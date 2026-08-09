@@ -25,7 +25,8 @@ Follow the files in order:
 12. [Bootstrap CDK](73-bootstrap-cdk.md)
 13. [Grant local CDK deployer access](74-grant-local-cdk-deployer-access.md)
 14. [Connect GitHub and Terrateam](80-connect-github-and-terrateam.md)
-15. [Operate and retire accounts](90-operate-account-lifecycle.md)
+15. [Secure Terrateam in a public repository](81-secure-terrateam-in-a-public-repository.md)
+16. [Operate and retire accounts](90-operate-account-lifecycle.md)
 
 The intended result is:
 

@@ -201,6 +201,12 @@ data "aws_iam_policy_document" "terrateam_assume_role" {
       variable = "token.actions.githubusercontent.com:job_workflow_ref"
       values   = [local.terrateam_workflow_ref]
     }
+
+    condition {
+      test     = "StringEquals"
+      variable = "token.actions.githubusercontent.com:actor"
+      values   = ["terrateam-action[bot]"]
+    }
   }
 }
 
