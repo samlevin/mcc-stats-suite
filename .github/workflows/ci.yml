@@ -20,6 +20,7 @@ jobs:
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: "1.12.1"
+      - uses: docker/setup-qemu-action@v3
       - run: npm ci
       - run: npm run check
       - run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c instance=ci
