@@ -38,6 +38,7 @@ dirs:
         - "${DIR}/*.tf"
         - "${DIR}/*.tfvars"
         - "${DIR}/*.hcl"
+        - "infrastructure/modules/foundation/*.tf"
 
 workflows:
   - tag_query: "dev"
