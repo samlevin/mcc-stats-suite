@@ -1,0 +1,6 @@
+{
+  "app": "npx ts-node --prefer-ts-exts cdk/bin/ocr-quality.ts",
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true
+  }
+}

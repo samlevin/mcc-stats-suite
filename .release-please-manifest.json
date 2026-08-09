@@ -1,0 +1,7 @@
+{
+  "applications/match-to-csv": "1.0.0",
+  "applications/ocr-quality": "1.0.0",
+  "applications/admin": "1.0.0",
+  "applications/data-pipeline": "1.0.0",
+  "applications/player": "1.0.0"
+}

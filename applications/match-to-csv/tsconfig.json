@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "types": [
+      "node",
+      "aws-lambda"
+    ]
+  },
+  "include": [
+    "cdk/**/*.ts",
+    "src/**/*.ts",
+    "test/**/*.ts"
+  ]
+}

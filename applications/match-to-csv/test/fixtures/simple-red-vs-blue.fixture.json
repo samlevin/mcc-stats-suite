@@ -1,0 +1,177 @@
+{
+  "name": "simple red vs blue",
+  "blocks": [
+    {
+      "Id": "tbl-1",
+      "BlockType": "TABLE",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "c-h-player",
+            "c-h-score",
+            "c-h-kills",
+            "c-h-assists",
+            "c-h-deaths",
+            "c-r-player",
+            "c-r-score",
+            "c-r-kills",
+            "c-r-assists",
+            "c-r-deaths",
+            "c-b-player",
+            "c-b-score",
+            "c-b-kills",
+            "c-b-assists",
+            "c-b-deaths"
+          ]
+        }
+      ]
+    },
+    { "Id": "w-player", "BlockType": "WORD", "Text": "PLAYERS" },
+    { "Id": "w-score", "BlockType": "WORD", "Text": "SCORE" },
+    { "Id": "w-kills", "BlockType": "WORD", "Text": "KILLS" },
+    { "Id": "w-assists", "BlockType": "WORD", "Text": "ASSISTS" },
+    { "Id": "w-deaths", "BlockType": "WORD", "Text": "DEATHS" },
+    { "Id": "w-red-name", "BlockType": "WORD", "Text": "RedGuy" },
+    { "Id": "w-red-score", "BlockType": "WORD", "Text": "20" },
+    { "Id": "w-red-kills", "BlockType": "WORD", "Text": "20" },
+    { "Id": "w-red-assists", "BlockType": "WORD", "Text": "5" },
+    { "Id": "w-red-deaths", "BlockType": "WORD", "Text": "10" },
+    { "Id": "w-blue-name", "BlockType": "WORD", "Text": "BlueGuy" },
+    { "Id": "w-blue-score", "BlockType": "WORD", "Text": "10" },
+    { "Id": "w-blue-kills", "BlockType": "WORD", "Text": "10" },
+    { "Id": "w-blue-assists", "BlockType": "WORD", "Text": "3" },
+    { "Id": "w-blue-deaths", "BlockType": "WORD", "Text": "15" },
+    {
+      "Id": "c-h-player",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 1,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-player"] }]
+    },
+    {
+      "Id": "c-h-score",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 2,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-score"] }]
+    },
+    {
+      "Id": "c-h-kills",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 3,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-kills"] }]
+    },
+    {
+      "Id": "c-h-assists",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 4,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-assists"] }]
+    },
+    {
+      "Id": "c-h-deaths",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 5,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-deaths"] }]
+    },
+    {
+      "Id": "c-r-player",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 1,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-red-name"] }]
+    },
+    {
+      "Id": "c-r-score",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 2,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-red-score"] }]
+    },
+    {
+      "Id": "c-r-kills",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 3,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-red-kills"] }]
+    },
+    {
+      "Id": "c-r-assists",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 4,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-red-assists"] }]
+    },
+    {
+      "Id": "c-r-deaths",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 5,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-red-deaths"] }]
+    },
+    {
+      "Id": "c-b-player",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 1,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-blue-name"] }]
+    },
+    {
+      "Id": "c-b-score",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 2,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-blue-score"] }]
+    },
+    {
+      "Id": "c-b-kills",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 3,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-blue-kills"] }]
+    },
+    {
+      "Id": "c-b-assists",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 4,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-blue-assists"] }]
+    },
+    {
+      "Id": "c-b-deaths",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 5,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-blue-deaths"] }]
+    }
+  ],
+  "rowColors": [
+    { "rowIndex": 2, "r": 230, "g": 20, "b": 20 },
+    { "rowIndex": 3, "r": 20, "g": 20, "b": 230 }
+  ],
+  "expectedRows": [
+    {
+      "team": "Red",
+      "player": "RedGuy",
+      "score": "20",
+      "kills": "20",
+      "assists": "5",
+      "deaths": "10",
+      "win": 1,
+      "loss": 0
+    },
+    {
+      "team": "Blue",
+      "player": "BlueGuy",
+      "score": "10",
+      "kills": "10",
+      "assists": "3",
+      "deaths": "15",
+      "win": 0,
+      "loss": 1
+    }
+  ]
+}

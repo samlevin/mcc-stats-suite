@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Copy to .envrc, replace every placeholder, then run: direnv allow
+
+export MCC_AWS_REGION="us-east-2"
+export MCC_GITHUB_ORGANIZATION="YOUR_GITHUB_ORG_OR_USERNAME"
+export MCC_GITHUB_REPOSITORY="mcc-stats-suite"
+# New GitHub repositories use immutable OIDC subjects. Replace this with
+# OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID from GitHub before bootstrap.
+export MCC_GITHUB_OIDC_SUBJECT_REPOSITORY="OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID"
+
+export MCC_DEV_PROFILE="mcc-dev"
+export MCC_DEV_ACCOUNT_ID="111111111111"
+
+# The repository root defaults to the dev profile.
+export AWS_PROFILE="$MCC_DEV_PROFILE"
+export AWS_REGION="$MCC_AWS_REGION"
+export AWS_DEFAULT_REGION="$MCC_AWS_REGION"
+export CDK_DEFAULT_REGION="$MCC_AWS_REGION"
+
+# OpenTofu bootstrap roots read these common inputs. Environment-specific
+# .envrc files select their administrator profile and GitHub Environment.
+export TF_VAR_aws_region="$MCC_AWS_REGION"
+export TF_VAR_github_organization="$MCC_GITHUB_ORGANIZATION"
+export TF_VAR_github_repository="$MCC_GITHUB_REPOSITORY"
+export TF_VAR_github_oidc_subject_repository="$MCC_GITHUB_OIDC_SUBJECT_REPOSITORY"

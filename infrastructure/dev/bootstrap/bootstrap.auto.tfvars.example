@@ -1,0 +1,8 @@
+# Common AWS, GitHub, and Owner values come from the ignored root .envrc.
+# This directory's ignored .envrc selects the dev administrator profile and
+# the GitHub Environment name. See ../../../.envrc.example.
+#
+# Set both flags to false only when this root bootstraps a locally managed,
+# disposable Sandbox account rather than stable shared development.
+create_terrateam_role  = true
+create_cdk_deploy_role = true

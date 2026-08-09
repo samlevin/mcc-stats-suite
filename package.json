@@ -1,0 +1,33 @@
+{
+  "name": "mcc-stats-suite",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "npm@11.6.2",
+  "workspaces": [
+    "applications/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "check": "npm run typecheck && npm test && npm run build",
+    "cdk:synth": "turbo run cdk:synth",
+    "app:synth": "node scripts/cdk-app.mjs synth",
+    "app:diff": "node scripts/cdk-app.mjs diff",
+    "app:deploy": "node scripts/cdk-app.mjs deploy",
+    "app:destroy": "node scripts/cdk-app.mjs destroy",
+    "tofu:fmt": "tofu fmt -recursive infrastructure",
+    "tofu:fmt:check": "tofu fmt -check -recursive infrastructure"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.15",
+    "aws-cdk": "2.1134.0",
+    "sharp": "0.35.3",
+    "turbo": "2.10.7",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.16.0"
+  }
+}

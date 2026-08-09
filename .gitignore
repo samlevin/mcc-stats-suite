@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.turbo/
+.tap/
+
+# Build outputs
+dist/
+cdk.out/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# OpenTofu
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+*.tflock
+**/backend.hcl
+**/backend.tf
+**/*.auto.tfvars
+
+# Environment and local config
+.env
+.env.*
+!.env.example
+.envrc
+.envrc.*
+!.envrc.example
+.direnv/
+.aws/
+*.local.json
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

@@ -1,0 +1,23 @@
+{
+  "name": "@mcc/data-pipeline",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@mcc/cdk-config": "1.0.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test test/*.test.js",
+    "cdk:synth": "cdk synth",
+    "cdk:diff": "cdk diff",
+    "cdk:deploy": "cdk deploy",
+    "cdk:destroy": "cdk destroy"
+  },
+  "devDependencies": {
+    "aws-cdk-lib": "2.262.2",
+    "constructs": "^10.5.0",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2"
+  }
+}

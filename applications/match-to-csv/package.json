@@ -1,0 +1,33 @@
+{
+  "name": "@mcc/match-to-csv",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tap --disable-coverage test/*.test.ts",
+    "cdk:synth": "cdk synth",
+    "cdk:diff": "cdk diff",
+    "cdk:deploy": "cdk deploy",
+    "cdk:destroy": "cdk destroy"
+  },
+  "dependencies": {
+    "@aws-sdk/client-rekognition": "^3.992.0",
+    "@aws-sdk/client-s3": "^3.992.0",
+    "@aws-sdk/client-textract": "^3.992.0",
+    "@mcc/cdk-config": "1.0.0",
+    "@mcc/contracts": "1.0.0",
+    "mailparser": "^3.9.3",
+    "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "^8.10.162",
+    "@types/mailparser": "^3.4.6",
+    "aws-cdk-lib": "2.262.2",
+    "constructs": "^10.5.0",
+    "esbuild": "0.28.1",
+    "source-map-support": "^0.5.21",
+    "tap": "^21.7.5",
+    "ts-node": "^10.9.2"
+  }
+}

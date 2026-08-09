@@ -1,0 +1,26 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.16.0"
+          cache: npm
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: "1.12.1"
+      - run: npm ci
+      - run: npm run check
+      - run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c instance=ci
+      - run: npm run tofu:fmt:check

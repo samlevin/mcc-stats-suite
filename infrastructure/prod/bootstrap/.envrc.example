@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Requires the repository-root .envrc.
+source_up
+
+export MCC_PROD_BOOTSTRAP_PROFILE="mcc-prod-admin"
+export MCC_PROD_ACCOUNT_ID="222222222222"
+export AWS_PROFILE="$MCC_PROD_BOOTSTRAP_PROFILE"
+export TF_VAR_github_environment_name="prod"

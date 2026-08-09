@@ -1,0 +1,6 @@
+{
+  "app": "npx ts-node --prefer-ts-exts cdk/bin/match-to-csv.ts",
+  "context": {
+    "@aws-cdk/customresources:installLatestAwsSdkDefault": false
+  }
+}

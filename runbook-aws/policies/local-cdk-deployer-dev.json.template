@@ -1,0 +1,27 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AssumeDevCdkBootstrapRoles",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "arn:aws:iam::DEV_ACCOUNT_ID:role/cdk-hnb659fds-deploy-role-DEV_ACCOUNT_ID-AWS_REGION",
+        "arn:aws:iam::DEV_ACCOUNT_ID:role/cdk-hnb659fds-file-publishing-role-DEV_ACCOUNT_ID-AWS_REGION",
+        "arn:aws:iam::DEV_ACCOUNT_ID:role/cdk-hnb659fds-image-publishing-role-DEV_ACCOUNT_ID-AWS_REGION",
+        "arn:aws:iam::DEV_ACCOUNT_ID:role/cdk-hnb659fds-lookup-role-DEV_ACCOUNT_ID-AWS_REGION"
+      ]
+    },
+    {
+      "Sid": "ReadCdkBootstrapMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeStacks",
+        "cloudformation:GetTemplate",
+        "ssm:GetParameter"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

@@ -1,0 +1,177 @@
+{
+  "name": "simple free for all",
+  "blocks": [
+    {
+      "Id": "tbl-1",
+      "BlockType": "TABLE",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "c-h-player",
+            "c-h-score",
+            "c-h-kills",
+            "c-h-assists",
+            "c-h-deaths",
+            "c-p1-player",
+            "c-p1-score",
+            "c-p1-kills",
+            "c-p1-assists",
+            "c-p1-deaths",
+            "c-p2-player",
+            "c-p2-score",
+            "c-p2-kills",
+            "c-p2-assists",
+            "c-p2-deaths"
+          ]
+        }
+      ]
+    },
+    { "Id": "w-player", "BlockType": "WORD", "Text": "PLAYERS" },
+    { "Id": "w-score", "BlockType": "WORD", "Text": "SCORE" },
+    { "Id": "w-kills", "BlockType": "WORD", "Text": "KILLS" },
+    { "Id": "w-assists", "BlockType": "WORD", "Text": "ASSISTS" },
+    { "Id": "w-deaths", "BlockType": "WORD", "Text": "DEATHS" },
+    { "Id": "w-p1-name", "BlockType": "WORD", "Text": "PlayerOne" },
+    { "Id": "w-p1-score", "BlockType": "WORD", "Text": "18" },
+    { "Id": "w-p1-kills", "BlockType": "WORD", "Text": "18" },
+    { "Id": "w-p1-assists", "BlockType": "WORD", "Text": "4" },
+    { "Id": "w-p1-deaths", "BlockType": "WORD", "Text": "9" },
+    { "Id": "w-p2-name", "BlockType": "WORD", "Text": "PlayerTwo" },
+    { "Id": "w-p2-score", "BlockType": "WORD", "Text": "12" },
+    { "Id": "w-p2-kills", "BlockType": "WORD", "Text": "12" },
+    { "Id": "w-p2-assists", "BlockType": "WORD", "Text": "2" },
+    { "Id": "w-p2-deaths", "BlockType": "WORD", "Text": "11" },
+    {
+      "Id": "c-h-player",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 1,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-player"] }]
+    },
+    {
+      "Id": "c-h-score",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 2,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-score"] }]
+    },
+    {
+      "Id": "c-h-kills",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 3,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-kills"] }]
+    },
+    {
+      "Id": "c-h-assists",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 4,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-assists"] }]
+    },
+    {
+      "Id": "c-h-deaths",
+      "BlockType": "CELL",
+      "RowIndex": 1,
+      "ColumnIndex": 5,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-deaths"] }]
+    },
+    {
+      "Id": "c-p1-player",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 1,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p1-name"] }]
+    },
+    {
+      "Id": "c-p1-score",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 2,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p1-score"] }]
+    },
+    {
+      "Id": "c-p1-kills",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 3,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p1-kills"] }]
+    },
+    {
+      "Id": "c-p1-assists",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 4,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p1-assists"] }]
+    },
+    {
+      "Id": "c-p1-deaths",
+      "BlockType": "CELL",
+      "RowIndex": 2,
+      "ColumnIndex": 5,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p1-deaths"] }]
+    },
+    {
+      "Id": "c-p2-player",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 1,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p2-name"] }]
+    },
+    {
+      "Id": "c-p2-score",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 2,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p2-score"] }]
+    },
+    {
+      "Id": "c-p2-kills",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 3,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p2-kills"] }]
+    },
+    {
+      "Id": "c-p2-assists",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 4,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p2-assists"] }]
+    },
+    {
+      "Id": "c-p2-deaths",
+      "BlockType": "CELL",
+      "RowIndex": 3,
+      "ColumnIndex": 5,
+      "Relationships": [{ "Type": "CHILD", "Ids": ["w-p2-deaths"] }]
+    }
+  ],
+  "rowColors": [
+    { "rowIndex": 2, "r": 70, "g": 70, "b": 70 },
+    { "rowIndex": 3, "r": 68, "g": 69, "b": 72 }
+  ],
+  "expectedRows": [
+    {
+      "team": "",
+      "player": "PlayerOne",
+      "score": "18",
+      "kills": "18",
+      "assists": "4",
+      "deaths": "9",
+      "win": 1,
+      "loss": 0
+    },
+    {
+      "team": "",
+      "player": "PlayerTwo",
+      "score": "12",
+      "kills": "12",
+      "assists": "2",
+      "deaths": "11",
+      "win": 0,
+      "loss": 1
+    }
+  ]
+}
