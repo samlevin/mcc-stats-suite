@@ -78,7 +78,7 @@ function toLiteBlock(block: Block): TextractBlockLite {
     Relationships: block.Relationships?.map((relationship) => ({ Type: relationship.Type, Ids: relationship.Ids })) };
 }
 
-function normalize(rawBlocks: Block[], source: ProcessingRunInput['source'], runId: string) {
+export function normalize(rawBlocks: Block[], source: ProcessingRunInput['source'], runId: string) {
   const childToCell = new Map<string, Block>();
   const cellToTable = new Map<string, string>();
   for (const table of rawBlocks.filter((block) => block.BlockType === 'TABLE')) {

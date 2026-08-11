@@ -9,6 +9,13 @@ export async function handler(event: { bucket: string; baselineKey: string; cand
     return JSON.parse((await bodyToBuffer(object.Body)).toString('utf8'));
   }));
   type Cell = { tableLocation?: { rowIndex?: number; columnIndex?: number }; observedText?: string; confidence?: number };
+  const result = compareNormalizedRuns(baseline, candidate);
+  await s3.send(new PutObjectCommand({ Bucket: event.bucket, Key: event.outputKey, Body: JSON.stringify(result), ContentType: 'application/json' }));
+  return result;
+}
+
+export function compareNormalizedRuns(baseline: any, candidate: any) {
+  type Cell = { tableLocation?: { rowIndex?: number; columnIndex?: number }; observedText?: string; confidence?: number };
   const byCell = (value: any): Map<string, Cell> => new Map((value.cells ?? []).map((cell: Cell) => [`${cell.tableLocation?.rowIndex}:${cell.tableLocation?.columnIndex}`, cell]));
   const before = byCell(baseline); const after = byCell(candidate);
   const keys = new Set([...before.keys(), ...after.keys()]);
@@ -16,7 +23,5 @@ export async function handler(event: { bucket: string; baselineKey: string; cand
     const left = before.get(key); const right = after.get(key);
     return JSON.stringify(left?.observedText) === JSON.stringify(right?.observedText) ? [] : [{ coordinate: key, before: left?.observedText, after: right?.observedText, beforeConfidence: left?.confidence, afterConfidence: right?.confidence }];
   });
-  const result = { schemaVersion: 'run-comparison/v1', baselineRunId: baseline.runId, candidateRunId: candidate.runId, comparedAt: new Date().toISOString(), summary: { baselineCellCount: before.size, candidateCellCount: after.size, changedCellCount: changes.length }, changes };
-  await s3.send(new PutObjectCommand({ Bucket: event.bucket, Key: event.outputKey, Body: JSON.stringify(result), ContentType: 'application/json' }));
-  return result;
+  return { schemaVersion: 'run-comparison/v1', baselineRunId: baseline.runId, candidateRunId: candidate.runId, comparedAt: new Date().toISOString(), summary: { baselineCellCount: before.size, candidateCellCount: after.size, changedCellCount: changes.length }, changes };
 }
