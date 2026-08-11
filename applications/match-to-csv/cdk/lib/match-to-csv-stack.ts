@@ -62,20 +62,12 @@ export class MatchToCsvStack extends Stack {
         `${prefix}/raw-email-bucket-name`,
       ),
     );
-    const attachmentsBucket = s3.Bucket.fromBucketName(
+    const evidenceBucket = s3.Bucket.fromBucketName(
       this,
-      'AttachmentsBucket',
+      'EvidenceBucket',
       ssm.StringParameter.valueForStringParameter(
         this,
-        `${prefix}/attachments-bucket-name`,
-      ),
-    );
-    const outputBucket = s3.Bucket.fromBucketName(
-      this,
-      'OutputBucket',
-      ssm.StringParameter.valueForStringParameter(
-        this,
-        `${prefix}/output-bucket-name`,
+        `${prefix}/evidence-bucket-name`,
       ),
     );
     const dataKey = kms.Key.fromKeyArn(
@@ -91,55 +83,34 @@ export class MatchToCsvStack extends Stack {
       'ProcessEmail',
       'process-email.ts',
       {
-        ATTACHMENTS_BUCKET: attachmentsBucket.bucketName,
+        EVIDENCE_BUCKET: evidenceBucket.bucketName,
         ...lambdaEnvironment,
       },
       1024,
-    );
-    const preprocessImage = this.nodeFunction(
-      'PreprocessImage',
-      'preprocess-image.ts',
-      lambdaEnvironment,
-      2048,
-      true,
     );
     const extractText = this.nodeFunction(
       'ExtractText',
       'extract-text.ts',
       {
-        OUTPUT_BUCKET: outputBucket.bucketName,
         ...lambdaEnvironment,
       },
       2048,
       true,
     );
-    const writeMatchCsv = this.nodeFunction(
-      'WriteMatchCsv',
-      'write-match-csv.ts',
-      {
-        OUTPUT_BUCKET: outputBucket.bucketName,
-        ...lambdaEnvironment,
-      },
+    const writeExtractedCsv = this.nodeFunction(
+      'WriteExtractedCsv',
+      'write-extracted-csv.ts',
+      lambdaEnvironment,
       1024,
     );
 
     rawEmailBucket.grantRead(processEmail);
-    attachmentsBucket.grantReadWrite(processEmail);
-    attachmentsBucket.grantReadWrite(preprocessImage);
-    attachmentsBucket.grantRead(extractText);
-    outputBucket.grantWrite(extractText);
-    outputBucket.grantWrite(writeMatchCsv);
+    this.grantEvidenceAccess(evidenceBucket, processEmail, false);
+    this.grantEvidenceAccess(evidenceBucket, extractText, true);
+    this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
     dataKey.grantEncryptDecrypt(processEmail);
-    dataKey.grantEncryptDecrypt(preprocessImage);
     dataKey.grantEncryptDecrypt(extractText);
-    dataKey.grantEncryptDecrypt(writeMatchCsv);
-
-    preprocessImage.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['rekognition:DetectText'],
-        resources: ['*'],
-      }),
-    );
+    dataKey.grantEncryptDecrypt(writeExtractedCsv);
     extractText.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['textract:AnalyzeDocument'],
@@ -156,22 +127,13 @@ export class MatchToCsvStack extends Stack {
         retryOnServiceExceptions: false,
       },
     );
-    const preprocessTask = new tasks.LambdaInvoke(
-      this,
-      'Preprocess image',
-      {
-        lambdaFunction: preprocessImage,
-        payloadResponseOnly: true,
-        retryOnServiceExceptions: false,
-      },
-    );
     const extractTextTask = new tasks.LambdaInvoke(this, 'Extract text', {
       lambdaFunction: extractText,
       payloadResponseOnly: true,
       retryOnServiceExceptions: false,
     });
-    const writeCsvTask = new tasks.LambdaInvoke(this, 'Write match CSV', {
-      lambdaFunction: writeMatchCsv,
+    const writeCsvTask = new tasks.LambdaInvoke(this, 'Write extracted CSV', {
+      lambdaFunction: writeExtractedCsv,
       payloadResponseOnly: true,
       resultPath: '$.summary',
       retryOnServiceExceptions: false,
@@ -179,7 +141,6 @@ export class MatchToCsvStack extends Stack {
 
     for (const task of [
       processEmailTask,
-      preprocessTask,
       extractTextTask,
       writeCsvTask,
     ]) {
@@ -196,18 +157,14 @@ export class MatchToCsvStack extends Stack {
     }
 
     const processAttachments = new sfn.Map(this, 'Process attachments', {
-      itemsPath: '$.attachments',
+      itemsPath: '$.screenshots',
       resultPath: '$.results',
       maxConcurrency: 2,
       itemSelector: {
-        'matchId.$': '$.matchId',
-        'bucket.$': '$$.Map.Item.Value.bucket',
-        'key.$': '$$.Map.Item.Value.key',
-        'attachmentName.$': '$$.Map.Item.Value.attachmentName',
-        'contentType.$': '$$.Map.Item.Value.contentType',
+        'source.$': '$$.Map.Item.Value',
       },
     });
-    processAttachments.itemProcessor(preprocessTask.next(extractTextTask));
+    processAttachments.itemProcessor(extractTextTask.next(writeCsvTask));
 
     const logGroup = new logs.LogGroup(this, 'WorkflowLogs', {
       logGroupName: `/aws/vendedlogs/states/${deployment.resourcePrefix}`,
@@ -220,7 +177,7 @@ export class MatchToCsvStack extends Stack {
       stateMachineName: deployment.resourcePrefix,
       stateMachineType: sfn.StateMachineType.STANDARD,
       definitionBody: sfn.DefinitionBody.fromChainable(
-        processEmailTask.next(processAttachments).next(writeCsvTask),
+        processEmailTask.next(processAttachments),
       ),
       timeout: Duration.minutes(15),
       logs: {
@@ -376,5 +333,18 @@ export class MatchToCsvStack extends Stack {
         forceDockerBundling: includeSharp,
       },
     });
+  }
+
+  private grantEvidenceAccess(
+    bucket: s3.IBucket,
+    fn: lambdaNode.NodejsFunction,
+    read: boolean,
+  ): void {
+    fn.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: read ? ['s3:GetObject', 's3:PutObject'] : ['s3:PutObject'],
+        resources: [`${bucket.bucketArn}/*`],
+      }),
+    );
   }
 }

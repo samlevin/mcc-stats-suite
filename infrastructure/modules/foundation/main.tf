@@ -31,11 +31,18 @@ resource "aws_s3_bucket" "output" {
   force_destroy = var.force_destroy
 }
 
+resource "aws_s3_bucket" "evidence" {
+  bucket              = "${local.name}-${data.aws_caller_identity.current.account_id}-ocr-evidence"
+  force_destroy       = var.force_destroy
+  object_lock_enabled = true
+}
+
 locals {
   buckets = {
     raw_email   = aws_s3_bucket.raw_email.id
     attachments = aws_s3_bucket.attachments.id
     output      = aws_s3_bucket.output.id
+    evidence    = aws_s3_bucket.evidence.id
   }
 }
 
@@ -57,6 +64,27 @@ resource "aws_s3_bucket_versioning" "data" {
   }
 }
 
+resource "aws_s3_bucket_object_lock_configuration" "evidence" {
+  bucket = aws_s3_bucket.evidence.id
+  rule {
+    default_retention {
+      mode = "GOVERNANCE"
+      days = 365
+    }
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "raw_email" {
+  bucket = aws_s3_bucket.raw_email.id
+  rule {
+    id     = "expire-raw-mime-after-90-days"
+    status = "Enabled"
+    filter {}
+    expiration { days = 90 }
+    noncurrent_version_expiration { noncurrent_days = 1 }
+  }
+}
+
 resource "aws_s3_bucket_server_side_encryption_configuration" "raw_email" {
   bucket = aws_s3_bucket.raw_email.id
   rule {
@@ -70,6 +98,7 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "application" {
   for_each = {
     attachments = aws_s3_bucket.attachments.id
     output      = aws_s3_bucket.output.id
+    evidence    = aws_s3_bucket.evidence.id
   }
   bucket = each.value
   rule {
@@ -152,4 +181,10 @@ resource "aws_ssm_parameter" "data_key_arn" {
   name  = "/mcc/${var.environment}/match-to-csv/data-key-arn"
   type  = "String"
   value = aws_kms_key.data.arn
+}
+
+resource "aws_ssm_parameter" "evidence_bucket_name" {
+  name  = "/mcc/${var.environment}/match-to-csv/evidence-bucket-name"
+  type  = "String"
+  value = aws_s3_bucket.evidence.id
 }

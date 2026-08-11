@@ -10,6 +10,10 @@ output "output_bucket_name" {
   value = aws_s3_bucket.output.id
 }
 
+output "evidence_bucket_name" {
+  value = aws_s3_bucket.evidence.id
+}
+
 output "data_key_arn" {
   value = aws_kms_key.data.arn
 }

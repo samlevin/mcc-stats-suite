@@ -19,13 +19,13 @@ OpenTofu publishes resource names and ARNs through SSM Parameter Store. CDK cons
 
 No resource is managed by both tools.
 
-`match-to-csv` runs:
+`match-to-csv` processes each image attachment in an inbound email independently:
 
 ```text
 email stored in S3
-  -> process email and attachments
-  -> for each attachment: preprocess image -> extract text
-  -> write one match CSV
+  -> create immutable source screenshots
+  -> for each screenshot: create a processing run -> Textract -> normalized OCR
+  -> write an extracted CSV
 ```
 
 Each stage is a standalone Lambda. Step Functions passes S3 references rather

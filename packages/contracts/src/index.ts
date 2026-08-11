@@ -3,9 +3,17 @@ export interface S3ObjectReference {
   key: string;
 }
 
-export interface MatchAttachment extends S3ObjectReference {
+export type AcquisitionType = 'SCREENSHOT' | 'PHOTO' | 'OTHER';
+
+export interface SourceScreenshot extends S3ObjectReference {
+  screenshotId: string;
+  submissionId: string;
   attachmentName: string;
   contentType: string;
+  sha256: string;
+  acquisitionType: AcquisitionType;
+  widthPx: number;
+  heightPx: number;
 }
 
 export interface CsvRow {
@@ -22,28 +30,22 @@ export interface CsvRow {
 export interface ProcessEmailInput extends S3ObjectReference {}
 
 export interface ProcessEmailOutput {
-  matchId: string;
-  attachments: MatchAttachment[];
+  submissionId: string;
+  screenshots: SourceScreenshot[];
 }
 
-export interface PreprocessImageOutput {
-  matchId: string;
-  source: MatchAttachment;
-  preprocessed: S3ObjectReference;
+export interface ProcessingRunInput {
+  source: SourceScreenshot;
 }
 
 export interface ExtractTextOutput {
-  matchId: string;
-  attachmentName: string;
+  runId: string;
+  source: SourceScreenshot;
   rows: CsvRow[];
+  normalizedArtifact: S3ObjectReference;
 }
 
-export interface WriteMatchCsvInput {
-  matchId: string;
-  results: ExtractTextOutput[];
-}
-
-export interface WriteMatchCsvOutput extends S3ObjectReference {
-  matchId: string;
+export interface WriteExtractedCsvOutput extends S3ObjectReference {
+  runId: string;
   rowCount: number;
 }
