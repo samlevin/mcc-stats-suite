@@ -7,14 +7,14 @@ export interface ContextSource {
 export interface DeploymentConfig {
   application: string;
   environment: DeploymentEnvironment;
-  instance?: string;
+  ephemeral?: string;
   account?: string;
   region?: string;
   stackName: string;
   resourcePrefix: string;
   objectPrefix: string;
   workloadBoundaryName: string;
-  isShared: boolean;
+  isEphemeral: boolean;
   ingressEnabled: boolean;
 }
 
@@ -36,17 +36,18 @@ export function resolveDeployment(
     throw new Error('Pass -c environment=dev or -c environment=prod');
   }
 
-  const requestedInstance = contextValue(context, 'instance');
-  let instance: string | undefined;
-  if (environment === 'dev') {
-    if (!requestedInstance || !INSTANCE_PATTERN.test(requestedInstance)) {
+  const requestedEphemeral = contextValue(context, 'ephemeral');
+  let ephemeral: string | undefined;
+  if (requestedEphemeral) {
+    if (environment !== 'dev') {
+      throw new Error('Production does not support ephemeral deployments');
+    }
+    if (!INSTANCE_PATTERN.test(requestedEphemeral)) {
       throw new Error(
-        'Development requires -c instance=<name> using 1-20 lowercase letters, numbers, or hyphens',
+        'Development ephemeral deployments require -c ephemeral=<name> using 1-20 lowercase letters, numbers, or hyphens',
       );
     }
-    instance = requestedInstance;
-  } else if (requestedInstance) {
-    throw new Error('Production does not support developer instances');
+    ephemeral = requestedEphemeral;
   }
 
   const expectedAccount =
@@ -68,19 +69,14 @@ export function resolveDeployment(
     );
   }
 
-  const qualifier =
-    environment === 'prod'
-      ? 'prod'
-      : instance === 'shared'
-        ? 'dev'
-        : instance;
+  const qualifier = ephemeral ?? environment;
   const stackName = `${application}-${qualifier}`;
-  const isShared = environment === 'prod' || instance === 'shared';
+  const isEphemeral = ephemeral !== undefined;
 
   return {
     application,
     environment,
-    instance,
+    ephemeral,
     account: expectedAccount ?? actualAccount,
     region:
       environmentVariables.CDK_DEFAULT_REGION ??
@@ -88,10 +84,10 @@ export function resolveDeployment(
       environmentVariables.AWS_DEFAULT_REGION,
     stackName,
     resourcePrefix: stackName,
-    objectPrefix: isShared ? '' : `instances/${instance}`,
+    objectPrefix: isEphemeral ? `ephemeral/${ephemeral}` : '',
     workloadBoundaryName: 'mcc-stats-suite-workload-boundary',
-    isShared,
-    ingressEnabled: isShared,
+    isEphemeral,
+    ingressEnabled: !isEphemeral,
   };
 }
 

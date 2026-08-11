@@ -33,12 +33,12 @@ than image bytes.
 
 ## Environment model
 
-CDK stacks are managed ephemerally for local development; each contributor gets
-a standalone environment.
+GitHub Actions deploys one integration stack in dev and one live stack in
+prod. Local developers can create explicitly named ephemeral stacks in dev.
 
 ```text
-match-to-csv-sam         individual stack (dev account)
-match-to-csv-dev         shared stack for integration/smoke testing (dev account)
+match-to-csv-dev         integration and smoke-test stack (dev account)
+match-to-csv-sam         explicit ephemeral stack (dev account)
 match-to-csv-prod        live application stack (prod account)
 ```
 
@@ -120,18 +120,18 @@ aws sts get-caller-identity
 ```
 
 The CDK harness verifies the active account against the profile's
-`sso_account_id`, infers development from the profile name, and derives the
-personal qualifier from `whoami`. It passes CDK's `environment`, `instance`,
-and expected-account context dynamically; do not set CDK context in `.envrc`:
+`sso_account_id` and infers the environment from the profile name. It passes
+CDK's `environment`, `ephemeral`, and expected-account context dynamically;
+do not set CDK context in `.envrc`:
 
 ```console
 npm run app:synth -- match-to-csv
 npm run app:diff -- match-to-csv
-npm run app:deploy -- match-to-csv
+npm run app:deploy -- match-to-csv --ephemeral sam
 ```
 
-Use `--instance shared` only for the shared integration deployment. Production
-deployment is intentionally rejected outside of GitHub Actions on `main`.
+GitHub Actions deploys the plain dev and prod environments from `main`.
+Local deployment requires `--ephemeral <name>` and is only allowed in dev.
 
 Populated `backend.hcl`, `*.auto.tfvars`, state, plan, token, and environment
 files are ignored. **Never store AWS access keys in GitHub, Terrateam, or this

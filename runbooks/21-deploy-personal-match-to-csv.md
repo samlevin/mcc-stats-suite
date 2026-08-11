@@ -1,4 +1,4 @@
-# Deploy a personal dev stack
+# Deploy an ephemeral match-to-csv stack
 
 Use the dev account:
 
@@ -7,20 +7,19 @@ direnv allow
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity
 npm test --workspace @mcc/match-to-csv
-npm run app:synth -- match-to-csv
-npm run app:diff -- match-to-csv
-npm run app:deploy -- match-to-csv
+npm run app:synth -- match-to-csv --ephemeral sam
+npm run app:diff -- match-to-csv --ephemeral sam
+npm run app:deploy -- match-to-csv --ephemeral sam
 ```
 
-The wrapper derives the qualifier from `whoami`. Use `--instance <name>` only
-when needed. Set the locally ignored `MCC_EMAIL_DOMAIN` to the verified dev
-domain before deployment. Deploy the shared dev stack first. Each personal
-stack then receives mail at `submit+<instance>@<MCC_EMAIL_DOMAIN>`.
+Set the locally ignored `MCC_EMAIL_DOMAIN` to the verified dev domain before
+deployment. GitHub Actions must deploy the plain dev stack first. Each
+ephemeral stack receives mail at `submit+sam@<MCC_EMAIL_DOMAIN>`.
 
 Destroy the personal application when it is no longer useful:
 
 ```console
-npm run app:destroy -- match-to-csv
+npm run app:destroy -- match-to-csv --ephemeral sam
 ```
 
 Next: [`22-validate-match-to-csv-in-dev.md`](22-validate-match-to-csv-in-dev.md).

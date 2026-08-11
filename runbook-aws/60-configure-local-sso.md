@@ -39,11 +39,10 @@ Compare the returned account ID with the access portal before applying. The
 AWS CLI stores SSO configuration and temporary cached tokens outside this
 repository. Do not copy `~/.aws`, cached tokens, or shell exports into Git.
 
-Local CDK commands derive the personal instance from `whoami`; normally no
-`--instance` is needed:
+Local CDK deployment requires an explicit ephemeral name:
 
 ```console
-npm run app:synth -- match-to-csv
+npm run app:synth -- match-to-csv --ephemeral sam
 ```
 
 Reference: [Configure IAM Identity Center authentication for AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html).

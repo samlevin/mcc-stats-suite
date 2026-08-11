@@ -19,8 +19,8 @@ export class PlayerStack extends Stack {
     );
     Tags.of(this).add('Application', 'player');
     Tags.of(this).add('Environment', props.deployment.environment);
-    if (props.deployment.instance) {
-      Tags.of(this).add('Instance', props.deployment.instance);
+    if (props.deployment.ephemeral) {
+      Tags.of(this).add('Ephemeral', props.deployment.ephemeral);
     }
     new CfnOutput(this, 'Boundary', {
       value: 'Read-only player statistics API and user interface',

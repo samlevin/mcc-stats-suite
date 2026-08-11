@@ -19,8 +19,8 @@ export class OcrQualityStack extends Stack {
     );
     Tags.of(this).add('Application', 'ocr-quality');
     Tags.of(this).add('Environment', props.deployment.environment);
-    if (props.deployment.instance) {
-      Tags.of(this).add('Instance', props.deployment.instance);
+    if (props.deployment.ephemeral) {
+      Tags.of(this).add('Ephemeral', props.deployment.ephemeral);
     }
     new CfnOutput(this, 'Boundary', {
       value: 'OCR scoring, anomaly detection, and human correction workflow',

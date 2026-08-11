@@ -47,8 +47,8 @@ export class MatchToCsvStack extends Stack {
     );
     Tags.of(this).add('Application', deployment.application);
     Tags.of(this).add('Environment', deployment.environment);
-    if (deployment.instance) {
-      Tags.of(this).add('Instance', deployment.instance);
+    if (deployment.ephemeral) {
+      Tags.of(this).add('Ephemeral', deployment.ephemeral);
     }
     const prefix = `/mcc/${deployment.environment}/match-to-csv`;
     const lambdaEnvironment = {
@@ -231,11 +231,7 @@ export class MatchToCsvStack extends Stack {
       tracingEnabled: true,
     });
 
-    const inboundRoute = deployment.environment === 'prod'
-      ? 'prod'
-      : deployment.instance === 'shared'
-        ? 'shared'
-        : deployment.instance!;
+    const inboundRoute = deployment.ephemeral ?? deployment.environment;
     const inboundPrefix = `incoming/${inboundRoute}/`;
     const workflowDlq = new sqs.Queue(this, 'WorkflowDlq', {
       queueName: `${deployment.resourcePrefix}-events-dlq`,
@@ -270,14 +266,14 @@ export class MatchToCsvStack extends Stack {
       allowedPattern: '^[A-Za-z0-9.-]+$',
     });
     const recipient = Fn.join('', [
-      deployment.environment === 'prod' || deployment.instance === 'shared'
+      !deployment.ephemeral
         ? 'submit@'
-        : `submit+${deployment.instance}@`,
+        : `submit+${deployment.ephemeral}@`,
       emailDomain.valueAsString,
     ]);
     const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
     let receiptRuleSet: ses.CfnReceiptRuleSet | undefined;
-    if (deployment.isShared) {
+    if (!deployment.isEphemeral) {
       receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
         ruleSetName: receiptRuleSetName,
       });
@@ -342,7 +338,7 @@ export class MatchToCsvStack extends Stack {
       value: workflow.stateMachineArn,
     });
     new CfnOutput(this, 'ObjectPrefix', {
-      value: deployment.objectPrefix || '(shared)',
+      value: deployment.objectPrefix || '(environment default)',
     });
   }
 

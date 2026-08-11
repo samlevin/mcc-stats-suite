@@ -43,9 +43,9 @@ AWS organization
     └── prod account               stable; Terrateam-managed OpenTofu
 ```
 
-Personal CDK stacks live in the stable dev account and are named
-`match-to-csv-<owner>`. The shared integration stack is `match-to-csv-dev`;
-production is `match-to-csv-prod`.
+Ephemeral CDK stacks live in the stable dev account and are named
+`match-to-csv-<name>`. GitHub Actions deploys `match-to-csv-dev` for
+integration tests and `match-to-csv-prod` for production.
 
 Do not put root passwords, MFA recovery material, AWS access keys, account
 request files, populated OpenTofu inputs, or backend configuration in Git.

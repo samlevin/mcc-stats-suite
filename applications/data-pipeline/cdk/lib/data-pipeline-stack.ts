@@ -19,8 +19,8 @@ export class DataPipelineStack extends Stack {
     );
     Tags.of(this).add('Application', 'data-pipeline');
     Tags.of(this).add('Environment', props.deployment.environment);
-    if (props.deployment.instance) {
-      Tags.of(this).add('Instance', props.deployment.instance);
+    if (props.deployment.ephemeral) {
+      Tags.of(this).add('Ephemeral', props.deployment.ephemeral);
     }
     new CfnOutput(this, 'Boundary', {
       value: 'Glue and DuckDB transformation jobs for the medallion lakehouse',

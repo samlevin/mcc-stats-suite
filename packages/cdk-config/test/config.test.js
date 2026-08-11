@@ -6,9 +6,9 @@ function context(values) {
   return { tryGetContext: (key) => values[key] };
 }
 
-test('creates an isolated developer deployment', () => {
+test('creates an isolated ephemeral deployment in dev', () => {
   const deployment = resolveDeployment(
-    context({ environment: 'dev', instance: 'sam' }),
+    context({ environment: 'dev', ephemeral: 'sam' }),
     'match-to-csv',
     {
       CDK_DEFAULT_ACCOUNT: '111111111111',
@@ -18,19 +18,19 @@ test('creates an isolated developer deployment', () => {
   );
 
   assert.equal(deployment.stackName, 'match-to-csv-sam');
-  assert.equal(deployment.objectPrefix, 'instances/sam');
+  assert.equal(deployment.objectPrefix, 'ephemeral/sam');
   assert.equal(deployment.ingressEnabled, false);
 });
 
-test('marks the shared dev instance as the integration deployment', () => {
+test('uses one dev-qualified deployment for integration and smoke tests', () => {
   const deployment = resolveDeployment(
-    context({ environment: 'dev', instance: 'shared' }),
+    context({ environment: 'dev' }),
     'admin',
     {},
   );
 
   assert.equal(deployment.stackName, 'admin-dev');
-  assert.equal(deployment.isShared, true);
+  assert.equal(deployment.isEphemeral, false);
   assert.equal(deployment.ingressEnabled, true);
 });
 
@@ -42,19 +42,15 @@ test('uses one production-qualified deployment', () => {
   );
 
   assert.equal(deployment.stackName, 'player-prod');
-  assert.equal(deployment.instance, undefined);
+  assert.equal(deployment.ephemeral, undefined);
   assert.equal(deployment.ingressEnabled, true);
 });
 
-test('rejects missing dev instances and production instances', () => {
-  assert.throws(
-    () => resolveDeployment(context({ environment: 'dev' }), 'admin', {}),
-    /requires -c instance/,
-  );
+test('rejects production ephemeral deployments', () => {
   assert.throws(
     () =>
       resolveDeployment(
-        context({ environment: 'prod', instance: 'sam' }),
+        context({ environment: 'prod', ephemeral: 'sam' }),
         'admin',
         {},
       ),
@@ -68,7 +64,7 @@ test('rejects deployment to the wrong account', () => {
       resolveDeployment(
         context({
           environment: 'dev',
-          instance: 'sam',
+          ephemeral: 'sam',
           expectedAccount: '111111111111',
         }),
         'admin',

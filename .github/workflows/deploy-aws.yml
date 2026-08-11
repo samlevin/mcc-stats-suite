@@ -49,25 +49,15 @@ jobs:
           test "${ACTUAL_ACCOUNT}" = "${{ vars.AWS_ACCOUNT_ID }}"
       - name: Synthesize
         run: |
-          INSTANCE_ARGS=()
-          if [ "${{ inputs.environment }}" = "dev" ]; then
-            INSTANCE_ARGS+=(--instance shared)
-          fi
           npm run app:synth -- \
             "${{ inputs.application }}" \
-            --environment "${{ inputs.environment }}" \
-            "${INSTANCE_ARGS[@]}"
+            --environment "${{ inputs.environment }}"
       - name: Deploy
         run: |
-          INSTANCE_ARGS=()
-          if [ "${{ inputs.environment }}" = "dev" ]; then
-            INSTANCE_ARGS+=(--instance shared)
-          fi
           if [ "${{ inputs.application }}" = "match-to-csv" ]; then
             test -n "${MCC_EMAIL_DOMAIN}"
           fi
           npm run app:deploy -- \
             "${{ inputs.application }}" \
             --environment "${{ inputs.environment }}" \
-            "${INSTANCE_ARGS[@]}" \
             --require-approval never
