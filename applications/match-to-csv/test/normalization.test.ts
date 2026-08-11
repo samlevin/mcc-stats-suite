@@ -19,5 +19,36 @@ t.test('normalization maps known scoreboard headers to semantic fields', (t) => 
   t.equal(score?.semanticLocation.field, 'SCORE');
   t.equal(score?.parsed.expectedType, 'INTEGER');
   t.equal(score?.tableObservationId, 'run-1:table:table');
+  t.equal(score?.tableLocation.tableIndex, 0);
+  const scoreHeader = normalized.cells.find((item) => item.providerBlockId === 'h-score');
+  t.equal(scoreHeader?.semanticLocation.rowRole, 'HEADER');
+  t.equal(scoreHeader?.parsed.expectedType, 'STRING');
+  t.equal(scoreHeader?.validation.valid, true);
+  t.notOk(scoreHeader?.validation.flags.some((flag) => flag.code === 'INVALID_INTEGER'));
+  t.end();
+});
+
+t.test('normalization maps each table independently and flags invalid integers', (t) => {
+  const blocks = [
+    { Id: 'table-a', BlockType: 'TABLE' as const, Relationships: [{ Type: 'CHILD' as const, Ids: ['a-header', 'a-value'] }] },
+    cell('a-header', 1, 1, 'a-header-word'),
+    cell('a-value', 2, 1, 'a-value-word'),
+    word('a-header-word', 'PLAYER'),
+    word('a-value-word', 'Spartan'),
+    { Id: 'table-b', BlockType: 'TABLE' as const, Relationships: [{ Type: 'CHILD' as const, Ids: ['b-header', 'b-value'] }] },
+    cell('b-header', 1, 1, 'b-header-word'),
+    cell('b-value', 2, 1, 'b-value-word'),
+    word('b-header-word', 'SCORE'),
+    word('b-value-word', 'I9'),
+  ];
+  const normalized = normalize(blocks, source, 'run-1');
+  const player = normalized.cells.find((item) => item.providerBlockId === 'a-value');
+  const score = normalized.cells.find((item) => item.providerBlockId === 'b-value');
+  t.equal(player?.semanticLocation.field, 'PLAYER');
+  t.equal(score?.semanticLocation.field, 'SCORE');
+  t.equal(score?.tableLocation.tableIndex, 1);
+  t.equal(score?.parsed.parseSucceeded, false);
+  t.equal(score?.validation.valid, false);
+  t.ok(score?.validation.flags.some((flag) => flag.code === 'INVALID_INTEGER'));
   t.end();
 });

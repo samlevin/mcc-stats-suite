@@ -54,6 +54,10 @@ export class MatchToCsvStack extends Stack {
     const lambdaEnvironment = {
       OBJECT_PREFIX: deployment.objectPrefix,
     };
+    const buildEnvironment = {
+      GIT_SHA: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? 'local',
+      DEPLOYMENT_ENVIRONMENT: deployment.environment.toUpperCase(),
+    };
     const rawEmailBucket = s3.Bucket.fromBucketName(
       this,
       'RawEmailBucket',
@@ -87,12 +91,14 @@ export class MatchToCsvStack extends Stack {
         ...lambdaEnvironment,
       },
       1024,
+      true,
     );
     const extractText = this.nodeFunction(
       'ExtractText',
       'extract-text.ts',
       {
         ...lambdaEnvironment,
+        ...buildEnvironment,
       },
       2048,
       true,
@@ -109,16 +115,26 @@ export class MatchToCsvStack extends Stack {
       lambdaEnvironment,
       1024,
     );
+    const materializeTrainingData = this.nodeFunction(
+      'MaterializeTrainingData',
+      'materialize-training-data.ts',
+      lambdaEnvironment,
+      2048,
+      false,
+      Duration.minutes(10),
+    );
 
     rawEmailBucket.grantRead(processEmail);
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
     this.grantEvidenceAccess(evidenceBucket, extractText, true);
     this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
     this.grantEvidenceAccess(evidenceBucket, compareRuns, true);
+    this.grantEvidenceAccess(evidenceBucket, materializeTrainingData, true);
     dataKey.grantEncryptDecrypt(processEmail);
     dataKey.grantEncryptDecrypt(extractText);
     dataKey.grantEncryptDecrypt(writeExtractedCsv);
     dataKey.grantEncryptDecrypt(compareRuns);
+    dataKey.grantEncryptDecrypt(materializeTrainingData);
     extractText.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['textract:AnalyzeDocument'],
@@ -147,21 +163,31 @@ export class MatchToCsvStack extends Stack {
       retryOnServiceExceptions: false,
     });
 
+    const transientErrors = [
+      'Lambda.ClientExecutionTimeoutException',
+      'Lambda.ServiceException',
+      'Lambda.AWSLambdaException',
+      'Lambda.SdkClientException',
+      'Lambda.TooManyRequestsException',
+      'Textract.InternalServerError',
+      'Textract.ProvisionedThroughputExceededException',
+      'Textract.ThrottlingException',
+      'InternalServerError',
+      'ProvisionedThroughputExceededException',
+      'ThrottlingException',
+    ];
+    const retry = {
+      errors: transientErrors,
+      interval: Duration.seconds(2),
+      maxAttempts: 3,
+      backoffRate: 2,
+    };
     for (const task of [
       processEmailTask,
       extractTextTask,
       writeCsvTask,
     ]) {
-      task.addRetry({
-        errors: [
-          'Lambda.ServiceException',
-          'Lambda.AWSLambdaException',
-          'Lambda.SdkClientException',
-        ],
-        interval: Duration.seconds(2),
-        maxAttempts: 3,
-        backoffRate: 2,
-      });
+      task.addRetry(retry);
     }
 
     const processAttachments = new sfn.Map(this, 'Process attachments', {
@@ -196,11 +222,17 @@ export class MatchToCsvStack extends Stack {
       tracingEnabled: true,
     });
     const replayExtract = new tasks.LambdaInvoke(this, 'Replay extract text', {
-      lambdaFunction: extractText, payloadResponseOnly: true,
+      lambdaFunction: extractText,
+      payloadResponseOnly: true,
+      retryOnServiceExceptions: false,
     });
     const replayWrite = new tasks.LambdaInvoke(this, 'Replay write extracted CSV', {
-      lambdaFunction: writeExtractedCsv, payloadResponseOnly: true,
+      lambdaFunction: writeExtractedCsv,
+      payloadResponseOnly: true,
+      retryOnServiceExceptions: false,
     });
+    replayExtract.addRetry(retry);
+    replayWrite.addRetry(retry);
     const replayWorkflow = new sfn.StateMachine(this, 'ReplayWorkflow', {
       stateMachineName: `${deployment.resourcePrefix}-replay`,
       stateMachineType: sfn.StateMachineType.STANDARD,
@@ -321,6 +353,9 @@ export class MatchToCsvStack extends Stack {
     new CfnOutput(this, 'RunComparisonFunctionName', {
       value: compareRuns.functionName,
     });
+    new CfnOutput(this, 'TrainingDataMaterializerFunctionName', {
+      value: materializeTrainingData.functionName,
+    });
     new CfnOutput(this, 'ObjectPrefix', {
       value: deployment.objectPrefix || '(environment default)',
     });
@@ -332,6 +367,7 @@ export class MatchToCsvStack extends Stack {
     environment: Record<string, string>,
     memorySize: number,
     includeSharp = false,
+    timeout = Duration.minutes(2),
   ): lambdaNode.NodejsFunction {
     const repositoryRoot = path.join(__dirname, '..', '..', '..', '..');
     return new lambdaNode.NodejsFunction(this, id, {
@@ -347,7 +383,7 @@ export class MatchToCsvStack extends Stack {
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       memorySize,
-      timeout: Duration.minutes(2),
+      timeout,
       tracing: lambda.Tracing.ACTIVE,
       environment,
       projectRoot: repositoryRoot,

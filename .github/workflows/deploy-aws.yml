@@ -34,6 +34,9 @@ jobs:
         with:
           node-version: "22.16.0"
           cache: npm
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - run: npm ci
       - run: npm test --workspace "@mcc/${{ inputs.application }}"
       - name: Require main for production
@@ -46,17 +49,52 @@ jobs:
       - name: Verify target account
         run: |
           ACTUAL_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-          test "${ACTUAL_ACCOUNT}" = "${{ vars.AWS_ACCOUNT_ID }}"
+          if [ "${ACTUAL_ACCOUNT}" != "${{ vars.AWS_ACCOUNT_ID }}" ]; then
+            echo "::error::AWS credentials target the wrong account"
+            exit 1
+          fi
+      - name: Verify match-to-csv prerequisites
+        if: inputs.application == 'match-to-csv'
+        run: |
+          if [ -z "${MCC_EMAIL_DOMAIN}" ]; then
+            echo "::error::The selected GitHub Environment has no inbound domain configured"
+            exit 1
+          fi
+          PARAMETER_COUNT="$(aws ssm get-parameters \
+            --names \
+              /cdk-bootstrap/hnb659fds/version \
+              "/mcc/${{ inputs.environment }}/match-to-csv/raw-email-bucket-name" \
+              "/mcc/${{ inputs.environment }}/match-to-csv/evidence-bucket-name" \
+              "/mcc/${{ inputs.environment }}/match-to-csv/data-key-arn" \
+            --query 'length(Parameters)' \
+            --output text)"
+          if [ "${PARAMETER_COUNT}" != "4" ]; then
+            echo "::error::CDK bootstrap or match-to-csv foundation parameters are missing"
+            exit 1
+          fi
+          IDENTITY_STATUS="$(aws ses get-identity-verification-attributes \
+            --identities "${MCC_EMAIL_DOMAIN}" \
+            --query 'VerificationAttributes.*.VerificationStatus | [0]' \
+            --output text)"
+          if [ "${IDENTITY_STATUS}" != "Success" ]; then
+            echo "::error::The configured SES identity is not verified in the deployment region"
+            exit 1
+          fi
+          if ! dig +short MX "${MCC_EMAIL_DOMAIN}" | \
+            grep -Fq "inbound-smtp.${AWS_REGION}.amazonaws.com."; then
+            echo "::error::The configured MX record does not target SES inbound receiving in the deployment region"
+            exit 1
+          fi
       - name: Synthesize
         run: |
           npm run app:synth -- \
             "${{ inputs.application }}" \
             --environment "${{ inputs.environment }}"
+      - name: Verify native Lambda bundles
+        if: inputs.application == 'match-to-csv'
+        run: npm run verify:bundle --workspace @mcc/match-to-csv
       - name: Deploy
         run: |
-          if [ "${{ inputs.application }}" = "match-to-csv" ]; then
-            test -n "${MCC_EMAIL_DOMAIN}"
-          fi
           npm run app:deploy -- \
             "${{ inputs.application }}" \
             --environment "${{ inputs.environment }}" \

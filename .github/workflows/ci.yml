@@ -21,7 +21,10 @@ jobs:
         with:
           tofu_version: "1.12.1"
       - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - run: npm ci
       - run: npm run check
-      - run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c instance=ci
+      - run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c ephemeral=ci
+      - run: npm run verify:bundle --workspace @mcc/match-to-csv
       - run: npm run tofu:fmt:check

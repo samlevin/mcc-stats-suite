@@ -22,6 +22,7 @@ export async function putJson(
     Key: key,
     Body: JSON.stringify(value),
     ContentType: 'application/json',
+    IfNoneMatch: '*',
   }));
   return { bucket, key };
 }

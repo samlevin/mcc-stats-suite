@@ -1,4 +1,5 @@
 import type { GetObjectOutput } from '@aws-sdk/client-s3';
+import type { SourceScreenshot } from '@mcc/contracts';
 
 export async function bodyToBuffer(
   body: GetObjectOutput['Body'],
@@ -32,4 +33,19 @@ export function safeObjectName(value: string): string {
 export function namespacedObjectKey(key: string): string {
   const prefix = process.env.OBJECT_PREFIX?.replace(/^\/+|\/+$/g, '');
   return prefix ? `${prefix}/${key.replace(/^\/+/, '')}` : key;
+}
+
+export function sourceScreenshotPrefix(source: SourceScreenshot): string {
+  const suffix = '/source/original';
+  if (!source.key.endsWith(suffix)) {
+    throw new Error(`Unexpected source screenshot key: ${source.key}`);
+  }
+  return source.key.slice(0, -suffix.length);
+}
+
+export function processingRunPrefix(
+  source: SourceScreenshot,
+  runId: string,
+): string {
+  return `${sourceScreenshotPrefix(source)}/runs/${runId}`;
 }

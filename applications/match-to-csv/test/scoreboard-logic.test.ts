@@ -630,3 +630,33 @@ t.test('processScoreboardImage: header fallback when headers are not clearly rec
 
   t.end();
 });
+
+t.test('processScoreboardImage selects the scoreboard when Textract finds another table first', (t) => {
+  const decoyHeader = cell('decoy-header', 1, 1, 'decoy-header-word');
+  const decoyValue = cell('decoy-value', 2, 1, 'decoy-value-word');
+  const playerHeader = cell('player-header', 1, 1, 'player-header-word');
+  const scoreHeader = cell('score-header', 1, 2, 'score-header-word');
+  const playerValue = cell('player-value', 2, 1, 'player-value-word');
+  const scoreValue = cell('score-value', 2, 2, 'score-value-word');
+  const blocks = [
+    table('decoy-table', ['decoy-header', 'decoy-value']),
+    word('decoy-header-word', 'SETTING'),
+    word('decoy-value-word', 'ON'),
+    decoyHeader,
+    decoyValue,
+    table('scoreboard-table', ['player-header', 'score-header', 'player-value', 'score-value']),
+    word('player-header-word', 'PLAYERS'),
+    word('score-header-word', 'SCORE'),
+    word('player-value-word', 'Spartan'),
+    word('score-value-word', '19'),
+    playerHeader,
+    scoreHeader,
+    playerValue,
+    scoreValue,
+  ];
+  const rows = processScoreboardImage(blocks, []);
+  t.equal(rows.length, 1);
+  t.equal(rows[0].player, 'Spartan');
+  t.equal(rows[0].score, '19');
+  t.end();
+});

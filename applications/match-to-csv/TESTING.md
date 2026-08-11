@@ -1,25 +1,16 @@
 # Match-to-CSV testing
 
-Run from the repository root:
+Run local checks from the repository root:
 
 ```console
+npm run typecheck --workspace @mcc/match-to-csv
 npm test --workspace @mcc/match-to-csv
-npm run app:synth -- match-to-csv
+npm run app:synth -- match-to-csv --environment dev
+npm run verify:bundle --workspace @mcc/match-to-csv
 ```
 
-The unit suite uses JSON Textract fixtures and does not call AWS. Before
-deploying, ensure Docker is running so CDK packages Sharp for Lambda's Linux
-ARM runtime. Set the locally ignored `MCC_EMAIL_DOMAIN` to the verified dev
-domain. GitHub Actions deploys `match-to-csv-dev` before any ephemeral stack.
-Deploy a local stack with `--ephemeral <name>`. One email may contain several
-image attachments. Each accepted attachment becomes a `SCREENSHOT` source and
-receives its own immutable processing run under its generated screenshot ID.
+Unit tests replace mail parsing, image inspection, Textract, and evidence writes with local fakes. They do not call AWS. Coverage thresholds fail the test command when statement or line coverage drops below 80 percent, branch coverage drops below 65 percent, or function coverage drops below 60 percent.
 
-For an end-to-end test through the real email boundary, follow
-[`22-validate-match-to-csv-in-dev.md`](../../runbooks/22-validate-match-to-csv-in-dev.md).
-The plain dev stack owns the SES rule set and its default ingress rule. It
-keeps the original image, raw Textract response, normalized observations,
-processing manifest, append-only events, and extracted CSV in the evidence
-bucket.
+CDK synthesis uses Docker to install Sharp for Linux ARM64. `verify:bundle` inspects the synthesized `ProcessEmail` and `ExtractText` assets and fails if either is missing the native Sharp binary.
 
-Never use production email or player data in local fixtures.
+Use [22-validate-match-to-csv-in-dev.md](../../runbooks/22-validate-match-to-csv-in-dev.md) for a future AWS integration test. Never commit recipient configuration, domain configuration, production messages, or player data as fixtures.

@@ -86,6 +86,13 @@ if (expectedAccount && !/^[0-9]{12}$/.test(expectedAccount)) {
 }
 
 const childEnvironment = { ...process.env };
+const gitRevision = spawnSync('git', ['rev-parse', 'HEAD'], {
+  encoding: 'utf8',
+  env: childEnvironment,
+});
+if (gitRevision.status === 0) {
+  childEnvironment.GIT_SHA = gitRevision.stdout.trim();
+}
 if (needsAws) {
   const identityArguments = [
     'sts',

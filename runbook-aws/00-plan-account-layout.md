@@ -19,8 +19,7 @@ Project workload Region:
 GitHub owner and repository:
 ```
 
-Every AWS account requires a unique email address. Controlled aliases such as
-`aws+audit@example.com` are acceptable when the mail provider preserves access.
+Every AWS account requires a unique email address. A controlled alias is acceptable when the mail provider preserves access.
 Do not use an individual employee's mailbox for management, audit, log archive,
 or production.
 
@@ -46,4 +45,3 @@ only for a demonstrated resilience need.
 Reference: [AWS Control Tower landing-zone setup](https://docs.aws.amazon.com/prescriptive-guidance/latest/designing-control-tower-landing-zone/setup.html).
 
 Next: [Secure the management account](10-secure-management-account.md).
-

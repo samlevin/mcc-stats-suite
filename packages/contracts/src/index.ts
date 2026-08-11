@@ -32,6 +32,23 @@ export interface ProcessEmailInput extends S3ObjectReference {}
 export interface ProcessEmailOutput {
   submissionId: string;
   screenshots: SourceScreenshot[];
+  rejectedAttachments: RejectedAttachment[];
+}
+
+export type AttachmentRejectionCode =
+  | 'NOT_AN_IMAGE'
+  | 'UNREADABLE_IMAGE'
+  | 'UNSUPPORTED_IMAGE_FORMAT'
+  | 'IMAGE_TOO_LARGE'
+  | 'IMAGE_TOO_SMALL';
+
+export interface RejectedAttachment {
+  attachmentIndex: number;
+  attachmentName: string;
+  contentType: string;
+  fileSizeBytes: number;
+  rejectionCodes: AttachmentRejectionCode[];
+  source?: S3ObjectReference;
 }
 
 export interface ProcessingRunInput {
@@ -48,4 +65,21 @@ export interface ExtractTextOutput {
 export interface WriteExtractedCsvOutput extends S3ObjectReference {
   runId: string;
   rowCount: number;
+}
+
+export type DatasetSplit = 'TRAIN' | 'VALIDATION' | 'TEST';
+
+export interface MaterializeTrainingDataInput {
+  bucket: string;
+  normalizedKeys: string[];
+  splitSeed?: string;
+}
+
+export interface MaterializeTrainingDataOutput {
+  datasetId: string;
+  bucket: string;
+  prefix: string;
+  manifest: S3ObjectReference;
+  files: Record<Lowercase<DatasetSplit>, S3ObjectReference>;
+  counts: Record<Lowercase<DatasetSplit>, number>;
 }

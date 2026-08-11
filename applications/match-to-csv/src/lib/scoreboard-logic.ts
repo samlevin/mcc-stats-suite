@@ -5,7 +5,7 @@
 // It is pure logic that can be unit-tested easily.
 //
 // It takes:
-//   - Textract-style blocks (for one CROPPED scoreboard image)
+//   - Textract-style blocks from an image containing a scoreboard
 //   - Per-row background colors (average RGB per row)
 // and returns:
 //   - A list of CsvRow objects:
@@ -57,8 +57,8 @@ import type { CsvRow } from '@mcc/contracts';
 /**
  * Average background color for one table row.
  *
- * The preprocess Lambda will compute this using sharp by sampling
- * a horizontal band across each row's background.
+ * The extraction Lambda computes this by sampling a horizontal band across
+ * each row's background.
  */
 export interface RowColor {
   rowIndex: number; // Textract RowIndex
@@ -116,7 +116,7 @@ const COLOR_CLUSTER_THRESHOLD = 40;
 /**
  * Convert Textract blocks + row background colors into CsvRow[].
  *
- * @param blocks    Textract-like Blocks from the CROPPED scoreboard image.
+ * @param blocks    Textract-like blocks from an image containing a scoreboard.
  * @param rowColors For each table row, the average background RGB.
  *
  * @returns A list of CsvRow objects ready to write to CSV.
@@ -133,8 +133,13 @@ export function processScoreboardImage(
     if (b.Id) blockMap.set(b.Id, b);
   }
 
-  // 1) Find the TABLE block that represents the scoreboard.
-  const table = blocks.find((b) => b.BlockType === 'TABLE');
+  // 1) Find the TABLE block that most closely resembles the scoreboard.
+  const table = blocks
+    .filter((block) => block.BlockType === 'TABLE')
+    .sort(
+      (left, right) =>
+        tableHeaderScore(right, blockMap) - tableHeaderScore(left, blockMap),
+    )[0];
   if (!table || !table.Relationships) {
     // No table found => nothing to parse.
     return [];
@@ -311,6 +316,24 @@ function getCellText(
     }
   }
   return text.trim();
+}
+
+function tableHeaderScore(
+  table: TextractBlockLite,
+  blockMap: Map<string, TextractBlockLite>,
+): number {
+  let score = 0;
+  for (const relationship of table.Relationships ?? []) {
+    if (relationship.Type !== 'CHILD') continue;
+    for (const id of relationship.Ids ?? []) {
+      const cell = blockMap.get(id);
+      if (cell?.BlockType !== 'CELL' || cell.RowIndex !== 1) continue;
+      const header = getCellText(cell, blockMap).trim().toUpperCase();
+      if (header.includes('PLAYER')) score += 3;
+      if (['SCORE', 'KILLS', 'ASSISTS', 'DEATHS'].includes(header)) score += 1;
+    }
+  }
+  return score;
 }
 
 /**

@@ -5,7 +5,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "tap --disable-coverage test/*.test.ts",
+    "test": "tap --coverage-report=text --statements=80 --branches=65 --lines=80 --functions=60 test/*.test.ts",
+    "verify:bundle": "node scripts/verify-bundles.mjs",
     "cdk:synth": "cdk synth",
     "cdk:diff": "cdk diff",
     "cdk:deploy": "cdk deploy",
