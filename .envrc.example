@@ -10,6 +10,7 @@ export MCC_GITHUB_OIDC_SUBJECT_REPOSITORY="OWNER@OWNER_ID/REPOSITORY@REPOSITORY_
 
 export MCC_DEV_PROFILE="mcc-dev"
 export MCC_DEV_ACCOUNT_ID="111111111111"
+export MCC_EMAIL_DOMAIN="dev.example.com"
 
 # The repository root defaults to the dev profile.
 export AWS_PROFILE="$MCC_DEV_PROFILE"

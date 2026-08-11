@@ -63,6 +63,14 @@ if (
 
 const accountVariable =
   environment === 'dev' ? 'MCC_DEV_ACCOUNT_ID' : 'MCC_PROD_ACCOUNT_ID';
+const emailDomain = process.env.MCC_EMAIL_DOMAIN;
+if (
+  application === 'match-to-csv' &&
+  action === 'deploy' &&
+  !emailDomain
+) {
+  fail('Export MCC_EMAIL_DOMAIN before deploying match-to-csv');
+}
 let expectedAccount = process.env[accountVariable];
 let expectedAccountSource = accountVariable;
 const needsAws = action !== 'synth';
@@ -139,6 +147,9 @@ if (expectedAccount) {
   cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
 }
 if (profile) cdkArguments.push('--profile', profile);
+if (application === 'match-to-csv' && action === 'deploy' && emailDomain) {
+  cdkArguments.push('--parameters', `EmailDomain=${emailDomain}`);
+}
 cdkArguments.push(...passthrough);
 
 const command = spawnSync('npm', cdkArguments, {

@@ -4,6 +4,7 @@ import {
   CfnOutput,
   CfnParameter,
   Duration,
+  Fn,
   Stack,
   Tags,
   type StackProps,
@@ -18,7 +19,6 @@ import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ses from 'aws-cdk-lib/aws-ses';
-import * as sesActions from 'aws-cdk-lib/aws-ses-actions';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -231,51 +231,78 @@ export class MatchToCsvStack extends Stack {
       tracingEnabled: true,
     });
 
-    if (deployment.ingressEnabled) {
-      const workflowDlq = new sqs.Queue(this, 'WorkflowDlq', {
-        queueName: `${deployment.resourcePrefix}-events-dlq`,
-        retentionPeriod: Duration.days(14),
-        encryption: sqs.QueueEncryption.SQS_MANAGED,
-      });
-      const rawEmailCreated = new events.Rule(this, 'RawEmailCreated', {
-        eventPattern: {
-          source: ['aws.s3'],
-          detailType: ['Object Created'],
-          detail: {
-            bucket: { name: [rawEmailBucket.bucketName] },
-            object: { key: [{ prefix: 'incoming/' }] },
-          },
+    const inboundRoute = deployment.environment === 'prod'
+      ? 'prod'
+      : deployment.instance === 'shared'
+        ? 'shared'
+        : deployment.instance!;
+    const inboundPrefix = `incoming/${inboundRoute}/`;
+    const workflowDlq = new sqs.Queue(this, 'WorkflowDlq', {
+      queueName: `${deployment.resourcePrefix}-events-dlq`,
+      retentionPeriod: Duration.days(14),
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+    });
+    const rawEmailCreated = new events.Rule(this, 'RawEmailCreated', {
+      eventPattern: {
+        source: ['aws.s3'],
+        detailType: ['Object Created'],
+        detail: {
+          bucket: { name: [rawEmailBucket.bucketName] },
+          object: { key: [{ prefix: inboundPrefix }] },
         },
-      });
-      rawEmailCreated.addTarget(
-        new targets.SfnStateMachine(workflow, {
-          deadLetterQueue: workflowDlq,
-          retryAttempts: 3,
-          maxEventAge: Duration.hours(2),
-          input: events.RuleTargetInput.fromObject({
-            bucket: events.EventField.fromPath('$.detail.bucket.name'),
-            key: events.EventField.fromPath('$.detail.object.key'),
-          }),
+      },
+    });
+    rawEmailCreated.addTarget(
+      new targets.SfnStateMachine(workflow, {
+        deadLetterQueue: workflowDlq,
+        retryAttempts: 3,
+        maxEventAge: Duration.hours(2),
+        input: events.RuleTargetInput.fromObject({
+          bucket: events.EventField.fromPath('$.detail.bucket.name'),
+          key: events.EventField.fromPath('$.detail.object.key'),
         }),
-      );
+      }),
+    );
 
-      const recipient = new CfnParameter(this, 'StatsRecipientEmail', {
-        type: 'String',
-        description: 'SES-verified recipient for scoreboard emails',
+    const emailDomain = new CfnParameter(this, 'EmailDomain', {
+      type: 'String',
+      description: 'Verified SES domain used for inbound match-to-CSV email',
+      allowedPattern: '^[A-Za-z0-9.-]+$',
+    });
+    const recipient = Fn.join('', [
+      deployment.environment === 'prod' || deployment.instance === 'shared'
+        ? 'submit@'
+        : `submit+${deployment.instance}@`,
+      emailDomain.valueAsString,
+    ]);
+    const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
+    let receiptRuleSet: ses.CfnReceiptRuleSet | undefined;
+    if (deployment.isShared) {
+      receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
+        ruleSetName: receiptRuleSetName,
       });
-      const receiptRuleSetName = deployment.resourcePrefix;
-      const receiptRules = new ses.ReceiptRuleSet(this, 'ReceiptRuleSet', {
-        receiptRuleSetName,
-      });
-      receiptRules.addRule('StoreRawEmail', {
-        recipients: [recipient.valueAsString],
+    }
+    const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
+      ruleSetName: receiptRuleSetName,
+      rule: {
+        name: deployment.resourcePrefix,
+        enabled: true,
+        recipients: [recipient],
+        scanEnabled: true,
+        tlsPolicy: 'Optional',
         actions: [
-          new sesActions.S3({
-            bucket: rawEmailBucket,
-            objectKeyPrefix: 'incoming/',
-          }),
+          {
+            s3Action: {
+              bucketName: rawEmailBucket.bucketName,
+              objectKeyPrefix: inboundPrefix,
+            },
+          },
+          { stopAction: { scope: 'RuleSet' } },
         ],
-      });
+      },
+    });
+    if (receiptRuleSet) {
+      receiptRule.node.addDependency(receiptRuleSet);
       const activateRules = new customResources.AwsCustomResource(
         this,
         'ActivateReceiptRuleSet',
@@ -304,7 +331,7 @@ export class MatchToCsvStack extends Stack {
           }),
         },
       );
-      activateRules.node.addDependency(receiptRules);
+      activateRules.node.addDependency(receiptRule);
 
       new CfnOutput(this, 'ReceiptRuleSetName', {
         value: receiptRuleSetName,

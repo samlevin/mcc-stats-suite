@@ -13,8 +13,9 @@ npm run app:deploy -- match-to-csv
 ```
 
 The wrapper derives the qualifier from `whoami`. Use `--instance <name>` only
-when needed. Personal stacks do not receive email automatically; use the shared
-dev deployment for end-to-end email testing.
+when needed. Set the locally ignored `MCC_EMAIL_DOMAIN` to the verified dev
+domain before deployment. Deploy the shared dev stack first. Each personal
+stack then receives mail at `submit+<instance>@<MCC_EMAIL_DOMAIN>`.
 
 Destroy the personal application when it is no longer useful:
 

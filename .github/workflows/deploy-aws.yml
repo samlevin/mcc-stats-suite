@@ -27,7 +27,7 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && vars.AWS_ACCOUNT_ID || '' }}
       MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && vars.AWS_ACCOUNT_ID || '' }}
-      STATS_RECIPIENT_EMAIL: ${{ secrets.STATS_RECIPIENT_EMAIL }}
+      MCC_EMAIL_DOMAIN: ${{ vars.MCC_EMAIL_DOMAIN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,14 +63,11 @@ jobs:
           if [ "${{ inputs.environment }}" = "dev" ]; then
             INSTANCE_ARGS+=(--instance shared)
           fi
-          EXTRA_ARGS=()
           if [ "${{ inputs.application }}" = "match-to-csv" ]; then
-            test -n "${STATS_RECIPIENT_EMAIL}"
-            EXTRA_ARGS+=(--parameters "StatsRecipientEmail=${STATS_RECIPIENT_EMAIL}")
+            test -n "${MCC_EMAIL_DOMAIN}"
           fi
           npm run app:deploy -- \
             "${{ inputs.application }}" \
             --environment "${{ inputs.environment }}" \
             "${INSTANCE_ARGS[@]}" \
-            --require-approval never \
-            "${EXTRA_ARGS[@]}"
+            --require-approval never
