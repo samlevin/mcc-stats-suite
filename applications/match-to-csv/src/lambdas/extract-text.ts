@@ -93,13 +93,27 @@ function normalize(rawBlocks: Block[], source: ProcessingRunInput['source'], run
     const token = rawBlocks.find((block) => block.Id === tokenId);
     if (token?.Text) cellText.set(cell.Id ?? '', `${cellText.get(cell.Id ?? '') ?? ''} ${token.Text}`.trim());
   }
+  const semanticColumns = new Map<number, string>();
+  const firstTable = rawBlocks.find((block) => block.BlockType === 'TABLE');
+  const headerCells = (firstTable?.Relationships ?? [])
+    .filter((relationship) => relationship.Type === 'CHILD')
+    .flatMap((relationship) => relationship.Ids ?? [])
+    .map((id) => rawBlocks.find((block) => block.Id === id))
+    .filter((block): block is Block => block?.BlockType === 'CELL' && block.RowIndex === 1);
+  for (const cell of headerCells) {
+    const header = (cellText.get(cell.Id ?? '') ?? '').toUpperCase();
+    const field = header.includes('PLAYER') ? 'PLAYER' : header === 'SCORE' ? 'SCORE' : header === 'KILLS' ? 'KILLS' : header === 'ASSISTS' ? 'ASSISTS' : header === 'DEATHS' ? 'DEATHS' : undefined;
+    if (field && cell.ColumnIndex) semanticColumns.set(cell.ColumnIndex, field);
+  }
   const blocks = rawBlocks.map((block) => ({ observationId: `${runId}:block:${block.Id}`, runId, provider: 'AWS_TEXTRACT', providerBlockId: block.Id, blockType: block.BlockType, text: block.Text, confidence: block.Confidence, geometry: geometry(block, source.screenshotId), page: block.Page, rowIndex: block.RowIndex, columnIndex: block.ColumnIndex, rowSpan: block.RowSpan, columnSpan: block.ColumnSpan, entityTypes: block.EntityTypes, selectionStatus: block.SelectionStatus, relationshipIds: (block.Relationships ?? []).map((r) => ({ type: r.Type, providerBlockIds: r.Ids ?? [] })), providerExtensions: { textType: block.TextType } }));
   const tables = rawBlocks.filter((block) => block.BlockType === 'TABLE').map((block, index) => ({ tableObservationId: `${runId}:table:${block.Id}`, runId, providerBlockId: block.Id, tableIndex: index, confidence: block.Confidence, geometry: geometry(block, source.screenshotId), classification: index === 0 ? 'SCOREBOARD' : 'UNKNOWN', childCellObservationIds: (block.Relationships ?? []).flatMap((r) => r.Type === 'CHILD' ? (r.Ids ?? []).map((id) => `${runId}:cell:${id}`) : []), createdAt: now() }));
   const cells = rawBlocks.filter((block) => block.BlockType === 'CELL').map((block) => {
     const observedText = cellText.get(block.Id ?? '') ?? block.Text ?? '';
+    const field = semanticColumns.get(block.ColumnIndex ?? 0) ?? 'UNKNOWN';
+    const expectsInteger = ['SCORE', 'KILLS', 'ASSISTS', 'DEATHS'].includes(field);
     const numeric = /^\d+$/.test(observedText.trim());
     const validation = { rulesVersion: versions.validationRulesVersion, valid: observedText.length > 0, deterministicReviewRequired: observedText.length === 0 || (block.Confidence ?? 0) < 95, flags: [ ...(observedText.length === 0 ? [{ code: 'EMPTY_REQUIRED_CELL', severity: 'WARNING' }] : []), ...((block.Confidence ?? 0) < 95 ? [{ code: 'LOW_TEXTRACT_CONFIDENCE', severity: 'WARNING', actual: block.Confidence ?? 0 }] : []) ] };
-    return { cellObservationId: `${runId}:cell:${block.Id}`, runId, screenshotId: source.screenshotId, tableObservationId: `${runId}:table:${cellToTable.get(block.Id ?? '') ?? 'unknown'}`, providerBlockId: block.Id, tableLocation: { rowIndex: block.RowIndex, columnIndex: block.ColumnIndex, rowSpan: block.RowSpan ?? 1, columnSpan: block.ColumnSpan ?? 1 }, semanticLocation: { field: 'UNKNOWN' }, observedText, confidence: block.Confidence ?? 0, parsed: { parserVersion: versions.tableParserVersion, expectedType: numeric ? 'INTEGER' : 'STRING', parseSucceeded: observedText.length > 0, stringValue: observedText, integerValue: numeric ? Number(observedText) : undefined, transformations: [] }, geometry: geometry(block, source.screenshotId), tokenObservationIds: (block.Relationships ?? []).flatMap((r) => r.Type === 'CHILD' ? (r.Ids ?? []).map((id) => `${runId}:token:${id}`) : []), providerMetadata: { entityTypes: block.EntityTypes, selectionStatus: block.SelectionStatus }, validation, createdAt: now() };
+    return { cellObservationId: `${runId}:cell:${block.Id}`, runId, screenshotId: source.screenshotId, tableObservationId: `${runId}:table:${cellToTable.get(block.Id ?? '') ?? 'unknown'}`, providerBlockId: block.Id, tableLocation: { rowIndex: block.RowIndex, columnIndex: block.ColumnIndex, rowSpan: block.RowSpan ?? 1, columnSpan: block.ColumnSpan ?? 1 }, semanticLocation: { field }, observedText, confidence: block.Confidence ?? 0, parsed: { parserVersion: versions.tableParserVersion, expectedType: expectsInteger ? 'INTEGER' : 'STRING', parseSucceeded: observedText.length > 0 && (!expectsInteger || numeric), stringValue: observedText, integerValue: numeric ? Number(observedText) : undefined, transformations: [] }, geometry: geometry(block, source.screenshotId), tokenObservationIds: (block.Relationships ?? []).flatMap((r) => r.Type === 'CHILD' ? (r.Ids ?? []).map((id) => `${runId}:token:${id}`) : []), providerMetadata: { entityTypes: block.EntityTypes, selectionStatus: block.SelectionStatus }, validation, createdAt: now() };
   });
   const tokens = rawBlocks.filter((block) => ['WORD', 'LINE', 'SELECTION_ELEMENT'].includes(block.BlockType ?? '')).map((block) => ({ tokenObservationId: `${runId}:token:${block.Id}`, runId, cellObservationId: childToCell.get(block.Id ?? '')?.Id ? `${runId}:cell:${childToCell.get(block.Id ?? '')?.Id}` : undefined, providerBlockId: block.Id, tokenType: block.BlockType, text: block.Text, confidence: block.Confidence, geometry: geometry(block, source.screenshotId), providerMetadata: { textType: block.TextType }, createdAt: now() }));
   return { blocks, tables, cells, tokens };
