@@ -25,11 +25,11 @@ Apply the matching environment foundation before deploying this application. Fou
 GitHub Actions deploys the stable environments:
 
 ```text
-dev:  submit@dev.hhheroes.club
-prod: submit@hhheroes.club
+dev:  submit@<development-domain>
+prod: submit@<production-domain>
 ```
 
-Local developer stacks are explicit and receive `submit+<name>@dev.hhheroes.club`:
+Local developer stacks are explicit and receive `submit+<name>@<development-domain>`:
 
 ```console
 npm run app:deploy -- match-to-csv --environment dev --ephemeral sam
