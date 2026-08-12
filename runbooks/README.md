@@ -12,5 +12,5 @@ AWS account, identity, state, or CI architecture.
 6. [Deploy an ephemeral dev stack](21-deploy-ephemeral-match-to-csv.md)
 7. [Validate the shared dev application](22-validate-match-to-csv-in-dev.md)
 8. [Promote foundation changes to prod](30-promote-foundation-to-prod.md)
-9. [Promote the application to prod](31-promote-match-to-csv-to-prod.md)
+9. [Release, promote, and recover applications](31-release-promote-and-recover-applications.md)
 10. [Recover and troubleshoot](40-recover-and-troubleshoot.md)

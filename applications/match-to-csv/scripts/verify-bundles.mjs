@@ -17,7 +17,10 @@ const stackArtifacts = Object.values(manifest.artifacts ?? {}).filter(
 if (stackArtifacts.length === 0) fail('CDK manifest contains no stack');
 
 for (const stack of stackArtifacts) {
-  const templatePath = path.join(outputDirectory, stack.properties.templateFile);
+  const templatePath = path.join(
+    outputDirectory,
+    stack.properties.templateFile,
+  );
   const template = JSON.parse(fs.readFileSync(templatePath, 'utf8'));
   verifyTemplate(stack.displayName, template);
   for (const logicalPrefix of ['ProcessEmail', 'ExtractText']) {
@@ -106,7 +109,9 @@ function verifyTemplate(stackName, template) {
 
   const definitionText = JSON.stringify(
     Object.values(template.Resources ?? {})
-      .filter((resource) => resource.Type === 'AWS::StepFunctions::StateMachine')
+      .filter(
+        (resource) => resource.Type === 'AWS::StepFunctions::StateMachine',
+      )
       .map((resource) => resource.Properties?.DefinitionString),
   );
   for (const retryName of [
@@ -146,7 +151,9 @@ function assertPresent(label, value) {
 
 function assertEqual(label, actual, expected) {
   if (actual !== expected) {
-    fail(`${label} is ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`);
+    fail(
+      `${label} is ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`,
+    );
   }
 }
 

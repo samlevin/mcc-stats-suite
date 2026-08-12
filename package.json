@@ -11,7 +11,13 @@
     "build": "turbo run build",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "check": "npm run typecheck && npm test && npm run build",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier . --write --ignore-unknown",
+    "format:check": "prettier . --check --ignore-unknown",
+    "check": "npm run format:check && npm run lint && npm run release:check && npm run typecheck && npm test && npm run build",
+    "release:check": "node scripts/release-metadata.mjs --check",
+    "release:metadata": "node scripts/release-metadata.mjs",
     "cdk:synth": "turbo run cdk:synth",
     "app:synth": "node scripts/cdk-app.mjs synth",
     "app:diff": "node scripts/cdk-app.mjs diff",
@@ -21,11 +27,17 @@
     "tofu:fmt:check": "tofu fmt -check -recursive infrastructure"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.19.15",
     "aws-cdk": "2.1134.0",
+    "eslint": "^10.8.1",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.9.0",
+    "prettier": "^3.9.6",
     "sharp": "0.35.3",
     "turbo": "2.10.7",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.67.0"
   },
   "engines": {
     "node": ">=22.16.0"

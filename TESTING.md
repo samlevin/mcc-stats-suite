@@ -14,6 +14,8 @@ npm run check
 npm run tofu:fmt:check
 ```
 
+`npm run check` verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI runs the same quality gate.
+
 Target one logical application with npm's workspace flag:
 
 ```console
@@ -26,8 +28,6 @@ Current application guidance:
 - [`applications/match-to-csv/TESTING.md`](applications/match-to-csv/TESTING.md)
 - [`packages/cdk-config/TESTING.md`](packages/cdk-config/TESTING.md)
 
-Future application scaffolds still participate in the root workspace checks but
-are not part of the current deployment runbook.
+Every application workspace participates in the root checks and can be targeted independently by the deployment workflow.
 
-`npm test` is AWS-free. CDK synth verifies infrastructure shape; AWS smoke
-tests belong in development before promotion.
+`npm test` is AWS-free. CDK synth verifies infrastructure structure. After a merge to `main`, CI deploys affected applications to `dev` and verifies the resulting CloudFormation stack. The `match-to-csv` check also requires its Lambda functions and Step Functions state machines to be active. Run the full email integration test before promoting a material ingestion or processing change.

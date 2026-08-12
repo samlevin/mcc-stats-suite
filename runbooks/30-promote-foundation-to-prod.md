@@ -8,4 +8,4 @@ Promote only changes already applied and validated in dev.
 
 Do not apply production foundation changes locally.
 
-Next: [`31-promote-match-to-csv-to-prod.md`](31-promote-match-to-csv-to-prod.md).
+Next: [`31-release-promote-and-recover-applications.md`](31-release-promote-and-recover-applications.md).

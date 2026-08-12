@@ -30,7 +30,7 @@ export interface TextractRelationship {
 }
 
 export interface TextractGeometryBox {
-  Top?: number;    // normalized 0–1
+  Top?: number; // normalized 0–1
   Height?: number; // normalized 0–1
 }
 
@@ -41,8 +41,8 @@ export interface TextractGeometry {
 export interface TextractBlockLite {
   Id?: string;
   BlockType?: string; // "TABLE", "CELL", "WORD", etc.
-  Text?: string;      // For WORD blocks
-  RowIndex?: number;  // For CELL blocks
+  Text?: string; // For WORD blocks
+  RowIndex?: number; // For CELL blocks
   ColumnIndex?: number; // For CELL blocks
   Geometry?: TextractGeometry;
   Relationships?: TextractRelationship[];
@@ -62,9 +62,9 @@ import type { CsvRow } from '@mcc/contracts';
  */
 export interface RowColor {
   rowIndex: number; // Textract RowIndex
-  r: number;        // average red 0–255
-  g: number;        // average green 0–255
-  b: number;        // average blue 0–255
+  r: number; // average red 0–255
+  g: number; // average green 0–255
+  b: number; // average blue 0–255
 }
 
 /////////////////////////
@@ -96,10 +96,10 @@ interface PlayerRow {
  * Each cluster becomes one MCC team.
  */
 interface TeamCluster {
-  name: string;   // MCC color name, e.g. "Red"
-  r: number;      // mean R of the cluster
-  g: number;      // mean G of the cluster
-  b: number;      // mean B of the cluster
+  name: string; // MCC color name, e.g. "Red"
+  r: number; // mean R of the cluster
+  g: number; // mean G of the cluster
+  b: number; // mean B of the cluster
   rows: number[]; // RowIndex[] in this cluster
 }
 
@@ -188,11 +188,16 @@ export function processScoreboardImage(
 
   // If Textract mis-reads headers, fall back to the standard column order.
   const headerCols = Array.from(headerRow.keys()).sort((a, b) => a - b);
-  if (!colMapping.player && headerCols.length >= 1) colMapping.player = headerCols[0];
-  if (!colMapping.score && headerCols.length >= 2) colMapping.score = headerCols[1];
-  if (!colMapping.kills && headerCols.length >= 3) colMapping.kills = headerCols[2];
-  if (!colMapping.assists && headerCols.length >= 4) colMapping.assists = headerCols[3];
-  if (!colMapping.deaths && headerCols.length >= 5) colMapping.deaths = headerCols[4];
+  if (!colMapping.player && headerCols.length >= 1)
+    colMapping.player = headerCols[0];
+  if (!colMapping.score && headerCols.length >= 2)
+    colMapping.score = headerCols[1];
+  if (!colMapping.kills && headerCols.length >= 3)
+    colMapping.kills = headerCols[2];
+  if (!colMapping.assists && headerCols.length >= 4)
+    colMapping.assists = headerCols[3];
+  if (!colMapping.deaths && headerCols.length >= 5)
+    colMapping.deaths = headerCols[4];
 
   // 5) Build a list of PlayerRow entries (skip header row).
   const players: PlayerRow[] = [];
@@ -201,7 +206,7 @@ export function processScoreboardImage(
     const row = tableByRow.get(r)!;
 
     const rawPlayer = colMapping.player
-      ? row.get(colMapping.player) ?? ''
+      ? (row.get(colMapping.player) ?? '')
       : '';
     const player = tidyPlayerName(rawPlayer);
     if (!player) continue;

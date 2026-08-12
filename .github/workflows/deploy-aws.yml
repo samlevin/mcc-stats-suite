@@ -1,101 +1,168 @@
-name: deploy-aws-application
+name: promote-aws-application
+run-name: ${{ inputs.operation }} ${{ inputs.application }} ${{ inputs.release-tag }} to prod
 
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Promote a new release or restore a previous production release
+        required: true
+        type: choice
+        options:
+          - promote
+          - rollback
       application:
         description: Logical application workspace
         required: true
         type: choice
         options:
+          - admin
+          - data-pipeline
           - match-to-csv
-      environment:
-        description: AWS environment
+          - ocr-quality
+          - player
+      release-tag:
+        description: App release tag, for example match-to-csv-v1.2.3
         required: true
-        type: choice
-        options: [dev, prod]
+        type: string
+      reason:
+        description: Required for rollback; optional for promotion
+        required: false
+        type: string
 
 permissions:
-  id-token: write
   contents: read
+  deployments: read
 
 jobs:
-  deploy:
+  qualify:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    env:
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-      MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && vars.AWS_ACCOUNT_ID || '' }}
-      MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && vars.AWS_ACCOUNT_ID || '' }}
-      MCC_EMAIL_DOMAIN: ${{ vars.MCC_EMAIL_DOMAIN }}
+    outputs:
+      release-url: ${{ steps.release.outputs.release-url }}
+      sha: ${{ steps.target.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22.16.0"
-          cache: npm
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
-      - run: npm ci
-      - run: npm test --workspace "@mcc/${{ inputs.application }}"
-      - name: Require main for production
-        if: inputs.environment == 'prod'
+      - name: Require main workflow definition
         run: test "${GITHUB_REF}" = "refs/heads/main"
-      - uses: aws-actions/configure-aws-credentials@v5
+      - uses: actions/checkout@v4
         with:
-          role-to-assume: ${{ vars.AWS_CDK_DEPLOY_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Verify target account
+          fetch-depth: 0
+      - name: Validate release
+        id: release
+        uses: actions/github-script@v9
+        env:
+          APPLICATION: ${{ inputs.application }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        with:
+          script: |
+            const escapedApplication = process.env.APPLICATION.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const expectedTag = new RegExp(`^${escapedApplication}-v\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$`);
+            if (!expectedTag.test(process.env.RELEASE_TAG)) {
+              core.setFailed(`Release tag does not belong to ${process.env.APPLICATION}`);
+              return;
+            }
+            const response = await github.rest.repos.getReleaseByTag({
+              ...context.repo,
+              tag: process.env.RELEASE_TAG,
+            });
+            if (response.data.draft || response.data.prerelease) {
+              core.setFailed('Production requires a published, non-prerelease GitHub Release');
+              return;
+            }
+            core.setOutput('release-url', response.data.html_url);
+      - name: Resolve immutable release revision
+        id: target
+        env:
+          APPLICATION: ${{ inputs.application }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
         run: |
-          ACTUAL_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
-          if [ "${ACTUAL_ACCOUNT}" != "${{ vars.AWS_ACCOUNT_ID }}" ]; then
-            echo "::error::AWS credentials target the wrong account"
+          TARGET_SHA="$(git rev-list -n 1 "${RELEASE_TAG}^{commit}")"
+          if [[ ! "${TARGET_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Release tag does not resolve to a commit"
             exit 1
           fi
-      - name: Verify match-to-csv prerequisites
-        if: inputs.application == 'match-to-csv'
+          git merge-base --is-ancestor "${TARGET_SHA}" origin/main
+          RELEASE_VERSION="${RELEASE_TAG#"${APPLICATION}-v"}"
+          PACKAGE_VERSION="$(node -p "require('./applications/${APPLICATION}/package.json').version")"
+          if [ "${RELEASE_VERSION}" != "${PACKAGE_VERSION}" ]; then
+            echo "::error::Release tag version ${RELEASE_VERSION} does not match ${APPLICATION} package version ${PACKAGE_VERSION}"
+            exit 1
+          fi
+          npm run release:check
+          echo "sha=${TARGET_SHA}" >> "${GITHUB_OUTPUT}"
+      - name: Require rollback reason
+        if: inputs.operation == 'rollback'
+        env:
+          REASON: ${{ inputs.reason }}
         run: |
-          if [ -z "${MCC_EMAIL_DOMAIN}" ]; then
-            echo "::error::The selected GitHub Environment has no inbound domain configured"
+          if [ -z "${REASON// }" ]; then
+            echo "::error::Explain why production is being rolled back"
             exit 1
           fi
-          PARAMETER_COUNT="$(aws ssm get-parameters \
-            --names \
-              /cdk-bootstrap/hnb659fds/version \
-              "/mcc/${{ inputs.environment }}/match-to-csv/raw-email-bucket-name" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/evidence-bucket-name" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/data-key-arn" \
-            --query 'length(Parameters)' \
-            --output text)"
-          if [ "${PARAMETER_COUNT}" != "4" ]; then
-            echo "::error::CDK bootstrap or match-to-csv foundation parameters are missing"
-            exit 1
-          fi
-          IDENTITY_STATUS="$(aws ses get-identity-verification-attributes \
-            --identities "${MCC_EMAIL_DOMAIN}" \
-            --query 'VerificationAttributes.*.VerificationStatus | [0]' \
-            --output text)"
-          if [ "${IDENTITY_STATUS}" != "Success" ]; then
-            echo "::error::The configured SES identity is not verified in the deployment region"
-            exit 1
-          fi
-          if ! dig +short MX "${MCC_EMAIL_DOMAIN}" | \
-            grep -Fq "inbound-smtp.${AWS_REGION}.amazonaws.com."; then
-            echo "::error::The configured MX record does not target SES inbound receiving in the deployment region"
-            exit 1
-          fi
-      - name: Synthesize
+      - name: Verify prior qualification
+        uses: actions/github-script@v9
+        env:
+          APPLICATION: ${{ inputs.application }}
+          OPERATION: ${{ inputs.operation }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
+        with:
+          script: |
+            const environment = process.env.OPERATION === 'rollback' ? 'prod' : 'dev';
+            const task = `deploy:${process.env.APPLICATION}`;
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              ...context.repo,
+              sha: process.env.TARGET_SHA,
+              environment,
+              task,
+              per_page: 100,
+            });
+            const exactDeployments = deployments
+              .filter((deployment) => deployment.sha === process.env.TARGET_SHA && deployment.task === task)
+              .sort((left, right) => new Date(right.created_at) - new Date(left.created_at));
+            if (exactDeployments.length === 0) {
+              core.setFailed(`${process.env.APPLICATION} ${process.env.TARGET_SHA} has no ${environment} deployment record`);
+              return;
+            }
+            const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+              ...context.repo,
+              deployment_id: exactDeployments[0].id,
+              per_page: 100,
+            });
+            const latestStatus = statuses
+              .sort((left, right) => new Date(right.created_at) - new Date(left.created_at))[0];
+            if (latestStatus?.state !== 'success') {
+              core.setFailed(`Latest ${environment} deployment did not succeed`);
+            }
+      - name: Write qualification summary
+        env:
+          APPLICATION: ${{ inputs.application }}
+          OPERATION: ${{ inputs.operation }}
+          REASON: ${{ inputs.reason }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          RELEASE_URL: ${{ steps.release.outputs.release-url }}
+          TARGET_SHA: ${{ steps.target.outputs.sha }}
         run: |
-          npm run app:synth -- \
-            "${{ inputs.application }}" \
-            --environment "${{ inputs.environment }}"
-      - name: Verify native Lambda bundles
-        if: inputs.application == 'match-to-csv'
-        run: npm run verify:bundle --workspace @mcc/match-to-csv
-      - name: Deploy
-        run: |
-          npm run app:deploy -- \
-            "${{ inputs.application }}" \
-            --environment "${{ inputs.environment }}" \
-            --require-approval never
+          {
+            echo "## Production qualification"
+            echo
+            echo "- Operation: \`${OPERATION}\`"
+            echo "- Application: \`${APPLICATION}\`"
+            echo "- Release: [\`${RELEASE_TAG}\`](${RELEASE_URL})"
+            echo "- Commit: \`${TARGET_SHA}\`"
+            if [ -n "${REASON}" ]; then
+              echo "- Reason: ${REASON}"
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  deploy-prod:
+    needs: qualify
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/_deploy-aws-application.yml
+    with:
+      application: ${{ inputs.application }}
+      environment: prod
+      sha: ${{ needs.qualify.outputs.sha }}
+      operation: ${{ inputs.operation }}
+      source: ${{ inputs.release-tag }}

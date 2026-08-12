@@ -9,7 +9,7 @@ import {
   Tags,
   type StackProps,
 } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import type { Construct } from 'constructs';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -30,11 +30,7 @@ interface MatchToCsvStackProps extends StackProps {
 }
 
 export class MatchToCsvStack extends Stack {
-  constructor(
-    scope: Construct,
-    id: string,
-    props: MatchToCsvStackProps,
-  ) {
+  constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
     const { deployment } = props;
@@ -182,11 +178,7 @@ export class MatchToCsvStack extends Stack {
       maxAttempts: 3,
       backoffRate: 2,
     };
-    for (const task of [
-      processEmailTask,
-      extractTextTask,
-      writeCsvTask,
-    ]) {
+    for (const task of [processEmailTask, extractTextTask, writeCsvTask]) {
       task.addRetry(retry);
     }
 
@@ -226,17 +218,23 @@ export class MatchToCsvStack extends Stack {
       payloadResponseOnly: true,
       retryOnServiceExceptions: false,
     });
-    const replayWrite = new tasks.LambdaInvoke(this, 'Replay write extracted CSV', {
-      lambdaFunction: writeExtractedCsv,
-      payloadResponseOnly: true,
-      retryOnServiceExceptions: false,
-    });
+    const replayWrite = new tasks.LambdaInvoke(
+      this,
+      'Replay write extracted CSV',
+      {
+        lambdaFunction: writeExtractedCsv,
+        payloadResponseOnly: true,
+        retryOnServiceExceptions: false,
+      },
+    );
     replayExtract.addRetry(retry);
     replayWrite.addRetry(retry);
     const replayWorkflow = new sfn.StateMachine(this, 'ReplayWorkflow', {
       stateMachineName: `${deployment.resourcePrefix}-replay`,
       stateMachineType: sfn.StateMachineType.STANDARD,
-      definitionBody: sfn.DefinitionBody.fromChainable(replayExtract.next(replayWrite)),
+      definitionBody: sfn.DefinitionBody.fromChainable(
+        replayExtract.next(replayWrite),
+      ),
       timeout: Duration.minutes(15),
       tracingEnabled: true,
     });
@@ -276,9 +274,7 @@ export class MatchToCsvStack extends Stack {
       allowedPattern: '^[A-Za-z0-9.-]+$',
     });
     const recipient = Fn.join('', [
-      !deployment.ephemeral
-        ? 'submit@'
-        : `submit+${deployment.ephemeral}@`,
+      !deployment.ephemeral ? 'submit@' : `submit+${deployment.ephemeral}@`,
       emailDomain.valueAsString,
     ]);
     const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
@@ -371,14 +367,7 @@ export class MatchToCsvStack extends Stack {
   ): lambdaNode.NodejsFunction {
     const repositoryRoot = path.join(__dirname, '..', '..', '..', '..');
     return new lambdaNode.NodejsFunction(this, id, {
-      entry: path.join(
-        __dirname,
-        '..',
-        '..',
-        'src',
-        'lambdas',
-        fileName,
-      ),
+      entry: path.join(__dirname, '..', '..', 'src', 'lambdas', fileName),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,

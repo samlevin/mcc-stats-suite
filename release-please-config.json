@@ -1,24 +1,45 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": true,
   "separate-pull-requests": true,
+  "plugins": [
+    {
+      "type": "node-workspace"
+    }
+  ],
   "packages": {
+    "packages/cdk-config": {
+      "component": "cdk-config",
+      "release-type": "node",
+      "package-name": "@mcc/cdk-config"
+    },
+    "packages/contracts": {
+      "component": "contracts",
+      "release-type": "node",
+      "package-name": "@mcc/contracts"
+    },
     "applications/match-to-csv": {
+      "component": "match-to-csv",
       "release-type": "node",
       "package-name": "@mcc/match-to-csv"
     },
     "applications/ocr-quality": {
+      "component": "ocr-quality",
       "release-type": "node",
       "package-name": "@mcc/ocr-quality"
     },
     "applications/admin": {
+      "component": "admin",
       "release-type": "node",
       "package-name": "@mcc/admin"
     },
     "applications/data-pipeline": {
+      "component": "data-pipeline",
       "release-type": "node",
       "package-name": "@mcc/data-pipeline"
     },
     "applications/player": {
+      "component": "player",
       "release-type": "node",
       "package-name": "@mcc/player"
     }

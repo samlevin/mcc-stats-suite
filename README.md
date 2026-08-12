@@ -1,84 +1,84 @@
 # MCC Stats Suite
 
-Converts MCC post-game summaries to structured data through OCR and ML.
-Includes a data lakehouse and full stack application for data analytics.
+MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
 
-AWS serverless monorepo powered by NPM workspaces, TurboRepo, CDK, and TypeScript.
+The project starts with OCR, but the stored evidence is meant to outlive the first parser. Every processing run retains source hashes, provider output, normalized cells, confidence, geometry, validation results, and code versions. That record supports replaying old screenshots through new pipelines, comparing results, labeling cells, and eventually training OCR quality models.
 
-## At a glance
+## What works today
 
-| Boundary | Tool | Owns |
+`match-to-csv` is the active application. Amazon SES stores the raw MIME message in S3, then EventBridge and Step Functions coordinate attachment validation and Textract processing.
+
+```text
+email with one or more screenshots
+  -> retain the raw MIME message
+  -> preserve each accepted image as immutable source evidence
+  -> run Textract and normalize tables, cells, and tokens
+  -> record validation and processing provenance
+  -> write structured JSON and CSV exports
+```
+
+Each screenshot has its own processing run. Replays create new runs and never replace earlier evidence. The package can also compare two runs and materialize screenshot-safe training, validation, and test datasets. It does not create matches, associate maps, adjudicate OCR, or train models yet.
+
+Read the [`match-to-csv` documentation](applications/match-to-csv/README.md) for its evidence layout, replay input, comparison behavior, and training-data output.
+
+## Components
+
+The monorepo separates product areas so they can be tested, versioned, and deployed without moving the entire system at once.
+
+| Component | Role | Current state |
 |---|---|---|
-| Bootstrap | Manual: OpenTofu via SSO | State, OIDC, deployment roles, workload boundary |
-| Foundation | Automated: OpenTofu via GitOps (Terrateam) | S3, KMS, event notification, SSM contracts |
-| Analytics | Both: Local and GitOps (Actions) CDK | Lambda, Step Functions, SES, IAM, logs |
+| `applications/match-to-csv` | Email intake, screenshot evidence, OCR, replay, comparison, and dataset materialization | Implemented |
+| `applications/ocr-quality` | OCR scoring, anomaly detection, and cell-labeling workflow | Deployable boundary; feature work remains |
+| `applications/admin` | Reviewer API and mobile-first review interface | Deployable boundary; feature work remains |
+| `applications/data-pipeline` | Lakehouse transformation jobs | Deployable boundary; feature work remains |
+| `applications/player` | Read-only statistics API and interface | Deployable boundary; feature work remains |
+| `packages/contracts` | Shared TypeScript evidence and processing contracts | Implemented and independently versioned |
+| `packages/cdk-config` | Shared environment validation, names, and deployment rules | Implemented and independently versioned |
 
-OpenTofu owns resources and data that transcend business logic.
-CDK owns deployable compute and orchestration for applications and data engineering.
-OpenTofu publishes resource names and ARNs through SSM Parameter Store. CDK consumes them.
+The plans under [`specs/`](specs/) describe future product work. They are design inputs, not proof that a feature is deployed.
 
-No resource is managed by both tools.
-
-`match-to-csv` processes each image attachment in an inbound email independently:
+## Repository layout
 
 ```text
-email stored in S3
-  -> create immutable source screenshots
-  -> for each screenshot: create a processing run -> Textract -> normalized OCR
-  -> write an extracted CSV
+applications/        Independently deployable TypeScript and CDK workspaces
+packages/            Private, versioned packages shared by applications
+infrastructure/      OpenTofu modules and dev/prod roots
+scripts/             Repository-level deployment and release checks
+specs/               Product and implementation specifications
+runbooks/            AWS setup, foundation, validation, and recovery procedures
 ```
 
-Each stage is a standalone Lambda. Step Functions passes S3 references rather
-than image bytes.
+NPM workspaces provide package boundaries. Turbo follows their dependency graph so root checks run in order and CI can identify affected applications.
 
-## Environment model
+## How AWS is divided
 
-GitHub Actions deploys one integration stack in dev and one live stack in
-prod. Local developers can create explicitly named ephemeral stacks in dev.
+OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. Terrateam applies stable foundation changes from pull requests.
 
-```text
-match-to-csv-dev         integration and smoke-test stack (dev account)
-match-to-csv-sam         explicit ephemeral stack (dev account)
-match-to-csv-prod        live application stack (prod account)
-```
+CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, SES receipt rules, IAM grants, and logs. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
 
-dev and prod each have a foundation state plus a separate bootstrap
-state. Application and data lakehouse are intentionally separate.
-
-## Repository map
+There are stable `dev` and `prod` environments. GitHub Actions deploys stable application stacks. Local developers may create named ephemeral stacks in the dev account.
 
 ```text
-applications/match-to-csv/       Post-match summary conversion
-applications/*/                  Future application boundaries
-packages/cdk-config/             Shared account checks and stack naming
-packages/contracts/              Shared TypeScript contracts
-infrastructure/                  Dev/prod roots and reusable OpenTofu modules
-runbooks/                        Project setup, deployment, and validation
+match-to-csv-dev         stable integration stack
+match-to-csv-<name>      local ephemeral stack in dev
+match-to-csv-prod        live stack
 ```
 
 ## Prerequisites
 
-Install:
+Local TypeScript work requires Git, Node.js 22.16.0, and npm. The repository pins Node and OpenTofu versions in [`.tool-versions`](.tool-versions).
 
-- Git
-- Node.js 22.16.0 and npm
+AWS and infrastructure work also requires:
+
 - OpenTofu 1.12.1
-- AWS CLI v2
-- direnv
-- Docker for Linux/ARM Lambda assets containing Sharp
+- AWS CLI v2 with IAM Identity Center profiles
+- `direnv`
+- Docker for CDK assets containing Linux ARM64 native dependencies
+- access to the project dev or prod AWS account for the task being performed
 
-You also need:
+Stable infrastructure automation also depends on GitHub Actions, GitHub Environments named `dev` and `prod`, and Terrateam. DNS and a verified SES identity are required before `match-to-csv` can receive email.
 
-- AWS accounts named or treated as `dev` and `prod`;
-- SSO-backed local profiles with access to those accounts;
-- Post-matchroject state buckets and repository-scoped deployment roles;
-- DNS access for an SES inbound domain or recipient.
-
-Optional but encouraged:
-- Terrateam for GitOps (free plan)
-- asdf for node.js and OpenTofu
-
-The repository pins Node and OpenTofu in `.tool-versions`. With asdf:
+With `asdf` installed:
 
 ```console
 asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
@@ -87,55 +87,46 @@ asdf install
 npm ci
 ```
 
-Create your local environment file from the provided template, replace every
-placeholder, and authorize it:
+## Start locally
+
+Run the AWS-free repository checks first:
 
 ```console
-cp .envrc.example .envrc
-direnv allow
-```
-
-It selects the dev SSO profile and supplies its account ID, Region,
-GitHub identity, and OpenTofu bootstrap inputs. The dev and prod bootstrap
-directories have their own `.envrc.example` files; copy and allow those
-immediately before bootstrapping the corresponding account.
-
-Verify:
-
-```console
-node --version
-tofu version
-aws --version
+npm ci
 npm run check
 npm run tofu:fmt:check
 ```
 
-## Local development
+`npm run check` covers Prettier, ESLint, release metadata, TypeScript, tests, and builds. See [TESTING.md](TESTING.md) for focused commands and the difference between unit, synthesis, and deployed integration checks.
 
-At the repository root, direnv selects the dev profile. Verify:
+For AWS work, copy the ignored environment template and replace its placeholders:
 
 ```console
+cp .envrc.example .envrc
+direnv allow
 aws sso login
 aws sts get-caller-identity
 ```
 
-The CDK harness verifies the active account against the profile's
-`sso_account_id` and infers the environment from the profile name. It passes
-CDK's `environment`, `ephemeral`, and expected-account context dynamically;
-do not set CDK context in `.envrc`:
+Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain names, populated backend files, variable files, state, or plans.
+
+## Develop and deploy
+
+Target a workspace without running every package:
 
 ```console
-npm run app:synth -- match-to-csv
-npm run app:diff -- match-to-csv
-npm run app:deploy -- match-to-csv --ephemeral sam
+npm test --workspace @mcc/match-to-csv
+npm run typecheck --workspace @mcc/match-to-csv
+npm run app:synth -- match-to-csv --environment dev
 ```
 
-GitHub Actions deploys the plain dev and prod environments from `main`.
-Local deployment requires `--ephemeral <name>` and is only allowed in dev.
+Local deployments must be named ephemeral stacks in dev:
 
-Populated `backend.hcl`, `*.auto.tfvars`, state, plan, token, and environment
-files are ignored. **Never store AWS access keys in GitHub, Terrateam, or this
-repository.**
+```console
+npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
+npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
+```
 
-After validating the prerequisites, follow the [project runbooks](runbooks/README.md).
-See [TESTING.md](TESTING.md) for automated tests.
+Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to stable `dev` at the merged commit SHA. Release Please versions applications and private shared packages. Production promotion is manual and accepts an immutable application release tag after that exact revision succeeds in dev.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.

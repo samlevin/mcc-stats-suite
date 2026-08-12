@@ -59,11 +59,7 @@ export function resolveDeployment(
 
   validateAccount('expected account', expectedAccount);
   validateAccount('CDK_DEFAULT_ACCOUNT', actualAccount);
-  if (
-    expectedAccount &&
-    actualAccount &&
-    expectedAccount !== actualAccount
-  ) {
+  if (expectedAccount && actualAccount && expectedAccount !== actualAccount) {
     throw new Error(
       `Refusing ${environment} synthesis: active account ${actualAccount} does not match expected account ${expectedAccount}`,
     );
@@ -91,10 +87,7 @@ export function resolveDeployment(
   };
 }
 
-function contextValue(
-  context: ContextSource,
-  key: string,
-): string | undefined {
+function contextValue(context: ContextSource, key: string): string | undefined {
   const value = context.tryGetContext(key);
   if (value == null || value === '') return undefined;
   if (typeof value !== 'string') {

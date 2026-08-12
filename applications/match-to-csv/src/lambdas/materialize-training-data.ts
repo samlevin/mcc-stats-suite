@@ -1,4 +1,8 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import type {
   DatasetSplit,
   MaterializeTrainingDataInput,
@@ -125,10 +129,7 @@ export async function handler(
     validation: examples.validation.length,
     test: examples.test.length,
   };
-  const screenshotsBySplit: Record<
-    Lowercase<DatasetSplit>,
-    Set<string>
-  > = {
+  const screenshotsBySplit: Record<Lowercase<DatasetSplit>, Set<string>> = {
     train: new Set(),
     validation: new Set(),
     test: new Set(),
@@ -143,22 +144,18 @@ export async function handler(
     validation: screenshotsBySplit.validation.size,
     test: screenshotsBySplit.test.size,
   };
-  const manifest = await putJson(
-    event.bucket,
-    `${prefix}/manifest.json`,
-    {
-      schemaVersion: 'ocr-cell-dataset/v1',
-      datasetId,
-      createdAt: now(),
-      splitAlgorithm: 'sha256-screenshot-80-10-10-v1',
-      splitSeed,
-      labelStatus: 'UNLABELED',
-      counts,
-      screenshotCounts,
-      files,
-      sources,
-    },
-  );
+  const manifest = await putJson(event.bucket, `${prefix}/manifest.json`, {
+    schemaVersion: 'ocr-cell-dataset/v1',
+    datasetId,
+    createdAt: now(),
+    splitAlgorithm: 'sha256-screenshot-80-10-10-v1',
+    splitSeed,
+    labelStatus: 'UNLABELED',
+    counts,
+    screenshotCounts,
+    files,
+    sources,
+  });
 
   return {
     datasetId,
@@ -192,10 +189,7 @@ export function materializeExamples(
   manifest: RunManifest,
 ): MaterializedExample[] {
   const tokens = new Map(
-    (normalized.tokens ?? []).map((token) => [
-      token.tokenObservationId,
-      token,
-    ]),
+    (normalized.tokens ?? []).map((token) => [token.tokenObservationId, token]),
   );
   const validations = new Map(
     (normalized.validation ?? []).map((validation) => [
@@ -235,7 +229,10 @@ export function manifestKeyForNormalized(normalizedKey: string): string {
 
 function validateInput(event: MaterializeTrainingDataInput): void {
   if (!event.bucket) throw new Error('bucket is required');
-  if (!Array.isArray(event.normalizedKeys) || event.normalizedKeys.length === 0) {
+  if (
+    !Array.isArray(event.normalizedKeys) ||
+    event.normalizedKeys.length === 0
+  ) {
     throw new Error('normalizedKeys must contain at least one artifact key');
   }
   if (event.normalizedKeys.length > MAX_NORMALIZED_ARTIFACTS) {

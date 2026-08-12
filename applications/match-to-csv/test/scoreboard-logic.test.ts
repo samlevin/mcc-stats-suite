@@ -17,9 +17,9 @@
 import t from 'tap';
 import {
   processScoreboardImage,
-  TextractBlockLite,
-  RowColor,
-  CsvRow,
+  type TextractBlockLite,
+  type RowColor,
+  type CsvRow,
 } from '../src/lib/scoreboard-logic';
 
 /**
@@ -191,8 +191,8 @@ t.test('processScoreboardImage: simple 2-team Red vs Blue match', (t) => {
   // Row background colors for team assignment:
   // rowIndex 2 is bright red, rowIndex 3 is bright blue.
   const rowColors: RowColor[] = [
-    { rowIndex: 2, r: 230, g: 20, b: 20 },  // Red team
-    { rowIndex: 3, r: 20, g: 20, b: 230 },  // Blue team
+    { rowIndex: 2, r: 230, g: 20, b: 20 }, // Red team
+    { rowIndex: 3, r: 20, g: 20, b: 230 }, // Blue team
   ];
 
   const rows = processScoreboardImage(blocks, rowColors);
@@ -439,10 +439,10 @@ t.test('processScoreboardImage: 3-team match with uneven sizes', (t) => {
   // - Blue rows 3 and 4 are blue-ish
   // - Green row 5 is green-ish
   const rowColors: RowColor[] = [
-    { rowIndex: 2, r: 220, g: 30, b: 30 },   // Red
-    { rowIndex: 3, r: 30, g: 30, b: 220 },   // Blue
-    { rowIndex: 4, r: 35, g: 35, b: 210 },   // Blue-ish, same team as row 3
-    { rowIndex: 5, r: 30, g: 220, b: 30 },   // Green
+    { rowIndex: 2, r: 220, g: 30, b: 30 }, // Red
+    { rowIndex: 3, r: 30, g: 30, b: 220 }, // Blue
+    { rowIndex: 4, r: 35, g: 35, b: 210 }, // Blue-ish, same team as row 3
+    { rowIndex: 5, r: 30, g: 220, b: 30 }, // Green
   ];
 
   const rows = processScoreboardImage(blocks, rowColors);
@@ -552,111 +552,126 @@ t.test('processScoreboardImage: filters out non-player rows', (t) => {
  *     col 1 => Player, col 2 => Score, col 3 => Kills, col 4 => Assists, col 5 => Deaths.
  * - We verify that stats still go into the correct fields.
  */
-t.test('processScoreboardImage: header fallback when headers are not clearly recognized', (t) => {
-  // Fake headers (Textract mis-reads them).
-  const wH1 = word('hf-w-h1', 'P1');
-  const wH2 = word('hf-w-h2', 'P2');
-  const wH3 = word('hf-w-h3', 'P3');
-  const wH4 = word('hf-w-h4', 'P4');
-  const wH5 = word('hf-w-h5', 'P5');
+t.test(
+  'processScoreboardImage: header fallback when headers are not clearly recognized',
+  (t) => {
+    // Fake headers (Textract mis-reads them).
+    const wH1 = word('hf-w-h1', 'P1');
+    const wH2 = word('hf-w-h2', 'P2');
+    const wH3 = word('hf-w-h3', 'P3');
+    const wH4 = word('hf-w-h4', 'P4');
+    const wH5 = word('hf-w-h5', 'P5');
 
-  const wName = word('hf-w-name', 'MysteryPlayer');
-  const wScore = word('hf-w-score', '30');
-  const wKills = word('hf-w-kills', '25');
-  const wAssists = word('hf-w-assists', '5');
-  const wDeaths = word('hf-w-deaths', '8');
+    const wName = word('hf-w-name', 'MysteryPlayer');
+    const wScore = word('hf-w-score', '30');
+    const wKills = word('hf-w-kills', '25');
+    const wAssists = word('hf-w-assists', '5');
+    const wDeaths = word('hf-w-deaths', '8');
 
-  const cH1 = cell('hf-c-h1', 1, 1, 'hf-w-h1');
-  const cH2 = cell('hf-c-h2', 1, 2, 'hf-w-h2');
-  const cH3 = cell('hf-c-h3', 1, 3, 'hf-w-h3');
-  const cH4 = cell('hf-c-h4', 1, 4, 'hf-w-h4');
-  const cH5 = cell('hf-c-h5', 1, 5, 'hf-w-h5');
+    const cH1 = cell('hf-c-h1', 1, 1, 'hf-w-h1');
+    const cH2 = cell('hf-c-h2', 1, 2, 'hf-w-h2');
+    const cH3 = cell('hf-c-h3', 1, 3, 'hf-w-h3');
+    const cH4 = cell('hf-c-h4', 1, 4, 'hf-w-h4');
+    const cH5 = cell('hf-c-h5', 1, 5, 'hf-w-h5');
 
-  const cName = cell('hf-c-name', 2, 1, 'hf-w-name');
-  const cScore = cell('hf-c-score', 2, 2, 'hf-w-score');
-  const cKills = cell('hf-c-kills', 2, 3, 'hf-w-kills');
-  const cAssists = cell('hf-c-assists', 2, 4, 'hf-w-assists');
-  const cDeaths = cell('hf-c-deaths', 2, 5, 'hf-w-deaths');
+    const cName = cell('hf-c-name', 2, 1, 'hf-w-name');
+    const cScore = cell('hf-c-score', 2, 2, 'hf-w-score');
+    const cKills = cell('hf-c-kills', 2, 3, 'hf-w-kills');
+    const cAssists = cell('hf-c-assists', 2, 4, 'hf-w-assists');
+    const cDeaths = cell('hf-c-deaths', 2, 5, 'hf-w-deaths');
 
-  const tbl = table('hf-tbl', [
-    cH1.Id!,
-    cH2.Id!,
-    cH3.Id!,
-    cH4.Id!,
-    cH5.Id!,
-    cName.Id!,
-    cScore.Id!,
-    cKills.Id!,
-    cAssists.Id!,
-    cDeaths.Id!,
-  ]);
+    const tbl = table('hf-tbl', [
+      cH1.Id!,
+      cH2.Id!,
+      cH3.Id!,
+      cH4.Id!,
+      cH5.Id!,
+      cName.Id!,
+      cScore.Id!,
+      cKills.Id!,
+      cAssists.Id!,
+      cDeaths.Id!,
+    ]);
 
-  const blocks: TextractBlockLite[] = [
-    tbl,
-    wH1,
-    wH2,
-    wH3,
-    wH4,
-    wH5,
-    wName,
-    wScore,
-    wKills,
-    wAssists,
-    wDeaths,
-    cH1,
-    cH2,
-    cH3,
-    cH4,
-    cH5,
-    cName,
-    cScore,
-    cKills,
-    cAssists,
-    cDeaths,
-  ];
+    const blocks: TextractBlockLite[] = [
+      tbl,
+      wH1,
+      wH2,
+      wH3,
+      wH4,
+      wH5,
+      wName,
+      wScore,
+      wKills,
+      wAssists,
+      wDeaths,
+      cH1,
+      cH2,
+      cH3,
+      cH4,
+      cH5,
+      cName,
+      cScore,
+      cKills,
+      cAssists,
+      cDeaths,
+    ];
 
-  // Single row, but color doesn't matter here; use any values.
-  const rowColors: RowColor[] = [{ rowIndex: 2, r: 150, g: 150, b: 150 }];
+    // Single row, but color doesn't matter here; use any values.
+    const rowColors: RowColor[] = [{ rowIndex: 2, r: 150, g: 150, b: 150 }];
 
-  const rows = processScoreboardImage(blocks, rowColors);
-  t.same(rows.length, 1, 'should produce exactly 1 row');
+    const rows = processScoreboardImage(blocks, rowColors);
+    t.same(rows.length, 1, 'should produce exactly 1 row');
 
-  const row = rows[0];
-  t.equal(row.player, 'MysteryPlayer', 'player name should be mapped from col 1');
-  t.equal(row.score, '30', 'score should be mapped from col 2');
-  t.equal(row.kills, '25', 'kills should be mapped from col 3');
-  t.equal(row.assists, '5', 'assists should be mapped from col 4');
-  t.equal(row.deaths, '8', 'deaths should be mapped from col 5');
+    const row = rows[0];
+    t.equal(
+      row.player,
+      'MysteryPlayer',
+      'player name should be mapped from col 1',
+    );
+    t.equal(row.score, '30', 'score should be mapped from col 2');
+    t.equal(row.kills, '25', 'kills should be mapped from col 3');
+    t.equal(row.assists, '5', 'assists should be mapped from col 4');
+    t.equal(row.deaths, '8', 'deaths should be mapped from col 5');
 
-  t.end();
-});
+    t.end();
+  },
+);
 
-t.test('processScoreboardImage selects the scoreboard when Textract finds another table first', (t) => {
-  const decoyHeader = cell('decoy-header', 1, 1, 'decoy-header-word');
-  const decoyValue = cell('decoy-value', 2, 1, 'decoy-value-word');
-  const playerHeader = cell('player-header', 1, 1, 'player-header-word');
-  const scoreHeader = cell('score-header', 1, 2, 'score-header-word');
-  const playerValue = cell('player-value', 2, 1, 'player-value-word');
-  const scoreValue = cell('score-value', 2, 2, 'score-value-word');
-  const blocks = [
-    table('decoy-table', ['decoy-header', 'decoy-value']),
-    word('decoy-header-word', 'SETTING'),
-    word('decoy-value-word', 'ON'),
-    decoyHeader,
-    decoyValue,
-    table('scoreboard-table', ['player-header', 'score-header', 'player-value', 'score-value']),
-    word('player-header-word', 'PLAYERS'),
-    word('score-header-word', 'SCORE'),
-    word('player-value-word', 'Spartan'),
-    word('score-value-word', '19'),
-    playerHeader,
-    scoreHeader,
-    playerValue,
-    scoreValue,
-  ];
-  const rows = processScoreboardImage(blocks, []);
-  t.equal(rows.length, 1);
-  t.equal(rows[0].player, 'Spartan');
-  t.equal(rows[0].score, '19');
-  t.end();
-});
+t.test(
+  'processScoreboardImage selects the scoreboard when Textract finds another table first',
+  (t) => {
+    const decoyHeader = cell('decoy-header', 1, 1, 'decoy-header-word');
+    const decoyValue = cell('decoy-value', 2, 1, 'decoy-value-word');
+    const playerHeader = cell('player-header', 1, 1, 'player-header-word');
+    const scoreHeader = cell('score-header', 1, 2, 'score-header-word');
+    const playerValue = cell('player-value', 2, 1, 'player-value-word');
+    const scoreValue = cell('score-value', 2, 2, 'score-value-word');
+    const blocks = [
+      table('decoy-table', ['decoy-header', 'decoy-value']),
+      word('decoy-header-word', 'SETTING'),
+      word('decoy-value-word', 'ON'),
+      decoyHeader,
+      decoyValue,
+      table('scoreboard-table', [
+        'player-header',
+        'score-header',
+        'player-value',
+        'score-value',
+      ]),
+      word('player-header-word', 'PLAYERS'),
+      word('score-header-word', 'SCORE'),
+      word('player-value-word', 'Spartan'),
+      word('score-value-word', '19'),
+      playerHeader,
+      scoreHeader,
+      playerValue,
+      scoreValue,
+    ];
+    const rows = processScoreboardImage(blocks, []);
+    t.equal(rows.length, 1);
+    t.equal(rows[0].player, 'Spartan');
+    t.equal(rows[0].score, '19');
+    t.end();
+  },
+);

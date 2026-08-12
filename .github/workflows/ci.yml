@@ -11,20 +11,63 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    outputs:
+      applications: ${{ steps.affected.outputs.applications }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22.16.0"
+          node-version: '22.16.0'
           cache: npm
       - uses: opentofu/setup-opentofu@v1
         with:
-          tofu_version: "1.12.1"
+          tofu_version: '1.12.1'
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm64
       - run: npm ci
-      - run: npm run check
+      - name: Check formatting, lint, types, tests, and builds
+        run: npm run check
       - run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c ephemeral=ci
       - run: npm run verify:bundle --workspace @mcc/match-to-csv
       - run: npm run tofu:fmt:check
+      - name: Find affected deployable applications
+        id: affected
+        if: github.event_name == 'push'
+        env:
+          TURBO_SCM_BASE: ${{ github.event.before }}
+          TURBO_SCM_HEAD: ${{ github.sha }}
+        run: |
+          if [[ "${TURBO_SCM_BASE}" =~ ^0+$ ]]; then
+            TURBO_SCM_BASE="${TURBO_SCM_HEAD}^"
+            export TURBO_SCM_BASE
+          fi
+          APPLICATIONS="$(npx turbo run cdk:deploy --affected --dry=json | jq -c '
+            [.tasks[]
+              | select(.task == "cdk:deploy" and .command != "<NONEXISTENT>")
+              | .package
+              | select(startswith("@mcc/"))
+              | sub("^@mcc/"; "")]
+            | unique')"
+          echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
+
+  deploy-dev:
+    if: github.event_name == 'push' && needs.check.outputs.applications != '[]'
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        application: ${{ fromJSON(needs.check.outputs.applications) }}
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/_deploy-aws-application.yml
+    with:
+      application: ${{ matrix.application }}
+      environment: dev
+      sha: ${{ github.sha }}
+      operation: continuous-delivery
+      source: main

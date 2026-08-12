@@ -1,12 +1,12 @@
 import t from 'tap';
-import {
-  namespacedObjectKey,
-  processingRunPrefix,
-} from '../src/lib/s3';
+import { namespacedObjectKey, processingRunPrefix } from '../src/lib/s3';
 
 t.test('namespacedObjectKey keeps stable deployment keys unchanged', (t) => {
   delete process.env.OBJECT_PREFIX;
-  t.equal(namespacedObjectKey('matches/123/summary.csv'), 'matches/123/summary.csv');
+  t.equal(
+    namespacedObjectKey('matches/123/summary.csv'),
+    'matches/123/summary.csv',
+  );
   t.end();
 });
 

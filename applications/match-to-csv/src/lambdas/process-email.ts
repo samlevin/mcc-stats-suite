@@ -1,4 +1,8 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import type {
   AttachmentRejectionCode,
   ProcessEmailInput,
@@ -9,11 +13,7 @@ import type {
 } from '@mcc/contracts';
 import { simpleParser } from 'mailparser';
 import sharp from 'sharp';
-import {
-  bodyToBuffer,
-  namespacedObjectKey,
-  safeObjectName,
-} from '../lib/s3';
+import { bodyToBuffer, namespacedObjectKey, safeObjectName } from '../lib/s3';
 import { log } from '../lib/log';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 
@@ -160,11 +160,7 @@ export async function processEmail(
         bucket: evidenceBucket,
         key: `${screenshotPrefix}/source/original`,
       };
-      await dependencies.putObject(
-        source,
-        content,
-        attachment.contentType,
-      );
+      await dependencies.putObject(source, content, attachment.contentType);
 
       let metadata: ImageMetadata = {};
       let metadataError: unknown;

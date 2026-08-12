@@ -17,13 +17,15 @@ export async function putJson(
   key: string,
   value: unknown,
 ): Promise<S3ObjectReference> {
-  await s3.send(new PutObjectCommand({
-    Bucket: bucket,
-    Key: key,
-    Body: JSON.stringify(value),
-    ContentType: 'application/json',
-    IfNoneMatch: '*',
-  }));
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: JSON.stringify(value),
+      ContentType: 'application/json',
+      IfNoneMatch: '*',
+    }),
+  );
   return { bucket, key };
 }
 

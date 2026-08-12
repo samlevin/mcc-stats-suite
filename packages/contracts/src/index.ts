@@ -27,7 +27,7 @@ export interface CsvRow {
   loss: number;
 }
 
-export interface ProcessEmailInput extends S3ObjectReference {}
+export type ProcessEmailInput = S3ObjectReference;
 
 export interface ProcessEmailOutput {
   submissionId: string;

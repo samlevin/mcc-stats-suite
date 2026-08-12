@@ -3,9 +3,9 @@ import path from 'path';
 import t from 'tap';
 import {
   processScoreboardImage,
-  TextractBlockLite,
-  RowColor,
-  CsvRow,
+  type TextractBlockLite,
+  type RowColor,
+  type CsvRow,
 } from '../src/lib/scoreboard-logic';
 
 interface ScoreboardFixture {

@@ -1,0 +1,12 @@
+node_modules
+.turbo
+.tap
+dist
+cdk.out
+coverage
+.terraform
+package-lock.json
+**/*.md
+*.tfstate
+*.tfstate.*
+*.tfplan

@@ -10,85 +10,85 @@ indexer:
 
 access_control:
   enabled: true
-  ci_config_update: ["role:admin"]
-  terrateam_config_update: ["role:admin"]
-  unlock: ["role:admin"]
+  ci_config_update: ['role:admin']
+  terrateam_config_update: ['role:admin']
+  unlock: ['role:admin']
   policies:
-    - tag_query: "dev"
-      plan: ["*"]
-      apply: ["role:write", "role:maintain", "role:admin"]
-    - tag_query: "prod"
-      plan: ["*"]
-      apply: ["role:admin"]
+    - tag_query: 'dev'
+      plan: ['*']
+      apply: ['role:write', 'role:maintain', 'role:admin']
+    - tag_query: 'prod'
+      plan: ['*']
+      apply: ['role:admin']
 
 dirs:
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
       file_patterns:
-        - "${DIR}/*.tf"
-        - "${DIR}/*.tfvars"
-        - "${DIR}/*.hcl"
-        - "infrastructure/modules/foundation/*.tf"
+        - '${DIR}/*.tf'
+        - '${DIR}/*.tfvars'
+        - '${DIR}/*.hcl'
+        - 'infrastructure/modules/foundation/*.tf'
 
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
     when_modified:
       file_patterns:
-        - "${DIR}/*.tf"
-        - "${DIR}/*.tfvars"
-        - "${DIR}/*.hcl"
-        - "infrastructure/modules/foundation/*.tf"
+        - '${DIR}/*.tf'
+        - '${DIR}/*.tfvars'
+        - '${DIR}/*.hcl'
+        - 'infrastructure/modules/foundation/*.tf'
 
 workflows:
-  - tag_query: "dev"
+  - tag_query: 'dev'
     plan:
       - type: oidc
         provider: aws
-        role_arn: "${DEV_TERRATEAM_ROLE_ARN}"
+        role_arn: '${DEV_TERRATEAM_ROLE_ARN}'
       - type: init
         extra_args:
-          - "-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}"
-          - "-backend-config=region=${DEV_AWS_REGION}"
+          - '-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}'
+          - '-backend-config=region=${DEV_AWS_REGION}'
       - type: env
         name: TF_VAR_aws_region
-        cmd: ["echo", "${DEV_AWS_REGION}"]
+        cmd: ['echo', '${DEV_AWS_REGION}']
       - type: plan
     apply:
       - type: oidc
         provider: aws
-        role_arn: "${DEV_TERRATEAM_ROLE_ARN}"
+        role_arn: '${DEV_TERRATEAM_ROLE_ARN}'
       - type: init
         extra_args:
-          - "-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}"
-          - "-backend-config=region=${DEV_AWS_REGION}"
+          - '-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}'
+          - '-backend-config=region=${DEV_AWS_REGION}'
       - type: env
         name: TF_VAR_aws_region
-        cmd: ["echo", "${DEV_AWS_REGION}"]
+        cmd: ['echo', '${DEV_AWS_REGION}']
       - type: apply
 
-  - tag_query: "prod"
+  - tag_query: 'prod'
     plan:
       - type: oidc
         provider: aws
-        role_arn: "${PROD_TERRATEAM_ROLE_ARN}"
+        role_arn: '${PROD_TERRATEAM_ROLE_ARN}'
       - type: init
         extra_args:
-          - "-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}"
-          - "-backend-config=region=${PROD_AWS_REGION}"
+          - '-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}'
+          - '-backend-config=region=${PROD_AWS_REGION}'
       - type: env
         name: TF_VAR_aws_region
-        cmd: ["echo", "${PROD_AWS_REGION}"]
+        cmd: ['echo', '${PROD_AWS_REGION}']
       - type: plan
     apply:
       - type: oidc
         provider: aws
-        role_arn: "${PROD_TERRATEAM_ROLE_ARN}"
+        role_arn: '${PROD_TERRATEAM_ROLE_ARN}'
       - type: init
         extra_args:
-          - "-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}"
-          - "-backend-config=region=${PROD_AWS_REGION}"
+          - '-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}'
+          - '-backend-config=region=${PROD_AWS_REGION}'
       - type: env
         name: TF_VAR_aws_region
-        cmd: ["echo", "${PROD_AWS_REGION}"]
+        cmd: ['echo', '${PROD_AWS_REGION}']
       - type: apply

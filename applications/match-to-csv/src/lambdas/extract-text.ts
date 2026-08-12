@@ -185,9 +185,7 @@ export async function runExtraction(
         completedAt: dependencies.timestamp(),
         textract: {
           rawResponse,
-          rawResponseSha256: sha256(
-            Buffer.from(JSON.stringify(result)),
-          ),
+          rawResponseSha256: sha256(Buffer.from(JSON.stringify(result))),
           request,
           requestId: result.$metadata.requestId,
         },
@@ -216,26 +214,18 @@ export async function runExtraction(
   } catch (error) {
     const failure = errorSummary(error);
     await Promise.all([
-      dependencies.writeJson(
-        source.bucket,
-        `${runPrefix}/completion.json`,
-        {
-          schemaVersion: 'processing-run-completion/v1',
-          runId,
-          status: 'FAILED',
-          completedAt: dependencies.timestamp(),
-          request,
-          error: failure,
-        },
-      ),
-      eventRecord(
-        dependencies,
-        source.bucket,
-        runPrefix,
+      dependencies.writeJson(source.bucket, `${runPrefix}/completion.json`, {
+        schemaVersion: 'processing-run-completion/v1',
         runId,
-        'RUN_FAILED',
-        { request, error: failure },
-      ),
+        status: 'FAILED',
+        completedAt: dependencies.timestamp(),
+        request,
+        error: failure,
+      }),
+      eventRecord(dependencies, source.bucket, runPrefix, runId, 'RUN_FAILED', {
+        request,
+        error: failure,
+      }),
     ]).catch((recordError) => {
       log('ERROR', 'Unable to record processing failure', {
         screenshotId: source.screenshotId,
@@ -441,9 +431,8 @@ export function normalize(
       const tableId = cellToTable.get(block.Id ?? '') ?? 'unknown';
       const tableIndex = tableIndexes.get(tableId) ?? -1;
       const field =
-        semanticColumnsByTable
-          .get(tableIndex)
-          ?.get(block.ColumnIndex ?? 0) ?? 'UNKNOWN';
+        semanticColumnsByTable.get(tableIndex)?.get(block.ColumnIndex ?? 0) ??
+        'UNKNOWN';
       const rowRole = block.RowIndex === 1 ? 'HEADER' : 'DATA';
       const expectsInteger =
         rowRole === 'DATA' &&
@@ -455,8 +444,7 @@ export function normalize(
       const validation = {
         rulesVersion: versions.validationRulesVersion,
         valid: !empty && !invalidInteger,
-        deterministicReviewRequired:
-          empty || lowConfidence || invalidInteger,
+        deterministicReviewRequired: empty || lowConfidence || invalidInteger,
         flags: [
           ...(empty
             ? [{ code: 'EMPTY_REQUIRED_CELL', severity: 'WARNING' }]
@@ -584,10 +572,7 @@ async function computeRowColors(
   }
   const colors: RowColor[] = [];
   for (const [rowIndex, row] of rows) {
-    const top = Math.max(
-      0,
-      Math.floor(height * ((row.top + row.bottom) / 2)),
-    );
+    const top = Math.max(0, Math.floor(height * ((row.top + row.bottom) / 2)));
     const stats = await sharp(image)
       .extract({
         left: Math.floor(width * 0.1),

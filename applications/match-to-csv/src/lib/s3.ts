@@ -23,11 +23,13 @@ export async function bodyToBuffer(
 }
 
 export function safeObjectName(value: string): string {
-  return value
-    .normalize('NFKC')
-    .replace(/[^a-zA-Z0-9._-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 160) || 'attachment';
+  return (
+    value
+      .normalize('NFKC')
+      .replace(/[^a-zA-Z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 160) || 'attachment'
+  );
 }
 
 export function namespacedObjectKey(key: string): string {

@@ -1,4 +1,8 @@
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import {
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from '@aws-sdk/client-s3';
 import { bodyToBuffer } from '../lib/s3';
 
 const s3 = new S3Client({});
@@ -64,9 +68,7 @@ export function compareNormalizedRuns(
   candidate: NormalizedRun,
 ) {
   const byCell = (value: NormalizedRun): Map<string, ComparisonCell> =>
-    new Map(
-      (value.cells ?? []).map((cell) => [cellCoordinate(cell), cell]),
-    );
+    new Map((value.cells ?? []).map((cell) => [cellCoordinate(cell), cell]));
   const before = byCell(baseline);
   const after = byCell(candidate);
   const keys = new Set([...before.keys(), ...after.keys()]);
@@ -118,7 +120,9 @@ function validateInput(event: CompareRunsInput): void {
     ['candidateKey', event.candidateKey],
   ]) {
     if (!key?.endsWith('/normalized/observations.json')) {
-      throw new Error(`${name} must identify a normalized observation artifact`);
+      throw new Error(
+        `${name} must identify a normalized observation artifact`,
+      );
     }
   }
   if (!event.outputKey?.endsWith('.json')) {
