@@ -1,0 +1,63 @@
+name: Epic
+description: Define an outcome that requires several independently verifiable tasks.
+title: '[Epic]: '
+labels:
+  - 'type: epic'
+projects:
+  - 'samlevin/1'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        An epic is a parent issue. Create or attach executable sub-issues after this outcome is accepted.
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: State the user or operator outcome. Describe the changed behavior, not a list of files.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Explain why this work matters and link the evidence or decision that prompted it.
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: In scope
+      description: List the capabilities this epic owns.
+    validations:
+      required: true
+  - type: textarea
+    id: non_goals
+    attributes:
+      label: Out of scope
+      description: Record nearby work that this epic will not absorb.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use observable, testable conditions. These govern when the epic may close.
+      placeholder: |
+        - [ ] A user can ...
+        - [ ] An operator can verify ...
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints and decisions
+      description: Record contract, security, data, deployment, or compatibility limits that every child must preserve.
+  - type: textarea
+    id: decomposition
+    attributes:
+      label: Initial decomposition
+      description: List proposed child tasks or link existing issues. Convert each accepted item into a sub-issue.
+      placeholder: |
+        - [ ] #123
+        - [ ] Define ...

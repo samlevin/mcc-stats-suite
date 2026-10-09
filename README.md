@@ -129,4 +129,4 @@ npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 
 Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to stable `dev` at the merged commit SHA. Release Please versions applications and private shared packages. Production promotion is manual and accepts an immutable application release tag after that exact revision succeeds in dev.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.
+See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.
