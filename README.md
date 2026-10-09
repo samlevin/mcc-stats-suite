@@ -1,5 +1,13 @@
 # MCC Stats Suite
 
+[![CI](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci.yml)
+[![Secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml)
+[![Semantic PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml)
+[![Release Please](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml)
+[![Deploy application](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
+[![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
+[![Application deploy workflow](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml)
+
 MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
 
 The project starts with OCR, but the stored evidence is meant to outlive the first parser. Every processing run retains source hashes, provider output, normalized cells, confidence, geometry, validation results, and code versions. That record supports replaying old screenshots through new pipelines, comparing results, labeling cells, and eventually training OCR quality models.
