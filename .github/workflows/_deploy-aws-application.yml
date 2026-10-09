@@ -35,7 +35,8 @@ permissions:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    # match-to-csv's ARM64 Lambda bundling needs a native ARM Docker host.
+    runs-on: ${{ inputs.application == 'match-to-csv' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     environment:
       name: ${{ inputs.environment }}
       deployment: false
@@ -81,10 +82,6 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-      - uses: docker/setup-qemu-action@v3
-        if: inputs.application == 'match-to-csv'
-        with:
-          platforms: arm64
       - run: npm ci
       - name: Read release metadata
         id: release-metadata

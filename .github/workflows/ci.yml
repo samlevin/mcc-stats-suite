@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
+    # so Bun and the native dependencies do not execute under QEMU.
+    runs-on: ubuntu-24.04-arm
     outputs:
       applications: ${{ steps.affected.outputs.applications }}
     steps:
@@ -24,9 +26,6 @@ jobs:
       - uses: opentofu/setup-opentofu@v1
         with:
           tofu_version: '1.12.1'
-      - uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - run: npm ci
       - name: Check formatting, lint, types, tests, and builds
         run: npm run check
