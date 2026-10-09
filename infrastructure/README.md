@@ -1,4 +1,14 @@
-# OpenTofu bootstrap implementation
+# OpenTofu infrastructure
+
+OpenTofu owns account bootstrap and persistent resources shared by application releases. Environment roots live under `dev` and `prod`; reusable implementations live under `modules`.
+
+| Root | Owner | Purpose |
+|---|---|---|
+| `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
+| `<environment>/foundation` | Terrateam | KMS, durable evidence storage, and SSM resource contracts |
+| `<environment>/data-platform` | Terrateam when activated | Shared analytics and lakehouse resources |
+
+## Bootstrap
 
 The shared module is in `modules/bootstrap`. Its environment roots are:
 
@@ -30,5 +40,10 @@ administer IAM, and neither CI role operates this bootstrap state.
 Apply bootstrap changes locally through an authorized IAM Identity Center
 session. Terrateam manages only stable operational roots.
 
-Do not run OpenTofu from this directory. Use the dev or prod environment root
-with the account access and deployment process your organization provides.
+## Foundation promotion
+
+Foundation code is not packaged or assigned a separate release ID. The exact pull-request Git commit is its version, and Terrateam saves the plan for that revision. Apply `dev and foundation`, validate it, then apply `prod and foundation` from the same unchanged pull request when the change is intended for both environments. Adding a commit invalidates the promotion candidate and requires another dev plan, apply, and validation.
+
+Changes to `modules/foundation` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
+
+Do not run OpenTofu from this directory. Use the bootstrap procedure for initial account setup and the Terrateam runbooks for stable foundation changes.

@@ -8,6 +8,18 @@ destination_branches:
 indexer:
   enabled: true
 
+drift:
+  enabled: true
+  schedules:
+    foundation:
+      tag_query: 'foundation'
+      schedule: weekly
+
+hooks:
+  plan:
+    post:
+      - type: drift_create_issue
+
 access_control:
   enabled: true
   ci_config_update: ['role:admin']
@@ -42,6 +54,7 @@ dirs:
 
 workflows:
   - tag_query: 'dev'
+    environment: dev
     plan:
       - type: oidc
         provider: aws
@@ -68,6 +81,7 @@ workflows:
       - type: apply
 
   - tag_query: 'prod'
+    environment: prod
     plan:
       - type: oidc
         provider: aws

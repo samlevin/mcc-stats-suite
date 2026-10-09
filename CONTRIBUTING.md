@@ -126,7 +126,9 @@ The workflow rejects draft or prerelease tags, mismatched application versions, 
 
 OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it.
 
-Bootstrap is a local administrative procedure. Terrateam plans and applies stable foundation changes from pull requests. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
+Bootstrap is a local administrative procedure. Terrateam plans and applies stable foundation changes from pull requests. The unchanged pull-request commit and its saved Terrateam plan are the foundation promotion artifact; foundation does not have a separate release ID. Apply and validate `dev and foundation` before applying `prod and foundation` from that same revision. Any new commit requires another dev cycle.
+
+Terrateam checks foundation roots for drift weekly and opens a GitHub issue when it finds a difference. Reconciliation remains reviewed and manual. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
 
 ## Keep documentation with the code
 

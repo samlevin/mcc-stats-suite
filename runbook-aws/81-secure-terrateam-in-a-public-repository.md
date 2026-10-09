@@ -8,9 +8,9 @@ The public repository contains deployment policy. It must never contain a reusab
 
 Commit these files:
 
-- `.terrateam/config.yml`, copied from `.terrateam/config.yml.example` without replacing its `${...}` placeholders;
+- the authoritative `.terrateam/config.yml`, retaining its `${...}` variable references;
 - Terrateam's generated `.github/workflows/terrateam.yml`; and
-- `CODEOWNERS` rules that require an infrastructure maintainer for changes to `.terrateam/`, `.github/workflows/`, and `infrastructure/`.
+- optional `CODEOWNERS` rules for `.terrateam/`, `.github/workflows/`, and `infrastructure/` when the repository has another qualified reviewer.
 
 Do not commit any of these files or values:
 
@@ -34,9 +34,9 @@ Record the three results for each environment. Do not paste them into the reposi
 
 The bootstrap must have created a separate state bucket and a Terrateam role for each account. The repository's bootstrap module already limits the role to the Terrateam workflow path and sets the maximum AWS session duration to one hour.
 
-## 2. Configure GitHub Actions variables
+## 2. Configure GitHub Environment variables
 
-In GitHub, open **Settings -> Secrets and variables -> Actions -> Variables**. Create these repository variables:
+In GitHub, open **Settings -> Environments**. Create the `DEV_*` variables under `dev` and the `PROD_*` variables under `prod`:
 
 | Name | Value |
 | --- | --- |
@@ -47,16 +47,15 @@ In GitHub, open **Settings -> Secrets and variables -> Actions -> Variables**. C
 | `PROD_TOFU_STATE_BUCKET` | prod `state_bucket_name` output |
 | `PROD_AWS_REGION` | prod `aws_region` output |
 
-Use **Variables**, not **Secrets**, for these six identifiers. Do not create static AWS credential secrets. If OpenTofu needs a secret input, create a GitHub Actions secret with a `TF_VAR_` prefix instead, such as `TF_VAR_database_password`.
+Use environment **Variables**, not **Secrets**, for these six identifiers. The Terrateam workflows explicitly select their matching GitHub Environment. Do not create static AWS credential secrets. If OpenTofu needs a secret input, create an environment secret with a `TF_VAR_` prefix instead, such as `TF_VAR_database_password`.
 
 ## 3. Install Terrateam and commit its policy
 
 1. In Terrateam Cloud, install the GitHub App for only `mcc-stats-suite`.
 2. Accept Terrateam's generated `.github/workflows/terrateam.yml`. Check that it requests only the permissions Terrateam documents, including `id-token: write` for OIDC.
-3. Copy the checked-in example without substituting values:
+3. Stage the authoritative config without substituting its variable references:
 
    ```sh
-   cp .terrateam/config.yml.example .terrateam/config.yml
    git add .terrateam/config.yml .github/workflows/terrateam.yml
    git diff --cached --check
    git diff --cached
@@ -69,25 +68,9 @@ The supplied configuration permits plans for contributors, requires writers or m
 
 ## 4. Protect files that can obtain cloud access
 
-Create `.github/CODEOWNERS` if it does not already exist. Replace `@YOUR_ORG/infra-admins` with a GitHub team that has at least two maintainers:
+For a solo-maintained repository, do not enable a required Code Owner review that nobody else can satisfy. Require pull requests and passing CI when practical, block force pushes, and keep the administrator bypass available as the documented recovery path. Terrateam separately restricts changes to its workflow and configuration to repository administrators.
 
-```text
-/.terrateam/ @YOUR_ORG/infra-admins
-/.github/workflows/ @YOUR_ORG/infra-admins
-/infrastructure/ @YOUR_ORG/infra-admins
-```
-
-In GitHub, open **Settings -> Branches -> Add branch ruleset** and create a ruleset for `main` with these settings:
-
-1. Require a pull request before merging.
-2. Require approval from Code Owners.
-3. Require at least one approval. Require two for production infrastructure if the team supports it.
-4. Dismiss stale approvals when new commits are pushed.
-5. Require status checks to pass, including the repository CI and Terrateam checks.
-6. Block force pushes and direct pushes for everyone except a tightly controlled break-glass administrator group.
-7. Do not allow administrators to bypass the ruleset unless a documented incident requires it.
-
-Terrateam's `access_control` settings protect Terrateam operations when a pull request changes `.terrateam/config.yml` or the Terrateam workflow. Confirm that the Terrateam edition in use supports `ci_config_update` and `terrateam_config_update`; Terrateam documents those controls as Enterprise features. If it does not, do not allow Terrateam to run privileged plans against untrusted pull requests. Restrict runs to trusted maintainers until you add an equivalent control.
+When another qualified maintainer joins, add `CODEOWNERS` coverage for `.terrateam/`, `.github/workflows/`, and `infrastructure/`, then require that review. Do not add a placeholder team or a rule that locks out the only maintainer.
 
 ## 5. Harden the AWS OIDC trust policy
 
@@ -114,11 +97,14 @@ Keep the Terrateam role narrowly scoped. This repository currently attaches AWS 
 1. Make an infrastructure change on a branch.
 2. Open a pull request to `main`.
 3. Let Terrateam create a plan. Review the plan and the changed files.
-4. A permitted maintainer runs the Terrateam apply command for dev after review.
-5. Promote the same reviewed release to prod in a separate pull request.
-6. A permitted administrator reviews and applies prod.
+4. Run `terrateam apply dev and foundation` after reviewing the dev plan.
+5. Validate dev without changing the pull-request commit.
+6. Review the prod plan and run `terrateam apply prod and foundation` from the same pull request when the change is intended for prod.
+7. Merge after the intended applies succeed.
 
-Do not apply from a contributor fork or from a pull request that changes `.terrateam/config.yml`, `.github/workflows/terrateam.yml`, or the OIDC bootstrap without the required infrastructure-owner approval.
+There is no foundation release ID. If the branch changes after the dev apply, plan, apply, and validate dev again before applying prod. Weekly drift detection opens an issue and never applies a repair automatically.
+
+Do not apply from an untrusted contributor fork. Review any pull request that changes `.terrateam/config.yml`, `.github/workflows/terrateam.yml`, or the OIDC bootstrap as a cloud-access policy change.
 
 ## 7. Verify the boundary before relying on it
 

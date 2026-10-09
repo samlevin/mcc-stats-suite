@@ -9,7 +9,7 @@ Terrateam's generic AWS bootstrap in addition to this repository's bootstrap.
 2. Install the GitHub App for only the intended repository.
 3. Accept and commit Terrateam's generated
    `.github/workflows/terrateam.yml` on `main`.
-4. Commit `.terrateam/config.yml` from the supplied example.
+4. Review and commit the repository's authoritative `.terrateam/config.yml`.
 5. Never add either `bootstrap` directory to Terrateam.
 
 Terrateam and GitHub Actions authenticate with short-lived GitHub OIDC tokens.
@@ -17,8 +17,7 @@ There are no AWS access keys to create or store.
 
 ## Configure Terrateam runtime variables
 
-In **GitHub repository → Settings → Secrets and variables → Actions →
-Variables**, add:
+In **GitHub repository → Settings → Environments**, add the dev values as environment variables under `dev` and the prod values under `prod`:
 
 ```text
 DEV_TERRATEAM_ROLE_ARN
@@ -32,10 +31,9 @@ PROD_AWS_REGION
 Copy values from the matching bootstrap outputs. Never swap dev and prod
 buckets or role ARNs.
 
-The committed Terrateam configuration restricts dev apply to repository writers
-and prod apply to repository administrators. It auto-plans, but never
-auto-applies. A dev promotion PR changes the module and dev `release_id`; after
-validation, a separate prod promotion PR advances prod to the same release ID.
+The committed Terrateam configuration selects the matching GitHub Environment for each workflow, restricts dev apply to repository writers, and restricts prod apply to repository administrators. It auto-plans but never auto-applies. Apply dev, validate it, and then apply prod from the same unchanged pull-request commit. A new commit requires another dev plan, apply, and validation.
+
+Terrateam checks foundation roots for drift weekly and opens an issue when it finds a difference. It does not reconcile drift automatically.
 
 ## Configure GitHub CDK environments
 

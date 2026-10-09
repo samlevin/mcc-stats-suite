@@ -15,7 +15,6 @@ provider "aws" {
       Project     = "mcc"
       Environment = "dev"
       ManagedBy   = "opentofu"
-      Release     = local.release_id
     }
   }
 }

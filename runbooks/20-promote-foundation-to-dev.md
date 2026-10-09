@@ -1,11 +1,31 @@
 # Apply foundation changes to dev
 
-1. Change the dev foundation configuration.
-2. Run formatting and static checks.
-3. Open a PR and review the dev plan using your deployment process.
-4. Apply to dev and validate it before changing prod.
+The pull-request commit is the foundation version. There is no release ID, foundation tag, or second version field to manage. Terrateam saves a plan for that exact commit and refuses to apply a stale plan after the branch changes.
 
-Keep dev and prod changes separate. Reject unexpected replacements or
-deletions.
+1. Make the foundation change. Put reusable behavior in `infrastructure/modules/foundation`; put a dev-only value in `infrastructure/dev/foundation`.
+2. Run the local checks:
+
+   ```console
+   npm run tofu:fmt:check
+   npm run check
+   ```
+
+3. Push the branch and open a pull request.
+4. Confirm that Terrateam plans `infrastructure/dev/foundation`. If the automatic plan is missing or stale, comment:
+
+   ```text
+   terrateam plan dev and foundation
+   ```
+
+5. Review the entire dev plan. Reject unexpected replacements, deletions, policy changes, or a plan for the wrong account. A shared module change may also produce a prod plan; do not apply it yet.
+6. Apply only the dev foundation from the pull request:
+
+   ```text
+   terrateam apply dev and foundation
+   ```
+
+7. Validate the dev resources and any affected application behavior.
+
+Do not add commits after validating dev if this change will continue to prod. A new commit creates a new revision. If the branch changes, plan and apply dev again before promoting that new revision.
 
 Next: [`21-deploy-ephemeral-match-to-csv.md`](21-deploy-ephemeral-match-to-csv.md).
