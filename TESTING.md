@@ -7,6 +7,14 @@ npm ci
 npm test
 ```
 
+The AWS-free issue triage tests cover eligibility, pagination, idempotency, and metadata changes before mutation:
+
+```console
+node --test scripts/issue-triage.test.mjs
+```
+
+These tests use metadata mocks and never call GitHub. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
+
 The full local quality gate is:
 
 ```console
