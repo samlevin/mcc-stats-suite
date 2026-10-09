@@ -1,24 +1,13 @@
-# Promote foundation changes to prod
+# Verify foundation promotion to prod
 
-Promote the same unchanged pull-request commit that was applied and validated in dev. The Git commit and Terrateam plan are the immutable promotion artifacts. Do not create or edit a manual foundation release ID.
+Terrateam promotes the merged revision to prod after its dev layer succeeds. The Git commit and saved plans are the promotion record. Do not create or edit a manual foundation release ID.
 
-1. Confirm that the pull request head SHA has not changed since the successful dev apply.
-2. Confirm that Terrateam has a successful plan for `infrastructure/prod/foundation` at that SHA. If it does not, comment:
+1. Confirm that the dev apply succeeded for the merged revision.
+2. Monitor the automatically generated prod plan and apply. Autoapply does not pause between them. Compare the output with the reviewed dev plan while accounting for environment-specific names, account IDs, and values.
+3. Confirm that Terrateam reports no replacement, deletion, wrong-account operation, or attempt to create an existing named resource. Treat any such operation as an incident and stop later promotions.
+4. Validate the production resources.
 
-   ```text
-   terrateam plan prod and foundation
-   ```
-
-3. Review the entire prod plan. Compare its intent with the validated dev plan, while accounting for expected environment-specific names, account IDs, and values. Reject creation of a named foundation resource that already exists.
-4. Apply only the prod foundation:
-
-   ```text
-   terrateam apply prod and foundation
-   ```
-
-5. Validate the production resources, then merge the pull request.
-
-If any commit is added after the dev apply, stop. Re-plan and re-apply dev, validate the new revision, and only then apply prod. If the change is intentionally dev-only, do not manufacture a prod edit; merge after the dev validation.
+If the dev layer fails or becomes stale, prod waits. If another foundation change reaches `main`, require the newest revision to complete both layers. Do not force-unlock the earlier run.
 
 Do not apply production foundation changes locally.
 

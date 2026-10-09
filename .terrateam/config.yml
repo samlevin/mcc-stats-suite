@@ -37,6 +37,7 @@ dirs:
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
+      autoapply: true
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
@@ -46,6 +47,10 @@ dirs:
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
     when_modified:
+      autoapply: true
+      depends_on:
+        tag_query: 'dir:infrastructure/dev/foundation'
+        prune_on_no_change: true
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
