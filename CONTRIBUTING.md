@@ -77,6 +77,23 @@ Link the pull request to its task or bug with `Closes #<number>`. Reference the 
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs the repository quality gate, CDK synthesis, native bundle verification, and OpenTofu formatting. Pull requests do not deploy applications.
 
+## Use personal Codex delivery agents
+
+With the reusable agents installed under `~/.codex/agents/`, start a fresh Codex session in this repository. `AGENTS.md` supplies the repository and project binding; the agents discover the remaining workflow and commands from these contributor guides.
+
+Example prompts:
+
+```text
+Build me this feature <GitHub epic URL>.
+Implement <GitHub task or bug URL>.
+Rework <GitHub issue URL> to address the feedback on its existing PR.
+Use code-reviewer to review pushed branch <branch> against <issue URL> before its PR exists.
+Use security-reviewer to review pushed branch <branch> against <base>.
+Use stacked-pr-manager to sync the stack for <existing PR URL> after its parent merges.
+```
+
+Delivery prompts request implementation through ready-for-review PRs. The implementer owns PRs and runs checks; the code reviewer performs only the initial static review before PR creation. Security review requires an explicit request. See `WORKFLOW.md` for the review gate, stack decomposition, and issue states.
+
 ## Understand release versioning
 
 Release Please manages every application plus `@mcc/cdk-config` and `@mcc/contracts`. It creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`.

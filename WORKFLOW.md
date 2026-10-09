@@ -2,7 +2,7 @@
 
 GitHub Issues is the source of truth for planned work in MCC Stats Suite. Each durable unit of work has an issue before implementation starts. Prompts, chat transcripts, branches, pull requests, project cards, and specifications may add context, but none of them replaces the issue.
 
-The repository uses two issue levels:
+The repository uses two kinds of work issue:
 
 - An epic states a product or operator outcome that needs several independently verifiable changes. The epic is the parent issue.
 - A task or bug is an executable unit that one agent can implement and one reviewer can verify. It is a sub-issue when it contributes to an epic.
@@ -29,7 +29,7 @@ Milestones group work for a dated release or outcome. They do not represent epic
 
 `Done` means the change is merged, required checks pass, and the issue contains enough evidence to verify its acceptance criteria. Close child issues through their pull requests. Close an epic only after all required children are done and the epic-level acceptance criteria have been checked.
 
-Use GitHub's blocked-by and blocking relationships for execution order. A blocked issue stays in `Ready`; do not move it to `In progress` while its blocker remains open.
+Use GitHub's blocked-by and blocking relationships for execution order. A blocked issue stays in `Ready` while its blocker remains open, unless the dependency can be satisfied by a reviewed implementation in the same native PR stack. That exception requires the blocker to have passing required checks, an independent pre-PR `APPROVE` at its initial submission, and an open PR ready for formal review. Base the dependent branch on the blocker's current pushed head and record the dependency and SHA in the claim. Later changes require renewed validation of affected branches. Keep the issue dependency open until merge. A dependency that requires deployment or merged behavior remains blocked.
 
 ## Priority and size
 
@@ -49,6 +49,10 @@ Size limits the amount of work assigned to one task or bug:
 
 Epics do not need a size. Split an executable issue if it reaches `L`, has several independently useful outcomes, or cannot be reviewed as one coherent pull request.
 
+For Codex delivery, approximately 400 changed production-code lines per PR is also a decomposition trigger. Count additions and deletions against the PR's immediate parent branch. Exclude tests, docs, generated files, lockfiles, and non-code artifacts; executable infrastructure definitions count as production code. Split into coherent layers with independently verifiable acceptance criteria. Record any justified small overage instead of making fragments that cannot be reviewed usefully.
+
+When one assigned issue needs several PRs, retain it as the coordinating parent and create executable child issues for the layers before publishing them. Each PR closes its own child and references the original assignment and epic. Add native parent and dependency relationships and project metadata. Record this decomposition on the original issue; it remains open until all required layers merge and its acceptance criteria are verified.
+
 ## Agent protocol
 
 An agent starts from the highest-priority unblocked task or bug in `Ready` that it is authorized to handle. The issue body and current comments are the task brief. Repository instructions and linked specifications remain binding. A dispatch prompt names the repository and issue number. It may narrow the assignment, but it does not redefine the issue or replace missing acceptance criteria.
@@ -67,6 +71,22 @@ During implementation, the agent keeps durable decisions in the issue or pull re
 The pull request must close one task or bug and may reference one parent epic. Its title follows the Conventional Commits rules in `CONTRIBUTING.md`. The author moves the issue to `In review`. After merge, the issue closes and moves to `Done`. Follow-up work remains open as separate issues.
 
 Agents may investigate an `Inbox` item, but they may not implement it until a maintainer or authorized planning agent makes it `Ready`. Agents do not close epics merely because all known children are closed. They verify the epic acceptance criteria first.
+
+## Codex delivery and review
+
+An explicit issue or epic delivery invocation requests the full workflow through open PRs ready for formal review. It authorizes the agents to claim accepted work, update its project state, decompose its accepted scope, commit and push implementation branches, create PRs, and link them into native GitHub stacks. Honor narrower instructions in the dispatch prompt. Merges, auto-merge, deployments, infrastructure applies, and repository settings changes require separate authorization.
+
+The `task-orchestrator` fetches the epic, all executable children, current comments, project metadata, and dependencies. It dispatches issues sequentially unless their requirements, contracts, and touched files are independent. Parallel implementers use separate worktrees and leave capacity for review and stack operations. The `issue-implementer` owns code, tests, checks, PR creation and descriptions, CI follow-up, and requested rework.
+
+After initial implementation and passing local checks, the implementer pushes each candidate branch and confirms that its PR does not yet exist. It asks `code-reviewer` for a static review against the linked issue and exact immediate-base/head SHAs. The reviewer reads code, tests, diffs, and history, runs no tests, and never reads or interacts with PRs. It returns `APPROVE`, `REQUEST CHANGES`, or `BLOCKED`. The implementer resolves changes and repeats checks, push, and review until approval. A changed base or head before PR creation invalidates approval.
+
+Only the implementer opens the PR after approval. For a stack, it opens each layer against its immediate parent, with the appropriate issue closing link and validation evidence. It delegates native linking to `stacked-pr-manager` using existing PR URLs. The stack manager uses the official `gh stack` extension for branch construction, cascading changes, native linking, and post-merge synchronization; it never creates PRs. Avoid `gh stack submit` and branch arguments to `gh stack link` because they can create PRs outside the implementer's gate.
+
+Once a PR exists, the implementer owns rework, required checks, and responses to formal review. The pre-PR `code-reviewer` is not invoked for that branch again. New stack layers still need their own pre-PR gate. After a stack rebase, the implementer reruns checks for affected branches and records the new revisions; formal review governs existing PRs. Historical pre-PR approval is not approval of a later revision.
+
+The `security-reviewer` runs only on an explicit human request for a pushed branch and returns `PASS`, `REQUEST CHANGES`, or `BLOCKED`. It is separate from automatic delivery.
+
+Agent delivery completes when all required PRs are open and ready for review, required checks pass, and issue links and native stack relationships are verified. Record the PR URLs, current branch/base SHAs, validation evidence, and initial pre-PR approval SHAs at handoff. The issues remain `In review`; `Done` and epic closure still require merge and acceptance evidence.
 
 ## Triage checklist
 

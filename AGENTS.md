@@ -51,7 +51,15 @@ Foundation promotion is different from application release promotion. Terrateam 
 
 Release Please versions all applications and both shared packages. Internal dependencies use exact versions. The Node workspace plugin patch-bumps consumers when a shared package changes. Keep `package.json`, `package-lock.json`, `.release-please-manifest.json`, and `release-please-config.json` synchronized; `npm run release:check` enforces this.
 
-Use Conventional Commit pull-request titles. Do not commit, push, open a pull request, change GitHub settings, apply infrastructure, or deploy unless the user requests that action.
+Use Conventional Commit pull-request titles. Do not commit, push, open a pull request, change GitHub settings, apply infrastructure, or deploy unless the user requests that action. Invoking an issue or epic delivery agent requests the issue-to-PR workflow described below; ordinary local editing does not.
+
+## Codex delivery binding
+
+Use the reusable personal Codex agents for GitHub work in `samlevin/mcc-stats-suite`, with `main` as trunk and the [MCC delivery project](https://github.com/users/samlevin/projects/1) as the default project. Read `WORKFLOW.md` for readiness, claims, dependencies, and project states. Discover project field IDs and options from GitHub instead of hard-coding them.
+
+Delegate epic delivery prompts such as "build me this feature <GitHub epic URL>" to `task-orchestrator`, and task/bug implementation or existing-PR rework to `issue-implementer`. The implementer delegates pushed-branch review to `code-reviewer` strictly before the candidate PR exists, and branch/stack maintenance to `stacked-pr-manager`. Invoke `security-reviewer` only for an explicit human security-review request. The implementer owns PR creation and formal-review follow-up.
+
+A delivery invocation authorizes issue claims, project transitions, accepted-scope decomposition, commits, pushes, PR creation, and native stack linking through ready-for-review handoff. It does not authorize merges, auto-merge, repository settings changes, infrastructure applies, or deployments. Run the local gates in `CONTRIBUTING.md` and satisfy required PR checks. Keep executable issues in `In review` until merge; agent handoff is not issue completion.
 
 ## Data guarantees
 
