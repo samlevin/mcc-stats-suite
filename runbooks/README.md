@@ -14,3 +14,4 @@ AWS account, identity, state, or CI architecture.
 8. [Promote foundation changes to prod](30-promote-foundation-to-prod.md)
 9. [Release, promote, and recover applications](31-release-promote-and-recover-applications.md)
 10. [Recover and troubleshoot](40-recover-and-troubleshoot.md)
+11. [Recover foundation state after a local-backend apply](41-recover-foundation-state.md)

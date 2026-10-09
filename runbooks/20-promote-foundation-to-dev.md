@@ -17,7 +17,7 @@ The pull-request commit is the foundation version. There is no release ID, found
    terrateam plan dev and foundation
    ```
 
-5. Review the entire dev plan. Reject unexpected replacements, deletions, policy changes, or a plan for the wrong account. A shared module change may also produce a prod plan; do not apply it yet.
+5. Review the entire dev plan. Reject unexpected replacements, deletions, policy changes, a plan for the wrong account, or creation of a named foundation resource that already exists. A shared module change may also produce a prod plan; do not apply it yet.
 6. Apply only the dev foundation from the pull request:
 
    ```text
@@ -27,5 +27,7 @@ The pull-request commit is the foundation version. There is no release ID, found
 7. Validate the dev resources and any affected application behavior.
 
 Do not add commits after validating dev if this change will continue to prod. A new commit creates a new revision. If the branch changes, plan and apply dev again before promoting that new revision.
+
+If initialization reports a missing backend or a plan proposes recreating the foundation, stop. Follow [`41-recover-foundation-state.md`](41-recover-foundation-state.md) instead of applying.
 
 Next: [`21-deploy-ephemeral-match-to-csv.md`](21-deploy-ephemeral-match-to-csv.md).

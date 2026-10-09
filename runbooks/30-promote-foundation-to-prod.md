@@ -9,7 +9,7 @@ Promote the same unchanged pull-request commit that was applied and validated in
    terrateam plan prod and foundation
    ```
 
-3. Review the entire prod plan. Compare its intent with the validated dev plan, while accounting for expected environment-specific names, account IDs, and values.
+3. Review the entire prod plan. Compare its intent with the validated dev plan, while accounting for expected environment-specific names, account IDs, and values. Reject creation of a named foundation resource that already exists.
 4. Apply only the prod foundation:
 
    ```text
@@ -21,5 +21,7 @@ Promote the same unchanged pull-request commit that was applied and validated in
 If any commit is added after the dev apply, stop. Re-plan and re-apply dev, validate the new revision, and only then apply prod. If the change is intentionally dev-only, do not manufacture a prod edit; merge after the dev validation.
 
 Do not apply production foundation changes locally.
+
+If initialization reports a missing backend or a plan proposes recreating the foundation, stop. Follow [`41-recover-foundation-state.md`](41-recover-foundation-state.md) instead of applying.
 
 Next: [`31-release-promote-and-recover-applications.md`](31-release-promote-and-recover-applications.md).
