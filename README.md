@@ -1,5 +1,13 @@
 # MCC Stats Suite
 
+[![CI](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci.yml)
+[![Secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml)
+[![Semantic PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml)
+[![Release Please](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml)
+[![Deploy application](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
+[![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
+[![Application deploy workflow](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml)
+
 MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
 
 The project starts with OCR, but the stored evidence is meant to outlive the first parser. Every processing run retains source hashes, provider output, normalized cells, confidence, geometry, validation results, and code versions. That record supports replaying old screenshots through new pipelines, comparing results, labeling cells, and eventually training OCR quality models.
@@ -52,7 +60,7 @@ NPM workspaces provide package boundaries. Turbo follows their dependency graph 
 
 ## How AWS is divided
 
-OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. Terrateam applies stable foundation changes from pull requests.
+OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. After a reviewed pull request merges, Terrateam applies stable foundation changes to dev and then prod from that revision. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
 
 CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, SES receipt rules, IAM grants, and logs. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
 
@@ -129,4 +137,4 @@ npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 
 Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to stable `dev` at the merged commit SHA. Release Please versions applications and private shared packages. Production promotion is manual and accepts an immutable application release tag after that exact revision succeeds in dev.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.
+See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.

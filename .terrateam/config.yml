@@ -8,6 +8,18 @@ destination_branches:
 indexer:
   enabled: true
 
+drift:
+  enabled: true
+  schedules:
+    foundation:
+      tag_query: 'foundation'
+      schedule: weekly
+
+hooks:
+  plan:
+    post:
+      - type: drift_create_issue
+
 access_control:
   enabled: true
   ci_config_update: ['role:admin']
@@ -25,6 +37,7 @@ dirs:
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
+      autoapply: true
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
@@ -34,6 +47,10 @@ dirs:
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
     when_modified:
+      autoapply: true
+      depends_on:
+        tag_query: 'dir:infrastructure/dev/foundation'
+        prune_on_no_change: true
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
@@ -42,6 +59,7 @@ dirs:
 
 workflows:
   - tag_query: 'dev'
+    environment: dev
     plan:
       - type: oidc
         provider: aws
@@ -68,6 +86,7 @@ workflows:
       - type: apply
 
   - tag_query: 'prod'
+    environment: prod
     plan:
       - type: oidc
         provider: aws

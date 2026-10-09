@@ -1,5 +1,12 @@
 terraform {
   required_version = "~> 1.12.0"
+
+  backend "s3" {
+    key          = "operational/foundation.tfstate"
+    encrypt      = true
+    use_lockfile = true
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -15,7 +22,6 @@ provider "aws" {
       Project     = "mcc"
       Environment = "prod"
       ManagedBy   = "opentofu"
-      Release     = local.release_id
     }
   }
 }

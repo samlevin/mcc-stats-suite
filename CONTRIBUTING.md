@@ -62,7 +62,7 @@ Never commit credentials, account IDs, email addresses, domain names, populated 
 
 ## Submit a change
 
-Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
+Start from a `Ready` GitHub issue and follow the claim, implementation, review, and completion rules in [`WORKFLOW.md`](WORKFLOW.md). Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
 
 Pull-request titles must follow Conventional Commits because Release Please derives versions and release notes from them. Common forms are:
 
@@ -73,7 +73,26 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
+Link the pull request to its task or bug with `Closes #<number>`. Reference the parent epic separately. A pull request closes executable work, not an epic.
+
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs the repository quality gate, CDK synthesis, native bundle verification, and OpenTofu formatting. Pull requests do not deploy applications.
+
+## Use personal Codex delivery agents
+
+With the reusable agents installed under `~/.codex/agents/`, start a fresh Codex session in this repository. `AGENTS.md` supplies the repository and project binding; the agents discover the remaining workflow and commands from these contributor guides.
+
+Example prompts:
+
+```text
+Build me this feature <GitHub epic URL>.
+Implement <GitHub task or bug URL>.
+Rework <GitHub issue URL> to address the feedback on its existing PR.
+Use code-reviewer to review pushed branch <branch> against <issue URL> before its PR exists.
+Use security-reviewer to review pushed branch <branch> against <base>.
+Use stacked-pr-manager to sync the stack for <existing PR URL> after its parent merges.
+```
+
+Delivery prompts request implementation through ready-for-review PRs. The implementer owns PRs and runs checks; the code reviewer performs only the initial static review before PR creation. Security review requires an explicit request. See `WORKFLOW.md` for the review gate, stack decomposition, and issue states.
 
 ## Understand release versioning
 
@@ -126,7 +145,9 @@ The workflow rejects draft or prerelease tags, mismatched application versions, 
 
 OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it.
 
-Bootstrap is a local administrative procedure. Terrateam plans and applies stable foundation changes from pull requests. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
+Bootstrap is a local administrative procedure. Terrateam plans stable foundation changes on pull requests. After merge, it applies the merged revision to dev before it plans and applies prod. Foundation does not have a separate release ID. A failed or stale dev layer blocks prod. If another foundation change reaches `main` during a run, treat the newer revision as the promotion candidate and require its layered run to finish successfully.
+
+Terrateam checks foundation roots for drift weekly and opens a GitHub issue when it finds a difference. Reconciliation remains reviewed and manual. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
 
 ## Keep documentation with the code
 

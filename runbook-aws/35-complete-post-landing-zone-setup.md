@@ -183,8 +183,8 @@ policy before granting stable-dev deployment access to a larger team.
 
 1. Install Terrateam Cloud for only this repository.
 2. Accept and commit its generated `.github/workflows/terrateam.yml` on `main`.
-3. Copy `.terrateam/config.yml.example` to `.terrateam/config.yml` and commit it.
-4. Add these GitHub repository **Actions variables**:
+3. Review and commit the repository's authoritative `.terrateam/config.yml`.
+4. Add these GitHub **Environment variables**, using the `dev` environment for `DEV_*` values and `prod` for `PROD_*` values:
 
 ```text
 DEV_TERRATEAM_ROLE_ARN
@@ -199,9 +199,7 @@ Use bootstrap outputs for the ARNs and bucket names. Terrateam receives
 short-lived AWS sessions through OIDC; do not create `AWS_ACCESS_KEY_ID` or
 `AWS_SECRET_ACCESS_KEY` secrets.
 
-Dev foundation changes are applied from a dev promotion PR. After validation,
-a separate prod promotion PR advances prod's `release_id`. Neither bootstrap
-state is managed by Terrateam.
+Apply the dev foundation and validate it, then apply prod from the same unchanged pull-request commit. There is no separate foundation release ID. A new commit requires another dev plan, apply, and validation. Neither bootstrap state is managed by Terrateam.
 
 ## 8. Connect GitHub Actions CDK deployments
 

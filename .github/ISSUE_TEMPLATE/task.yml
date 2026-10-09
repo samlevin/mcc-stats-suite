@@ -1,0 +1,57 @@
+name: Task
+description: Define one reviewable, independently verifiable unit of work.
+title: '[Task]: '
+labels:
+  - 'type: task'
+projects:
+  - 'samlevin/1'
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Link this issue as a sub-issue when it belongs to an epic. A task is ready only when its acceptance criteria and validation plan are complete.
+  - type: input
+    id: parent
+    attributes:
+      label: Parent epic
+      description: Link the parent issue, or write "None" for standalone maintenance.
+      placeholder: '#123'
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: State the behavior or durable artifact this task must produce.
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use observable, testable conditions.
+      placeholder: |
+        - [ ] Given ..., when ..., then ...
+        - [ ] Existing ... remains unchanged
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Implementation notes
+      description: Name likely boundaries, contracts, risks, and decisions. Leave implementation freedom where it is useful.
+  - type: textarea
+    id: validation
+    attributes:
+      label: Validation
+      description: List the automated and manual checks that prove the acceptance criteria.
+      placeholder: |
+        - `npm test --workspace ...`
+        - Manual check: ...
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: Link blocking or blocked issues. Add native GitHub issue dependencies after creation.
