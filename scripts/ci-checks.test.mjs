@@ -300,7 +300,7 @@ test('CI cdk-config tests cannot invoke another compiler or modify built declara
   }
 });
 
-test('workflow isolates cache namespaces, retains ARM64, and gates main deployment', () => {
+test('workflow isolates cache namespaces and deploys stable environments after CI', () => {
   const workflow = readFileSync(
     new URL('../.github/workflows/ci.yml', import.meta.url),
     'utf8',
@@ -319,8 +319,21 @@ test('workflow isolates cache namespaces, retains ARM64, and gates main deployme
   assert.match(workflow, /git show "\$BASE:scripts\/ci-scope\.mjs"/);
   assert.match(
     workflow,
-    /deploy-dev:\n[ ]{4}if: github\.event_name == 'push'.*\n[ ]{4}needs: check/,
+    /Save affected applications for stable dev deployment/,
   );
+  const dev = readFileSync(
+    new URL('../.github/workflows/deploy-stable-dev.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(dev, /workflows: \[ci\]/);
+  assert.match(dev, /github\.event\.workflow_run\.conclusion == 'success'/);
+  assert.match(dev, /environment: dev/);
+  const prod = readFileSync(
+    new URL('../.github/workflows/deploy-stable-prod.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(prod, /workflows: \[deploy-stable-dev\]/);
+  assert.match(prod, /environment: prod/);
   assert.ok(!workflow.includes('continue-on-error'));
   assert.ok(!workflow.includes('pull_request_target'));
   const config = JSON.parse(
