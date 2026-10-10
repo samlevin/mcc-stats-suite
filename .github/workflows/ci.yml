@@ -15,8 +15,6 @@ permissions:
 
 jobs:
   check:
-    env:
-      MCC_BUILD_ENVIRONMENT: dev
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
