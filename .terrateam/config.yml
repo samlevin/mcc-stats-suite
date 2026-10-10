@@ -34,6 +34,7 @@ access_control:
       apply: ['role:admin']
 
 dirs:
+  # Foundation roots also watch this file because it sets their backend and inputs.
   # Bootstrap stays manual; exclusions also block indexer-added module patterns.
   infrastructure/dev/bootstrap:
     when_modified:
@@ -56,6 +57,7 @@ dirs:
         - '${DIR}/*.tfvars'
         - '${DIR}/*.hcl'
         - 'infrastructure/modules/foundation/*.tf'
+        - '.terrateam/config.yml'
 
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
@@ -69,6 +71,7 @@ dirs:
         - '${DIR}/*.tfvars'
         - '${DIR}/*.hcl'
         - 'infrastructure/modules/foundation/*.tf'
+        - '.terrateam/config.yml'
 
 workflows:
   - tag_query: 'dev'
