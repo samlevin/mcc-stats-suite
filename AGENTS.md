@@ -32,5 +32,5 @@ Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://gi
 
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
 - Issue states: claim and move to `In progress` before coding; move to `In review` when the PR opens. Never mark issues `Done`.
-- Labels: `.github/labels.json` is the source of truth, shared with prismatic. Change it and run `node scripts/labels-sync.mjs` (dry run; `--apply --prune` runs from `main`); never `gh label create`.
+- Labels: `.github/labels.json` is the source of truth, shared with prismatic. Change it and run `node scripts/labels-sync.mjs --prune` (dry run; `--apply --prune` runs from `main`); never `gh label create`.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
