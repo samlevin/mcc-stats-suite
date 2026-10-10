@@ -27,12 +27,14 @@ asdf install
 npm ci
 ```
 
-Run the complete local gate before opening a pull request:
+For application, package, infrastructure, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
 
 ```console
 npm run check
 npm run tofu:fmt:check
 ```
+
+For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0` and `node --test scripts/issue-triage.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
 
 The first command checks formatting, lint rules, release metadata, types, tests, and builds. Neither command calls AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
 

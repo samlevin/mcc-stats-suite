@@ -41,7 +41,7 @@ npm run app:synth -- match-to-csv --environment dev
 npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-`npm run check` includes Prettier, ESLint, release metadata checks, TypeScript, tests, and builds. CDK synthesis for native Lambda assets needs Docker and QEMU in CI. Tests must not call AWS.
+`npm run check` includes Prettier, ESLint, release metadata checks, TypeScript, tests, and builds. For documentation or recognized repository-only work, follow the shorter checks in CONTRIBUTING.md; do not run package or infrastructure tests. CI selects scope from files using the baseline classifier, never PR titles or labels. CDK synthesis for native Lambda assets needs Docker and QEMU in CI. Tests must not call AWS.
 
 ## Release and deployment rules
 
