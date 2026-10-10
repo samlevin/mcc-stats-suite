@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
   readFileSync,
+  readdirSync,
   cpSync,
   statSync,
   mkdtempSync,
@@ -19,6 +20,7 @@ import {
   workspaceMode,
   workspaceArguments,
 } from './ci-checks.mjs';
+import { repositoryFiles } from './ci-scope.mjs';
 
 const root = new URL('../', import.meta.url);
 const turbo = new URL('../node_modules/.bin/turbo', import.meta.url).pathname;
@@ -74,9 +76,26 @@ test('documentation and recognized repository scopes avoid workspace and infrast
   const commands = checks({ full: false, repository: true });
   assert.equal(commands.length, 3);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
-  assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
-  assert.ok(JSON.stringify(commands).includes('labels-sync.test.mjs'));
-  assert.ok(JSON.stringify(commands).includes('labels-sync.mjs'));
+});
+
+test('repository-scope lists derive from the classifier allowlist', () => {
+  const [, lint, tests] = checks({ full: false, repository: true });
+  const listed = [...repositoryFiles];
+  const expectedTests = listed.filter((f) => f.endsWith('.test.mjs'));
+  const expectedLint = listed.filter((f) => f.endsWith('.mjs'));
+  assert.ok(expectedTests.length > 0);
+  assert.deepEqual([...tests[1].slice(1)].sort(), expectedTests.sort());
+  assert.deepEqual(lint[1].slice(1, -2).sort(), expectedLint.sort());
+  assert.deepEqual(lint[1].slice(-2), ['--max-warnings', '0']);
+});
+
+test('full-scope test list equals every scripts test file', () => {
+  const [, , , tests] = checks({ full: true, mode: 'all' });
+  const onDisk = readdirSync(new URL('./', import.meta.url))
+    .filter((name) => name.endsWith('.test.mjs'))
+    .map((name) => `scripts/${name}`)
+    .sort();
+  assert.deepEqual(tests[1].slice(1), onDisk);
 });
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {
