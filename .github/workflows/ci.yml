@@ -19,6 +19,7 @@ jobs:
     outputs:
       full: ${{ steps.scope.outputs.full }}
       repository: ${{ steps.scope.outputs.repository }}
+      application: ${{ steps.scope.outputs.application }}
       infrastructure: ${{ steps.scope.outputs.infrastructure }}
       check: ${{ steps.scope.outputs.check }}
       base: ${{ steps.scope.outputs.base }}
@@ -45,7 +46,7 @@ jobs:
             const head = event === 'pull_request'
               ? context.payload.pull_request.head.sha
               : context.sha;
-            const all = { full: true, repository: true, infrastructure: true, check: true };
+            const all = { full: true, repository: true, application: true, infrastructure: true, check: true };
             let scopes = all;
             if (/^0+$/.test(base)) {
               core.warning('Push has no usable base commit; running every gate.');
@@ -90,6 +91,7 @@ jobs:
                 }
               } catch (error) {
                 core.warning(`Could not classify the commit comparison; running every gate: ${error.message}`);
+                base = head;
               }
             }
             for (const [name, value] of Object.entries({ ...scopes, base, head }))
@@ -114,10 +116,8 @@ jobs:
           restore-keys: tofu-provider-${{ runner.os }}-
       - name: Create OpenTofu plugin cache
         run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
-      - name: Check OpenTofu formatting
-        run: tofu fmt -check -recursive infrastructure
       - name: Check OpenTofu roots
-        run: bash scripts/tofu-checks.sh
+        run: ./scripts/tofu-checks.sh
 
   application-checks:
     needs: scope
@@ -182,7 +182,7 @@ jobs:
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
   check:
     needs: [scope, infrastructure, application-checks]
-    if: always()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
       applications: ${{ needs.application-checks.outputs.applications }}

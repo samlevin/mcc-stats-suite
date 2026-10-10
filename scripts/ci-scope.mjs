@@ -1,6 +1,3 @@
-import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
-
 // Keep the allowlist narrow. A new or build-affecting path selects all checks.
 const repositoryFiles = new Set([
   '.github/labels.json',
@@ -27,14 +24,24 @@ export function classify(path) {
     /^\.github\/ISSUE_TEMPLATE\/[^/]+\.ya?ml$/.test(path)
   )
     return 'repository';
+  if (
+    /^(applications\/(admin|data-pipeline|match-to-csv|ocr-quality|player)|packages\/(contracts|cdk-config))\//.test(
+      path,
+    )
+  )
+    return 'application';
   return 'full';
 }
 
 export function selectScopes(paths) {
   const scopes = paths.map(classify);
   return {
-    full: !scopes.length || scopes.includes('full'),
+    full:
+      !scopes.length ||
+      scopes.includes('full') ||
+      scopes.includes('application'),
     repository: scopes.includes('repository'),
+    application: scopes.includes('application'),
     infrastructure:
       !scopes.length ||
       scopes.includes('infrastructure') ||
@@ -42,31 +49,3 @@ export function selectScopes(paths) {
     check: !scopes.length || scopes.some((scope) => scope !== 'infrastructure'),
   };
 }
-
-function main() {
-  const [base, head, event] = process.argv.slice(2);
-  if (
-    !/^[0-9a-f]{40}$/.test(base ?? '') ||
-    !/^[0-9a-f]{40}$/.test(head ?? '') ||
-    !['pull_request', 'push'].includes(event)
-  )
-    throw new Error('Expected base/head commit SHAs and pull_request or push');
-  const diffBase =
-    event === 'pull_request'
-      ? execFileSync('git', ['merge-base', base, head], {
-          encoding: 'utf8',
-        }).trim()
-      : base;
-  const paths = execFileSync(
-    'git',
-    ['diff', '--name-only', '--no-renames', '-z', diffBase, head, '--'],
-    { encoding: 'utf8' },
-  )
-    .split('\0')
-    .filter(Boolean);
-  for (const [scope, selected] of Object.entries(selectScopes(paths)))
-    console.log(`${scope}=${selected}`);
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  main();
