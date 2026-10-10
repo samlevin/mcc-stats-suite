@@ -8,7 +8,6 @@ import {
   RemovalPolicy,
   Stack,
   Tags,
-  Validations,
   type StackProps,
 } from 'aws-cdk-lib';
 import type { Construct } from 'constructs';
@@ -307,8 +306,8 @@ export class MatchToCsvStack extends Stack {
       });
       // Migration step 1: keep the live rule set and rule when later releases
       // stop declaring them, because OpenTofu takes ownership (issue #45).
-      // RetainExceptOnCreate lets a failed first deploy roll back cleanly
-      // instead of stranding the names and failing every retry.
+      // RetainExceptOnCreate deletes them when a first create rolls back, so
+      // the names are not stranded and a retry does not fail AlreadyExists.
       receiptRuleSet.applyRemovalPolicy(
         RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
       );
@@ -316,10 +315,6 @@ export class MatchToCsvStack extends Stack {
       // duplicate every inbound email.
       receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE, {
         applyToUpdateReplacePolicy: false,
-      });
-      Validations.of(receiptRule).acknowledge({
-        id: 'CloudFormation-Validate::W3011',
-        reason: 'Only deletion is retained; a replaced rule must be removed',
       });
       receiptRule.node.addDependency(receiptRuleSet);
       const activateRules = new customResources.AwsCustomResource(
@@ -348,6 +343,13 @@ export class MatchToCsvStack extends Stack {
         },
       );
       activateRules.node.addDependency(receiptRule);
+      // Activate last. The activation has no delete call and an active rule
+      // set cannot be deleted, so a create that failed after activation could
+      // not roll back. Depending on every other construct means a failed
+      // create never reaches activation.
+      for (const child of this.node.children) {
+        if (child !== activateRules) activateRules.node.addDependency(child);
+      }
 
       new CfnOutput(this, 'ReceiptRuleSetName', {
         value: receiptRuleSetName,

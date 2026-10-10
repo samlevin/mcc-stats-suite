@@ -1,18 +1,11 @@
 import t from 'tap';
-import { Match, Template } from 'aws-cdk-lib/assertions';
-import { BUNDLING_STACKS } from 'aws-cdk-lib/cx-api';
-import { createMatchToCsvApp } from '../cdk/lib/app';
-
-function synthesize(context: Record<string, string>): Template {
-  return Template.fromStack(
-    createMatchToCsvApp({ context: { [BUNDLING_STACKS]: [], ...context } }, {}),
-  );
-}
+import { Match } from 'aws-cdk-lib/assertions';
+import { synthesize } from './support/app';
 
 const stable = synthesize({ environment: 'dev' });
 
 t.test('stable stacks retain the receipt rule set and rule', (t) => {
-  // RetainExceptOnCreate: a failed first deploy rolls back cleanly instead of
+  // RetainExceptOnCreate: a rolled-back first create deletes them instead of
   // stranding the names and failing every retry with AlreadyExists.
   stable.hasResource('AWS::SES::ReceiptRuleSet', {
     DeletionPolicy: 'RetainExceptOnCreate',
@@ -43,6 +36,23 @@ t.test('stable activation never deactivates the rule set on delete', (t) => {
       }),
     ),
   });
+  t.end();
+});
+
+t.test('stable activation is the last resource to be created', (t) => {
+  // Without a delete call, a rule set that is already active cannot be
+  // deleted during a create rollback. Activating last means a failed create
+  // never leaves the rule set active.
+  const resources = stable.toJSON().Resources as Record<
+    string,
+    { DependsOn?: string[] }
+  >;
+  const [activationId] = Object.keys(stable.findResources('Custom::AWS'));
+  const dependsOn = new Set(resources[activationId].DependsOn ?? []);
+  for (const logicalId of Object.keys(resources)) {
+    if (logicalId === activationId) continue;
+    t.ok(dependsOn.has(logicalId), `activation depends on ${logicalId}`);
+  }
   t.end();
 });
 

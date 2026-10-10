@@ -9,5 +9,5 @@ const deployment = resolveDeployment(app.node, 'data-pipeline');
 new DataPipelineStack(app, deployment.stackName, {
   deployment,
   env: { account: deployment.account, region: deployment.region },
-  terminationProtection: deployment.environment === 'prod',
+  terminationProtection: !deployment.isEphemeral,
 });

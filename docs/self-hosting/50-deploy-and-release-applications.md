@@ -8,7 +8,7 @@ Each application owns a CDK stack per environment:
 <application>-prod      production stack, deployed by GitHub Actions
 ```
 
-`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, and refuses ephemeral deploys inside GitHub Actions.
+`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, refuses ephemeral deploys inside GitHub Actions, and refuses to destroy a stable stack. Before a stable deploy it compares the deployed template with the new one and refuses to remove a stateful resource, or a custom resource with a delete call, that the deployed template does not retain; see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure).
 
 ## Ephemeral stacks
 

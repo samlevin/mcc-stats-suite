@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { findUnsafeRemovals } from './stack-migration-guard.mjs';
 
 const applications = new Set([
@@ -142,11 +141,7 @@ if (ephemeral) contextArguments.push('-c', `ephemeral=${ephemeral}`);
 if (expectedAccount) {
   contextArguments.push('-c', `expectedAccount=${expectedAccount}`);
 }
-if (profile) contextArguments.push('--profile', profile);
-
-if (action === 'deploy' && !ephemeral) {
-  refuseUnsafeRemovals(`${application}-${environment}`);
-}
+const profileArguments = profile ? ['--profile', profile] : [];
 
 const cdkArguments = [
   'run',
@@ -155,7 +150,13 @@ const cdkArguments = [
   `@samlevin/${application}`,
   '--',
   ...contextArguments,
+  ...profileArguments,
 ];
+if (action === 'deploy' && !ephemeral) {
+  refuseUnsafeRemovals(`${application}-${environment}`);
+  // Deploy the assembly the guard just synthesized instead of bundling again.
+  cdkArguments.push('--app', 'cdk.out');
+}
 if (
   application === 'match-to-csv' &&
   (action === 'deploy' || action === 'diff') &&
@@ -204,9 +205,9 @@ function environmentFromProfile(profile) {
   return undefined;
 }
 
-// CloudFormation deletes removed resources using the DeletionPolicy of the
-// template that is already deployed. A release that drops a resource is only
-// safe after the release that retains it has reached this stack.
+// CloudFormation deletes a removed resource using the DeletionPolicy of the
+// template that is already deployed. A release that drops a stateful resource
+// is only safe after a release that retains it has reached the stack.
 function refuseUnsafeRemovals(stackName) {
   const liveTemplate = deployedTemplate(stackName);
   if (!liveTemplate) return;
@@ -217,33 +218,49 @@ function refuseUnsafeRemovals(stackName) {
   if (problems.length === 0) return;
   fail(
     [
-      `Refusing deploy: ${stackName} has not received the release that retains its SES receipt resources.`,
+      `Refusing deploy: ${stackName} would lose resources that its deployed template does not retain.`,
       ...problems.map((problem) => `  - ${problem}`),
-      'Deploy the retaining release to this stack first.',
+      'Retain each resource, or drop its delete call, in a release that keeps its logical ID. Deploy that release, then remove the resource in the next one.',
     ].join('\n'),
   );
 }
 
 function deployedTemplate(stackName) {
-  const templateArguments = [
+  const status = awsCli([
+    'cloudformation',
+    'describe-stacks',
+    '--stack-name',
+    stackName,
+    '--query',
+    'Stacks[0].StackStatus',
+    '--output',
+    'text',
+  ]);
+  if (status.status !== 0) {
+    if (/does not exist/.test(status.stderr ?? '')) return undefined;
+    process.stderr.write(status.stderr ?? '');
+    fail(`Unable to describe ${stackName}`);
+  }
+  // A rolled-back first create or a review-only stack owns no resources, and
+  // cdk deploy replaces it, so its template protects nothing.
+  if (
+    ['ROLLBACK_COMPLETE', 'REVIEW_IN_PROGRESS'].includes(status.stdout.trim())
+  ) {
+    return undefined;
+  }
+  const template = awsCli([
     'cloudformation',
     'get-template',
     '--stack-name',
     stackName,
     '--output',
     'json',
-  ];
-  if (profile) templateArguments.push('--profile', profile);
-  const result = spawnSync('aws', templateArguments, {
-    encoding: 'utf8',
-    env: childEnvironment,
-  });
-  if (result.status !== 0) {
-    if (/does not exist/.test(result.stderr ?? '')) return undefined;
-    process.stderr.write(result.stderr ?? '');
+  ]);
+  if (template.status !== 0) {
+    process.stderr.write(template.stderr ?? '');
     fail(`Unable to read the deployed template of ${stackName}`);
   }
-  const body = JSON.parse(result.stdout).TemplateBody;
+  const body = JSON.parse(template.stdout).TemplateBody;
   if (typeof body !== 'string') return body;
   try {
     return JSON.parse(body);
@@ -253,33 +270,39 @@ function deployedTemplate(stackName) {
 }
 
 function synthesizedTemplate(stackName) {
-  const outputDirectory = mkdtempSync(path.join(tmpdir(), 'mcc-synth-'));
-  try {
-    const synth = spawnSync(
-      'npm',
-      [
-        'run',
-        'cdk:synth',
-        '--workspace',
-        `@samlevin/${application}`,
-        '--',
-        ...contextArguments,
-        '--quiet',
-        '--output',
-        outputDirectory,
-      ],
-      { stdio: 'inherit', env: childEnvironment },
-    );
-    if (synth.status !== 0) process.exit(synth.status ?? 1);
-    return JSON.parse(
-      readFileSync(
-        path.join(outputDirectory, `${stackName}.template.json`),
-        'utf8',
+  const synth = spawnSync(
+    'npm',
+    [
+      'run',
+      'cdk:synth',
+      '--workspace',
+      `@samlevin/${application}`,
+      '--',
+      ...contextArguments,
+      ...profileArguments,
+      '--quiet',
+    ],
+    { stdio: 'inherit', env: childEnvironment },
+  );
+  if (synth.status !== 0) process.exit(synth.status ?? 1);
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../applications/${application}/cdk.out/${stackName}.template.json`,
+          import.meta.url,
+        ),
       ),
-    );
-  } finally {
-    rmSync(outputDirectory, { recursive: true, force: true });
-  }
+      'utf8',
+    ),
+  );
+}
+
+function awsCli(commandArguments) {
+  return spawnSync('aws', [...commandArguments, ...profileArguments], {
+    encoding: 'utf8',
+    env: childEnvironment,
+  });
 }
 
 function profileSsoAccount(profile) {

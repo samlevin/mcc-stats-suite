@@ -2,77 +2,77 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { findUnsafeRemovals } from './stack-migration-guard.mjs';
 
-const ruleSet = (policy) => ({
-  Type: 'AWS::SES::ReceiptRuleSet',
+const stateful = (type, policy) => ({
+  Type: type,
   ...(policy ? { DeletionPolicy: policy } : {}),
-  Properties: { RuleSetName: 'mcc-match-to-csv-dev' },
+  Properties: {},
 });
-const rule = (policy) => ({
-  Type: 'AWS::SES::ReceiptRule',
-  ...(policy ? { DeletionPolicy: policy } : {}),
-  Properties: { RuleSetName: 'mcc-match-to-csv-dev' },
-});
-const activation = (withDelete) => ({
+const custom = (withDelete) => ({
   Type: 'Custom::AWS',
   Properties: {
     Create: '{"action":"setActiveReceiptRuleSet"}',
-    Update: '{"action":"setActiveReceiptRuleSet"}',
     ...(withDelete ? { Delete: '{"action":"setActiveReceiptRuleSet"}' } : {}),
   },
 });
 const template = (resources) => ({ Resources: resources });
-const unrelated = { Type: 'AWS::SQS::Queue', Properties: {} };
+const stateless = { Type: 'AWS::Lambda::Function', Properties: {} };
 
 test('keeping every resource is always safe', () => {
   const live = template({
-    ReceiptRuleSet: ruleSet(),
-    StoreRawEmail: rule(),
-    Activate: activation(true),
+    RuleSet: stateful('AWS::SES::ReceiptRuleSet'),
+    Bucket: stateful('AWS::S3::Bucket'),
+    Activate: custom(true),
   });
   assert.deepEqual(findUnsafeRemovals(live, live), []);
 });
 
-test('removing unretained receipt resources is refused', () => {
+test('removing unretained stateful resources is refused', () => {
   const live = template({
-    ReceiptRuleSet: ruleSet(),
-    StoreRawEmail: rule(),
-    Activate: activation(true),
-    Queue: unrelated,
+    RuleSet: stateful('AWS::SES::ReceiptRuleSet'),
+    Rule: stateful('AWS::SES::ReceiptRule', 'Delete'),
+    Table: stateful('AWS::DynamoDB::Table'),
+    Fn: stateless,
   });
-  const problems = findUnsafeRemovals(live, template({ Queue: unrelated }));
-  assert.equal(problems.length, 3);
-  assert.match(problems[0], /^ReceiptRuleSet .*deleted/);
-  assert.match(problems[1], /^StoreRawEmail .*deleted/);
-  assert.match(problems[2], /^Activate .*deactivate/);
+  const problems = findUnsafeRemovals(live, template({ Fn: stateless }));
+  assert.deepEqual(
+    problems.map((problem) => problem.split(' ')[0]),
+    ['RuleSet', 'Rule', 'Table'],
+  );
+  assert.match(problems[0], /DeletionPolicy is Delete$/);
 });
 
-test('removing retained receipt resources is allowed', () => {
+test('removing retained stateful resources is allowed', () => {
   for (const policy of ['Retain', 'RetainExceptOnCreate']) {
     const live = template({
-      ReceiptRuleSet: ruleSet(policy),
-      StoreRawEmail: rule(policy),
-      Activate: activation(false),
+      RuleSet: stateful('AWS::SES::ReceiptRuleSet', policy),
+      Bucket: stateful('AWS::S3::Bucket', policy),
     });
     assert.deepEqual(findUnsafeRemovals(live, template({})), []);
   }
 });
 
-test('removing unrelated resources is allowed', () => {
-  const live = template({ Queue: unrelated, ReceiptRuleSet: ruleSet() });
-  const next = template({ ReceiptRuleSet: ruleSet() });
+test('removing a custom resource with a delete call is refused', () => {
+  const live = template({ Activate: custom(true) });
+  const problems = findUnsafeRemovals(live, template({}));
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /^Activate .*delete call$/);
+});
+
+test('removing a custom resource without a delete call is allowed', () => {
+  const live = template({ Activate: custom(false) });
+  assert.deepEqual(findUnsafeRemovals(live, template({})), []);
+});
+
+test('removing stateless resources is allowed', () => {
+  const live = template({ Fn: stateless, Bucket: stateful('AWS::S3::Bucket') });
+  const next = template({ Bucket: stateful('AWS::S3::Bucket') });
   assert.deepEqual(findUnsafeRemovals(live, next), []);
 });
 
-test('an activation whose delete handler is an intrinsic is still caught', () => {
-  const live = template({
-    Activate: {
-      Type: 'Custom::AWS',
-      Properties: {
-        Delete: { 'Fn::Join': ['', ['{"action":"setActiveReceiptRuleSet"']] },
-      },
-    },
-  });
-  assert.equal(findUnsafeRemovals(live, template({})).length, 1);
+test('a renamed stateful resource counts as a removal', () => {
+  const live = template({ OldBucket: stateful('AWS::S3::Bucket') });
+  const next = template({ NewBucket: stateful('AWS::S3::Bucket') });
+  assert.equal(findUnsafeRemovals(live, next).length, 1);
 });
 
 test('a missing stack or empty template has nothing to protect', () => {

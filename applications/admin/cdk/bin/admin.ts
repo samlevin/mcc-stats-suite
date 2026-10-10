@@ -9,5 +9,5 @@ const deployment = resolveDeployment(app.node, 'admin');
 new AdminStack(app, deployment.stackName, {
   deployment,
   env: { account: deployment.account, region: deployment.region },
-  terminationProtection: deployment.environment === 'prod',
+  terminationProtection: !deployment.isEphemeral,
 });
