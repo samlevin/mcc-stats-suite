@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { LOCAL_CHANGE_SET_NAME } from './local-cdk-bootstrap.mjs';
+import {
+  APPLICATIONS,
+  LOCAL_TOOLKIT_STACK_NAME,
+  localDeployArguments,
+} from './cdk-targets.mjs';
 
-const applications = new Set([
-  'admin',
-  'data-pipeline',
-  'match-to-csv',
-  'ocr-quality',
-  'player',
-]);
+const applications = new Set(APPLICATIONS);
 const actions = new Set(['synth', 'diff', 'deploy', 'destroy']);
 
 const [action, application, ...rawArguments] = process.argv.slice(2);
@@ -145,15 +143,13 @@ if (expectedAccount) {
 }
 if (profile) cdkArguments.push('--profile', profile);
 if (ephemeral && action !== 'synth') {
-  cdkArguments.push('--toolkit-stack-name', 'CDKToolkitLocal');
-  // The local bootstrap executes only change sets with this name.
-  if (
-    action === 'deploy' &&
-    !passthrough.some((argument) =>
-      /^--(method|change-set-name)(=|$)/.test(argument),
-    )
-  ) {
-    cdkArguments.push('--change-set-name', LOCAL_CHANGE_SET_NAME);
+  cdkArguments.push('--toolkit-stack-name', LOCAL_TOOLKIT_STACK_NAME);
+  if (action === 'deploy') {
+    try {
+      cdkArguments.push(...localDeployArguments(passthrough));
+    } catch (error) {
+      fail(error.message);
+    }
   }
 }
 if (

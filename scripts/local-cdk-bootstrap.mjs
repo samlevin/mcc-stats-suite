@@ -1,14 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { parse, stringify } from 'yaml';
+import {
+  APPLICATIONS as applications,
+  LOCAL_CHANGE_SET_NAME,
+  LOCAL_QUALIFIER,
+} from './cdk-targets.mjs';
 
-const applications = [
-  'admin',
-  'data-pipeline',
-  'match-to-csv',
-  'ocr-quality',
-  'player',
-];
 const sub = (value) => ({ 'Fn::Sub': value });
 const arn = (service, resource) =>
   sub(
@@ -26,7 +23,6 @@ const statement = (Sid, Action, Resource, extra = {}) => ({
   ...extra,
 });
 const document = (Statement) => ({ Version: '2012-10-17', Statement });
-export const LOCAL_CHANGE_SET_NAME = 'mcclocal1-deploy';
 
 export function localBootstrap(template) {
   const result = structuredClone(template);
@@ -43,9 +39,9 @@ export function localBootstrap(template) {
         `Missing bootstrap resource ${name}; review the CDK template upgrade`,
       );
   }
-  result.Parameters.Qualifier.Default = 'mcclocal1';
+  result.Parameters.Qualifier.Default = LOCAL_QUALIFIER;
   // An operator cannot accidentally turn this template into the stable bootstrap.
-  result.Parameters.Qualifier.AllowedValues = ['mcclocal1'];
+  result.Parameters.Qualifier.AllowedValues = [LOCAL_QUALIFIER];
   const stacks = applications.map((app) =>
     arn('cloudformation', `stack/${app}-*/*`),
   );
@@ -98,6 +94,8 @@ export function localBootstrap(template) {
             'logs:DescribeLogGroups',
             'xray:PutTraceSegments',
             'xray:PutTelemetryRecords',
+            'xray:GetSamplingRules',
+            'xray:GetSamplingTargets',
           ],
           '*',
         ),
@@ -186,7 +184,7 @@ export function localBootstrap(template) {
     Sid: 'ReadOnlyBootstrapParameters',
     Effect: 'Deny',
     Action: 'ssm:GetParameter*',
-    NotResource: arn('ssm', 'parameter/cdk-bootstrap/mcclocal1/*'),
+    NotResource: arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/*`),
   });
   const deployment = resources.DeploymentActionRole.Properties;
   deployment.ManagedPolicyArns = [];
@@ -208,6 +206,9 @@ export function localBootstrap(template) {
           [
             'cloudformation:TagResource',
             'cloudformation:UntagResource',
+            // The CLI deletes a stack that failed creation without a role ARN. CloudFormation
+            // then uses the stack's stored role, and passing any other role needs PassRole.
+            'cloudformation:DeleteStack',
             'cloudformation:DeleteChangeSet',
             'cloudformation:UpdateTerminationProtection',
           ],
@@ -218,7 +219,6 @@ export function localBootstrap(template) {
           [
             'cloudformation:CreateStack',
             'cloudformation:UpdateStack',
-            'cloudformation:DeleteStack',
             'cloudformation:CreateChangeSet',
             'cloudformation:ContinueUpdateRollback',
             'cloudformation:RollbackStack',
@@ -267,8 +267,8 @@ export function localBootstrap(template) {
         ),
         statement(
           'ReadBootstrapVersion',
-          'ssm:GetParameter',
-          arn('ssm', 'parameter/cdk-bootstrap/mcclocal1/version'),
+          ['ssm:GetParameter', 'ssm:GetParameters'],
+          arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
         ),
       ]),
     },
@@ -388,6 +388,7 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
+  const { parse, stringify } = await import('yaml');
   process.stdout.write(
     stringify(localBootstrap(parse(readFileSync(0, 'utf8')))),
   );

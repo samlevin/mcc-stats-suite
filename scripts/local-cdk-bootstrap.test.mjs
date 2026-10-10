@@ -3,10 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { parse } from 'yaml';
-import {
-  LOCAL_CHANGE_SET_NAME,
-  localBootstrap,
-} from './local-cdk-bootstrap.mjs';
+import { LOCAL_CHANGE_SET_NAME, localDeployArguments } from './cdk-targets.mjs';
+import { localBootstrap } from './local-cdk-bootstrap.mjs';
 
 const upstream = parse(
   execFileSync(
@@ -437,4 +435,57 @@ test('lookup role cannot read workload data', () => {
       'arn:aws:ssm:us-east-1:000000000000:parameter/cdk-bootstrap/mcclocal1/version',
     ),
   );
+});
+
+test('deployment deletes failed ephemeral stacks without a role but never shared ones', () => {
+  assert.equal(
+    allowed(deployment, 'cloudformation:DeleteStack', stack('admin-alice')),
+    true,
+  );
+  assert.equal(
+    allowed(deployment, 'cloudformation:DeleteStack', stack('admin-dev')),
+    false,
+  );
+  assert.equal(
+    allowed(deployment, 'cloudformation:UpdateStack', stack('admin-alice')),
+    false,
+    'updates still require the local execution role',
+  );
+});
+
+test('deployment reads the local bootstrap version with either SSM call', () => {
+  for (const action of ['ssm:GetParameter', 'ssm:GetParameters']) {
+    assert.equal(
+      allowed(
+        deployment,
+        action,
+        'arn:aws:ssm:us-east-1:000000000000:parameter/cdk-bootstrap/mcclocal1/version',
+      ),
+      true,
+      action,
+    );
+  }
+});
+
+test('runtime boundary allows X-Ray sampling lookups', () => {
+  for (const action of ['xray:GetSamplingRules', 'xray:GetSamplingTargets']) {
+    assert.equal(allowed(runtime, action, '*'), true, action);
+  }
+});
+
+test('ephemeral deploys name the local change set unless deploying directly', () => {
+  const named = ['--change-set-name', LOCAL_CHANGE_SET_NAME];
+  assert.deepEqual(localDeployArguments([]), named);
+  assert.deepEqual(localDeployArguments(['--method=change-set']), named);
+  assert.deepEqual(
+    localDeployArguments(['--method', 'prepare-change-set']),
+    named,
+  );
+  assert.deepEqual(localDeployArguments(['--method=direct']), []);
+  assert.deepEqual(localDeployArguments(['--method', 'direct']), []);
+  assert.throws(
+    () => localDeployArguments(['--change-set-name', 'mine']),
+    /remove --change-set-name/,
+  );
+  assert.throws(() => localDeployArguments(['--change-set-name=mine']));
 });
