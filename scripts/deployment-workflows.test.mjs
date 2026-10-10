@@ -79,7 +79,7 @@ test('artifact belongs to qualifying CI run and deployment uses that CI SHA', ()
     orchestration.jobs.deploy.with.sha,
     '${{ needs.qualify.outputs.sha }}',
   );
-  for (const job of Object.values(delivery.jobs)) {
+  for (const job of [delivery.jobs.dev, delivery.jobs.prod]) {
     assert.equal(job.with.sha, '${{ inputs.sha }}');
     assert.equal(job.with.application, '${{ inputs.application }}');
   }
@@ -225,4 +225,148 @@ test('package publication runs separately after trusted CI at the validated SHA'
     publication.jobs['publish-packages'].steps[0].with.ref,
     '${{ github.event.workflow_run.head_sha }}',
   );
+});
+
+test('approval prompt uses the qualified application and SHA with comment permissions', () => {
+  const prompt = delivery.jobs['approval-prompt'];
+  assert.equal(prompt.needs, 'dev');
+  assert.equal(prompt.if, delivery.jobs.prod.if);
+  assert.equal(prompt.environment, undefined);
+  assert.deepEqual(prompt.permissions, {
+    contents: 'read',
+    'pull-requests': 'read',
+    issues: 'write',
+  });
+  assert.equal(orchestration.jobs.deploy.permissions.issues, 'write');
+  assert.equal(orchestration.jobs.deploy.permissions['pull-requests'], 'read');
+  assert.deepEqual(prompt.steps[0].env, {
+    APPLICATION: '${{ inputs.application }}',
+    TARGET_SHA: '${{ inputs.sha }}',
+  });
+  assert.equal(prompt.steps[0].with['github-token'], undefined);
+  assert.equal(
+    delivery.jobs.prod.name,
+    'Approve production: ${{ inputs.application }}',
+  );
+  assert.match(deployment.jobs.deploy.name, /Approve production:/);
+});
+
+test('approval prompt creates or updates its bot comment and skips commits without a merged PR', async () => {
+  const script = delivery.jobs['approval-prompt'].steps[0].with.script;
+  const run = new (Object.getPrototypeOf(async function () {}).constructor)(
+    'github',
+    'context',
+    'core',
+    'process',
+    script,
+  );
+  const sha = 'a'.repeat(40);
+  const pull = {
+    number: 38,
+    merged_at: 'merged',
+    merge_commit_sha: sha,
+    base: { repo: { full_name: 'owner/repo' } },
+  };
+  for (const scenario of [
+    'create',
+    'update',
+    'no-pr',
+    'unmerged',
+    'other-sha',
+    'other-repo',
+  ]) {
+    const calls = [];
+    let summary;
+    const associated =
+      scenario === 'no-pr'
+        ? []
+        : [
+            {
+              ...pull,
+              ...(scenario === 'unmerged' ? { merged_at: null } : {}),
+              ...(scenario === 'other-sha'
+                ? { merge_commit_sha: 'b'.repeat(40) }
+                : {}),
+              ...(scenario === 'other-repo'
+                ? { base: { repo: { full_name: 'fork/repo' } } }
+                : {}),
+            },
+          ];
+    const listPulls = Symbol('pulls');
+    const listComments = Symbol('comments');
+    await run(
+      {
+        rest: {
+          repos: { listPullRequestsAssociatedWithCommit: listPulls },
+          issues: {
+            listComments,
+            createComment: async (request) => calls.push(['create', request]),
+            updateComment: async (request) => calls.push(['update', request]),
+          },
+        },
+        paginate: async (method, request) => {
+          assert.equal(request.owner, 'owner');
+          assert.equal(request.repo, 'repo');
+          if (method === listPulls) {
+            assert.equal(request.commit_sha, sha);
+            return associated;
+          }
+          assert.equal(method, listComments);
+          assert.equal(request.issue_number, 38);
+          calls.push(['list']);
+          return [
+            {
+              id: 1,
+              user: { login: 'human' },
+              body: '<!-- production-approval:match-to-csv -->',
+            },
+            {
+              id: 2,
+              user: { login: 'github-actions[bot]' },
+              body: '<!-- production-approval:admin -->',
+            },
+            ...(scenario === 'update'
+              ? [
+                  {
+                    id: 3,
+                    user: { login: 'github-actions[bot]' },
+                    body: '<!-- production-approval:match-to-csv -->old',
+                  },
+                ]
+              : []),
+          ];
+        },
+      },
+      {
+        repo: { owner: 'owner', repo: 'repo' },
+        serverUrl: 'https://github.com',
+        runId: 123,
+      },
+      {
+        summary: {
+          addRaw: (body) => {
+            summary = body;
+            return { write: async () => {} };
+          },
+        },
+        info: () => {},
+      },
+      { env: { APPLICATION: 'match-to-csv', TARGET_SHA: sha } },
+    );
+    assert.match(summary, /@owner/);
+    assert.match(summary, /`match-to-csv` at `aaaaaaa`/);
+    assert.match(
+      summary,
+      /https:\/\/github.com\/owner\/repo\/actions\/runs\/123/,
+    );
+    if (scenario === 'create' || scenario === 'update') {
+      assert.equal(calls.length, 2);
+      assert.equal(calls[1][0], scenario);
+      assert.equal(calls[1][1].body, summary);
+      assert.equal(
+        calls[1][1][scenario === 'create' ? 'issue_number' : 'comment_id'],
+        scenario === 'create' ? 38 : 3,
+      );
+    } else assert.deepEqual(calls, []);
+  }
 });

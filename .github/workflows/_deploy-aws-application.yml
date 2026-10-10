@@ -56,6 +56,7 @@ jobs:
             }
 
   deploy:
+    name: "${{ inputs.environment == 'prod' && format('Approve production: {0}', inputs.application) || format('Deploy dev: {0}', inputs.application) }}"
     needs: qualify-production
     if: ${{ always() && !cancelled() && (inputs.environment == 'dev' || needs.qualify-production.result == 'success') }}
     # match-to-csv's ARM64 Lambda bundling needs a native ARM Docker host.
