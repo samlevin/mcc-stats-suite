@@ -1,6 +1,5 @@
 name: Epic
 description: Explicitly requested notable body of work.
-title: '[Epic]: '
 labels:
   - 'epic'
 projects:
