@@ -41,7 +41,7 @@ Expected: both policies are `Retain`, and the active rule set matches the state 
 
 Terrateam has no import command, so import with declarative `import` blocks, as in [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist). Do this on the foundation pull request, which adds `email_domain` and the `aws_ses_*` resources and removes the resources from the stack. Do not merge it yet. Planning without the import proposes to create resources that already exist, and an apply fails.
 
-1. Add `infrastructure/dev/foundation/ses-imports.tf` to the pull request. It holds no domain and no account ID. Do not add it to a new installation, where the resources do not exist yet.
+1. Add `infrastructure/dev/foundation/ses-imports.tf` and `infrastructure/prod/foundation/ses-imports.tf` in one commit, so dev and prod apply from the same commit. They hold no domain and no account ID. Dev holds the blocks below. Prod holds the same blocks with `mcc-match-to-csv-prod` and `mcc-match-to-csv-prod:match-to-csv-prod`.
 
    ```hcl
    import {
@@ -62,8 +62,9 @@ Terrateam has no import command, so import with declarative `import` blocks, as 
 
 2. Comment `terrateam plan dev and foundation`. Expected: three resources to import, one new SSM parameter `/mcc/dev/match-to-csv/receipt-rule-set-name`, and nothing else. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means `DEV_MCC_EMAIL_DOMAIN` differs from the domain the stack uses.
 3. Comment `terrateam apply dev and foundation`. Expected: three imported, one added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
-4. Add `infrastructure/prod/foundation/ses-imports.tf` with the same blocks, using `mcc-match-to-csv-prod` and `mcc-match-to-csv-prod:match-to-csv-prod`. Comment `terrateam plan prod and foundation`, confirm the same shape as dev, then `terrateam apply prod and foundation`.
-5. Once both applies succeed, the resources are in state. Delete both `ses-imports.tf` files in the same pull request, then comment `terrateam plan dev and foundation` and the same for prod. Expected: both plans are empty.
+4. Comment `terrateam plan prod and foundation`, confirm the same shape as dev, then `terrateam apply prod and foundation`, and run the same `describe` check.
+
+The import files are in state after the applies and then do nothing, like `recovery-imports.tf`. Do not copy them into a new installation, where the resources do not exist yet and the import would fail. After the merge, remove them in a follow-up foundation pull request. Expected: its dev and prod plans are empty.
 
 Terrateam merges the pull request after both applies. That starts step 3 for dev.
 
