@@ -31,7 +31,7 @@ Terrateam checks the dev and prod foundation roots weekly and opens a GitHub iss
 1. Identify the affected root and inspect every planned action in the issue.
 2. Decide whether AWS changed outside OpenTofu or the repository no longer describes the intended state.
 3. If the external change is intended, open a pull request that records it in OpenTofu.
-4. If it is not intended, open a pull request to get a fresh plan for that root, and merge only after confirming the plan restores repository state without touching unrelated resources.
+4. If it is not intended, open a pull request to get a fresh plan for that root, and apply it from the pull request only after confirming the plan restores repository state without touching unrelated resources.
 5. Close the drift issue after a later plan is empty.
 
 Do not enable unattended reconciliation to silence drift, and do not edit state by hand.

@@ -15,6 +15,16 @@ drift:
       tag_query: 'foundation'
       schedule: weekly
 
+# Foundation changes are applied from the pull request, dev before prod. Nothing
+# applies from main. A root stays locked from its first apply until the pull
+# request merges, and Terrateam merges it once every planned root has applied.
+lock_policy: strict
+
+automerge:
+  enabled: true
+  merge_strategy: squash
+  retain_pr_title: true
+
 hooks:
   plan:
     post:
@@ -51,7 +61,7 @@ dirs:
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
-      autoapply: true
+      autoapply: false
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
@@ -62,7 +72,7 @@ dirs:
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
     when_modified:
-      autoapply: true
+      autoapply: false
       depends_on:
         tag_query: 'dir:infrastructure/dev/foundation'
         prune_on_no_change: true
