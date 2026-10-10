@@ -5,6 +5,7 @@ import {
   CfnParameter,
   Duration,
   Fn,
+  RemovalPolicy,
   Stack,
   Tags,
   type StackProps,
@@ -27,13 +28,15 @@ import * as customResources from 'aws-cdk-lib/custom-resources';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
+  /** Commit recorded in Lambda environments and OCR evidence. */
+  gitSha: string;
 }
 
 export class MatchToCsvStack extends Stack {
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
-    const { deployment } = props;
+    const { deployment, gitSha } = props;
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -51,7 +54,7 @@ export class MatchToCsvStack extends Stack {
       OBJECT_PREFIX: deployment.objectPrefix,
     };
     const buildEnvironment = {
-      GIT_SHA: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? 'local',
+      GIT_SHA: gitSha,
       DEPLOYMENT_ENVIRONMENT: deployment.environment.toUpperCase(),
     };
     const rawEmailBucket = s3.Bucket.fromBucketName(
@@ -278,12 +281,6 @@ export class MatchToCsvStack extends Stack {
       emailDomain.valueAsString,
     ]);
     const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
-    let receiptRuleSet: ses.CfnReceiptRuleSet | undefined;
-    if (!deployment.isEphemeral) {
-      receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
-        ruleSetName: receiptRuleSetName,
-      });
-    }
     const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
       ruleSetName: receiptRuleSetName,
       rule: {
@@ -303,7 +300,22 @@ export class MatchToCsvStack extends Stack {
         ],
       },
     });
-    if (receiptRuleSet) {
+    if (!deployment.isEphemeral) {
+      const receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
+        ruleSetName: receiptRuleSetName,
+      });
+      // Migration step 1: keep the live rule set and rule when later releases
+      // stop declaring them, because OpenTofu takes ownership (issue #45).
+      // RetainExceptOnCreate deletes them when a first create rolls back, so
+      // the names are not stranded and a retry does not fail AlreadyExists.
+      receiptRuleSet.applyRemovalPolicy(
+        RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
+      );
+      // Retain only on deletion. A replaced rule must not stay behind and
+      // duplicate every inbound email.
+      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE, {
+        applyToUpdateReplacePolicy: false,
+      });
       receiptRule.node.addDependency(receiptRuleSet);
       const activateRules = new customResources.AwsCustomResource(
         this,
@@ -323,17 +335,21 @@ export class MatchToCsvStack extends Stack {
             physicalResourceId:
               customResources.PhysicalResourceId.of(receiptRuleSetName),
           },
-          onDelete: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: {},
-          },
+          // No onDelete: removing this resource must never deactivate the
+          // account's active rule set.
           policy: customResources.AwsCustomResourcePolicy.fromSdkCalls({
             resources: customResources.AwsCustomResourcePolicy.ANY_RESOURCE,
           }),
         },
       );
       activateRules.node.addDependency(receiptRule);
+      // Activate last. The activation has no delete call and an active rule
+      // set cannot be deleted, so a create that failed after activation could
+      // not roll back. Depending on every other construct means a failed
+      // create never reaches activation.
+      for (const child of this.node.children) {
+        if (child !== activateRules) activateRules.node.addDependency(child);
+      }
 
       new CfnOutput(this, 'ReceiptRuleSetName', {
         value: receiptRuleSetName,
@@ -382,7 +398,8 @@ export class MatchToCsvStack extends Stack {
         sourceMap: true,
         target: 'node22',
         nodeModules: includeSharp ? ['sharp'] : undefined,
-        forceDockerBundling: includeSharp,
+        // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
+        forceDockerBundling: includeSharp && this.bundlingRequired,
       },
     });
   }

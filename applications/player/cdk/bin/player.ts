@@ -9,5 +9,5 @@ const deployment = resolveDeployment(app.node, 'player');
 new PlayerStack(app, deployment.stackName, {
   deployment,
   env: { account: deployment.account, region: deployment.region },
-  terminationProtection: deployment.environment === 'prod',
+  terminationProtection: !deployment.isEphemeral,
 });

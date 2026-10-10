@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { findUnsafeRemovals } from './stack-migration-guard.mjs';
 
 const applications = new Set([
   'admin',
@@ -39,8 +42,12 @@ if (
 if (environment === 'prod' && ephemeral) {
   fail('Production does not support --ephemeral');
 }
-if (environment === 'prod' && action === 'destroy') {
-  fail('Production destruction is not supported by this command');
+if (action === 'destroy' && !ephemeral) {
+  fail(
+    'Only ephemeral stacks can be destroyed. Stable stacks deploy from main ' +
+      'through GitHub Actions and have termination protection. ' +
+      'Pass --ephemeral <name>',
+  );
 }
 if (!ephemeral && action === 'deploy') {
   if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true') {
@@ -129,20 +136,27 @@ const sharedBuild = spawnSync(
 );
 if (sharedBuild.status !== 0) process.exit(sharedBuild.status ?? 1);
 
+const contextArguments = ['-c', `environment=${environment}`];
+if (ephemeral) contextArguments.push('-c', `ephemeral=${ephemeral}`);
+if (expectedAccount) {
+  contextArguments.push('-c', `expectedAccount=${expectedAccount}`);
+}
+const profileArguments = profile ? ['--profile', profile] : [];
+
 const cdkArguments = [
   'run',
   `cdk:${action}`,
   '--workspace',
   `@samlevin/${application}`,
   '--',
-  '-c',
-  `environment=${environment}`,
+  ...contextArguments,
+  ...profileArguments,
 ];
-if (ephemeral) cdkArguments.push('-c', `ephemeral=${ephemeral}`);
-if (expectedAccount) {
-  cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
+if (action === 'deploy' && !ephemeral) {
+  refuseUnsafeRemovals(`${application}-${environment}`);
+  // Deploy the assembly the guard just synthesized instead of bundling again.
+  cdkArguments.push('--app', 'cdk.out');
 }
-if (profile) cdkArguments.push('--profile', profile);
 if (
   application === 'match-to-csv' &&
   (action === 'deploy' || action === 'diff') &&
@@ -189,6 +203,106 @@ function environmentFromProfile(profile) {
   if (/(^|[-_])prod(uction)?($|[-_])/.test(normalized)) return 'prod';
   if (/(^|[-_])dev(elopment)?($|[-_])/.test(normalized)) return 'dev';
   return undefined;
+}
+
+// CloudFormation deletes a removed resource using the DeletionPolicy of the
+// template that is already deployed. A release that drops a stateful resource
+// is only safe after a release that retains it has reached the stack.
+function refuseUnsafeRemovals(stackName) {
+  const liveTemplate = deployedTemplate(stackName);
+  if (!liveTemplate) return;
+  const problems = findUnsafeRemovals(
+    liveTemplate,
+    synthesizedTemplate(stackName),
+  );
+  if (problems.length === 0) return;
+  fail(
+    [
+      `Refusing deploy: ${stackName} would lose resources that its deployed template does not retain.`,
+      ...problems.map((problem) => `  - ${problem}`),
+      'Retain each resource, or drop its delete call, in a release that keeps its logical ID. Deploy that release, then remove the resource in the next one.',
+    ].join('\n'),
+  );
+}
+
+function deployedTemplate(stackName) {
+  const status = awsCli([
+    'cloudformation',
+    'describe-stacks',
+    '--stack-name',
+    stackName,
+    '--query',
+    'Stacks[0].StackStatus',
+    '--output',
+    'text',
+  ]);
+  if (status.status !== 0) {
+    if (/does not exist/.test(status.stderr ?? '')) return undefined;
+    process.stderr.write(status.stderr ?? '');
+    fail(`Unable to describe ${stackName}`);
+  }
+  // A rolled-back first create or a review-only stack owns no resources, and
+  // cdk deploy replaces it, so its template protects nothing.
+  if (
+    ['ROLLBACK_COMPLETE', 'REVIEW_IN_PROGRESS'].includes(status.stdout.trim())
+  ) {
+    return undefined;
+  }
+  const template = awsCli([
+    'cloudformation',
+    'get-template',
+    '--stack-name',
+    stackName,
+    '--output',
+    'json',
+  ]);
+  if (template.status !== 0) {
+    process.stderr.write(template.stderr ?? '');
+    fail(`Unable to read the deployed template of ${stackName}`);
+  }
+  const body = JSON.parse(template.stdout).TemplateBody;
+  if (typeof body !== 'string') return body;
+  try {
+    return JSON.parse(body);
+  } catch {
+    fail(`The deployed template of ${stackName} is not JSON; refusing deploy`);
+  }
+}
+
+function synthesizedTemplate(stackName) {
+  const synth = spawnSync(
+    'npm',
+    [
+      'run',
+      'cdk:synth',
+      '--workspace',
+      `@samlevin/${application}`,
+      '--',
+      ...contextArguments,
+      ...profileArguments,
+      '--quiet',
+    ],
+    { stdio: 'inherit', env: childEnvironment },
+  );
+  if (synth.status !== 0) process.exit(synth.status ?? 1);
+  return JSON.parse(
+    readFileSync(
+      fileURLToPath(
+        new URL(
+          `../applications/${application}/cdk.out/${stackName}.template.json`,
+          import.meta.url,
+        ),
+      ),
+      'utf8',
+    ),
+  );
+}
+
+function awsCli(commandArguments) {
+  return spawnSync('aws', [...commandArguments, ...profileArguments], {
+    encoding: 'utf8',
+    env: childEnvironment,
+  });
 }
 
 function profileSsoAccount(profile) {

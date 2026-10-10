@@ -40,18 +40,20 @@ Do not enable unattended reconciliation to silence drift, and do not edit state 
 
 Inspect the CloudFormation stack events, fix the application or configuration, and redeploy. Do not recreate stack-owned resources by hand.
 
+If the deploy stops with `Refusing deploy: <stack> would lose resources that its deployed template does not retain`, the new release removes a stateful resource (a bucket, table, key, SES receipt rule set or rule, or SSM parameter) or a custom resource with a delete call, and the deployed template would delete it or run that call. CloudFormation applies the deployed template's policy, not the new one. Retain the resource, or drop its delete call, in a release that keeps its logical ID, deploy that release, and remove the resource in the next one.
+
 ## Application incident after a production deployment
 
 If an older release is known safe and compatible with current data, [roll back](50-deploy-and-release-applications.md#roll-back). After service recovers, revert or correct the change on current `main`. Prefer fixing forward when the current release changed persistent schemas or wrote data an older version cannot read.
 
 ## Stale personal development stack
 
-Confirm the instance owner, then remove only that application stack:
+Confirm the instance owner, then remove only that ephemeral application stack. The shared `-dev` and `-prod` stacks deploy only from `main` through GitHub Actions, have termination protection, and cannot be destroyed with this command:
 
 ```console
 aws sso login --profile <dev-profile>
 aws sts get-caller-identity --profile <dev-profile>
-npm run app:destroy -- <application> --profile <dev-profile>
+npm run app:destroy -- <application> --environment dev --ephemeral <name> --profile <dev-profile>
 ```
 
 ## Release Please cannot open a release pull request
