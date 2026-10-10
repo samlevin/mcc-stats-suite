@@ -21,6 +21,7 @@ Pipe long output through `tail -n 60`. Tests never call AWS.
 - Public repo: never commit credentials, account IDs, emails, domains, state, plans, or populated env files.
 - Never deploy, apply infrastructure, or weaken account checks in `scripts/cdk-app.mjs` or `packages/cdk-config`. Local CDK diff/deploy needs `--environment dev --ephemeral <name>`.
 - OpenTofu owns persistent shared resources; CDK owns application compute. Never manage a resource from both.
+- Terrateam plans and applies only pull requests that target `main`. A pull request that changes `infrastructure/` or `.terrateam/` targets `main` directly. Stack it on another branch only when nothing needs its apply before it is retargeted to `main`; say so in the PR body and include any `import` blocks before the retarget. A foundation change that an application change depends on goes first, in its own pull request.
 - Evidence is immutable: never overwrite raw MIME, screenshots, provider responses, or runs; events are append-only. Replay creates a new run. Unknown layouts stay `UNKNOWN`.
 - Shared-package changes include every consumer update. Keep `package.json`, `package-lock.json`, `.release-please-manifest.json`, and `release-please-config.json` in sync (`npm run release:check`).
 
