@@ -31,7 +31,6 @@ From the repository root:
 ```console
 npm ci
 npm run check
-npm run tofu:fmt:check
 aws sso login --profile mcc-dev-admin
 aws sts get-caller-identity --profile mcc-dev-admin
 aws sso login --profile mcc-prod-admin
@@ -39,5 +38,7 @@ aws sts get-caller-identity --profile mcc-prod-admin
 ```
 
 The checks pass and the two account IDs differ.
+
+For infrastructure changes, run the full formatting, validation, and module-test loop in [TESTING.md](../../TESTING.md).
 
 Next: [Bootstrap the dev and prod accounts](10-bootstrap-accounts.md).

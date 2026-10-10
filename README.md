@@ -87,10 +87,9 @@ Run the repository checks. None of them call AWS:
 ```console
 npm ci
 npm run check
-npm run tofu:fmt:check
 ```
 
-`npm run check` covers Prettier, ESLint, release metadata, TypeScript, tests, and builds. See [TESTING.md](TESTING.md) for focused commands and the difference between unit, synthesis, and deployed integration checks.
+`npm run check` covers Prettier, ESLint, release metadata, TypeScript, tests, and builds. For infrastructure changes, follow the full formatting, validation, and module-test loop in [TESTING.md](TESTING.md). See it for focused commands and the difference between unit, synthesis, and deployed integration checks.
 
 Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain names, populated backend files, variable files, state, or plans.
 
