@@ -34,6 +34,8 @@ Without write access to the repository, you cannot assign yourself or change pro
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
+People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. CI checks the name and that the issue exists.
+
 ## Pull requests and review
 
 People open their PR directly. Agents push the branch and get an `APPROVE` from `code-reviewer` before opening the PR. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over.

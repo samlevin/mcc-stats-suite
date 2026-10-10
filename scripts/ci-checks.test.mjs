@@ -75,6 +75,8 @@ test('documentation and recognized repository scopes avoid workspace and infrast
   assert.equal(commands.length, 3);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
   assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
+  assert.ok(JSON.stringify(commands).includes('branch-name.test.mjs'));
+  assert.ok(JSON.stringify(commands).includes('branch-name.mjs'));
 });
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {
