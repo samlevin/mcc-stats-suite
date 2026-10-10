@@ -102,6 +102,7 @@ test('release configuration preserves coordinated local dependency versions', ()
     assert.notEqual(pkg.private, true);
     assert.equal(pkg.publishConfig.registry, registry);
     assert.deepEqual(pkg.files, ['dist']);
+    if (workspace === 'cdk-config') assert.ok(pkg.dependencies['@types/node']);
     assert.equal(
       pkg.repository.url,
       'https://github.com/samlevin/mcc-stats-suite.git',

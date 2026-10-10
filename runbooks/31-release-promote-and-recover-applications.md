@@ -2,7 +2,7 @@
 
 Application releases and deployments are separate. Release Please creates a named, immutable candidate. The production workflow promotes that candidate after the same application and commit pass in `dev`.
 
-The private `@samlevin/cdk-config` and `@samlevin/contracts` workspaces have independent semantic versions and GitHub releases. Applications use exact local dependency versions. Release Please updates those pins and patch-bumps every affected application in the same release commit. A `cdk-config` change therefore creates releases for all dependent applications. A `contracts` change creates a new `match-to-csv` release. The packages remain private and are not published to npm.
+The `@samlevin/cdk-config` and `@samlevin/contracts` shared packages have independent semantic versions and GitHub releases. Applications use exact local dependency versions. Release Please updates those pins and patch-bumps every affected application in the same release commit. A `cdk-config` change therefore creates releases for all dependent applications. A `contracts` change creates a new `match-to-csv` release. After successful main CI, the `publish-packages` job publishes built shared package versions to GitHub Packages and skips existing immutable versions. See [package publication and recovery](../CONTRIBUTING.md#understand-release-versioning) for authentication and retry instructions.
 
 ## Release an application
 

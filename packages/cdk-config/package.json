@@ -19,5 +19,8 @@
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
+  },
+  "dependencies": {
+    "@types/node": "^22.19.15"
   }
 }
