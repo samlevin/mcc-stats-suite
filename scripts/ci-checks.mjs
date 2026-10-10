@@ -1,5 +1,5 @@
 import { spawn, execFileSync } from 'node:child_process';
-import { appendFileSync, globSync } from 'node:fs';
+import { appendFileSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { repositoryFiles } from './ci-scope.mjs';
 
@@ -31,9 +31,13 @@ export function workspaceArguments(mode) {
   ];
 }
 
-// Single sources: the full list is the glob, the repository list comes from the
+// Single sources: the full list is the scripts directory, the repository list comes from the
 // classifier's allowlist, so a new script needs no edit here.
-export const fullTests = () => globSync('scripts/*.test.mjs').sort();
+export const fullTests = () =>
+  readdirSync(new URL('./', import.meta.url))
+    .filter((name) => name.endsWith('.test.mjs'))
+    .sort()
+    .map((name) => `scripts/${name}`);
 export const repositoryTests = () =>
   [...repositoryFiles].filter((file) => file.endsWith('.test.mjs')).sort();
 export const repositoryTargets = () =>

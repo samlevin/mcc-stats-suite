@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import ts from 'typescript';
 import {
@@ -134,7 +135,8 @@ test('checks overlap and any failing check rejects the gate after all checks set
   await assert.rejects(result, /CI checks failed/);
 });
 
-test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', () => {
+test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', (t) => {
+  if (!existsSync(turbo)) return t.skip('turbo binary absent');
   const plan = JSON.parse(
     execFileSync(turbo, [...workspaceArguments('all').slice(1), '--dry=json'], {
       cwd: root,
@@ -169,7 +171,8 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   );
 });
 
-test('actual Turbo affected selection includes shared consumers and skips unrelated applications', () => {
+test('actual Turbo affected selection includes shared consumers and skips unrelated applications', (t) => {
+  if (!existsSync(turbo)) return t.skip('turbo binary absent');
   const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-selection-'));
   try {
     const git = (...args) =>
@@ -436,7 +439,8 @@ test('cache uses dedicated session credentials and environment contracts without
   );
 });
 
-test('same revision has separate dev and prod Turbo task hashes', () => {
+test('same revision has separate dev and prod Turbo task hashes', (t) => {
+  if (!existsSync(turbo)) return t.skip('turbo binary absent');
   const plan = (environment) =>
     JSON.parse(
       execFileSync(
