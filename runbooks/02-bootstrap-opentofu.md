@@ -44,7 +44,7 @@ Bootstrap each account once from an administrator SSO session. This creates the 
    Approve the migration. The final plan must report no changes.
 
 Repeat for prod only when its inputs and administrator profile are ready. Keep
-each bootstrap root local; do not connect it to Terrateam.
+each bootstrap root local; do not connect it to Terrateam. The repository configuration explicitly excludes both bootstrap roots, including indexer-discovered changes to their shared module, and disables their automatic plans and applies.
 
 Next: [`10-configure-terrateam-and-github.md`](10-configure-terrateam-and-github.md).
 
