@@ -14,7 +14,7 @@ Run the steps in dev first and confirm each expected state before starting the s
 ## Before you start
 
 1. Confirm the dev and prod `match-to-csv` stacks exist and inbound mail currently works.
-2. Set `DEV_MCC_EMAIL_DOMAIN` in the `infra/foundation-dev` GitHub Environment and `PROD_MCC_EMAIL_DOMAIN` in `infra/foundation-prod`. Each must equal the domain the matching stack uses today. Keep the existing `MCC_EMAIL_DOMAIN` variable in the `dev` and `prod` environments until the move ends. After that, only ephemeral stacks use it, from your local `.envrc`, and you can delete the GitHub variables.
+2. Set `DEV_MCC_EMAIL_DOMAIN` in the `infra/foundation-dev` GitHub Environment and `PROD_MCC_EMAIL_DOMAIN` in `infra/foundation-prod`. Each must equal the domain the matching stack uses today. Keep the existing `MCC_EMAIL_DOMAIN` variable in the `dev` and `prod` environments until step 3's pull request has merged. After that, the deployment workflow and ephemeral stacks read the domain from SSM, and you can delete the variable.
 3. Record the current state for each environment and keep it for comparison:
 
    ```console
@@ -41,7 +41,9 @@ Between this step and step 3, do not destroy a stable `match-to-csv` stack. The 
 
 ## Step 2: import them into the foundation
 
-Terrateam has no import command, so import with declarative `import` blocks, as in [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist). Do this on the foundation pull request, which adds `email_domain` and the `aws_ses_*` resources and removes the resources from the stack. Do not merge it yet. Planning without the import proposes to create resources that already exist, and an apply fails.
+Terrateam has no import command, so import with declarative `import` blocks, as in [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist). Do this on the foundation pull request, which adds `email_domain` and the `aws_ses_*` resources and removes the resources from the stack. Planning without the import proposes to create resources that already exist, and an apply fails.
+
+Terrateam plans and applies only pull requests that target `main`. If the foundation pull request was prepared on top of the step 1 branch, it gets no plan until step 1 has merged and the pull request is retargeted to `main`. Add the import files before you retarget, because Terrateam plans as soon as the pull request targets `main`. Do not merge the pull request yourself; Terrateam merges it after both applies.
 
 1. Add `infrastructure/dev/foundation/ses-imports.tf` and `infrastructure/prod/foundation/ses-imports.tf` in one commit, so dev and prod apply from the same commit. They hold no domain and no account ID. Dev holds the blocks below. Prod holds the same blocks with `mcc-match-to-csv-prod` and `mcc-match-to-csv-prod:match-to-csv-prod`.
 
@@ -62,8 +64,8 @@ Terrateam has no import command, so import with declarative `import` blocks, as 
    }
    ```
 
-2. Comment `terrateam plan dev and foundation`. Expected: three resources to import, one new SSM parameter `/mcc/dev/match-to-csv/receipt-rule-set-name`, and nothing else. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means `DEV_MCC_EMAIL_DOMAIN` differs from the domain the stack uses.
-3. Comment `terrateam apply dev and foundation`. Expected: three imported, one added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
+2. Retarget the pull request to `main` if it still targets the step 1 branch. If the automatic plan is missing or stale, comment `terrateam plan dev and foundation`. Expected: three resources to import, two new SSM parameters `/mcc/dev/match-to-csv/receipt-rule-set-name` and `/mcc/dev/match-to-csv/email-domain`, and nothing else. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means `DEV_MCC_EMAIL_DOMAIN` differs from the domain the stack uses.
+3. Comment `terrateam apply dev and foundation`. Expected: three imported, two added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
 4. Comment `terrateam plan prod and foundation`, confirm the same shape as dev, then `terrateam apply prod and foundation`, and run the same `describe` check.
 
 The import files are in state after the applies and then do nothing, like `recovery-imports.tf`. Do not copy them into a new installation, where the resources do not exist yet and the import would fail. After the merge, remove them in a follow-up foundation pull request. Expected: its dev and prod plans are empty. Still comment `terrateam apply dev and foundation` and then `terrateam apply prod and foundation`, which release the strict locks and let Terrateam merge it.
@@ -86,10 +88,10 @@ Expected: the events show the rule set and the rule as `DELETE_SKIPPED`, and the
 
 ## After the move
 
-- Existing ephemeral stacks keep working. Their rule already targets `mcc-match-to-csv-dev`. The next deployment reads that name from `/mcc/dev/match-to-csv/receipt-rule-set-name`, with no replacement.
-- Roll `match-to-csv` back only to the release that contains step 3 or a later one. Earlier tags declare the rule set and rule again, and CloudFormation fails with `AlreadyExists`. The failure causes no email outage.
+- Existing ephemeral stacks keep working. Their rule already targets `mcc-match-to-csv-dev`. The next deployment reads that name and the domain from SSM instead of `MCC_EMAIL_DOMAIN`, and the rule is unchanged when the domains match.
+- Roll `match-to-csv` back only to the release that contains step 3 or a later one. Earlier tags declare the rule set and rule again, and CloudFormation fails with `AlreadyExists`. The deployment workflow still supplies the domain those revisions expect, so the failure happens in CloudFormation and causes no email outage.
 - Destroying a `match-to-csv` stack no longer touches the rule set or the shared rule.
-- Domain verification and the MX record are still manual prerequisites. Each `match-to-csv` deployment reads the domain from the shared rule and stops if the rule set is not active, the identity is not verified in the deployment Region, or the MX record does not point at SES inbound receiving there. See [Check prerequisites](00-prerequisites.md).
+- Domain verification and the MX record are still manual prerequisites. Each `match-to-csv` deployment reads the domain from SSM and stops if the rule set is not active, the identity is not verified in the deployment Region, or the MX record does not point at SES inbound receiving there. See [Check prerequisites](00-prerequisites.md).
 
 ## If something looks wrong
 

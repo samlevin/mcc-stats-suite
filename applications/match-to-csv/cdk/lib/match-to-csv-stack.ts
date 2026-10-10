@@ -2,7 +2,6 @@ import * as path from 'path';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
   CfnOutput,
-  CfnParameter,
   Duration,
   Fn,
   Stack,
@@ -270,11 +269,12 @@ export class MatchToCsvStack extends Stack {
     // The foundation owns the receipt rule set, its activation, and the shared
     // submit@ rule. An ephemeral stack adds only its own plus-addressed rule.
     if (deployment.ephemeral) {
-      const emailDomain = new CfnParameter(this, 'EmailDomain', {
-        type: 'String',
-        description: 'Verified SES domain used for inbound match-to-CSV email',
-        allowedPattern: '^[A-Za-z0-9.-]+$',
-      });
+      // The foundation publishes the domain its shared rule serves, so the
+      // plus-addressed rule cannot drift from it.
+      const emailDomain = ssm.StringParameter.valueForStringParameter(
+        this,
+        `${prefix}/email-domain`,
+      );
       new ses.CfnReceiptRule(this, 'StoreRawEmail', {
         ruleSetName: ssm.StringParameter.valueForStringParameter(
           this,
@@ -284,10 +284,7 @@ export class MatchToCsvStack extends Stack {
           name: deployment.resourcePrefix,
           enabled: true,
           recipients: [
-            Fn.join('', [
-              `submit+${deployment.ephemeral}@`,
-              emailDomain.valueAsString,
-            ]),
+            Fn.join('', [`submit+${deployment.ephemeral}@`, emailDomain]),
           ],
           scanEnabled: true,
           tlsPolicy: 'Optional',

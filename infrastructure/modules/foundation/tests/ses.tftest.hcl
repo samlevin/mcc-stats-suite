@@ -69,9 +69,11 @@ run "dev_shared_rule" {
   assert {
     condition = (
       aws_ssm_parameter.receipt_rule_set_name.name == "/mcc/dev/match-to-csv/receipt-rule-set-name" &&
-      aws_ssm_parameter.receipt_rule_set_name.value == "mcc-match-to-csv-dev"
+      aws_ssm_parameter.receipt_rule_set_name.value == "mcc-match-to-csv-dev" &&
+      aws_ssm_parameter.email_domain.name == "/mcc/dev/match-to-csv/email-domain" &&
+      aws_ssm_parameter.email_domain.value == "mail.example.com"
     )
-    error_message = "The rule set name must be published in SSM for CDK."
+    error_message = "The rule set name and the domain must be published in SSM for CDK and the deployment workflow."
   }
 }
 
@@ -85,9 +87,10 @@ run "prod_shared_rule" {
     condition = (
       aws_ses_receipt_rule_set.inbound.rule_set_name == "mcc-match-to-csv-prod" &&
       one(aws_ses_receipt_rule.store_raw_email.s3_action).object_key_prefix == "incoming/prod/" &&
-      aws_ssm_parameter.receipt_rule_set_name.name == "/mcc/prod/match-to-csv/receipt-rule-set-name"
+      aws_ssm_parameter.receipt_rule_set_name.name == "/mcc/prod/match-to-csv/receipt-rule-set-name" &&
+      aws_ssm_parameter.email_domain.name == "/mcc/prod/match-to-csv/email-domain"
     )
-    error_message = "Prod must use its own rule set, prefix, and SSM parameter."
+    error_message = "Prod must use its own rule set, prefix, and SSM parameters."
   }
 }
 

@@ -1,6 +1,17 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { handoverBlockers } from './receipt-rule-handover.mjs';
+
+const script = fileURLToPath(
+  new URL('./receipt-rule-handover.mjs', import.meta.url),
+);
+const runCli = (args, input) =>
+  spawnSync(process.execPath, [script, ...args], { input, encoding: 'utf8' });
 
 const ruleSet = (extra = {}) => ({
   Type: 'AWS::SES::ReceiptRuleSet',
@@ -84,4 +95,38 @@ test('detects a Delete call built with Fn::Join', () => {
   assert.deepEqual(blockers, [
     'Activate would deactivate the receipt rule set when it is removed',
   ]);
+});
+
+test('the CLI reads the deployed template from stdin, string-encoded or not', () => {
+  const incomingPath = join(
+    mkdtempSync(join(tmpdir(), 'handover-')),
+    'incoming.json',
+  );
+  writeFileSync(incomingPath, JSON.stringify(dropped));
+
+  // get-template --output json wraps non-JSON templates in a JSON string.
+  const blocked = runCli(
+    [incomingPath],
+    JSON.stringify(JSON.stringify(beforeRetain)),
+  );
+  assert.equal(blocked.status, 1);
+  assert.match(blocked.stderr, /ReceiptRuleSet .* not retained/);
+  assert.match(blocked.stderr, /Deploy a release that retains/);
+
+  const allowed = runCli([incomingPath], JSON.stringify(retained));
+  assert.equal(allowed.status, 0);
+  assert.equal(allowed.stderr, '');
+});
+
+test('the CLI fails clearly without a readable synthesized template', () => {
+  const usage = runCli([], '{}');
+  assert.equal(usage.status, 2);
+  assert.match(usage.stderr, /^Usage:/);
+
+  const missing = runCli(
+    [join(tmpdir(), 'handover-missing.template.json')],
+    '{}',
+  );
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /Cannot read the synthesized template/);
 });

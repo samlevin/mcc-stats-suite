@@ -56,9 +56,18 @@ if (
     );
     process.exit(2);
   }
+  let incoming;
+  try {
+    incoming = readFileSync(incomingPath, 'utf8');
+  } catch (error) {
+    process.stderr.write(
+      `Cannot read the synthesized template ${incomingPath}: ${error.message}\n`,
+    );
+    process.exit(2);
+  }
   const blockers = handoverBlockers(
     parseTemplate(readFileSync(0, 'utf8')),
-    parseTemplate(readFileSync(incomingPath, 'utf8')),
+    parseTemplate(incoming),
   );
   if (blockers.length > 0) {
     for (const blocker of blockers) process.stderr.write(`${blocker}\n`);

@@ -6,7 +6,7 @@ The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/f
 
 1. Put reusable behavior in `infrastructure/modules/foundation` and environment-only values in the environment root.
 2. Run `npm run tofu:fmt:check` and `npm run check`.
-3. Open a pull request. Terrateam plans each affected root: a module change or a `.terrateam/config.yml` change plans dev and prod, and a change to one environment root plans only that root. If a plan is missing or stale, comment `terrateam plan`.
+3. Open a pull request against `main`. Terrateam ignores pull requests that target any other branch, so do not stack a foundation pull request on another branch unless nothing needs its apply before it is retargeted to `main`. Terrateam plans as soon as the pull request targets `main`, so any `import` blocks must already be in it. Terrateam plans each affected root: a module change or a `.terrateam/config.yml` change plans dev and prod, and a change to one environment root plans only that root. If a plan is missing or stale, comment `terrateam plan`.
 4. Read every planned action. Reject unexpected replacements, deletions, policy changes, a plan for the wrong account, or creation of a named resource that already exists.
 
 ## Apply dev, then prod

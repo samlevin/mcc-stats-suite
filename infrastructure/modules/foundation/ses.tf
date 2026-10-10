@@ -48,3 +48,11 @@ resource "aws_ssm_parameter" "receipt_rule_set_name" {
   type  = "String"
   value = aws_ses_receipt_rule_set.inbound.rule_set_name
 }
+
+// Ephemeral stacks and the deployment workflow read the domain here, so they
+// always use the domain the shared rule serves instead of a local copy.
+resource "aws_ssm_parameter" "email_domain" {
+  name  = "/mcc/${var.environment}/match-to-csv/email-domain"
+  type  = "String"
+  value = var.email_domain
+}

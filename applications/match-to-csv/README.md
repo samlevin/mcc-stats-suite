@@ -32,7 +32,7 @@ Local developer stacks are explicit:
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-Ephemeral deployments need `MCC_EMAIL_DOMAIN` in ignored local configuration for their `submit+<name>@` rule. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
+Ephemeral deployments read the domain for their `submit+<name>@` rule from `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds it. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
 
 ## Evidence layout
 
