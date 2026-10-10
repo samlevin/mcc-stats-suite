@@ -42,7 +42,9 @@ Protect `main`: require pull requests and the `check`, `gitleaks`, and `semantic
 The committed configuration does the following:
 
 - plans the foundation roots on every pull request that changes them;
-- applies dev after merge, then prod only if dev succeeds, with no pause between them;
+- never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
+- locks each root from its first apply until the pull request merges;
+- squash-merges the pull request with its title once every planned root has applied;
 - lets repository writers apply dev and only administrators apply prod;
 - requires an administrator for changes to Terrateam's workflow or configuration;
 - never touches the bootstrap roots; and

@@ -72,7 +72,9 @@ Use `feat` for a minor version, `fix` for a patch, and a documented breaking cha
 
 ## What happens after merge
 
-A merge to `main` deploys every affected application to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. Foundation changes under `infrastructure/` are applied to dev and then prod by Terrateam. You can follow both in the pull request's checks and the repository's Deployments page, but you do not run them.
+A merge to `main` deploys every affected application to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. You can follow it in the repository's Deployments page, but you do not run it.
+
+Foundation changes under `infrastructure/` work differently. The maintainer applies them to dev and then prod from your pull request, and Terrateam merges the pull request when both have applied.
 
 Release Please collects merged Conventional Commits into a release pull request. Merging it creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`. Applications pin internal packages at exact versions, and the release pull request patch-bumps consumers when a shared package changes:
 
@@ -97,7 +99,7 @@ Never commit credentials, account IDs, email addresses, domain names, populated 
 
 ## Change shared infrastructure
 
-OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it. Terrateam posts a plan on pull requests that change the foundation; check that it matches your intent. See [Change the foundation](docs/self-hosting/40-change-foundation.md) for how merged changes are applied.
+OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it. Terrateam posts a plan on pull requests that change the foundation; check that it matches your intent. See [Change the foundation](docs/self-hosting/40-change-foundation.md) for how foundation pull requests are applied.
 
 ## Keep documentation with the code
 

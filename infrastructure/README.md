@@ -42,9 +42,9 @@ session. Terrateam manages only stable operational roots.
 
 ## Foundation promotion
 
-Foundation code is not packaged or assigned a separate release ID. Terrateam plans pull-request revisions. After merge, it applies the merged revision to dev before planning and applying prod. A failed or stale dev layer blocks prod. Follow [Change the foundation](../docs/self-hosting/40-change-foundation.md).
+Foundation code is not packaged or assigned a separate release ID. Terrateam plans pull-request revisions, and the maintainer applies dev and then prod from the pull request. Prod cannot apply before dev. Each root stays locked from its first apply until the pull request merges, and Terrateam merges it once every planned root has applied. Nothing applies from `main`. Follow [Change the foundation](../docs/self-hosting/40-change-foundation.md).
 
-Changes to `modules/foundation` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
+Changes to `modules/foundation` or `.terrateam/config.yml` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
 
 Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and Terrateam for foundation changes.
 

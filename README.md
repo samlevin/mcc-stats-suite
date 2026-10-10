@@ -60,7 +60,7 @@ NPM workspaces provide package boundaries. Turbo follows their dependency graph 
 
 ## How AWS is divided
 
-OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. After a reviewed pull request merges, Terrateam applies foundation changes to dev and then prod from that revision. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
+OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. Terrateam applies foundation changes to dev and then prod from the pull request, then merges it. Nothing applies from `main`. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
 
 CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, SES receipt rules, IAM grants, and logs. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
 
