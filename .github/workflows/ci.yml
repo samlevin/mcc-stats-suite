@@ -65,7 +65,7 @@ jobs:
         if: steps.scope.outputs.full != 'true' && steps.scope.outputs.repository == 'true'
         run: |
           npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0
-          node --test scripts/issue-triage.test.mjs
+          node --test scripts/issue-*.test.mjs
       - if: steps.scope.outputs.full == 'true'
         run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c ephemeral=ci
       - if: steps.scope.outputs.full == 'true'
