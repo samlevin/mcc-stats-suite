@@ -30,6 +30,8 @@ Use GitHub's blocked-by relationships for ordering. A blocked issue stays Ready 
 
 Before changing code, assign yourself, move the issue to In progress, and post one comment with your approach, branch, likely files, and planned checks. When several agents share one GitHub identity, the comment must also name the agent. If you stop before opening a PR, say so in a comment.
 
+Issues and pull requests opened by the repository owner's identity, which agents use, are assigned to the owner automatically by `assign-owner.yml`. Agents should still pass `--assignee samlevin` when creating them.
+
 Without write access to the repository, you cannot assign yourself or change project status. Comment on the issue with your approach instead, and a maintainer will assign it and move it to In progress.
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.

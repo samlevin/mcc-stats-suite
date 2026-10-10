@@ -3,6 +3,7 @@
 Use the repo's issue forms and [labels](../.github/labels.json). Read [ISSUE_TRIAGE.md](../ISSUE_TRIAGE.md) only for a classification question.
 
 - Plain titles, with no `[Type]:` prefix.
+- Pass `--assignee samlevin` to `gh issue create`. `.github/workflows/assign-owner.yml` assigns issues opened by the owner's identity as a backstop.
 - Set Priority (default P2), Size, one severity, and area labels. Use `bug`, not `type: bug`. Use `epic` only when explicitly requested, and then as the sole work-category label.
 - Multiple outcomes become native sub-issues under `container.yml` (What/Why/How, no acceptance criteria). Leaves use `task.yml` or `bug.yml` with acceptance criteria.
 - After creating them, run `node scripts/issue-triage.mjs --apply --issue N` for each new issue and `node scripts/issue-containers.mjs --apply --issue N` for each new top-level container.
