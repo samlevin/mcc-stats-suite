@@ -22,7 +22,7 @@ npm run check
 npm run tofu:fmt:check
 ```
 
-`npm run check` verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI selects checks from changed files using `scripts/ci-scope.mjs` from the committed baseline. Markdown-only changes run formatting; recognized repository-only changes also run repository lint and issue-automation tests. They skip workspace tests/builds, CDK synthesis, bundle validation, and OpenTofu checks. Application/package/infrastructure code, dependencies, CI selection, and unknown paths run the full gate. Titles and labels never control selection. Renames inspect both removed and added paths. The required `check` job always runs, alongside existing secret and PR-title checks.
+`npm run check` verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI selects checks from changed files using `scripts/ci-scope.mjs` from the committed baseline. Markdown-only changes run formatting; recognized repository-only changes also run repository lint and issue-automation tests. They skip workspace tests/builds, CDK synthesis, bundle validation, and OpenTofu checks. Application/package code, dependencies, CI selection, and unknown paths run the full application gate. Non-Markdown files under `infrastructure/` and `.terrateam/config.yml` select the separate `infrastructure` job. Infrastructure-only changes skip `check`; application-only changes skip `infrastructure`; mixed changes run both. Titles and labels never control selection. Renames inspect both removed and added paths. Both jobs remain present in the workflow so skipped jobs can satisfy required checks. Adding `infrastructure` to the main ruleset requires a separately authorized settings change.
 
 Target one logical application with npm's workspace flag:
 
@@ -42,9 +42,29 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Concurrent CI checks
 
-The ARM64 `check` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside one Turbo task graph. Turbo orders workspace builds before read-only `ci:test` tasks and shared builds before consumers. The focused `npm test --workspace @samlevin/cdk-config` command still builds its own declarations; concurrent CI tests reuse the tracked build and never invoke a second compiler. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. Synthesis and native verification are never cached.
+The scope job reads the baseline classifier before either gate runs. The ARM64 `check` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside one Turbo task graph. Turbo orders workspace builds before read-only `ci:test` tasks and shared builds before consumers. The focused `npm test --workspace @samlevin/cdk-config` command still builds its own declarations; concurrent CI tests reuse the tracked build and never invoke a second compiler. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. Synthesis and native verification are never cached.
 
-For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, infrastructure, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. The existing baseline classifier still controls documentation and recognized repository checks. Deployment requires the successful `check` job and remains limited to pushes to `main`.
+For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, mixed infrastructure/application changes, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. The existing baseline classifier still controls documentation and recognized repository checks. Deployment requires successful CI and remains limited to pushes to `main`. Infrastructure-only pushes save an empty application selection from the scope job, so `deploy-applications` completes without deploying.
+
+The AWS-free `infrastructure` job runs `tofu fmt -check -recursive infrastructure`, then backend-disabled initialization and validation for bootstrap, foundation, and data-platform roots in dev and prod. The inactive data-platform roots are included because they validate without inputs. It initializes the bootstrap and foundation test modules through the dev roots and runs `infrastructure/modules/bootstrap/tests` and `infrastructure/modules/foundation/tests`. Those suites use fake credentials and overrides; CI never assumes an AWS role for this job.
+
+Run the same infrastructure checks locally with OpenTofu 1.12.1:
+
+```sh
+tofu fmt -check -recursive infrastructure
+for environment in dev prod; do
+  for module in bootstrap foundation data-platform; do
+    root="infrastructure/$environment/$module"
+    tofu -chdir="$root" init -backend=false -input=false
+    tofu -chdir="$root" validate
+  done
+done
+for module in bootstrap foundation; do
+  root="infrastructure/dev/$module"
+  tofu -chdir="$root" init -backend=false -input=false -test-directory="../../modules/$module/tests"
+  tofu -chdir="$root" test -test-directory="../../modules/$module/tests"
+done
+```
 
 Run the selection, concurrency, failure propagation, cache policy, and deployment guard tests with:
 

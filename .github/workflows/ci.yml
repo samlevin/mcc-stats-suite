@@ -14,18 +14,15 @@ permissions:
   contents: read
 
 jobs:
-  check:
-    # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
-    # so Bun and the native dependencies do not execute under QEMU.
-    runs-on: ubuntu-24.04-arm
-    permissions:
-      contents: read
-      id-token: write
-      packages: read
-    env:
-      MCC_BUILD_ENVIRONMENT: dev
+  scope:
+    runs-on: ubuntu-latest
     outputs:
-      applications: ${{ steps.affected.outputs.applications }}
+      full: ${{ steps.scope.outputs.full }}
+      repository: ${{ steps.scope.outputs.repository }}
+      infrastructure: ${{ steps.scope.outputs.infrastructure }}
+      check: ${{ steps.scope.outputs.check }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -55,25 +52,94 @@ jobs:
           else
             echo "full=true" >> "$GITHUB_OUTPUT"
             echo "repository=true" >> "$GITHUB_OUTPUT"
+            echo "check=true" >> "$GITHUB_OUTPUT"
             echo "No baseline classifier; running all checks."
           fi
+          # Older baseline classifiers have no infrastructure/check outputs.
+          DIFF_BASE="$BASE"
+          if [[ "$EVENT" == "pull_request" ]]; then
+            DIFF_BASE="$(git merge-base "$BASE" "$HEAD")"
+          fi
+          INFRASTRUCTURE=false
+          while IFS= read -r -d '' PATH_CHANGED; do
+            if [[ "$PATH_CHANGED" != *.md && ( "$PATH_CHANGED" == infrastructure/* || "$PATH_CHANGED" == .terrateam/config.yml ) ]]; then
+              INFRASTRUCTURE=true
+            fi
+          done < <(git diff --name-only --no-renames -z "$DIFF_BASE" "$HEAD" --)
+          echo "infrastructure=$INFRASTRUCTURE" >> "$GITHUB_OUTPUT"
           echo "base=${BASE:-$HEAD}" >> "$GITHUB_OUTPUT"
           echo "head=$HEAD" >> "$GITHUB_OUTPUT"
+      - name: Save empty application selection when check is skipped
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.scope.outputs.check == 'false'
+        run: |
+          mkdir -p "${RUNNER_TEMP}/deploy-selection"
+          printf '[]\n' > "${RUNNER_TEMP}/deploy-selection/applications.json"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.scope.outputs.check == 'false'
+        with:
+          name: deploy-applications-${{ github.run_id }}
+          path: ${{ runner.temp }}/deploy-selection/applications.json
+          retention-days: 1
+
+  infrastructure:
+    needs: scope
+    if: needs.scope.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    env:
+      AWS_EC2_METADATA_DISABLED: 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: '1.12.1'
+      - name: Check OpenTofu formatting
+        run: tofu fmt -check -recursive infrastructure
+      - name: Validate environment roots without a backend
+        run: |
+          for environment in dev prod; do
+            for module in bootstrap foundation data-platform; do
+              root="infrastructure/$environment/$module"
+              tofu -chdir="$root" init -backend=false -input=false
+              tofu -chdir="$root" validate
+            done
+          done
+      - name: Test bootstrap and foundation modules without AWS
+        run: |
+          for module in bootstrap foundation; do
+            root="infrastructure/dev/$module"
+            tofu -chdir="$root" init -backend=false -input=false -test-directory="../../modules/$module/tests"
+            tofu -chdir="$root" test -test-directory="../../modules/$module/tests"
+          done
+
+  check:
+    needs: scope
+    if: needs.scope.outputs.check != 'false'
+    # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
+    # so Bun and the native dependencies do not execute under QEMU.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    env:
+      MCC_BUILD_ENVIRONMENT: dev
+    outputs:
+      applications: ${{ steps.affected.outputs.applications }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
           cache: npm
           registry-url: https://npm.pkg.github.com
           scope: '@samlevin'
-      - uses: opentofu/setup-opentofu@v1
-        if: steps.scope.outputs.full == 'true'
-        with:
-          tofu_version: '1.12.1'
       - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.scope.outputs.full == 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
@@ -81,15 +147,15 @@ jobs:
           region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
       - name: Run independent checks concurrently
         env:
-          CI_BASE: ${{ steps.scope.outputs.base }}
-          CI_HEAD: ${{ steps.scope.outputs.head }}
+          CI_BASE: ${{ needs.scope.outputs.base }}
+          CI_HEAD: ${{ needs.scope.outputs.head }}
           CI_EVENT: ${{ github.event_name }}
-          CI_FULL: ${{ steps.scope.outputs.full }}
-          CI_REPOSITORY: ${{ steps.scope.outputs.repository }}
+          CI_FULL: ${{ needs.scope.outputs.full }}
+          CI_REPOSITORY: ${{ needs.scope.outputs.repository }}
         run: node scripts/ci-checks.mjs
       - name: Find affected deployable applications
         id: affected
-        if: github.event_name == 'push' && steps.scope.outputs.full == 'true'
+        if: github.event_name == 'push' && needs.scope.outputs.full == 'true'
         env:
           TURBO_SCM_BASE: ${{ github.event.before }}
           TURBO_SCM_HEAD: ${{ github.sha }}

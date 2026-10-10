@@ -429,3 +429,43 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
     }
   }
 });
+
+test('infrastructure-only main pushes publish an empty selection before skipping check', () => {
+  const scope = ci.jobs.scope;
+  const save = scope.steps.find(
+    (step) =>
+      step.name === 'Save empty application selection when check is skipped',
+  );
+  const upload = scope.steps.find((step) =>
+    step.uses?.startsWith('actions/upload-artifact'),
+  );
+  for (const event_name of ['push', 'pull_request']) {
+    for (const check of ['true', 'false', '']) {
+      const values = {
+        github: { event_name, ref: 'refs/heads/main' },
+        steps: { scope: { outputs: { check } } },
+      };
+      assert.equal(
+        evaluate(save.if, values),
+        event_name === 'push' && check === 'false',
+      );
+      assert.equal(
+        evaluate(upload.if, values),
+        event_name === 'push' && check === 'false',
+      );
+    }
+  }
+  assert.match(save.run, /printf '\[\]\\n'/);
+  assert.match(save.run, /deploy-selection\/applications\.json/);
+  assert.equal(upload.with.name, 'deploy-applications-${{ github.run_id }}');
+  assert.equal(
+    upload.with.path,
+    '${{ runner.temp }}/deploy-selection/applications.json',
+  );
+  assert.equal(
+    evaluate(orchestration.jobs.deploy.if, {
+      needs: { qualify: { outputs: { applications: '[]' } } },
+    }),
+    false,
+  );
+});

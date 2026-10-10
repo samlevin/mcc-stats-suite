@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import ts from 'typescript';
+import { parse } from 'yaml';
+import { classify, selectScopes } from './ci-scope.mjs';
 import {
   checks,
   runChecks,
@@ -85,10 +87,10 @@ test('full gate contains repository checks and the dependency-aware workspace ga
     'release:check',
     'issue-triage.test.mjs',
     'ci-checks.test.mjs',
-    'tofu:fmt:check',
   ]) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
+  assert.ok(!JSON.stringify(commands).includes('tofu'));
   assert.ok(!workspaceArguments('all').includes('--affected'));
   assert.ok(workspaceArguments('affected').includes('--affected'));
 });
@@ -431,4 +433,107 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
   const prod = plan('prod');
   assert.notEqual(dev.tasks[0].hash, prod.tasks[0].hash);
   assert.equal(dev.tasks[0].hash, plan('dev').tasks[0].hash);
+});
+
+test('classifier selects independent infrastructure and application gates', () => {
+  const workflow = parse(
+    readFileSync(
+      new URL('../.github/workflows/ci.yml', import.meta.url),
+      'utf8',
+    ),
+  );
+  for (const key of [
+    'full',
+    'repository',
+    'infrastructure',
+    'check',
+    'base',
+    'head',
+  ]) {
+    assert.equal(
+      workflow.jobs.scope.outputs[key],
+      '${{ steps.scope.outputs.' + key + ' }}',
+    );
+  }
+  for (const [paths, expected] of [
+    [
+      ['infrastructure/dev/foundation/main.tf', '.terrateam/config.yml'],
+      { full: false, repository: false, infrastructure: true, check: false },
+    ],
+    [
+      ['applications/match-to-csv/src/index.ts'],
+      { full: true, repository: false, infrastructure: false, check: true },
+    ],
+    [
+      [
+        'infrastructure/prod/bootstrap/main.tf',
+        'packages/contracts/src/index.ts',
+      ],
+      { full: true, repository: false, infrastructure: true, check: true },
+    ],
+    [
+      ['infrastructure/README.md'],
+      { full: false, repository: false, infrastructure: false, check: true },
+    ],
+    [[], { full: true, repository: false, infrastructure: false, check: true }],
+  ]) {
+    assert.deepEqual(selectScopes(paths), expected);
+    const needs = {
+      scope: {
+        outputs: Object.fromEntries(
+          Object.entries(expected).map(([key, value]) => [key, String(value)]),
+        ),
+      },
+    };
+    const evaluate = (expression) =>
+      Function('needs', `return (${expression})`)(needs);
+    assert.equal(evaluate(workflow.jobs.check.if), expected.check);
+    assert.equal(
+      evaluate(workflow.jobs.infrastructure.if),
+      expected.infrastructure,
+    );
+  }
+  assert.equal(
+    classify('infrastructure/modules/foundation/tests/cache.tftest.hcl'),
+    'infrastructure',
+  );
+  assert.equal(classify('.terrateam/other.yml'), 'full');
+  assert.deepEqual(workflow.on, {
+    pull_request: null,
+    push: { branches: ['main'] },
+  });
+});
+
+test('standalone infrastructure gate formats, validates all roots, and tests without credentials', () => {
+  const workflow = parse(
+    readFileSync(
+      new URL('../.github/workflows/ci.yml', import.meta.url),
+      'utf8',
+    ),
+  );
+  const job = workflow.jobs.infrastructure;
+  const commands = job.steps
+    .filter((step) => step.run)
+    .map((step) => step.run)
+    .join('\n');
+  assert.match(commands, /tofu fmt -check -recursive infrastructure/);
+  assert.match(commands, /for environment in dev prod/);
+  assert.match(commands, /for module in bootstrap foundation data-platform/);
+  assert.match(commands, /init -backend=false -input=false/);
+  assert.match(commands, /tofu -chdir="\$root" validate/);
+  assert.match(commands, /for module in bootstrap foundation; do/);
+  assert.match(
+    commands,
+    /init .* -test-directory="\.\.\/\.\.\/modules\/\$module\/tests"/,
+  );
+  assert.match(
+    commands,
+    /test -test-directory="\.\.\/\.\.\/modules\/\$module\/tests"/,
+  );
+  assert.ok(
+    !JSON.stringify(job).match(
+      /id-token|configure-aws|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|secrets\./,
+    ),
+  );
+  assert.deepEqual(job.env, { AWS_EC2_METADATA_DISABLED: 'true' });
 });

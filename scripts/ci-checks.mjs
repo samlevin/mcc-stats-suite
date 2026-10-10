@@ -48,7 +48,6 @@ export function checks({ full, repository, mode }) {
           'scripts/deployment-workflows.test.mjs',
         ],
       ],
-      ['npm', ['run', 'tofu:fmt:check']],
       ['npx', workspaceArguments(mode)],
     );
   else if (repository)
