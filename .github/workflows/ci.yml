@@ -101,22 +101,16 @@ jobs:
               | sub("^@mcc/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
-
-  deploy-dev:
-    if: github.event_name == 'push' && needs.check.outputs.applications != '' && needs.check.outputs.applications != '[]'
-    needs: check
-    strategy:
-      fail-fast: false
-      matrix:
-        application: ${{ fromJSON(needs.check.outputs.applications) }}
-    permissions:
-      contents: read
-      deployments: write
-      id-token: write
-    uses: ./.github/workflows/_deploy-aws-application.yml
-    with:
-      application: ${{ matrix.application }}
-      environment: dev
-      sha: ${{ github.sha }}
-      operation: continuous-delivery
-      source: main
+      - name: Save affected applications for stable dev deployment
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          APPLICATIONS: ${{ steps.affected.outputs.applications || '[]' }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/deploy-selection"
+          printf '%s\n' "${APPLICATIONS}" > "${RUNNER_TEMP}/deploy-selection/applications.json"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: deploy-applications-${{ github.run_id }}
+          path: ${{ runner.temp }}/deploy-selection/applications.json
+          retention-days: 1

@@ -129,21 +129,15 @@ Only `match-to-csv` needs `MCC_EMAIL_DOMAIN` during deployment. Ephemeral stacks
 
 ### Stable dev
 
-Stable dev deploys only from GitHub Actions. Merge the reviewed change to `main`. The `ci` workflow asks Turbo which applications are affected and calls the reusable deployment workflow once for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
+Stable dev deploys only from GitHub Actions. Merge the reviewed change to `main`. After the `ci` workflow succeeds, `deploy-stable-dev` downloads the affected-application list from that exact CI run and calls the reusable deployment workflow for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
 
-Open the `ci` run for the merge SHA and verify the application-specific `deploy-dev` job. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Re-run that GitHub Actions job to repeat the same deployment. Do not deploy the plain `dev` stack from a local shell.
+Open the `deploy-stable-dev` run for the merge SHA to verify deployments. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Do not deploy the plain `dev` stack from a local shell.
 
 ## Deploy one application to prod
 
-Production accepts a published application release that already succeeded in stable dev.
+After every affected application deploys successfully to stable dev, `deploy-stable-prod` starts for the same commit and waits for approval through the protected GitHub `prod` environment. A required reviewer must approve the pending deployment in the Actions run before it can assume production credentials. Configure required reviewers on the `prod` environment in repository settings.
 
-1. Merge the application change to `main` and wait for its stable dev deployment.
-2. Complete the application’s integration or smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`.
-3. Review and merge the Release Please pull request containing the application release.
-4. Wait for Release Please to publish `<application>-v<version>` and for CI to deploy the release commit successfully to dev.
-5. Open **GitHub Actions -> promote-aws-application -> Run workflow** from `main`.
-6. Select `promote`, select the application, enter its release tag, and run the workflow.
-7. Review the production CDK diff and verify the stack health checks and application smoke test.
+Review and approve the pending production deployment in **GitHub Actions -> deploy-stable-prod -> Review deployments** after completing any application smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`. Then review the production CDK diff and verify the stack health checks and application smoke test. The workflow deploys the exact commit that succeeded in stable dev. The manual `rollback-aws-application` workflow remains available to restore a prior production release; read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) first.
 
 The workflow rejects draft or prerelease tags, mismatched application versions, commits outside `main`, and revisions without a successful dev deployment for the same application. To restore an older production version, choose `rollback`, supply a release previously deployed successfully to prod, and record the reason. Read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) before operating the prod workflow.
 

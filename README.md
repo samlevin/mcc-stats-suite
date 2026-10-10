@@ -4,7 +4,9 @@
 [![Secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml)
 [![Semantic PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml)
 [![Release Please](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml)
-[![Deploy application](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
+[![Stable dev deployment](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-stable-dev.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-stable-dev.yml)
+[![Stable prod deployment](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-stable-prod.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-stable-prod.yml)
+[![Production rollback](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
 [![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
 [![Application deploy workflow](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml)
 

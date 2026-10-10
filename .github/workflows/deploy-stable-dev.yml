@@ -1,0 +1,64 @@
+name: deploy-stable-dev
+run-name: Deploy ${{ github.event.workflow_run.head_sha }} to stable dev
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  qualify:
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      applications: ${{ steps.selection.outputs.applications }}
+      sha: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: deploy-applications-${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: selection
+      - name: Validate deployment selection
+        id: selection
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const allowed = ["admin", "data-pipeline", "match-to-csv", "ocr-quality", "player"];
+            const applications = JSON.parse(fs.readFileSync("selection/applications.json", "utf8"));
+            if (!Array.isArray(applications) || applications.some((app) => !allowed.includes(app))) {
+              throw new Error("Invalid affected application list");
+            }
+            applications.sort();
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `applications=${JSON.stringify(applications)}\n`);
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stable-dev-applications-${{ github.event.workflow_run.id }}
+          path: selection/applications.json
+          retention-days: 1
+
+  deploy:
+    needs: qualify
+    if: needs.qualify.outputs.applications != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        application: ${{ fromJSON(needs.qualify.outputs.applications) }}
+    permissions:
+      contents: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/_deploy-aws-application.yml
+    with:
+      application: ${{ matrix.application }}
+      environment: dev
+      sha: ${{ needs.qualify.outputs.sha }}
+      operation: continuous-delivery
+      source: main
