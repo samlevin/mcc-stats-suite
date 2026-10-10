@@ -7,3 +7,9 @@ variable "force_destroy" {
   type    = bool
   default = true
 }
+
+variable "cache_service_role_arns" {
+  description = "Explicit future cache service workload roles. Empty until a service is selected; never GitHub Actions roles."
+  type        = set(string)
+  default     = []
+}
