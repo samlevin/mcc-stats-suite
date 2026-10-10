@@ -7,7 +7,6 @@
 [![application delivery](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-dev.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-dev.yml)
 [![Production rollback](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
 [![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
-[![Application deploy workflow](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml)
 
 MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
 
@@ -54,7 +53,7 @@ packages/            Private, versioned packages shared by applications
 infrastructure/      OpenTofu modules and dev/prod roots
 scripts/             Repository-level deployment and release checks
 specs/               Product and implementation specifications
-runbooks/            AWS setup, foundation, validation, and recovery procedures
+docs/self-hosting/    Running your own deployment: AWS, CI, releases, and recovery
 ```
 
 NPM workspaces provide package boundaries. Turbo follows their dependency graph so root checks run in order and CI can identify affected applications.
@@ -73,32 +72,17 @@ match-to-csv-<name>      local ephemeral stack in dev
 match-to-csv-prod        live stack
 ```
 
-## Prerequisites
+## Start locally
 
-Local TypeScript work requires Git, Node.js 22.16.0, and npm. The repository pins Node and OpenTofu versions in [`.tool-versions`](.tool-versions).
-
-AWS and infrastructure work also requires:
-
-- OpenTofu 1.12.1
-- AWS CLI v2 with IAM Identity Center profiles
-- `direnv`
-- Docker for CDK assets containing Linux ARM64 native dependencies
-- access to the project dev or prod AWS account for the task being performed
-
-Infrastructure automation also depends on GitHub Actions, GitHub Environments named `dev` and `prod`, and Terrateam. DNS and a verified SES identity are required before `match-to-csv` can receive email.
-
-With `asdf` installed:
+Local work needs Git, Node.js 22.16.0, and npm. Docker is needed for CDK synthesis and OpenTofu 1.12.1 for the infrastructure format check. [`.tool-versions`](.tool-versions) pins Node and OpenTofu. With `asdf` installed:
 
 ```console
 asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
 asdf plugin add opentofu https://github.com/virtualstaticvoid/asdf-opentofu.git
 asdf install
-npm ci
 ```
 
-## Start locally
-
-Run the AWS-free repository checks first:
+Run the repository checks. None of them call AWS:
 
 ```console
 npm ci
@@ -107,15 +91,6 @@ npm run tofu:fmt:check
 ```
 
 `npm run check` covers Prettier, ESLint, release metadata, TypeScript, tests, and builds. See [TESTING.md](TESTING.md) for focused commands and the difference between unit, synthesis, and deployed integration checks.
-
-For AWS work, copy the ignored environment template and replace its placeholders:
-
-```console
-cp .envrc.example .envrc
-direnv allow
-aws sso login
-aws sts get-caller-identity
-```
 
 Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain names, populated backend files, variable files, state, or plans.
 
@@ -129,13 +104,13 @@ npm run typecheck --workspace @samlevin/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
 ```
 
-Local deployments must be named ephemeral stacks in dev:
+With access to a dev AWS account, you can deploy a named ephemeral stack there. [Self-hosting](docs/self-hosting/README.md) covers the account setup:
 
 ```console
 npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to `dev` at the merged commit SHA. After dev succeeds, `prod` waits for approval in the GitHub Actions run. Release Please versions applications and shared packages published to GitHub Packages.
+Pull requests run CI without deploying and need no AWS access. A merge to `main` deploys affected applications to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. Release Please versions applications and shared packages.
 
-See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.
+See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).

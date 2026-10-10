@@ -13,4 +13,4 @@ Unit tests replace mail parsing, image inspection, Textract, and evidence writes
 
 CDK synthesis uses Docker to install Sharp for Linux ARM64. `verify:bundle` inspects the synthesized `ProcessEmail` and `ExtractText` assets and fails if either is missing the native Sharp binary.
 
-Use [22-validate-match-to-csv-in-dev.md](../../runbooks/22-validate-match-to-csv-in-dev.md) for a future AWS integration test. Never commit recipient configuration, domain configuration, production messages, or player data as fixtures.
+Use [Validate match-to-csv](../../docs/self-hosting/50-deploy-and-release-applications.md#validate-match-to-csv) for an AWS integration test. Never commit recipient configuration, domain configuration, production messages, or player data as fixtures.

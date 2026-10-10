@@ -30,11 +30,13 @@ Use GitHub's blocked-by relationships for ordering. A blocked issue stays Ready 
 
 Before changing code, assign yourself, move the issue to In progress, and post one comment with your approach, branch, likely files, and planned checks. When several agents share one GitHub identity, the comment must also name the agent. If you stop before opening a PR, say so in a comment.
 
+Without write access to the repository, you cannot assign yourself or change project status. Comment on the issue with your approach instead, and a maintainer will assign it and move it to In progress.
+
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
 ## Pull requests and review
 
-Agents push the branch and get an `APPROVE` from `code-reviewer` before opening the PR. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over.
+People open their PR directly. Agents push the branch and get an `APPROVE` from `code-reviewer` before opening the PR. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over.
 
 The final PR for a leaf closes it with `Closes #N` and references its parent. Titles follow the Conventional Commits rules in [CONTRIBUTING.md](CONTRIBUTING.md). Move the issue to In review when the PR opens. Issues reach Done on merge, not when an agent hands off.
 

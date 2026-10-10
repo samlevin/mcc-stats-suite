@@ -2,6 +2,8 @@
 
 MCC Stats Suite is an NPM and Turbo monorepo. Each application owns a CDK stack and can be released or deployed independently. Shared packages use exact versions so a change to a common contract produces explicit releases for every affected application.
 
+You do not need AWS access, secrets, or package registry credentials to contribute. Pull requests run CI without touching AWS.
+
 ## Find the right component
 
 | Path | Package | Responsibility |
@@ -27,7 +29,7 @@ asdf install
 npm ci
 ```
 
-Workspaces use the `@samlevin` scope. `.npmrc` routes that scope to GitHub Packages; third-party dependencies use npmjs.org. Matching workspace versions install locally. If an install needs a published shared version, authenticate with `npm login --scope=@samlevin --auth-type=legacy --registry=https://npm.pkg.github.com` using a classic token with `read:packages`. Keep credentials in your user npm configuration.
+Workspaces use the `@samlevin` scope and install from the local workspaces. Third-party dependencies come from npmjs.org.
 
 For application, package, infrastructure, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
 
@@ -51,22 +53,9 @@ npm run verify:bundle --workspace @samlevin/match-to-csv
 
 Use `npm run format` and `npm run lint:fix` for automatic corrections. Add or update tests with every behavior change. Preserve immutable evidence semantics in `match-to-csv`: never overwrite source screenshots, provider responses, processing runs, or append-only events.
 
-## Work with AWS safely
-
-Copy `.envrc.example` to the ignored `.envrc`, fill its placeholders, and run `direnv allow`. Authenticate through IAM Identity Center and verify the account before any diff or deployment:
-
-```console
-aws sso login
-aws sts get-caller-identity
-```
-
-The deployment harness also checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and, for local stacks, `--ephemeral`.
-
-Never commit credentials, account IDs, email addresses, domain names, populated `backend.hcl`, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
-
 ## Submit a change
 
-Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md). Start from a `Ready` GitHub issue, then verify executable scope, acceptance, validation, dependencies, parent relationships, and size planning before claiming. Ready means metadata triaged; implement only executable leaves. Any parent with sub-issues is a container with no branch or PR. Follow the claim, implementation, review, and completion rules in [`WORKFLOW.md`](WORKFLOW.md). Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
+Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) and follow [WORKFLOW.md](WORKFLOW.md) to claim one. Implement only executable leaf issues; a parent with sub-issues is a container with no branch or PR. Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
 
 Pull-request titles must follow Conventional Commits because Release Please derives versions and release notes from them. Common forms are:
 
@@ -77,83 +66,38 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
-Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children.
-
-The [linked issue metadata workflow](.github/workflows/pr-issue-metadata.yml) copies labels, a milestone, and active GitHub Projects membership when a PR is opened, its description is edited, it is reopened, or it becomes ready for review. It reads same-repository references such as `#123`, `owner/repository#123`, and GitHub issue URLs from the description. Parent issue or epic lines, code examples, and HTML comments are excluded. References to pull requests are ignored. With several linked issues, it copies the union of their labels and projects. It fills an empty PR milestone only when the linked issues have one distinct milestone; conflicts leave the milestone unchanged. Existing PR labels, milestones, project membership, and project fields are preserved. Removing a link does not remove metadata previously copied. Later issue metadata changes can be copied by rerunning the workflow with the PR number; the manual run defaults to a dry run.
-
-The workflow reuses `MCC_PROJECT_TOKEN` from issue triage. Its credential needs repository issue and pull-request write access and read/write access to the source projects. The workflow runs trusted default-branch scripts with `pull_request_target`, including for fork PRs, and never executes PR code. It becomes active after publication on the default branch. See [GitHub's project authentication guidance](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions).
+Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, milestone, and project membership are copied from the linked issue automatically.
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs independent repository checks and workspace tasks concurrently in one ARM64 job. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. CI retains CDK synthesis, native bundle verification, and OpenTofu formatting. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
 
-## Use personal Codex delivery agents
+## What happens after merge
 
-With the reusable agents installed under `~/.codex/agents/`, start a fresh Codex session in this repository. `AGENTS.md` supplies the repository and project binding; the agents discover the remaining workflow and commands from these contributor guides.
+A merge to `main` deploys every affected application to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. Foundation changes under `infrastructure/` are applied to dev and then prod by Terrateam. You can follow both in the pull request's checks and the repository's Deployments page, but you do not run them.
 
-Example prompts:
-
-```text
-Build me this feature <GitHub epic URL>.
-Implement <GitHub task or bug URL>.
-Rework <GitHub issue URL> to address the feedback on its existing PR.
-Use code-reviewer to review pushed branch <branch> against <issue URL> before its PR exists.
-Use security-reviewer to review pushed branch <branch> against <base>.
-Use stacked-pr-manager to sync the stack for <existing PR URL> after its parent merges.
-```
-
-Delivery prompts request implementation through ready-for-review PRs. The implementer owns PRs and runs checks; the code reviewer performs only the initial static review before PR creation. Security review requires an explicit request. See `WORKFLOW.md` for the review gate, stack decomposition, and issue states.
-
-## Understand release versioning
-
-Release Please manages every application plus `@samlevin/cdk-config` and `@samlevin/contracts`. It creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`.
-
-Release Please authenticates as a dedicated GitHub App instead of `GITHUB_TOKEN`, so its release pull requests start the checks that the `main` ruleset requires. The workflow reads the app ID from the `RELEASE_PLEASE_APP_ID` repository variable and the private key from the `RELEASE_PLEASE_APP_PRIVATE_KEY` secret. The app is installed on this repository only, with read and write access to contents, pull requests, and issues. The workflow's own `GITHUB_TOKEN` is read-only. See the [release pull request recovery procedure](runbooks/31-release-promote-and-recover-applications.md#recover-release-pull-request-creation) for token failures and end-to-end verification. Repository settings changes require separate authorization.
-
-Applications pin internal packages at exact versions. The Node workspace release plugin updates those pins and patch-bumps consumers when a shared package changes:
+Release Please collects merged Conventional Commits into a release pull request. Merging it creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`. Applications pin internal packages at exact versions, and the release pull request patch-bumps consumers when a shared package changes:
 
 - a `cdk-config` release affects `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, and `player`;
 - a `contracts` release affects `match-to-csv`.
 
-The release pull request updates package versions, changelogs, the root lockfile, and `.release-please-manifest.json` together. `npm run release:check` rejects drift between those files. Release Please opens one coordinated release pull request so shared versions and exact consumer pins change together. Component versions and tags remain independent. After successful `main` CI, the `publish-shared-packages` workflow builds and publishes `@samlevin/contracts` and `@samlevin/cdk-config` to GitHub Packages using `GITHUB_TOKEN`. The first successful run publishes the current versions; later runs skip versions already present. Registry or publication errors fail the job. Packages inherit access from this repository; registry downloads require authentication even for public packages. Applications remain private workspaces.
+The release pull request updates package versions, changelogs, the root lockfile, and `.release-please-manifest.json` together. `npm run release:check` rejects drift between those files.
 
-Existing separate Release Please pull requests predate this configuration and should be closed when the coordinated replacement opens. Re-run the failed main CI run to retry package publication; immutable existing versions are skipped.
+## Test against your own AWS account
 
-## Deploy one application to dev
-
-There are two dev deployment paths.
-
-### Local ephemeral dev
-
-Test application and business-logic changes in an ephemeral dev stack before opening a pull request. Replace `<application>` with `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, or `player`.
+To deploy an ephemeral stack, you need your own dev account set up with [Self-hosting](docs/self-hosting/README.md). Copy `.envrc.example` to the ignored `.envrc`, fill its placeholders, run `direnv allow`, and verify the account before any diff or deployment:
 
 ```console
-npm run app:synth -- <application> --environment dev --ephemeral <name>
-npm run app:diff -- <application> --environment dev --ephemeral <name>
+aws sso login
+aws sts get-caller-identity
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
 
-Only `match-to-csv` needs `MCC_EMAIL_DOMAIN` during deployment. Ephemeral stacks do not enable shared email ingress, so invoke their workflows directly when testing them. Follow [`runbooks/21-deploy-ephemeral-match-to-csv.md`](runbooks/21-deploy-ephemeral-match-to-csv.md) for setup and cleanup.
+The deployment harness checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and `--ephemeral`.
 
-### dev
-
-dev deploys only from GitHub Actions. Merge the reviewed change to `main`. After the `ci` workflow succeeds, `deploy-applications` downloads the affected-application list from that exact CI run and calls the reusable deployment workflow for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
-
-Open the `deploy-applications` run for the merge SHA to verify deployments. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Do not deploy the plain `dev` stack from a local shell.
-
-## Deploy one application to prod
-
-Each affected application has its own dev-to-prod sequence in `deploy-applications`. After that application deploys and verifies successfully in dev, its production job waits for approval through the protected GitHub `prod` environment. Failed, cancelled, or skipped dev jobs cannot qualify production; other applications proceed independently. A required reviewer must approve the pending deployment in the Actions run before it can assume production credentials. Production qualification requires a nonempty required-reviewer rule and disabled administrator bypass on `prod`; missing protection fails before requesting production credentials. Configure these settings only with separate authorization.
-
-Review and approve the pending production deployment in **GitHub Actions -> deploy-applications -> Review deployments** after completing any application smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`. Then review the production CDK diff and verify the stack health checks and application smoke test. The workflow deploys the exact commit that succeeded in dev. The manual `rollback-aws-application` workflow remains available to restore a prior production release; read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) first.
-
-To restore an older production version, use the manual `rollback-aws-application` workflow with a release previously deployed to prod, and record the reason. Read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) before rolling back.
+Never commit credentials, account IDs, email addresses, domain names, populated `backend.hcl`, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
 
 ## Change shared infrastructure
 
-OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it.
-
-Bootstrap is a local administrative procedure. Terrateam plans foundation changes on pull requests. Some working-branch guidance describes applies during PRs; the current configuration applies after merge. Changing Terrateam apply timing is outside application delivery. After merge, it applies the merged revision to dev before it plans and applies prod. Foundation does not have a separate release ID. A failed or stale dev layer blocks prod. If another foundation change reaches `main` during a run, treat the newer revision as the promotion candidate and require its layered run to finish successfully.
-
-Terrateam checks foundation roots for drift weekly and opens a GitHub issue when it finds a difference. Reconciliation remains reviewed and manual. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
+OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it. Terrateam posts a plan on pull requests that change the foundation; check that it matches your intent. See [Change the foundation](docs/self-hosting/40-change-foundation.md) for how merged changes are applied.
 
 ## Keep documentation with the code
 
@@ -161,7 +105,7 @@ Update the closest durable document:
 
 - product behavior and operator-facing package details belong in an application README;
 - local and CI test commands belong in `TESTING.md` or a package testing guide;
-- repeatable AWS operations belong in `runbooks/`;
+- setting up and operating a deployment belongs in `docs/self-hosting/`;
 - future behavior and acceptance criteria belong in `specs/`;
 - repository-wide orientation belongs in this file or the root README.
 
