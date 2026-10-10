@@ -5,6 +5,7 @@ import {
   CfnParameter,
   Duration,
   Fn,
+  RemovalPolicy,
   Stack,
   Tags,
   type StackProps,
@@ -283,6 +284,9 @@ export class MatchToCsvStack extends Stack {
       receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
         ruleSetName: receiptRuleSetName,
       });
+      // Migration step 1: keep the live rule set and rule when later releases
+      // stop declaring them, because OpenTofu takes ownership (issue #45).
+      receiptRuleSet.applyRemovalPolicy(RemovalPolicy.RETAIN);
     }
     const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
       ruleSetName: receiptRuleSetName,
@@ -304,6 +308,7 @@ export class MatchToCsvStack extends Stack {
       },
     });
     if (receiptRuleSet) {
+      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN);
       receiptRule.node.addDependency(receiptRuleSet);
       const activateRules = new customResources.AwsCustomResource(
         this,
@@ -323,11 +328,8 @@ export class MatchToCsvStack extends Stack {
             physicalResourceId:
               customResources.PhysicalResourceId.of(receiptRuleSetName),
           },
-          onDelete: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: {},
-          },
+          // No onDelete: removing this resource must never deactivate the
+          // account's active rule set.
           policy: customResources.AwsCustomResourcePolicy.fromSdkCalls({
             resources: customResources.AwsCustomResourcePolicy.ANY_RESOURCE,
           }),
