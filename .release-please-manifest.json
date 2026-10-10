@@ -1,7 +1,7 @@
 {
   "packages/cdk-config": "1.0.0",
   "packages/contracts": "1.0.0",
-  "applications/match-to-csv": "1.0.0",
+  "applications/match-to-csv": "1.1.0",
   "applications/ocr-quality": "1.0.0",
   "applications/admin": "1.0.0",
   "applications/data-pipeline": "1.0.0",
