@@ -12,24 +12,26 @@ const repositoryFiles = new Set([
   'scripts/issue-containers.mjs',
 ]);
 
+// Known workspaces. Shared with scripts/ci-checks.mjs so selection and Turbo
+// affected mode never disagree about what counts as an application path.
+export function isApplicationPath(path) {
+  return /^(applications\/(admin|data-pipeline|match-to-csv|ocr-quality|player)|packages\/(contracts|cdk-config))\//.test(
+    path,
+  );
+}
+
 export function classify(path) {
   if (path.endsWith('.md')) return 'documentation';
-  if (
-    (path.startsWith('infrastructure/') && /\.(tf|tfvars|hcl)$/.test(path)) ||
-    path === '.terrateam/config.yml'
-  )
+  // .terrateam/config.yml is Prettier-formatted, so it stays on the full path
+  // where format:check runs; full also selects the infrastructure job.
+  if (path.startsWith('infrastructure/') && /\.(tf|tfvars|hcl)$/.test(path))
     return 'infrastructure';
   if (
     repositoryFiles.has(path) ||
     /^\.github\/ISSUE_TEMPLATE\/[^/]+\.ya?ml$/.test(path)
   )
     return 'repository';
-  if (
-    /^(applications\/(admin|data-pipeline|match-to-csv|ocr-quality|player)|packages\/(contracts|cdk-config))\//.test(
-      path,
-    )
-  )
-    return 'application';
+  if (isApplicationPath(path)) return 'application';
   return 'full';
 }
 
@@ -41,7 +43,6 @@ export function selectScopes(paths) {
       scopes.includes('full') ||
       scopes.includes('application'),
     repository: scopes.includes('repository'),
-    application: scopes.includes('application'),
     infrastructure:
       !scopes.length ||
       scopes.includes('infrastructure') ||

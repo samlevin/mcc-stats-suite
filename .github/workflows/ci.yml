@@ -19,7 +19,6 @@ jobs:
     outputs:
       full: ${{ steps.scope.outputs.full }}
       repository: ${{ steps.scope.outputs.repository }}
-      application: ${{ steps.scope.outputs.application }}
       infrastructure: ${{ steps.scope.outputs.infrastructure }}
       check: ${{ steps.scope.outputs.check }}
       base: ${{ steps.scope.outputs.base }}
@@ -46,7 +45,7 @@ jobs:
             const head = event === 'pull_request'
               ? context.payload.pull_request.head.sha
               : context.sha;
-            const all = { full: true, repository: true, application: true, infrastructure: true, check: true };
+            const all = { full: true, repository: true, infrastructure: true, check: true };
             let scopes = all;
             if (/^0+$/.test(base)) {
               core.warning('Push has no usable base commit; running every gate.');

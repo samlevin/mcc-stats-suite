@@ -1,16 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { evaluate, workflow } from './workflow-test-helpers.mjs';
+import { evaluate, runScript, workflow } from './workflow-test-helpers.mjs';
 const ci = workflow('ci');
 const orchestration = workflow('deploy-dev');
 const delivery = workflow('_deliver-aws-application');
 const deployment = workflow('_deploy-aws-application');
-
-const runScript = (script, globals) =>
-  new (Object.getPrototypeOf(async function () {}).constructor)(
-    ...Object.keys(globals),
-    script,
-  )(...Object.values(globals));
 
 test('only successful trusted main push CI qualifies stable delivery', () => {
   assert.deepEqual(orchestration.on.workflow_run, {

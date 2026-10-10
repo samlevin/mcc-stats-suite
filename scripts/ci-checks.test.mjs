@@ -17,6 +17,7 @@ import ts from 'typescript';
 import { classify, selectScopes } from './ci-scope.mjs';
 import {
   evaluate,
+  runScript,
   workflow as loadWorkflow,
 } from './workflow-test-helpers.mjs';
 import {
@@ -36,7 +37,6 @@ const applicationNames = [
   'player',
 ];
 const require = createRequire(import.meta.url);
-const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 for (const name of [
   ...applicationNames.map((name) => `applications/${name}`),
@@ -458,7 +458,6 @@ test('classifier selects independent infrastructure and application gates', () =
   for (const key of [
     'full',
     'repository',
-    'application',
     'infrastructure',
     'check',
     'base',
@@ -471,21 +470,19 @@ test('classifier selects independent infrastructure and application gates', () =
   }
   for (const [paths, expected] of [
     [
-      ['infrastructure/dev/foundation/main.tf', '.terrateam/config.yml'],
-      {
-        full: false,
-        repository: false,
-        application: false,
-        infrastructure: true,
-        check: false,
-      },
+      ['infrastructure/dev/foundation/main.tf'],
+      { full: false, repository: false, infrastructure: true, check: false },
+    ],
+    [
+      // Prettier formats the Terrateam config, so it keeps the full gate too.
+      ['.terrateam/config.yml'],
+      { full: true, repository: false, infrastructure: true, check: true },
     ],
     [
       ['infrastructure/dev/foundation/backend.tfvars'],
       {
         full: false,
         repository: false,
-        application: false,
         infrastructure: true,
         check: false,
       },
@@ -495,7 +492,6 @@ test('classifier selects independent infrastructure and application gates', () =
       {
         full: true,
         repository: false,
-        application: true,
         infrastructure: false,
         check: true,
       },
@@ -508,7 +504,6 @@ test('classifier selects independent infrastructure and application gates', () =
       {
         full: true,
         repository: false,
-        application: true,
         infrastructure: true,
         check: true,
       },
@@ -518,7 +513,6 @@ test('classifier selects independent infrastructure and application gates', () =
       {
         full: false,
         repository: false,
-        application: false,
         infrastructure: false,
         check: true,
       },
@@ -531,7 +525,6 @@ test('classifier selects independent infrastructure and application gates', () =
       {
         full: true,
         repository: false,
-        application: false,
         infrastructure: true,
         check: true,
       },
@@ -541,7 +534,6 @@ test('classifier selects independent infrastructure and application gates', () =
       {
         full: true,
         repository: false,
-        application: false,
         infrastructure: true,
         check: true,
       },
@@ -571,7 +563,13 @@ test('classifier selects independent infrastructure and application gates', () =
   assert.equal(classify('infrastructure/.envrc.example'), 'full');
   assert.equal(classify('infrastructure/.tool-versions'), 'full');
   assert.equal(classify('infrastructure/dev/backend.tfvars.example'), 'full');
+  assert.equal(classify('.terrateam/config.yml'), 'full');
   assert.equal(classify('.terrateam/other.yml'), 'full');
+  assert.equal(
+    classify('applications/match-to-csv/src/index.ts'),
+    'application',
+  );
+  assert.equal(classify('applications/unknown-app/src/index.ts'), 'full');
   assert.deepEqual(ciWorkflow.on, {
     pull_request: null,
     push: { branches: ['main'] },
@@ -659,17 +657,17 @@ test('workflow executes gate selection for push, PR, retired baseline, and API f
       },
     };
     try {
-      await new AsyncFunction('require', 'context', 'github', 'core', script)(
-        mockedRequire,
+      await runScript(script, {
+        require: mockedRequire,
         context,
         github,
-        {
+        core: {
           setOutput: (name, value) => {
             outputs[name] = value;
           },
           warning: (message) => warnings.push(message),
         },
-      );
+      });
     } finally {
       rmSync(directory, { recursive: true, force: true });
       if (oldRunnerTemp === undefined) delete process.env.RUNNER_TEMP;
@@ -683,22 +681,20 @@ test('workflow executes gate selection for push, PR, retired baseline, and API f
     [
       infra.outputs.full,
       infra.outputs.repository,
-      infra.outputs.application,
       infra.outputs.infrastructure,
       infra.outputs.check,
     ],
-    [false, false, false, true, false],
+    [false, false, true, false],
   );
   const push = await run({ event: 'push', paths: ['scripts/ci-scope.mjs'] });
   assert.deepEqual(
     [
       push.outputs.full,
       push.outputs.repository,
-      push.outputs.application,
       push.outputs.infrastructure,
       push.outputs.check,
     ],
-    [true, false, false, true, true],
+    [true, false, true, true],
   );
   const retired = await run({ baseline: 'export function classify() {}' });
   assert.deepEqual(
@@ -743,12 +739,10 @@ test('standalone infrastructure gate formats, validates all roots, and tests wit
   assert.doesNotMatch(JSON.stringify(job.steps), /tofu fmt -check/);
   assert.match(commands, /for environment in dev prod/);
   assert.match(commands, /for module in bootstrap foundation data-platform/);
-  assert.match(commands, /init -backend=false -input=false/);
+  assert.match(commands, /init_args=\(-backend=false -input=false\)/);
   assert.match(commands, /tofu -chdir="\$root" validate/);
-  assert.match(
-    commands,
-    /init -backend=false -input=false -test-directory="\$test_directory"/,
-  );
+  assert.match(commands, /init_args\+=\(-test-directory="\$test_directory"\)/);
+  assert.match(commands, /tofu -chdir="\$root" init "\$\{init_args\[@\]\}"/);
   assert.match(commands, /test -test-directory="\$test_directory"/);
   assert.equal(
     job.env.TF_PLUGIN_CACHE_DIR,
@@ -756,7 +750,7 @@ test('standalone infrastructure gate formats, validates all roots, and tests wit
   );
   assert.doesNotMatch(job.env.TF_PLUGIN_CACHE_DIR, /runner\./);
   assert.ok(job.steps.some((step) => step.uses === 'actions/cache@v4'));
-  assert.equal((commands.match(/tofu -chdir="\$root" init/g) || []).length, 2);
+  assert.equal((commands.match(/tofu -chdir="\$root" init/g) || []).length, 1);
   assert.ok(
     !JSON.stringify(job).match(
       /id-token|configure-aws|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|secrets\./,
