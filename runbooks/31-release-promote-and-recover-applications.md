@@ -17,34 +17,34 @@ The `@samlevin/cdk-config` and `@samlevin/contracts` shared packages have indepe
 
 ## Recover release pull request creation
 
-If Release Please writes release branches but fails with `GitHub Actions is not permitted to create or approve pull requests.`, check the repository permission separately from the workflow token permissions. A generated branch does not prove that a release pull request was created.
+Release Please authenticates as a dedicated GitHub App. Its first step exchanges the `RELEASE_PLEASE_APP_ID` repository variable and the `RELEASE_PLEASE_APP_PRIVATE_KEY` secret for a short-lived installation token. Pull requests opened with that token start the `check`, `gitleaks`, and `semantic_pr` workflows. Pull requests opened with `GITHUB_TOKEN` start none of them, and the `main` ruleset will not merge a pull request without those checks.
 
-Use authenticated `gh` for this read-only preflight:
+If the **Create release token** step fails, check these in order:
 
-```console
-gh api repos/samlevin/mcc-stats-suite/actions/permissions/workflow \
-  --jq '{default_workflow_permissions, can_approve_pull_request_reviews}'
-```
+1. The variable and secret exist. Use authenticated `gh` for this read-only check:
 
-The expected values are `default_workflow_permissions: "read"` and `can_approve_pull_request_reviews: true`. The API field controls both pull request creation and approval, despite its name. If it is `false`, stop and obtain separate authorization for a repository settings change. After authorization, a repository administrator can open **Settings -> Actions -> General -> Workflow permissions**, enable **Allow GitHub Actions to create and approve pull requests**, and save. Keep the default token permission set to **Read repository contents and packages permissions**. See [GitHub's repository Actions settings documentation](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/enabling-features-for-your-repository/managing-github-actions-settings-for-a-repository).
+   ```console
+   gh variable list --repo samlevin/mcc-stats-suite
+   gh secret list --repo samlevin/mcc-stats-suite
+   ```
 
-Confirm `.github/workflows/release-please.yml` grants `contents: write` for release branches, tags, and GitHub releases, and `pull-requests: write` for release pull requests. Keep these existing workflow permissions. The [Release Please action documentation](https://github.com/googleapis/release-please-action#workflow-permissions) also identifies the repository setting as a prerequisite. Do not broaden default workflow permissions or introduce a personal token to bypass this setting.
+2. The app is still installed on this repository. Look under the account's **Settings -> Applications -> Installed GitHub Apps**.
+3. The private key is still active on the app's settings page. To rotate it, generate a new key, replace the secret with `gh secret set RELEASE_PLEASE_APP_PRIVATE_KEY --repo samlevin/mcc-stats-suite < <key-file>`, delete the local key file, and then revoke the old key.
 
-After the setting is enabled, verify release pull request creation:
+If the token step succeeds but Release Please fails with `Resource not accessible by integration` or another 403, the app is missing a repository permission. It needs read and write access to contents, pull requests, and issues. After changing app permissions, accept the new permissions on the installation. Do not replace the app with a personal token or broaden the workflow's `GITHUB_TOKEN` permissions.
 
-1. Repeat the preflight and record its output with the incident or issue.
-2. Use the next authorized push to `main` containing releasable Conventional Commits. Alternatively, with separate authorization, run **Actions -> release-please -> Run workflow** on `main` when releasable commits are already pending. This run can create release branches, pull requests, tags, or published releases; it is not a dry run.
-3. Inspect that run's logs and conclusion. Confirm the permission error is absent and the job succeeds. A successful run with no releasable changes does not verify pull request creation.
-4. Inspect the open release pull requests using the read-only command below. Confirm each expected component has a pull request targeting `main`, or that its existing pull request was updated by the run. Compare the changed files with `release-please-config.json`, including intentional shared-package consumer bumps. Check that unrelated components were not changed.
-5. Record the run URL, source commit SHA, release pull request URLs, and affected components on the issue. Keep the issue open if the setting remains disabled or no release pull request was created or updated.
+After a fix, verify release pull request creation:
+
+1. Use the next authorized push to `main` containing releasable Conventional Commits. Alternatively, with separate authorization, run **Actions -> release-please -> Run workflow** on `main` when releasable commits are already pending. This run can create release branches, pull requests, tags, or published releases. It is not a dry run.
+2. Inspect that run's logs and conclusion. A successful run with no releasable changes does not verify pull request creation.
+3. List the open release pull requests with the command below. Confirm the release pull request targets `main`, was opened or updated by the app, and shows `check`, `gitleaks`, and `semantic_pr` results. Compare its changed files with `release-please-config.json`, including intentional shared-package consumer bumps.
+4. Record the run URL, source commit SHA, release pull request URL, and affected components on the issue. Keep the issue open until a release pull request has run the required checks.
 
 ```console
 gh pr list --repo samlevin/mcc-stats-suite --state open --base main \
-  --json number,url,headRefName,title \
+  --json number,url,headRefName,title,author \
   --jq '.[] | select(.headRefName | startswith("release-please--"))'
 ```
-
-Release Please uses `GITHUB_TOKEN`, so its generated pull request events do not start other Actions workflows. Verify pull request creation independently of CI status. Follow the normal review and required-check process before merging a release pull request; see the [action's token guidance](https://github.com/googleapis/release-please-action#other-actions-on-release-please-prs).
 
 ## Promote a release to production
 
