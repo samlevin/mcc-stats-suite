@@ -12,7 +12,8 @@
     "cdk:synth": "cdk synth",
     "cdk:diff": "cdk diff",
     "cdk:deploy": "cdk deploy",
-    "cdk:destroy": "cdk destroy"
+    "cdk:destroy": "cdk destroy",
+    "ci:synth": "cdk synth -c environment=dev -c ephemeral=ci"
   },
   "devDependencies": {
     "aws-cdk-lib": "2.262.2",

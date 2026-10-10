@@ -81,7 +81,7 @@ The [linked issue metadata workflow](.github/workflows/pr-issue-metadata.yml) co
 
 The workflow reuses `MCC_PROJECT_TOKEN` from issue triage. Its credential needs repository issue and pull-request write access and read/write access to the source projects. The workflow runs trusted default-branch scripts with `pull_request_target`, including for fork PRs, and never executes PR code. It becomes active after publication on the default branch. See [GitHub's project authentication guidance](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions).
 
-Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs the repository quality gate, CDK synthesis, native bundle verification, and OpenTofu formatting. Pull requests do not deploy applications.
+Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs independent repository checks and workspace tasks concurrently in one ARM64 job. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. CI retains CDK synthesis, native bundle verification, and OpenTofu formatting. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
 
 ## Use personal Codex delivery agents
 

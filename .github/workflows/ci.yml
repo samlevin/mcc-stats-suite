@@ -5,11 +5,18 @@ on:
   push:
     branches: [main]
 
+# A unique push group never supersedes main validation or deployments.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
   check:
+    env:
+      MCC_BUILD_ENVIRONMENT: dev
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
@@ -46,6 +53,8 @@ jobs:
             echo "repository=true" >> "$GITHUB_OUTPUT"
             echo "No baseline classifier; running all checks."
           fi
+          echo "base=${BASE:-$HEAD}" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -55,23 +64,30 @@ jobs:
         with:
           tofu_version: '1.12.1'
       - run: npm ci
-      - name: Check formatting, lint, types, tests, and builds
+      - name: Restore Turbo task cache
+        id: turbo-cache
         if: steps.scope.outputs.full == 'true'
-        run: npm run check
-      - name: Check documentation and repository formatting
-        if: steps.scope.outputs.full != 'true'
-        run: npm run format:check
-      - name: Check repository automation
-        if: steps.scope.outputs.full != 'true' && steps.scope.outputs.repository == 'true'
-        run: |
-          npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0
-          node --test scripts/issue-*.test.mjs
-      - if: steps.scope.outputs.full == 'true'
-        run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c ephemeral=ci
-      - if: steps.scope.outputs.full == 'true'
-        run: npm run verify:bundle --workspace @mcc/match-to-csv
-      - if: steps.scope.outputs.full == 'true'
-        run: npm run tofu:fmt:check
+        uses: actions/cache/restore@v4
+        with:
+          path: .turbo/cache
+          key: turbo-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', 'turbo.json') }}-${{ github.event_name == 'push' && 'trusted-main' || format('pr-{0}', github.event.pull_request.number) }}-${{ github.sha }}
+          restore-keys: |
+            turbo-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', 'turbo.json') }}-${{ github.event_name == 'push' && 'trusted-main' || format('pr-{0}', github.event.pull_request.number) }}-
+            turbo-v1-${{ runner.os }}-${{ runner.arch }}-node22-${{ hashFiles('package-lock.json', 'turbo.json') }}-trusted-main-
+      - name: Run independent checks concurrently
+        env:
+          CI_BASE: ${{ steps.scope.outputs.base }}
+          CI_HEAD: ${{ steps.scope.outputs.head }}
+          CI_EVENT: ${{ github.event_name }}
+          CI_FULL: ${{ steps.scope.outputs.full }}
+          CI_REPOSITORY: ${{ steps.scope.outputs.repository }}
+        run: node scripts/ci-checks.mjs
+      - name: Save Turbo task cache
+        if: steps.scope.outputs.full == 'true' && steps.turbo-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: .turbo/cache
+          key: ${{ steps.turbo-cache.outputs.cache-primary-key }}
       - name: Find affected deployable applications
         id: affected
         if: github.event_name == 'push' && steps.scope.outputs.full == 'true'

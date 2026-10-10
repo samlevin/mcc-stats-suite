@@ -39,3 +39,19 @@ Current application guidance:
 Every application workspace participates in the root checks and can be targeted independently by the deployment workflow.
 
 `npm test` is AWS-free. CDK synth verifies infrastructure structure. After a merge to `main`, CI deploys affected applications to `dev` and verifies the resulting CloudFormation stack. The `match-to-csv` check also requires its Lambda functions and Step Functions state machines to be active. Run the full email integration test before promoting a material ingestion or processing change.
+
+## Concurrent CI checks
+
+The ARM64 `check` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside one Turbo task graph. Turbo orders workspace builds before tests and shared builds before consumers. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. Synthesis and native verification are never cached.
+
+For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, infrastructure, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. The existing baseline classifier still controls documentation and recognized repository checks. Deployment requires the successful `check` job and remains limited to pushes to `main`.
+
+Run the selection, concurrency, failure propagation, cache policy, and deployment guard tests with:
+
+```console
+node --test scripts/ci-checks.test.mjs
+```
+
+Npm downloads use the GitHub ref-scoped setup-node cache. Turbo outputs use GitHub cache with separate `trusted-main` and per-PR namespaces, OS/architecture, Node version, lockfile, and Turbo configuration in the key. PRs can restore trusted baseline outputs and their own outputs; main restores only trusted main outputs. GitHub also confines PR writes to their merge ref, preventing reuse by main or other PRs. No credentials or synthesis artifacts enter the Turbo cache. The explicit `.turbo/cache` directory also prevents local linked worktrees from writing into another checkout.
+
+Only superseded PR runs are cancelled. Main uses a unique run group and never cancels earlier validation or deployment jobs. Compare the `ci` run start with the last job completion for wall time, sum job start-to-completion intervals for runner time, and retain Turbo summaries and cache restore logs when benchmarking. Include cold and warm runs, record synthesis/bundle results, and compare full-scope PRs with full-scope baselines before claiming a performance improvement.
