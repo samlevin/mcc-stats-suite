@@ -9,7 +9,7 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 | Changed | Run |
 | --- | --- |
 | Docs only | `npm run format:check` |
-| `scripts/` only | `npm run format:check`, `npx eslint scripts --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/labels-sync.test.mjs` |
+| `scripts/` only | `npm run format:check`, `npx eslint scripts --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/labels-sync.test.mjs scripts/branch-name.test.mjs` |
 | A workspace | iterate with `npm test --workspace @samlevin/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:fmt:check` |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev`; `npm run verify:bundle --workspace @samlevin/match-to-csv` |
@@ -33,6 +33,7 @@ Issue tracker: GitHub Issues. This marker turns on the GitHub issue flows (`impl
 Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://github.com/users/samlevin/projects/1). Discover project field IDs with `gh`.
 
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
+- Branches are `<actor>/<issue>-<slug>`, actor `agent`. Run `node scripts/branch-name.mjs <issue>` (`--layer <n>` for stacked layers) and rename the worktree branch to its output before the first commit; never pick a name by hand. CI rejects other names. Branches opened before this rule fail the check on their next push; after that, rename the branch on GitHub with `gh api -X POST repos/<repo>/branches/<old>/rename -f new_name=<new>` so the PR survives, then close and reopen the PR to re-run the check, because a rename emits no pull_request event. Never push a new branch and delete the old one: that closes the PR for good.
 - Issue states: claim and move to `In progress` before coding; move to `In review` when the PR opens. Never mark issues `Done`.
 - Labels: `.github/labels.json` is the source of truth, shared with prismatic. Change it and run `node scripts/labels-sync.mjs --prune` (dry run; `--apply --prune` runs from `main`); never `gh label create`.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
