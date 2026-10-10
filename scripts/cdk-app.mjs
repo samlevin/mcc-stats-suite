@@ -39,8 +39,12 @@ if (
 if (environment === 'prod' && ephemeral) {
   fail('Production does not support --ephemeral');
 }
-if (environment === 'prod' && action === 'destroy') {
-  fail('Production destruction is not supported by this command');
+if (action === 'destroy' && !ephemeral) {
+  fail(
+    'Only ephemeral stacks can be destroyed. Stable stacks retain the shared ' +
+      'SES receipt rule set, so destroying one leaves it behind and the next ' +
+      'deploy fails with AlreadyExists. Pass --ephemeral <name>',
+  );
 }
 if (!ephemeral && action === 'deploy') {
   if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true') {

@@ -391,7 +391,7 @@ export class MatchToCsvStack extends Stack {
         target: 'node22',
         nodeModules: includeSharp ? ['sharp'] : undefined,
         // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
-        forceDockerBundling: includeSharp && Stack.of(this).bundlingRequired,
+        forceDockerBundling: includeSharp && this.bundlingRequired,
       },
     });
   }

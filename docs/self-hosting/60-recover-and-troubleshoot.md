@@ -46,12 +46,12 @@ If an older release is known safe and compatible with current data, [roll back](
 
 ## Stale personal development stack
 
-Confirm the instance owner, then remove only that application stack:
+Confirm the instance owner, then remove only that ephemeral application stack. The shared `-dev` and `-prod` stacks cannot be destroyed with this command, because they retain the SES receipt rule set and a redeploy would fail with `AlreadyExists`:
 
 ```console
 aws sso login --profile <dev-profile>
 aws sts get-caller-identity --profile <dev-profile>
-npm run app:destroy -- <application> --profile <dev-profile>
+npm run app:destroy -- <application> --environment dev --ephemeral <name> --profile <dev-profile>
 ```
 
 ## Release Please cannot open a release pull request
