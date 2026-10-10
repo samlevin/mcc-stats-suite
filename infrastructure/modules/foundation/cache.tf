@@ -36,10 +36,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "turbo_cache" {
 resource "aws_s3_bucket_lifecycle_configuration" "turbo_cache" {
   bucket = aws_s3_bucket.turbo_cache.id
   rule {
-    id     = "expire-cache-after-30-days"
+    id     = "expire-cache-after-7-days"
     status = "Enabled"
     filter {}
-    expiration { days = 30 }
+    expiration { days = 7 }
     abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
 }

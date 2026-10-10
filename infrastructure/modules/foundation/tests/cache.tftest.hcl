@@ -75,12 +75,12 @@ run "dev_secure_defaults" {
   assert {
     condition = (
       aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].status == "Enabled" &&
-      aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].expiration[0].days == 30 &&
+      aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].expiration[0].days == 7 &&
       aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].abort_incomplete_multipart_upload[0].days_after_initiation == 7 &&
       length(aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].filter) == 1 &&
       aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].filter[0].prefix == ""
     )
-    error_message = "Every cache object must expire after 30 days and incomplete multipart uploads after seven days."
+    error_message = "Every cache object must expire after seven days and incomplete multipart uploads after seven days."
   }
 
   assert {
@@ -198,6 +198,17 @@ run "prod_service_contract" {
       aws_s3_bucket_versioning.turbo_cache.versioning_configuration[0].status == "Disabled"
     )
     error_message = "Prod must have its own account-qualified bucket and SSM contract without evidence retention."
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].status == "Enabled" &&
+      aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].expiration[0].days == 7 &&
+      aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].abort_incomplete_multipart_upload[0].days_after_initiation == 7 &&
+      length(aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].filter) == 1 &&
+      aws_s3_bucket_lifecycle_configuration.turbo_cache.rule[0].filter[0].prefix == ""
+    )
+    error_message = "Every prod cache object must expire after seven days and incomplete multipart uploads after seven days."
   }
 
   assert {
