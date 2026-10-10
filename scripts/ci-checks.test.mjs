@@ -313,10 +313,9 @@ test('workflow isolates cache namespaces, retains ARM64, and gates main deployme
   assert.match(workflow, /format\('push-\{0\}', github\.run_id\)/);
   assert.match(
     workflow,
-    /github\.event_name == 'push' && 'trusted-main' \|\| format\('pr-\{0\}'/,
+    /Start trusted dev Turbo cache\n[ ]+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
   );
-  assert.match(workflow, /uses: actions\/cache\/restore@v4/);
-  assert.match(workflow, /uses: actions\/cache\/save@v4/);
+  assert.ok(!workflow.includes('actions/cache/'));
   assert.match(workflow, /git show "\$BASE:scripts\/ci-scope\.mjs"/);
   assert.match(
     workflow,
@@ -330,4 +329,67 @@ test('workflow isolates cache namespaces, retains ARM64, and gates main deployme
   assert.equal(config.cacheDir, '.turbo/cache');
   assert.equal(config.tasks['ci:synth'].cache, false);
   assert.equal(config.tasks['verify:bundle'].cache, false);
+});
+
+test('cache uses dedicated session credentials and environment contracts without cleanup', () => {
+  const action = readFileSync(
+    new URL('../.github/actions/turbo-s3-cache/action.yml', import.meta.url),
+    'utf8',
+  );
+  assert.match(action, /rharkor\/caching-for-turbo@v2\.5\.1/);
+  assert.match(action, /provider: s3/);
+  for (const [input, output] of [
+    ['s3-access-key-id', 'aws-access-key-id'],
+    ['s3-secret-access-key', 'aws-secret-access-key'],
+    ['s3-session-token', 'aws-session-token'],
+  ]) {
+    assert.ok(
+      action.includes(
+        input + ': ${{ steps.credentials.outputs.' + output + ' }}',
+      ),
+    );
+  }
+  assert.match(action, /allowed-account-ids:/);
+  assert.match(action, /aws sts get-caller-identity/);
+  assert.match(action, /turbo-cache\/bucket-name/);
+  assert.match(action, /turbo-cache\/data-key-arn/);
+  assert.match(action, /s3-prefix: turbogha\/\$\{\{ inputs.environment \}\}/);
+  assert.ok(!/max-age:|max-files:|max-size:/.test(action));
+  assert.match(action, /AWS_SESSION_TOKEN=" >> "\$GITHUB_ENV/);
+  const workflow = readFileSync(
+    new URL(
+      '../.github/workflows/_deploy-aws-application.yml',
+      import.meta.url,
+    ),
+    'utf8',
+  );
+  assert.match(
+    workflow,
+    /MCC_BUILD_ENVIRONMENT: \$\{\{ inputs.environment \}\}/,
+  );
+  assert.match(workflow, /ref: \$\{\{ github.workflow_sha \}\}/);
+  assert.match(workflow, /npx turbo run build --filter=/);
+  assert.ok(
+    workflow.indexOf('Start environment Turbo cache') <
+      workflow.indexOf('AWS_CDK_DEPLOY_ROLE_ARN'),
+  );
+});
+
+test('same revision has separate dev and prod Turbo task hashes', () => {
+  const plan = (environment) =>
+    JSON.parse(
+      execFileSync(
+        turbo,
+        ['run', 'build', '--filter=@mcc/contracts', '--dry=json'],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env, MCC_BUILD_ENVIRONMENT: environment },
+        },
+      ),
+    );
+  const dev = plan('dev');
+  const prod = plan('prod');
+  assert.notEqual(dev.tasks[0].hash, prod.tasks[0].hash);
+  assert.equal(dev.tasks[0].hash, plan('dev').tasks[0].hash);
 });

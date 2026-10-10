@@ -41,6 +41,7 @@ jobs:
       name: ${{ inputs.environment }}
       deployment: false
     env:
+      MCC_BUILD_ENVIRONMENT: ${{ inputs.environment }}
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && vars.AWS_ACCOUNT_ID || '' }}
       MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && vars.AWS_ACCOUNT_ID || '' }}
@@ -78,6 +79,12 @@ jobs:
         env:
           TARGET_SHA: ${{ inputs.sha }}
         run: test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+      - name: Check out cache action from the qualified workflow revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .cache-workflow
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -90,6 +97,14 @@ jobs:
         run: |
           METADATA="$(npm run release:metadata --silent -- --application "${APPLICATION}")"
           echo "metadata=${METADATA}" >> "${GITHUB_OUTPUT}"
+      - name: Start environment Turbo cache
+        uses: ./.cache-workflow/.github/actions/turbo-s3-cache
+        with:
+          environment: ${{ inputs.environment }}
+          account-id: ${{ vars.AWS_ACCOUNT_ID }}
+          region: ${{ env.AWS_REGION }}
+      - name: Build selected application with dependencies
+        run: npx turbo run build --filter="@mcc/${{ inputs.application }}..."
       - name: Test selected application
         run: npm test --workspace "@mcc/${{ inputs.application }}"
       - uses: aws-actions/configure-aws-credentials@v5

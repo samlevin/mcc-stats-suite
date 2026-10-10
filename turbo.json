@@ -39,5 +39,7 @@
     }
   },
   "cacheDir": ".turbo/cache",
-  "globalDependencies": ["tsconfig.base.json", ".tool-versions"]
+  "globalDependencies": ["tsconfig.base.json", ".tool-versions"],
+  "globalEnv": ["MCC_BUILD_ENVIRONMENT"],
+  "globalPassThroughEnv": ["TURBO_API", "TURBO_TOKEN", "TURBO_TEAM"]
 }

@@ -1,0 +1,64 @@
+name: Environment S3 Turbo cache
+description: Start the v2 remote cache with a dedicated short-lived workload session.
+inputs:
+  environment:
+    description: Stable environment (dev or prod).
+    required: true
+  account-id:
+    description: Expected stable AWS account.
+    required: true
+  region:
+    description: Stable AWS region.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Validate cache target
+      shell: bash
+      env:
+        CACHE_ENVIRONMENT: ${{ inputs.environment }}
+        CACHE_ACCOUNT: ${{ inputs.account-id }}
+      run: |
+        [[ "$CACHE_ENVIRONMENT" == dev || "$CACHE_ENVIRONMENT" == prod ]]
+        [[ "$CACHE_ACCOUNT" =~ ^[0-9]{12}$ ]]
+    - name: Assume dedicated cache role
+      id: credentials
+      uses: aws-actions/configure-aws-credentials@v5
+      with:
+        role-to-assume: arn:aws:iam::${{ inputs.account-id }}:role/mcc-stats-suite-${{ inputs.environment }}-github-turbo-cache
+        aws-region: ${{ inputs.region }}
+        allowed-account-ids: ${{ inputs.account-id }}
+        role-duration-seconds: 3600
+        output-credentials: true
+        output-env-credentials: true
+    - name: Resolve environment cache contracts
+      id: contracts
+      shell: bash
+      env:
+        CACHE_ENVIRONMENT: ${{ inputs.environment }}
+        CACHE_ACCOUNT: ${{ inputs.account-id }}
+        AWS_REGION: ${{ inputs.region }}
+      run: |
+        test "$(aws sts get-caller-identity --query Account --output text)" = "$CACHE_ACCOUNT"
+        BUCKET="$(aws ssm get-parameter --name "/mcc/$CACHE_ENVIRONMENT/turbo-cache/bucket-name" --query Parameter.Value --output text)"
+        KEY="$(aws ssm get-parameter --name "/mcc/$CACHE_ENVIRONMENT/turbo-cache/data-key-arn" --query Parameter.Value --output text)"
+        test "$BUCKET" = "mcc-stats-suite-$CACHE_ENVIRONMENT-$CACHE_ACCOUNT-turbo-cache"
+        [[ "$KEY" == "arn:aws:kms:$AWS_REGION:$CACHE_ACCOUNT:key/"* ]]
+        echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+    - name: Start S3 remote cache
+      # v2.5.1 is the published v2 release; upstream has no floating v2 ref.
+      uses: rharkor/caching-for-turbo@v2.5.1
+      with:
+        provider: s3
+        s3-bucket: ${{ steps.contracts.outputs.bucket }}
+        s3-region: ${{ inputs.region }}
+        s3-prefix: turbogha/${{ inputs.environment }}/${{ runner.os }}/${{ runner.arch }}/node22/
+        s3-access-key-id: ${{ steps.credentials.outputs.aws-access-key-id }}
+        s3-secret-access-key: ${{ steps.credentials.outputs.aws-secret-access-key }}
+        s3-session-token: ${{ steps.credentials.outputs.aws-session-token }}
+    - name: Remove cache credentials from build environment
+      shell: bash
+      run: |
+        echo "AWS_ACCESS_KEY_ID=" >> "$GITHUB_ENV"
+        echo "AWS_SECRET_ACCESS_KEY=" >> "$GITHUB_ENV"
+        echo "AWS_SESSION_TOKEN=" >> "$GITHUB_ENV"
