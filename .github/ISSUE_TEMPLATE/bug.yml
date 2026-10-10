@@ -1,6 +1,5 @@
 name: Bug
 description: Report behavior that differs from an existing contract or expectation.
-title: '[Bug]: '
 labels:
   - 'bug'
 projects:

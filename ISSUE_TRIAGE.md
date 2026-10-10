@@ -22,6 +22,8 @@ Split multiple logical outcomes into native sub-issues, even when small. Size al
 
 ## Labels
 
+Use plain descriptive issue titles without `[Type]:` prefixes. Labels are canonical for classification.
+
 Use existing `bug`, `enhancement`, or `documentation` labels where applicable, one `severity:` label, and labels for directly affected `package:` workspaces. Repository and infrastructure work use `area: repository` and `area: infrastructure`. Apply exceptional `risk:` labels only when useful. Avoid duplicate `type: bug` and package/area pairs. Apply `epic` only when epic creation was explicitly requested. An epic uses `epic` as its only work-category label: never combine it with `bug`, `enhancement`, `documentation`, or other standard categories. Severity, package/area, risk, and automation metadata may coexist with `epic`. Other standard labels remain available on non-epic issues. See [.github/labels.json](.github/labels.json) for exact names. The issue description supplies context; do not justify each label individually.
 
 ## Planning and hierarchy
