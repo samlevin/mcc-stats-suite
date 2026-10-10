@@ -87,7 +87,7 @@ run "dev_secure_defaults" {
     condition = alltrue([
       for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement :
       statement.effect == "Deny" && one(statement.principals).type == "*" && one(statement.principals).identifiers == toset(["*"])
-    ]) && length(data.aws_iam_policy_document.turbo_cache_bucket.statement) == 3
+    ]) && length(data.aws_iam_policy_document.turbo_cache_bucket.statement) == 4
     error_message = "The storage foundation must not grant access to any principal."
   }
 
@@ -101,14 +101,38 @@ run "dev_secure_defaults" {
         toset(one(statement.condition).values) == toset(["false"]) &&
         statement.resources == toset([aws_s3_bucket.turbo_cache.arn, "${aws_s3_bucket.turbo_cache.arn}/*"])
         ) : (
-        length(statement.condition) == 0 &&
-        (statement.sid == "DenyCacheDataOutsideServiceRoles" ?
-          statement.actions == toset(["s3:*"]) && statement.resources == toset(["${aws_s3_bucket.turbo_cache.arn}/*"]) :
-          statement.actions == toset(["s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads"]) && statement.resources == toset([aws_s3_bucket.turbo_cache.arn])
+        statement.sid == "DenyCacheDataOutsideServiceRoles" ?
+        length(statement.condition) == 0 && statement.actions == toset(["s3:*"]) && statement.resources == toset(["${aws_s3_bucket.turbo_cache.arn}/*"]) :
+        (statement.sid == "DenyCacheListingOutsideServiceRoles" ?
+          statement.actions == toset(["s3:ListBucket"]) && statement.resources == toset([aws_s3_bucket.turbo_cache.arn]) &&
+          length(statement.condition) == 1 &&
+          one(statement.condition).test == "NumericGreaterThan" &&
+          one(statement.condition).variable == "s3:max-keys" &&
+          toset(one(statement.condition).values) == toset(["0"]) :
+          statement.sid == "DenyCacheVersionAndMultipartListingOutsideServiceRoles" &&
+          length(statement.condition) == 0 &&
+          statement.actions == toset(["s3:ListBucketVersions", "s3:ListBucketMultipartUploads"]) && statement.resources == toset([aws_s3_bucket.turbo_cache.arn])
         )
       )
     ])
-    error_message = "TLS must be required; data/listing must be denied to everyone until a service role is configured, without denying bucket administration."
+    error_message = "TLS and data/listing denials must preserve metadata-only HeadBucket refreshes without exempting any management principal."
+  }
+
+  assert {
+    condition = alltrue([
+      for request in [
+        { max_keys = null, denied = false }, # HeadBucket has no listing limit.
+        { max_keys = 0, denied = false },    # A zero-key listing exposes no names.
+        { max_keys = 1, denied = true },
+        { max_keys = 1000, denied = true }, # Default limit when none is supplied.
+        ] : request.denied == (request.max_keys == null ? false :
+        request.max_keys > tonumber(one(one(one([
+          for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : statement
+          if statement.sid == "DenyCacheListingOutsideServiceRoles"
+        ]).condition).values))
+      )
+    ])
+    error_message = "Refresh must remain possible while explicit and default positive listing limits are denied."
   }
 
   assert {
@@ -182,9 +206,13 @@ run "prod_service_contract" {
       statement.effect == "Deny" &&
       (statement.sid == "DenyInsecureTransport" ?
         one(statement.condition).test == "Bool" && one(statement.condition).variable == "aws:SecureTransport" && toset(one(statement.condition).values) == toset(["false"]) :
-        one(statement.condition).test == "ArnNotEquals" &&
-        one(statement.condition).variable == "aws:PrincipalArn" &&
-        toset(one(statement.condition).values) == toset(["arn:aws:iam::000000000000:role/test-cache-service"])
+        length(statement.condition) == (statement.sid == "DenyCacheListingOutsideServiceRoles" ? 2 : 1) && alltrue([
+          for condition in statement.condition :
+          condition.variable == "s3:max-keys" ?
+          condition.test == "NumericGreaterThan" && toset(condition.values) == toset(["0"]) :
+          condition.test == "ArnNotEquals" && condition.variable == "aws:PrincipalArn" &&
+          toset(condition.values) == toset(["arn:aws:iam::000000000000:role/test-cache-service"])
+        ])
       )
     ])
     error_message = "Only explicitly named service roles may escape the data denial; TLS remains required for those roles too."

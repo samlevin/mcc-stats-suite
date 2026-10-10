@@ -87,7 +87,32 @@ data "aws_iam_policy_document" "turbo_cache_bucket" {
       type        = "*"
       identifiers = ["*"]
     }
-    actions   = ["s3:ListBucket", "s3:ListBucketVersions", "s3:ListBucketMultipartUploads"]
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.turbo_cache.arn]
+    # HeadBucket refreshes have no max-keys context. Object listings always do.
+    condition {
+      test     = "NumericGreaterThan"
+      variable = "s3:max-keys"
+      values   = ["0"]
+    }
+    dynamic "condition" {
+      for_each = length(var.cache_service_role_arns) == 0 ? [] : [var.cache_service_role_arns]
+      content {
+        test     = "ArnNotEquals"
+        variable = "aws:PrincipalArn"
+        values   = condition.value
+      }
+    }
+  }
+
+  statement {
+    sid    = "DenyCacheVersionAndMultipartListingOutsideServiceRoles"
+    effect = "Deny"
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    actions   = ["s3:ListBucketVersions", "s3:ListBucketMultipartUploads"]
     resources = [aws_s3_bucket.turbo_cache.arn]
     dynamic "condition" {
       for_each = length(var.cache_service_role_arns) == 0 ? [] : [var.cache_service_role_arns]
