@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
   readFileSync,
+  cpSync,
+  statSync,
   mkdtempSync,
   mkdirSync,
   rmSync,
@@ -10,6 +12,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import ts from 'typescript';
 import {
   checks,
   runChecks,
@@ -129,7 +132,7 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
     );
     assert.ok(
       tasks
-        .get(`@mcc/${name}#test`)
+        .get(`@mcc/${name}#ci:test`)
         .dependencies.includes(`@mcc/${name}#build`),
     );
   }
@@ -234,6 +237,64 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
       );
       git('revert', '--no-edit', head);
     }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('CI cdk-config tests cannot invoke another compiler or modify built declarations', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-readonly-tests-'));
+  try {
+    const manifest = JSON.parse(
+      readFileSync(
+        new URL('../packages/cdk-config/package.json', import.meta.url),
+      ),
+    );
+    writeFileSync(join(directory, 'package.json'), JSON.stringify(manifest));
+    cpSync(
+      new URL('../packages/cdk-config/test', import.meta.url),
+      join(directory, 'test'),
+      { recursive: true },
+    );
+    mkdirSync(join(directory, 'dist'));
+    const compiled = ts.transpileModule(
+      readFileSync(
+        new URL('../packages/cdk-config/src/index.ts', import.meta.url),
+        'utf8',
+      ),
+      {
+        compilerOptions: {
+          module: ts.ModuleKind.CommonJS,
+          target: ts.ScriptTarget.ES2022,
+        },
+      },
+    );
+    writeFileSync(join(directory, 'dist/index.js'), compiled.outputText);
+    writeFileSync(
+      join(directory, 'dist/index.d.ts'),
+      '// Already built declarations\n',
+    );
+    mkdirSync(join(directory, 'bin'));
+    // Any script-level compiler bypasses Turbo's tracked build and fails this test.
+    writeFileSync(join(directory, 'bin/tsc'), '#!/bin/sh\nexit 91\n', {
+      mode: 0o755,
+    });
+    const snapshot = () =>
+      ['index.js', 'index.d.ts'].map((name) => ({
+        content: readFileSync(join(directory, 'dist', name), 'utf8'),
+        modified: statSync(join(directory, 'dist', name), { bigint: true })
+          .mtimeNs,
+      }));
+    const before = snapshot();
+    execFileSync('npm', ['run', 'ci:test'], {
+      cwd: directory,
+      env: {
+        ...process.env,
+        PATH: `${join(directory, 'bin')}:${process.env.PATH}`,
+      },
+    });
+    assert.deepEqual(snapshot(), before);
+    assert.match(manifest.scripts.test, /npm run build/);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

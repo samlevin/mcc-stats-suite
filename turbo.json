@@ -32,6 +32,10 @@
     "verify:bundle": {
       "dependsOn": ["ci:synth"],
       "cache": false
+    },
+    "ci:test": {
+      "dependsOn": ["build"],
+      "outputs": []
     }
   },
   "cacheDir": ".turbo/cache",

@@ -21,7 +21,7 @@ export function workspaceArguments(mode) {
     'run',
     'build',
     'typecheck',
-    'test',
+    'ci:test',
     'ci:synth',
     'verify:bundle',
     '--concurrency=4',
