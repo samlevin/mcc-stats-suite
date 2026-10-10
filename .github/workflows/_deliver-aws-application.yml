@@ -62,7 +62,11 @@ jobs:
               const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
               const marker = `<!-- production-approval:${application}:run:${context.runId} -->`;
               const body = `${marker}\n${mentions}, approve production for \`${application}\` at \`${sha.slice(0, 7)}\`.\n\n[Review deployments](${runUrl}) in this run after completing the dev smoke test. Once the production job is waiting, select it to approve or reject it.`;
-              await core.summary.addRaw(body).write();
+              try {
+                await core.summary.addRaw(body).write();
+              } catch (error) {
+                core.warning(`Could not write production approval summary: ${error.message}`);
+              }
               const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
                 ...context.repo,
                 commit_sha: sha,

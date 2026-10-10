@@ -405,7 +405,12 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
       /https:\/\/github.com\/owner\/repo\/actions\/runs\/123/,
     );
     assert.match(summary, /Once the production job is waiting/);
-    if (scenario.endsWith('-error')) {
+    if (scenario === 'summary-error') {
+      assert.equal(warnings.length, 1);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0][0], 'create');
+      assert.equal(calls[0][1].body, summary);
+    } else if (scenario.endsWith('-error')) {
       assert.equal(warnings.length, 1);
       assert.deepEqual(calls, []);
     } else if (['create', 'update', 'new-run'].includes(scenario)) {
