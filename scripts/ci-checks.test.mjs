@@ -127,23 +127,24 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   for (const name of applicationNames) {
     assert.ok(
       tasks
-        .get(`@mcc/${name}#ci:synth`)
-        .dependencies.includes('@mcc/cdk-config#build'),
+        .get(`@samlevin/${name}#ci:synth`)
+        .dependencies.includes('@samlevin/cdk-config#build'),
     );
     assert.ok(
       tasks
-        .get(`@mcc/${name}#ci:test`)
-        .dependencies.includes(`@mcc/${name}#build`),
+        .get(`@samlevin/${name}#ci:test`)
+        .dependencies.includes(`@samlevin/${name}#build`),
     );
   }
   assert.ok(
     tasks
-      .get('@mcc/match-to-csv#ci:synth')
-      .dependencies.includes('@mcc/contracts#build'),
+      .get('@samlevin/match-to-csv#ci:synth')
+      .dependencies.includes('@samlevin/contracts#build'),
   );
-  assert.deepEqual(tasks.get('@mcc/match-to-csv#verify:bundle').dependencies, [
-    '@mcc/match-to-csv#ci:synth',
-  ]);
+  assert.deepEqual(
+    tasks.get('@samlevin/match-to-csv#verify:bundle').dependencies,
+    ['@samlevin/match-to-csv#ci:synth'],
+  );
 });
 
 test('actual Turbo affected selection includes shared consumers and skips unrelated applications', () => {
@@ -198,12 +199,15 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
     for (const [workspace, expected] of [
       ...applicationNames.map((name) => [
         `applications/${name}`,
-        [`@mcc/${name}`],
+        [`@samlevin/${name}`],
       ]),
-      ['packages/contracts', ['@mcc/contracts', '@mcc/match-to-csv']],
+      ['packages/contracts', ['@samlevin/contracts', '@samlevin/match-to-csv']],
       [
         'packages/cdk-config',
-        ['@mcc/cdk-config', ...applicationNames.map((name) => `@mcc/${name}`)],
+        [
+          '@samlevin/cdk-config',
+          ...applicationNames.map((name) => `@samlevin/${name}`),
+        ],
       ],
     ]) {
       writeFileSync(
@@ -390,7 +394,7 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
     JSON.parse(
       execFileSync(
         turbo,
-        ['run', 'build', '--filter=@mcc/contracts', '--dry=json'],
+        ['run', 'build', '--filter=@samlevin/contracts', '--dry=json'],
         {
           cwd: root,
           encoding: 'utf8',

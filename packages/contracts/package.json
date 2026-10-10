@@ -1,6 +1,5 @@
 {
-  "name": "@mcc/contracts",
-  "private": true,
+  "name": "@samlevin/contracts",
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,5 +8,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test",
     "ci:test": "node --test"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samlevin/mcc-stats-suite.git",
+    "directory": "packages/contracts"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

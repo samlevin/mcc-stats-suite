@@ -1,5 +1,5 @@
 import t from 'tap';
-import type { S3ObjectReference } from '@mcc/contracts';
+import type { S3ObjectReference } from '@samlevin/contracts';
 import {
   attachmentRejectionCodes,
   processEmail,

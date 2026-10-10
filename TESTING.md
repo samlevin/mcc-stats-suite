@@ -27,7 +27,7 @@ npm run tofu:fmt:check
 Target one logical application with npm's workspace flag:
 
 ```console
-npm test --workspace @mcc/match-to-csv
+npm test --workspace @samlevin/match-to-csv
 npm run app:synth -- match-to-csv
 ```
 
@@ -42,7 +42,7 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Concurrent CI checks
 
-The ARM64 `check` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside one Turbo task graph. Turbo orders workspace builds before read-only `ci:test` tasks and shared builds before consumers. The focused `npm test --workspace @mcc/cdk-config` command still builds its own declarations; concurrent CI tests reuse the tracked build and never invoke a second compiler. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. Synthesis and native verification are never cached.
+The ARM64 `check` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside one Turbo task graph. Turbo orders workspace builds before read-only `ci:test` tasks and shared builds before consumers. The focused `npm test --workspace @samlevin/cdk-config` command still builds its own declarations; concurrent CI tests reuse the tracked build and never invoke a second compiler. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. Synthesis and native verification are never cached.
 
 For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, infrastructure, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. The existing baseline classifier still controls documentation and recognized repository checks. Deployment requires the successful `check` job and remains limited to pushes to `main`.
 

@@ -1,6 +1,6 @@
 import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { createHash, randomUUID } from 'node:crypto';
-import type { S3ObjectReference } from '@mcc/contracts';
+import type { S3ObjectReference } from '@samlevin/contracts';
 
 const s3 = new S3Client({});
 

@@ -1,5 +1,5 @@
 import t from 'tap';
-import type { ExtractTextOutput } from '@mcc/contracts';
+import type { ExtractTextOutput } from '@samlevin/contracts';
 import { writeExtractedCsv } from '../src/lambdas/write-extracted-csv';
 
 const event: ExtractTextOutput = {

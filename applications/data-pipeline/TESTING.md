@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```console
-npm test --workspace @mcc/data-pipeline
+npm test --workspace @samlevin/data-pipeline
 npm run app:synth -- data-pipeline
 ```
 

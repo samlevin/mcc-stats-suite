@@ -125,8 +125,8 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 Target a workspace without running every package:
 
 ```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/match-to-csv
+npm test --workspace @samlevin/match-to-csv
+npm run typecheck --workspace @samlevin/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
 ```
 

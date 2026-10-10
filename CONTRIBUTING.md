@@ -6,13 +6,13 @@ MCC Stats Suite is an NPM and Turbo monorepo. Each application owns a CDK stack 
 
 | Path | Package | Responsibility |
 |---|---|---|
-| `applications/match-to-csv` | `@mcc/match-to-csv` | Working email intake and OCR evidence pipeline |
-| `applications/ocr-quality` | `@mcc/ocr-quality` | Planned OCR scoring, anomaly detection, and labeling services |
-| `applications/admin` | `@mcc/admin` | Planned reviewer API and interface |
-| `applications/data-pipeline` | `@mcc/data-pipeline` | Planned Glue and DuckDB lakehouse transformations |
-| `applications/player` | `@mcc/player` | Planned read-only statistics API and interface |
-| `packages/contracts` | `@mcc/contracts` | Types shared across application boundaries |
-| `packages/cdk-config` | `@mcc/cdk-config` | Account checks, environment rules, stack names, and resource prefixes |
+| `applications/match-to-csv` | `@samlevin/match-to-csv` | Working email intake and OCR evidence pipeline |
+| `applications/ocr-quality` | `@samlevin/ocr-quality` | Planned OCR scoring, anomaly detection, and labeling services |
+| `applications/admin` | `@samlevin/admin` | Planned reviewer API and interface |
+| `applications/data-pipeline` | `@samlevin/data-pipeline` | Planned Glue and DuckDB lakehouse transformations |
+| `applications/player` | `@samlevin/player` | Planned read-only statistics API and interface |
+| `packages/contracts` | `@samlevin/contracts` | Types shared across application boundaries |
+| `packages/cdk-config` | `@samlevin/cdk-config` | Account checks, environment rules, stack names, and resource prefixes |
 | `infrastructure/modules` | n/a | Reusable OpenTofu bootstrap, foundation, and data-platform modules |
 | `infrastructure/dev` and `infrastructure/prod` | n/a | Environment roots |
 
@@ -26,6 +26,8 @@ Install the versions pinned in `.tool-versions`, then install dependencies from 
 asdf install
 npm ci
 ```
+
+Workspaces use the `@samlevin` scope. `.npmrc` routes that scope to GitHub Packages; third-party dependencies use npmjs.org. Matching workspace versions install locally. If an install needs a published shared version, authenticate with `npm login --scope=@samlevin --auth-type=legacy --registry=https://npm.pkg.github.com` using a classic token with `read:packages`. Keep credentials in your user npm configuration.
 
 For application, package, infrastructure, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
 
@@ -41,10 +43,10 @@ The first command checks formatting, lint rules, release metadata, types, tests,
 Useful focused commands follow the workspace dependency graph:
 
 ```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/contracts
+npm test --workspace @samlevin/match-to-csv
+npm run typecheck --workspace @samlevin/contracts
 npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @mcc/match-to-csv
+npm run verify:bundle --workspace @samlevin/match-to-csv
 ```
 
 Use `npm run format` and `npm run lint:fix` for automatic corrections. Add or update tests with every behavior change. Preserve immutable evidence semantics in `match-to-csv`: never overwrite source screenshots, provider responses, processing runs, or append-only events.
@@ -102,7 +104,7 @@ Delivery prompts request implementation through ready-for-review PRs. The implem
 
 ## Understand release versioning
 
-Release Please manages every application plus `@mcc/cdk-config` and `@mcc/contracts`. It creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`.
+Release Please manages every application plus `@samlevin/cdk-config` and `@samlevin/contracts`. It creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`.
 
 Release Please uses `GITHUB_TOKEN` with `contents: write` and `pull-requests: write`. The repository must also allow GitHub Actions to create and approve pull requests. Keep the default workflow token permissions read-only; the release workflow declares its own write permissions. See the [release pull request recovery procedure](runbooks/31-release-promote-and-recover-applications.md#recover-release-pull-request-creation) for the permission preflight and end-to-end verification. Repository settings changes require separate authorization.
 
@@ -111,7 +113,9 @@ Applications pin internal packages at exact versions. The Node workspace release
 - a `cdk-config` release affects `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, and `player`;
 - a `contracts` release affects `match-to-csv`.
 
-The release pull request updates package versions, changelogs, the root lockfile, and `.release-please-manifest.json` together. `npm run release:check` rejects drift between those files. Shared packages stay private and are not published to npm.
+The release pull request updates package versions, changelogs, the root lockfile, and `.release-please-manifest.json` together. `npm run release:check` rejects drift between those files. Release Please opens one coordinated release pull request so shared versions and exact consumer pins change together. Component versions and tags remain independent. After successful `main` CI, the `publish-packages` job builds and publishes `@samlevin/contracts` and `@samlevin/cdk-config` to GitHub Packages using `GITHUB_TOKEN`. The first successful run publishes the current versions; later runs skip versions already present. Registry or publication errors fail the job. Packages inherit access from this repository; registry downloads require authentication even for public packages. Applications remain private workspaces.
+
+Existing separate Release Please pull requests predate this configuration and should be closed when the coordinated replacement opens. Re-run the failed main CI run to retry package publication; immutable existing versions are skipped.
 
 ## Deploy one application to dev
 

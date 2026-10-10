@@ -1,4 +1,4 @@
-import type { CsvRow } from '@mcc/contracts';
+import type { CsvRow } from '@samlevin/contracts';
 
 export function rowsToCsv(rows: CsvRow[]): string {
   const header = [

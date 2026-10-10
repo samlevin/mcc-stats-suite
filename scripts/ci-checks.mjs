@@ -42,6 +42,7 @@ export function checks({ full, repository, mode }) {
           '--test',
           'scripts/issue-triage.test.mjs',
           'scripts/ci-checks.test.mjs',
+          'scripts/publish-packages.test.mjs',
         ],
       ],
       ['npm', ['run', 'tofu:fmt:check']],

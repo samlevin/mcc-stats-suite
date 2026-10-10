@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```console
-npm test --workspace @mcc/ocr-quality
+npm test --workspace @samlevin/ocr-quality
 npm run app:synth -- ocr-quality
 ```
 

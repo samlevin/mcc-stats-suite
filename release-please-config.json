@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
   "include-component-in-tag": true,
-  "separate-pull-requests": true,
+  "separate-pull-requests": false,
   "plugins": [
     {
       "type": "node-workspace"
@@ -11,37 +11,37 @@
     "packages/cdk-config": {
       "component": "cdk-config",
       "release-type": "node",
-      "package-name": "@mcc/cdk-config"
+      "package-name": "@samlevin/cdk-config"
     },
     "packages/contracts": {
       "component": "contracts",
       "release-type": "node",
-      "package-name": "@mcc/contracts"
+      "package-name": "@samlevin/contracts"
     },
     "applications/match-to-csv": {
       "component": "match-to-csv",
       "release-type": "node",
-      "package-name": "@mcc/match-to-csv"
+      "package-name": "@samlevin/match-to-csv"
     },
     "applications/ocr-quality": {
       "component": "ocr-quality",
       "release-type": "node",
-      "package-name": "@mcc/ocr-quality"
+      "package-name": "@samlevin/ocr-quality"
     },
     "applications/admin": {
       "component": "admin",
       "release-type": "node",
-      "package-name": "@mcc/admin"
+      "package-name": "@samlevin/admin"
     },
     "applications/data-pipeline": {
       "component": "data-pipeline",
       "release-type": "node",
-      "package-name": "@mcc/data-pipeline"
+      "package-name": "@samlevin/data-pipeline"
     },
     "applications/player": {
       "component": "player",
       "release-type": "node",
-      "package-name": "@mcc/player"
+      "package-name": "@samlevin/player"
     }
   }
 }

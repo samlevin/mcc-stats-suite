@@ -1,6 +1,5 @@
 {
-  "name": "@mcc/cdk-config",
-  "private": true,
+  "name": "@samlevin/cdk-config",
   "version": "1.0.0",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -9,5 +8,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build --silent && node --test test/*.test.js",
     "ci:test": "node --test test/*.test.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samlevin/mcc-stats-suite.git",
+    "directory": "packages/cdk-config"
+  },
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
   }
 }

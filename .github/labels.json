@@ -49,37 +49,37 @@
     {
       "name": "package: admin",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/admin NPM package"
+      "description": "Directly affects the @samlevin/admin NPM package"
     },
     {
       "name": "package: cdk-config",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/cdk-config NPM package"
+      "description": "Directly affects the @samlevin/cdk-config NPM package"
     },
     {
       "name": "package: contracts",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/contracts NPM package"
+      "description": "Directly affects the @samlevin/contracts NPM package"
     },
     {
       "name": "package: data-pipeline",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/data-pipeline NPM package"
+      "description": "Directly affects the @samlevin/data-pipeline NPM package"
     },
     {
       "name": "package: match-to-csv",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/match-to-csv NPM package"
+      "description": "Directly affects the @samlevin/match-to-csv NPM package"
     },
     {
       "name": "package: ocr-quality",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/ocr-quality NPM package"
+      "description": "Directly affects the @samlevin/ocr-quality NPM package"
     },
     {
       "name": "package: player",
       "color": "5319e7",
-      "description": "Directly affects the @mcc/player NPM package"
+      "description": "Directly affects the @samlevin/player NPM package"
     },
     {
       "name": "question",
