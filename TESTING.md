@@ -13,7 +13,7 @@ The AWS-free issue automation tests cover triage eligibility, pagination, idempo
 node --test scripts/issue-*.test.mjs
 ```
 
-These tests use metadata mocks and never call GitHub. To preview PR metadata with authenticated local `gh`, run `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`; it defaults to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
+These tests use metadata mocks and never call GitHub. When a non-draft PR opens, the `pr-issue-metadata` workflow moves its linked open issues in MCC delivery to `In review`. Draft PRs do not change issue status. To preview PR metadata and status updates with authenticated local `gh`, run `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`; it defaults to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
 
 The full local quality gate is:
 

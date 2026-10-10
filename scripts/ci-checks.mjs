@@ -41,6 +41,7 @@ export function checks({ full, repository, mode }) {
         [
           '--test',
           'scripts/issue-triage.test.mjs',
+          'scripts/issue-pr-metadata.test.mjs',
           'scripts/ci-checks.test.mjs',
           'scripts/publish-packages.test.mjs',
           'scripts/deployment-workflows.test.mjs',
