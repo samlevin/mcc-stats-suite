@@ -151,18 +151,56 @@ jobs:
           fi
       - name: Verify match-to-csv prerequisites
         if: inputs.application == 'match-to-csv'
+        env:
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
         run: |
           PARAMETER_COUNT="$(aws ssm get-parameters \
             --names \
               /cdk-bootstrap/hnb659fds/version \
-              "/mcc/${{ inputs.environment }}/match-to-csv/raw-email-bucket-name" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/evidence-bucket-name" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/data-key-arn" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/receipt-rule-set-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/raw-email-bucket-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/evidence-bucket-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/data-key-arn" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/receipt-rule-set-name" \
             --query 'length(Parameters)' \
             --output text)"
           if [ "${PARAMETER_COUNT}" != "5" ]; then
             echo "::error::CDK bootstrap or match-to-csv foundation parameters are missing"
+            exit 1
+          fi
+          # The foundation owns the domain, so read it back from the shared rule and
+          # keep checking the identity and MX record the application depends on.
+          RULE_SET_NAME="$(aws ssm get-parameter \
+            --name "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/receipt-rule-set-name" \
+            --query Parameter.Value \
+            --output text)"
+          ACTIVE_RULE_SET="$(aws ses describe-active-receipt-rule-set \
+            --query Metadata.Name \
+            --output text)"
+          if [ "${ACTIVE_RULE_SET}" != "${RULE_SET_NAME}" ]; then
+            echo "::error::The foundation receipt rule set ${RULE_SET_NAME} is not the active rule set"
+            exit 1
+          fi
+          RECIPIENT="$(aws ses describe-receipt-rule \
+            --rule-set-name "${RULE_SET_NAME}" \
+            --rule-name "match-to-csv-${DEPLOYMENT_ENVIRONMENT}" \
+            --query 'Rule.Recipients[0]' \
+            --output text)"
+          MCC_EMAIL_DOMAIN="${RECIPIENT#submit@}"
+          if [ -z "${MCC_EMAIL_DOMAIN}" ] || [ "${MCC_EMAIL_DOMAIN}" = "${RECIPIENT}" ]; then
+            echo "::error::The shared receipt rule does not deliver submit@ mail"
+            exit 1
+          fi
+          IDENTITY_STATUS="$(aws ses get-identity-verification-attributes \
+            --identities "${MCC_EMAIL_DOMAIN}" \
+            --query 'VerificationAttributes.*.VerificationStatus | [0]' \
+            --output text)"
+          if [ "${IDENTITY_STATUS}" != "Success" ]; then
+            echo "::error::The SES identity for the shared receipt rule is not verified in the deployment region"
+            exit 1
+          fi
+          if ! dig +short MX "${MCC_EMAIL_DOMAIN}" | \
+            grep -Fq "inbound-smtp.${AWS_REGION}.amazonaws.com."; then
+            echo "::error::The MX record for the shared receipt rule does not target SES inbound receiving in the deployment region"
             exit 1
           fi
       - name: Synthesize
@@ -173,6 +211,29 @@ jobs:
       - name: Verify native Lambda bundles
         if: inputs.application == 'match-to-csv'
         run: npm run verify:bundle --workspace applications/match-to-csv
+      # Runs the guard from the qualified workflow revision, so it also protects
+      # rollbacks to application revisions that predate it.
+      - name: Verify receipt rule handover
+        if: inputs.application == 'match-to-csv'
+        env:
+          STACK_NAME: match-to-csv-${{ inputs.environment }}
+        run: |
+          set -o pipefail
+          if ! DESCRIBE_ERROR="$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" 2>&1 >/dev/null)"; then
+            if [[ "${DESCRIBE_ERROR}" == *"does not exist"* ]]; then
+              echo "${STACK_NAME} does not exist yet"
+              exit 0
+            fi
+            echo "${DESCRIBE_ERROR}" >&2
+            echo "::error::Unable to read the deployed ${STACK_NAME} template"
+            exit 1
+          fi
+          aws cloudformation get-template \
+            --stack-name "${STACK_NAME}" \
+            --template-stage Original \
+            --query TemplateBody \
+            --output json | node .cache-workflow/scripts/receipt-rule-handover.mjs \
+            "applications/match-to-csv/cdk.out/${STACK_NAME}.template.json"
       - name: Reviewable production diff
         if: inputs.environment == 'prod'
         run: |
@@ -220,20 +281,6 @@ jobs:
               auto_inactive: false,
             });
             return response.data.id;
-      - name: Verify receipt rule handover
-        if: inputs.application == 'match-to-csv'
-        env:
-          STACK_NAME: match-to-csv-${{ inputs.environment }}
-        run: |
-          if ! aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
-            echo "${STACK_NAME} does not exist yet"
-            exit 0
-          fi
-          aws cloudformation get-template \
-            --stack-name "${STACK_NAME}" \
-            --template-stage Original \
-            --query TemplateBody \
-            --output json | node scripts/receipt-rule-handover.mjs
       - name: Deploy
         id: deploy
         run: |

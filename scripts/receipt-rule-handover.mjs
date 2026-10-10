@@ -1,18 +1,29 @@
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-// Before a release that stops declaring the receipt rule set, the deployed stack must
-// already retain it and must not deactivate it on delete. Otherwise CloudFormation
-// deletes the live resources and turns off inbound email for the account (issue #45).
-export function handoverBlockers(template) {
+// CloudFormation deletes a resource that the next template no longer declares, or
+// declares with another type, unless the deployed template retains it. It also runs
+// the delete handler of a custom resource it removes. For the SES receipt rule set,
+// the shared rule, and the activation, that turns off inbound email for the whole
+// account (issue #45). Compare the deployed template with the one about to deploy
+// and block only a deploy that would delete or deactivate them.
+const receiptTypes = new Set([
+  'AWS::SES::ReceiptRuleSet',
+  'AWS::SES::ReceiptRule',
+]);
+
+export function handoverBlockers(deployed, incoming) {
   const blockers = [];
-  for (const [id, resource] of Object.entries(template?.Resources ?? {})) {
+  const next = incoming?.Resources ?? {};
+  for (const [id, resource] of Object.entries(deployed?.Resources ?? {})) {
+    if (next[id]?.Type === resource.Type) continue;
     if (
-      (resource.Type === 'AWS::SES::ReceiptRuleSet' ||
-        resource.Type === 'AWS::SES::ReceiptRule') &&
+      receiptTypes.has(resource.Type) &&
       resource.DeletionPolicy !== 'Retain'
     ) {
-      blockers.push(`${id} (${resource.Type}) is not retained on deletion`);
+      blockers.push(
+        `${id} (${resource.Type}) would be deleted because it is not retained`,
+      );
     }
     if (
       resource.Type === 'Custom::AWS' &&
@@ -20,7 +31,9 @@ export function handoverBlockers(template) {
         'setActiveReceiptRuleSet',
       )
     ) {
-      blockers.push(`${id} deactivates the receipt rule set on delete`);
+      blockers.push(
+        `${id} would deactivate the receipt rule set when it is removed`,
+      );
     }
   }
   return blockers;
@@ -36,11 +49,21 @@ if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const blockers = handoverBlockers(parseTemplate(readFileSync(0, 'utf8')));
+  const incomingPath = process.argv[2];
+  if (!incomingPath) {
+    process.stderr.write(
+      'Usage: node receipt-rule-handover.mjs <synthesized-template.json> < deployed-template.json\n',
+    );
+    process.exit(2);
+  }
+  const blockers = handoverBlockers(
+    parseTemplate(readFileSync(0, 'utf8')),
+    parseTemplate(readFileSync(incomingPath, 'utf8')),
+  );
   if (blockers.length > 0) {
     for (const blocker of blockers) process.stderr.write(`${blocker}\n`);
     process.stderr.write(
-      'Deploy the release that retains the receipt rules (#49) to this environment first.\n',
+      'Deploy a release that retains these resources before one that removes them.\n',
     );
     process.exit(1);
   }

@@ -435,9 +435,34 @@ test('match-to-csv deploys only after the receipt rule handover check', () => {
   const guard = deployment.jobs.deploy.steps.find(
     (step) => step.name === 'Verify receipt rule handover',
   );
-  assert.ok(guard.run.includes('node scripts/receipt-rule-handover.mjs'));
-  assert.equal(guard.if, "inputs.application == 'match-to-csv'");
+  // The guard ships with the qualified workflow revision, not the deployed one,
+  // and compares the deployed template with the synthesized one.
   assert.ok(
-    steps.indexOf('Verify receipt rule handover') < steps.indexOf('Deploy'),
+    guard.run.includes(
+      'node .cache-workflow/scripts/receipt-rule-handover.mjs',
+    ),
   );
+  assert.ok(guard.run.includes('cdk.out/${STACK_NAME}.template.json'));
+  assert.ok(guard.run.includes('set -o pipefail'));
+  // Only a missing stack skips the guard; any other read failure stops the deploy.
+  assert.ok(guard.run.includes('*"does not exist"*'));
+  assert.equal(guard.if, "inputs.application == 'match-to-csv'");
+  const position = steps.indexOf('Verify receipt rule handover');
+  assert.ok(position > steps.indexOf('Synthesize'));
+  assert.ok(
+    position < steps.indexOf('Create exact-revision deployment record'),
+  );
+  assert.ok(position < steps.indexOf('Deploy'));
+});
+
+test('match-to-csv prerequisites verify the SES identity and MX record', () => {
+  const prerequisites = deployment.jobs.deploy.steps.find(
+    (step) => step.name === 'Verify match-to-csv prerequisites',
+  );
+  assert.equal(prerequisites.if, "inputs.application == 'match-to-csv'");
+  assert.ok(prerequisites.run.includes('describe-active-receipt-rule-set'));
+  assert.ok(prerequisites.run.includes('describe-receipt-rule'));
+  assert.ok(prerequisites.run.includes('get-identity-verification-attributes'));
+  assert.ok(prerequisites.run.includes('dig +short MX'));
+  assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
 });

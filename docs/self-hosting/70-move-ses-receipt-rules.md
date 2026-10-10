@@ -35,7 +35,7 @@ aws cloudformation get-template --stack-name match-to-csv-<environment> --profil
 aws ses describe-active-receipt-rule-set --profile <profile>
 ```
 
-Expected: both policies are `Retain`, and the active rule set matches the state you recorded. Do not continue until prod also shows this. Without it, step 3 deletes the live resources. The deployment workflow enforces this. Before each `match-to-csv` deploy, its **Verify receipt rule handover** step reads the deployed template and stops if the rule set or rule is not retained or the activation still has its delete handler.
+Expected: both policies are `Retain`, and the active rule set matches the state you recorded. Do not continue until prod also shows this. Without it, step 3 deletes the live resources. The deployment workflow enforces this. Before each `match-to-csv` deploy, its **Verify receipt rule handover** step compares the deployed template with the one it is about to deploy. It stops if the deploy would remove a rule set or rule that is not retained, or remove an activation that still has its delete handler. A deploy that keeps those resources, such as this step's release, passes.
 
 Between this step and step 3, do not destroy a stable `match-to-csv` stack. The retained rule set and rule stay in SES, so recreating the stack fails with `AlreadyExists` and rolls back. Do not delete the active rule set to get past this, because that stops inbound email. Finish step 2 instead, so the foundation owns the resources and the stack no longer declares them.
 
@@ -89,7 +89,7 @@ Expected: the events show the rule set and the rule as `DELETE_SKIPPED`, and the
 - Existing ephemeral stacks keep working. Their rule already targets `mcc-match-to-csv-dev`. The next deployment reads that name from `/mcc/dev/match-to-csv/receipt-rule-set-name`, with no replacement.
 - Roll `match-to-csv` back only to the release that contains step 3 or a later one. Earlier tags declare the rule set and rule again, and CloudFormation fails with `AlreadyExists`. The failure causes no email outage.
 - Destroying a `match-to-csv` stack no longer touches the rule set or the shared rule.
-- Domain verification and the MX record are still manual prerequisites. The application deployment no longer checks them, so check that the domain identity is verified in the deployment Region and that the MX record points at SES inbound receiving there. See [Check prerequisites](00-prerequisites.md).
+- Domain verification and the MX record are still manual prerequisites. Each `match-to-csv` deployment reads the domain from the shared rule and stops if the rule set is not active, the identity is not verified in the deployment Region, or the MX record does not point at SES inbound receiving there. See [Check prerequisites](00-prerequisites.md).
 
 ## If something looks wrong
 
