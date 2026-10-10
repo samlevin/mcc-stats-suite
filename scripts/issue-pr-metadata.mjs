@@ -32,13 +32,17 @@ export function metadataGraphql(query, variables, run = execFileSync) {
   return result.data;
 }
 
-export function linkedIssues(body, repository = REPOSITORY) {
-  const text = (body ?? '')
+export function referenceText(body) {
+  return (body ?? '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '')
     .replace(/(`+)[\s\S]*?\1(?!`)/g, '')
     .replace(/^(?: {4}|\t).*$/gm, '')
     .replace(/^.*\bparent\s+(?:issue|epic)\b.*$/gim, '');
+}
+
+export function linkedIssues(body, repository = REPOSITORY) {
+  const text = referenceText(body);
   const numbers = new Set();
   const references =
     /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/([1-9]\d*)\b|([\w.-]+\/[\w.-]+)#([1-9]\d*)\b|(?<![\w/#])#([1-9]\d*)\b/g;
