@@ -1,9 +1,9 @@
 {
   "name": "@mcc/ocr-quality",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "dependencies": {
-    "@mcc/cdk-config": "1.0.0"
+    "@mcc/cdk-config": "1.0.1"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
