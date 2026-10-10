@@ -2,15 +2,19 @@ name: Bug
 description: Report behavior that differs from an existing contract or expectation.
 title: '[Bug]: '
 labels:
-  - 'type: bug'
+  - 'bug'
 projects:
   - 'samlevin/1'
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Define one executable logical change with acceptance criteria. For a parent with sub-issues, use the container template; use the epic template only when explicitly requested. Follow [ISSUE_TRIAGE.md](https://github.com/samlevin/mcc-stats-suite/blob/main/ISSUE_TRIAGE.md) for concise metadata and planning rules.
   - type: input
     id: parent
     attributes:
-      label: Parent epic
-      description: Link the parent issue, or write "None" if this bug is not part of an epic.
+      label: Parent issue
+      description: Link the immediate parent, or write "None". Use Parent epic when the parent is an epic.
       placeholder: '#123'
     validations:
       required: true
@@ -44,6 +48,7 @@ body:
         - Breaks supported product behavior
         - Causes degraded or confusing behavior
         - Cosmetic or low-impact defect
+        - Impact not yet established (explain the evidence and uncertainty)
     validations:
       required: true
   - type: textarea

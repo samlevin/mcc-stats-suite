@@ -7,6 +7,14 @@ npm ci
 npm test
 ```
 
+The AWS-free issue triage tests cover eligibility, pagination, idempotency, and metadata changes before mutation:
+
+```console
+node --test scripts/issue-triage.test.mjs
+```
+
+These tests use metadata mocks and never call GitHub. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
+
 The full local quality gate is:
 
 ```console
@@ -14,7 +22,7 @@ npm run check
 npm run tofu:fmt:check
 ```
 
-`npm run check` verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI runs the same quality gate.
+`npm run check` verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI selects checks from changed files using `scripts/ci-scope.mjs` from the committed baseline. Markdown-only changes run formatting; recognized repository-only changes also run repository lint and issue-automation tests. They skip workspace tests/builds, CDK synthesis, bundle validation, and OpenTofu checks. Application/package/infrastructure code, dependencies, CI selection, and unknown paths run the full gate. Titles and labels never control selection. Renames inspect both removed and added paths. The required `check` job always runs, alongside existing secret and PR-title checks.
 
 Target one logical application with npm's workspace flag:
 

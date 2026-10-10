@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "test": "turbo run test",
+    "test": "node --test scripts/issue-triage.test.mjs && turbo run test",
     "typecheck": "turbo run typecheck",
     "build:shared": "turbo run build --filter=@mcc/contracts --filter=@mcc/cdk-config",
     "prelint": "npm run build:shared",

@@ -41,7 +41,7 @@ npm run app:synth -- match-to-csv --environment dev
 npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-`npm run check` includes Prettier, ESLint, release metadata checks, TypeScript, tests, and builds. CDK synthesis for native Lambda assets needs Docker and QEMU in CI. Tests must not call AWS.
+`npm run check` includes Prettier, ESLint, release metadata checks, TypeScript, tests, and builds. For documentation or recognized repository-only work, follow the shorter checks in CONTRIBUTING.md; do not run package or infrastructure tests. CI selects scope from files using the baseline classifier, never PR titles or labels. CDK synthesis for native Lambda assets needs Docker and QEMU in CI. Tests must not call AWS.
 
 ## Release and deployment rules
 
@@ -55,9 +55,9 @@ Use Conventional Commit pull-request titles. Do not commit, push, open a pull re
 
 ## Codex delivery binding
 
-Use the reusable personal Codex agents for GitHub work in `samlevin/mcc-stats-suite`, with `main` as trunk and the [MCC delivery project](https://github.com/users/samlevin/projects/1) as the default project. Read `WORKFLOW.md` for readiness, claims, dependencies, and project states. Discover project field IDs and options from GitHub instead of hard-coding them.
+Use the reusable personal Codex agents for GitHub work in `samlevin/mcc-stats-suite`, with `main` as trunk and the [MCC delivery project](https://github.com/users/samlevin/projects/1) as the default project. Read `WORKFLOW.md` for readiness, claims, dependencies, and project states. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) owns issue classification and required metadata; use its [label catalog](.github/labels.json) and [.agents/issue-creation.md](.agents/issue-creation.md) adapter for issue creation. Ready means metadata triaged; before claiming, verify executable scope, acceptance, validation, dependencies, parent relationships, and XS/S/M. Any issue with sub-issues is a container with no branch or PR and no acceptance criteria; use What/Why/How. Only deliverable leaves have acceptance criteria. Explicit epics use the epic label without other work-category labels. Implement executable leaves; plan L items before implementation. Discover project field IDs and options from GitHub instead of hard-coding them.
 
-Delegate epic delivery prompts such as "build me this feature <GitHub epic URL>" to `task-orchestrator`, and task/bug implementation or existing-PR rework to `issue-implementer`. The implementer delegates pushed-branch review to `code-reviewer` strictly before the candidate PR exists, and branch/stack maintenance to `stacked-pr-manager`. Invoke `security-reviewer` only for an explicit human security-review request. The implementer owns PR creation and formal-review follow-up.
+For `implement #number`, inspect native sub-issues first. Delegate any container or epic delivery to `task-orchestrator`, and leaf implementation or existing-PR rework to `issue-implementer`. The orchestrator traverses nested containers, orders leaves by native blocking relationships, and parallelizes only independent files, contracts, and dependencies. Use stacks mainly for reviewable layers within M or larger leaf issues. Epics require an explicit creation request; use Issue/Sub-issue otherwise. The implementer delegates pushed-branch review to `code-reviewer` strictly before the candidate PR exists, and branch/stack maintenance to `stacked-pr-manager`. Invoke `security-reviewer` only for an explicit human security-review request. The implementer owns PR creation and formal-review follow-up.
 
 A delivery invocation authorizes issue claims, project transitions, accepted-scope decomposition, commits, pushes, PR creation, and native stack linking through ready-for-review handoff. It does not authorize merges, auto-merge, repository settings changes, infrastructure applies, or deployments. Run the local gates in `CONTRIBUTING.md` and satisfy required PR checks. Keep executable issues in `In review` until merge; agent handoff is not issue completion.
 

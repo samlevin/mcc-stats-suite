@@ -1,0 +1,9 @@
+# MCC issue creation
+
+Repository: `samlevin/mcc-stats-suite`; trunk: `main`; project: [MCC delivery](https://github.com/users/samlevin/projects/1). Read [ISSUE_TRIAGE.md](../ISSUE_TRIAGE.md), [WORKFLOW.md](../WORKFLOW.md), the selected issue form, and [labels](../.github/labels.json).
+
+Default Priority to P2. Set Priority, Size, one severity, and applicable standard/package labels. Use repository/infrastructure area labels instead of duplicating package labels. Use `bug`, not `type: bug`; only explicitly requested epics get `epic`. Discover project IDs/options once per batch and reuse them.
+
+Plan only where needed. Multiple logical changes become native sub-issues of an ordinary Issue unless an epic was explicitly requested. Parent containers never have branches or PRs. Each executable leaf has one logical outcome, acceptance criteria, validation, and native blocking relationships where needed. Use `Parent epic` only for an immediate epic parent; otherwise `Parent issue`. Use epic.yml for explicitly requested epics and container.yml for other parents, with What/Why/How and no acceptance criteria. Executable leaves retain task.yml or bug.yml. Epics have no other work-category labels; retain only severity, package/area, risk, and automation metadata alongside epic. Use a milestone only when requested or supplied by repository policy.
+
+After creating the batch and completing relationships/metadata, run `node scripts/issue-triage.mjs --apply --issue NUMBER` for each new issue and `node scripts/issue-containers.mjs --apply --issue NUMBER` for each top-level created container, then read back the results. Publication authority includes these scoped metadata/completion transitions. Drafts never write. Existing published partial results are repaired, never recreated. Missing access or options must be reported. Filing issues never authorizes credential or tracker configuration changes.

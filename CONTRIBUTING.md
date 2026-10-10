@@ -27,12 +27,14 @@ asdf install
 npm ci
 ```
 
-Run the complete local gate before opening a pull request:
+For application, package, infrastructure, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
 
 ```console
 npm run check
 npm run tofu:fmt:check
 ```
+
+For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0` and `node --test scripts/issue-triage.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
 
 The first command checks formatting, lint rules, release metadata, types, tests, and builds. Neither command calls AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
 
@@ -62,7 +64,7 @@ Never commit credentials, account IDs, email addresses, domain names, populated 
 
 ## Submit a change
 
-Start from a `Ready` GitHub issue and follow the claim, implementation, review, and completion rules in [`WORKFLOW.md`](WORKFLOW.md). Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
+Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md). Start from a `Ready` GitHub issue, then verify executable scope, acceptance, validation, dependencies, parent relationships, and size planning before claiming. Ready means metadata triaged; implement only executable leaves. Any parent with sub-issues is a container with no branch or PR. Follow the claim, implementation, review, and completion rules in [`WORKFLOW.md`](WORKFLOW.md). Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
 
 Pull-request titles must follow Conventional Commits because Release Please derives versions and release notes from them. Common forms are:
 
@@ -73,7 +75,7 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
-Link the pull request to its task or bug with `Closes #<number>`. Reference the parent epic separately. A pull request closes executable work, not an epic.
+Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately. A pull request closes executable leaf work; container completion follows its children.
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs the repository quality gate, CDK synthesis, native bundle verification, and OpenTofu formatting. Pull requests do not deploy applications.
 
