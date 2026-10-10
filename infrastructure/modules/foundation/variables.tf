@@ -46,3 +46,12 @@ variable "github_oidc_subject_repository" {
   type        = string
   default     = null
 }
+
+variable "email_domain" {
+  description = "Verified SES domain that receives match-to-csv email. The shared rule accepts submit@ this domain."
+  type        = string
+  validation {
+    condition     = can(regex("^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)+$", var.email_domain))
+    error_message = "email_domain must be a bare domain name such as mail.example.com."
+  }
+}

@@ -48,6 +48,10 @@ Changes to `modules/foundation` or `.terrateam/config.yml` trigger both environm
 
 Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and Terrateam for foundation changes.
 
+## Inbound email contract
+
+Each foundation root owns the SES receipt rule set `mcc-match-to-csv-<environment>`, its activation, and the shared `submit@<domain>` rule. The rule stores mail under `incoming/<environment>/` in the raw-email bucket and stops rule-set processing. The domain is the `email_domain` input. Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` variable of the matching `infra/foundation-*` environment, so it is never committed. The rule set name is published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name`. Ephemeral `match-to-csv` stacks add their own `submit+<name>@` rule to that set. The domain identity and MX record remain manual prerequisites. Installations that predate this ownership follow [Move the SES receipt rules into the foundation](../docs/self-hosting/70-move-ses-receipt-rules.md).
+
 ## Turborepo cache storage contract
 
 The foundation module defines a cache bucket named `<project>-<environment>-<account>-turbo-cache` in each stable account. It blocks public access, requires TLS, and encrypts objects with the existing foundation KMS key and S3 Bucket Keys. Objects expire after seven days in both dev and prod; incomplete multipart uploads are aborted after seven days. Versioning and Object Lock are disabled because cache artifacts are reproducible.

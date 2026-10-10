@@ -16,5 +16,6 @@ Then operate it:
 - [Change the foundation](40-change-foundation.md)
 - [Deploy, release, and roll back applications](50-deploy-and-release-applications.md)
 - [Recover and troubleshoot](60-recover-and-troubleshoot.md)
+- [Move the SES receipt rules into the foundation](70-move-ses-receipt-rules.md), for installations created before the foundation owned them
 
 To build the AWS organization itself (Control Tower, Identity Center, account vending), follow [samlevin/aws-bootstrap](https://github.com/samlevin/aws-bootstrap) first.

@@ -19,7 +19,6 @@ test('creates an isolated ephemeral deployment in dev', () => {
 
   assert.equal(deployment.stackName, 'match-to-csv-sam');
   assert.equal(deployment.objectPrefix, 'ephemeral/sam');
-  assert.equal(deployment.ingressEnabled, false);
 });
 
 test('uses one dev-qualified deployment for integration and smoke tests', () => {
@@ -31,7 +30,6 @@ test('uses one dev-qualified deployment for integration and smoke tests', () => 
 
   assert.equal(deployment.stackName, 'admin-dev');
   assert.equal(deployment.isEphemeral, false);
-  assert.equal(deployment.ingressEnabled, true);
 });
 
 test('uses one production-qualified deployment', () => {
@@ -43,7 +41,6 @@ test('uses one production-qualified deployment', () => {
 
   assert.equal(deployment.stackName, 'player-prod');
   assert.equal(deployment.ephemeral, undefined);
-  assert.equal(deployment.ingressEnabled, true);
 });
 
 test('rejects production ephemeral deployments', () => {
