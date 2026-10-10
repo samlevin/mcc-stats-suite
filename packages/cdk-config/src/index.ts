@@ -48,6 +48,12 @@ export function resolveDeployment(
         'Development ephemeral deployments require -c ephemeral=<name> using 1-20 lowercase letters, numbers, or hyphens',
       );
     }
+    // Shared dev resources own every <application>-dev* name.
+    if (requestedEphemeral.startsWith('dev')) {
+      throw new Error(
+        'Ephemeral names beginning with "dev" are reserved for shared dev resources',
+      );
+    }
     ephemeral = requestedEphemeral;
   }
 

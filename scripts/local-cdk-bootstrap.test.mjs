@@ -3,7 +3,10 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { parse } from 'yaml';
-import { localBootstrap } from './local-cdk-bootstrap.mjs';
+import {
+  LOCAL_CHANGE_SET_NAME,
+  localBootstrap,
+} from './local-cdk-bootstrap.mjs';
 
 const upstream = parse(
   execFileSync(
@@ -85,6 +88,7 @@ test('local deployment allows ephemeral writes and denies all shared stack write
       assert.equal(
         allowed(deployment, `cloudformation:${action}`, stack(`${app}-alice`), {
           'cloudformation:RoleArn': 'local-execution',
+          'cloudformation:ChangeSetName': LOCAL_CHANGE_SET_NAME,
         }),
         true,
         `${app} ${action} ephemeral`,
@@ -92,6 +96,7 @@ test('local deployment allows ephemeral writes and denies all shared stack write
       assert.equal(
         allowed(deployment, `cloudformation:${action}`, stack(`${app}-dev`), {
           'cloudformation:RoleArn': 'local-execution',
+          'cloudformation:ChangeSetName': LOCAL_CHANGE_SET_NAME,
         }),
         false,
         `${app} ${action} shared`,
@@ -101,6 +106,18 @@ test('local deployment allows ephemeral writes and denies all shared stack write
   assert.equal(
     allowed(deployment, 'cloudformation:UpdateStack', stack('admin-alice')),
     false,
+  );
+  assert.equal(
+    allowed(
+      deployment,
+      'cloudformation:ExecuteChangeSet',
+      stack('admin-alice'),
+      {
+        'cloudformation:ChangeSetName': 'cdk-deploy-change-set',
+      },
+    ),
+    false,
+    'change sets from the administrator bootstrap',
   );
   assert.equal(
     allowed(deployment, 'cloudformation:UpdateStack', stack('CDKToolkit')),
@@ -307,4 +324,117 @@ test('runtime boundary allows Step Functions logging delivery with unscoped IAM 
   ]) {
     assert.equal(allowed(runtime, `logs:${action}`, '*'), true, action);
   }
+});
+
+const evidence = (key) => `arn:aws:s3:::evidence/${key}`;
+const fn = (name) => `arn:aws:lambda:us-east-1:000000000000:function:${name}`;
+const machine = (name) =>
+  `arn:aws:states:us-east-1:000000000000:stateMachine:${name}`;
+
+test('runtime boundary confines data and compute to ephemeral resources', () => {
+  assert.equal(
+    allowed(runtime, 's3:PutObject', evidence('screenshots/a/source/original')),
+    false,
+    'shared evidence',
+  );
+  assert.equal(
+    allowed(runtime, 's3:GetObject', evidence('incoming/alice/message')),
+    true,
+  );
+  for (const key of ['incoming/dev/message', 'incoming/devin/message']) {
+    assert.equal(allowed(runtime, 's3:GetObject', evidence(key)), false, key);
+  }
+  assert.equal(
+    allowed(runtime, 'lambda:InvokeFunction', fn('match-to-csv-alice-Process')),
+    true,
+  );
+  assert.equal(
+    allowed(runtime, 'lambda:InvokeFunction', fn('match-to-csv-dev-Process')),
+    false,
+  );
+  for (const action of ['StartExecution', 'StopExecution']) {
+    assert.equal(
+      allowed(runtime, `states:${action}`, machine('match-to-csv-alice')),
+      true,
+      action,
+    );
+    assert.equal(
+      allowed(runtime, `states:${action}`, machine('match-to-csv-dev-replay')),
+      false,
+      action,
+    );
+  }
+  assert.equal(
+    allowed(
+      runtime,
+      'states:StopExecution',
+      'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:run',
+    ),
+    false,
+  );
+});
+
+test('execution compute patterns ignore names that merely contain an application', () => {
+  for (const resource of [
+    fn('sysadmin-rotate'),
+    'arn:aws:sqs:us-east-1:000000000000:team-player-events',
+    'arn:aws:logs:us-east-1:000000000000:log-group:/aws/lambda/sysadmin-rotate',
+  ]) {
+    assert.equal(allowed(execution, 'lambda:DeleteFunction', resource), false);
+    assert.equal(allowed(execution, 'sqs:DeleteQueue', resource), false);
+    assert.equal(allowed(execution, 'logs:DeleteLogGroup', resource), false);
+  }
+  for (const [action, resource] of [
+    [
+      'sqs:CreateQueue',
+      'arn:aws:sqs:us-east-1:000000000000:match-to-csv-alice-events-dlq',
+    ],
+    [
+      'events:PutRule',
+      'arn:aws:events:us-east-1:000000000000:rule/match-to-csv-alice-RawEmailCreated',
+    ],
+    [
+      'logs:CreateLogGroup',
+      'arn:aws:logs:us-east-1:000000000000:log-group:/aws/vendedlogs/states/match-to-csv-alice',
+    ],
+    ['states:CreateStateMachine', machine('match-to-csv-alice-replay')],
+  ]) {
+    assert.equal(allowed(execution, action, resource), true, resource);
+  }
+});
+
+test('execution decrypts staged Lambda assets only through S3', () => {
+  assert.equal(
+    allowed(execution, 'kms:Decrypt', '*', {
+      'kms:ViaService': 's3.us-east-1.amazonaws.com',
+    }),
+    true,
+  );
+  assert.equal(allowed(execution, 'kms:Decrypt', '*'), false);
+});
+
+test('lookup role cannot read workload data', () => {
+  const lookup =
+    resources.LookupRole.Properties.Policies[0].PolicyDocument.Statement;
+  const data = lookup.find((entry) => entry.Sid === 'DontReadWorkloadData');
+  for (const action of [
+    's3:GetObject',
+    'lambda:GetFunction',
+    'sqs:ReceiveMessage',
+  ]) {
+    assert.ok(
+      data.Action.some((item) => matches(item, action)),
+      action,
+    );
+  }
+  const parameters = lookup.find(
+    (entry) => entry.Sid === 'ReadOnlyBootstrapParameters',
+  );
+  assert.equal(parameters.Effect, 'Deny');
+  assert.ok(
+    matches(
+      resolve(parameters.NotResource),
+      'arn:aws:ssm:us-east-1:000000000000:parameter/cdk-bootstrap/mcclocal1/version',
+    ),
+  );
 });

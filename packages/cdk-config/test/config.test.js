@@ -83,3 +83,18 @@ test('rejects deployment to the wrong account', () => {
     /does not match expected account/,
   );
 });
+
+test('rejects ephemeral names reserved for shared dev resources', () => {
+  for (const ephemeral of ['dev', 'devin', 'dev-2']) {
+    assert.throws(
+      () =>
+        resolveDeployment(
+          context({ environment: 'dev', ephemeral }),
+          'admin',
+          {},
+        ),
+      /reserved for shared dev/,
+      ephemeral,
+    );
+  }
+});

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { LOCAL_CHANGE_SET_NAME } from './local-cdk-bootstrap.mjs';
 
 const applications = new Set([
   'admin',
@@ -143,6 +144,18 @@ if (expectedAccount) {
   cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
 }
 if (profile) cdkArguments.push('--profile', profile);
+if (ephemeral && action !== 'synth') {
+  cdkArguments.push('--toolkit-stack-name', 'CDKToolkitLocal');
+  // The local bootstrap executes only change sets with this name.
+  if (
+    action === 'deploy' &&
+    !passthrough.some((argument) =>
+      /^--(method|change-set-name)(=|$)/.test(argument),
+    )
+  ) {
+    cdkArguments.push('--change-set-name', LOCAL_CHANGE_SET_NAME);
+  }
+}
 if (
   application === 'match-to-csv' &&
   (action === 'deploy' || action === 'diff') &&

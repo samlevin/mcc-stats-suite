@@ -26,6 +26,7 @@ const statement = (Sid, Action, Resource, extra = {}) => ({
   ...extra,
 });
 const document = (Statement) => ({ Version: '2012-10-17', Statement });
+export const LOCAL_CHANGE_SET_NAME = 'mcclocal1-deploy';
 
 export function localBootstrap(template) {
   const result = structuredClone(template);
@@ -53,6 +54,17 @@ export function localBootstrap(template) {
   );
   const roles = applications.map((app) => roleArn(`${app}-*`));
   const sharedRoles = applications.map((app) => roleArn(`${app}-dev*`));
+  // Anchor allows on a delimiter so unrelated names such as sysadmin-* never match.
+  const workloadResources = applications.flatMap((app) => [
+    arn('*', `*:${app}-*`),
+    arn('sqs', `${app}-*`),
+    arn('events', `rule/${app}-*`),
+    arn('logs', `log-group:/aws/*/${app}-*`),
+  ]);
+  // Unanchored denies stay short and only over-match shared names.
+  const stableResources = applications.map((app) => arn('*', `*${app}-dev*`));
+  const objects = (prefix) =>
+    sub(`arn:${'${AWS::Partition}'}:s3:::*/${prefix}`);
   const localExecution = {
     'Fn::GetAtt': ['CloudFormationExecutionRole', 'Arn'],
   };
@@ -66,8 +78,6 @@ export function localBootstrap(template) {
         statement(
           'WorkloadActions',
           [
-            's3:GetObject*',
-            's3:PutObject',
             's3:ListBucket',
             'kms:Decrypt',
             'kms:Encrypt',
@@ -75,10 +85,6 @@ export function localBootstrap(template) {
             'kms:GenerateDataKey*',
             'kms:DescribeKey',
             'textract:AnalyzeDocument',
-            'lambda:InvokeFunction',
-            'states:StartExecution',
-            'states:DescribeExecution',
-            'states:StopExecution',
             'logs:CreateLogGroup',
             'logs:CreateLogStream',
             'logs:PutLogEvents',
@@ -90,13 +96,45 @@ export function localBootstrap(template) {
             'logs:PutResourcePolicy',
             'logs:DescribeResourcePolicies',
             'logs:DescribeLogGroups',
-            'sqs:SendMessage',
             'xray:PutTraceSegments',
             'xray:PutTelemetryRecords',
-            'states:GetExecutionHistory',
           ],
           '*',
         ),
+        // Shared dev evidence lives outside ephemeral/, so local runtimes cannot overwrite it.
+        statement(
+          'WriteEphemeralObjects',
+          's3:PutObject',
+          objects('ephemeral/*'),
+        ),
+        statement('ReadEphemeralObjects', 's3:GetObject*', [
+          objects('ephemeral/*'),
+          objects('incoming/*'),
+        ]),
+        {
+          Sid: 'ProtectSharedInboundEmail',
+          Effect: 'Deny',
+          Action: 's3:*',
+          Resource: objects('incoming/dev*'),
+        },
+        statement(
+          'UseEphemeralCompute',
+          [
+            'lambda:InvokeFunction',
+            'states:StartExecution',
+            'states:DescribeExecution',
+            'states:StopExecution',
+            'states:GetExecutionHistory',
+            'sqs:SendMessage',
+          ],
+          workloadResources,
+        ),
+        {
+          Sid: 'ProtectSharedCompute',
+          Effect: 'Deny',
+          Action: ['lambda:*', 'states:*', 'sqs:*', 'events:*'],
+          Resource: stableResources,
+        },
         {
           Sid: 'NoDeploymentOrIdentityAdministration',
           Effect: 'Deny',
@@ -122,6 +160,34 @@ export function localBootstrap(template) {
       ]),
     },
   };
+  // ReadOnlyAccess includes data reads; synthesis needs only metadata and the bootstrap version.
+  resources.LookupRole.Properties.Policies[0].PolicyDocument.Statement.push({
+    Sid: 'DontReadWorkloadData',
+    Effect: 'Deny',
+    Action: [
+      's3:GetObject*',
+      'lambda:GetFunction',
+      'lambda:GetFunctionConfiguration',
+      'logs:GetLogEvents',
+      'logs:FilterLogEvents',
+      'logs:StartQuery',
+      'states:DescribeExecution',
+      'states:GetExecutionHistory',
+      'sqs:ReceiveMessage',
+      'dynamodb:GetItem',
+      'dynamodb:BatchGetItem',
+      'dynamodb:Query',
+      'dynamodb:Scan',
+      'textract:Get*',
+    ],
+    Resource: '*',
+  });
+  resources.LookupRole.Properties.Policies[0].PolicyDocument.Statement.push({
+    Sid: 'ReadOnlyBootstrapParameters',
+    Effect: 'Deny',
+    Action: 'ssm:GetParameter*',
+    NotResource: arn('ssm', 'parameter/cdk-bootstrap/mcclocal1/*'),
+  });
   const deployment = resources.DeploymentActionRole.Properties;
   deployment.ManagedPolicyArns = [];
   deployment.Policies = [
@@ -142,7 +208,6 @@ export function localBootstrap(template) {
           [
             'cloudformation:TagResource',
             'cloudformation:UntagResource',
-            'cloudformation:ExecuteChangeSet',
             'cloudformation:DeleteChangeSet',
             'cloudformation:UpdateTerminationProtection',
           ],
@@ -162,6 +227,20 @@ export function localBootstrap(template) {
           {
             Condition: {
               StringEquals: { 'cloudformation:RoleArn': localExecution },
+            },
+          },
+        ),
+        // ExecuteChangeSet has no RoleArn condition. Requiring the wrapper's change-set name
+        // keeps change sets created under the administrator bootstrap unexecutable.
+        statement(
+          'ExecuteLocalChangeSets',
+          'cloudformation:ExecuteChangeSet',
+          stacks,
+          {
+            Condition: {
+              StringEquals: {
+                'cloudformation:ChangeSetName': LOCAL_CHANGE_SET_NAME,
+              },
             },
           },
         ),
@@ -196,12 +275,9 @@ export function localBootstrap(template) {
   ];
   // Never inherit AdministratorAccess or user-supplied execution policy parameters.
   const execution = resources.CloudFormationExecutionRole.Properties;
-  execution.ManagedPolicyArns = [];
   execution.PermissionsBoundary = { Ref: 'LocalExecutionPolicy' };
   execution.ManagedPolicyArns = [{ Ref: 'LocalExecutionPolicy' }];
   const services = ['lambda', 'events', 'states', 'sqs', 'logs'];
-  const workloadResources = applications.map((app) => arn('*', `*${app}-*`));
-  const stableResources = applications.map((app) => arn('*', `*${app}-dev*`));
   resources.LocalExecutionPolicy = {
     Type: 'AWS::IAM::ManagedPolicy',
     Properties: {
@@ -237,6 +313,14 @@ export function localBootstrap(template) {
             sub('${StagingBucket.Arn}/*'),
           ],
         ),
+        // Lambda reads the code object with the caller's credentials; the staging bucket uses SSE-KMS.
+        statement('DecryptLambdaAssets', 'kms:Decrypt', '*', {
+          Condition: {
+            StringEquals: {
+              'kms:ViaService': sub('s3.${AWS::Region}.amazonaws.com'),
+            },
+          },
+        }),
         statement(
           'ReadConfiguration',
           [
