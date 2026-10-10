@@ -22,10 +22,13 @@ const replacements = {
   'AWS::Partition': 'aws',
   'AWS::AccountId': '000000000000',
   'AWS::Region': 'us-east-1',
+  'StagingBucket.Arn': 'arn:aws:s3:::local-assets',
 };
 function resolve(value) {
   if (typeof value === 'string') return value;
   if (value.Ref === 'LocalWorkloadBoundary') return 'local-boundary';
+  if (value['Fn::GetAtt']?.[0] === 'StagingBucket')
+    return 'arn:aws:s3:::local-assets';
   if (value['Fn::GetAtt']?.[0] === 'CloudFormationExecutionRole')
     return 'local-execution';
   if (value['Fn::Sub'])
@@ -257,5 +260,51 @@ test('customizes current bootstrap without changing the stable template', () => 
 test('IAM managed policies remain below the 6144 character limit', () => {
   for (const policy of [execution, runtime]) {
     assert.ok(JSON.stringify(policy).length < 6144);
+  }
+});
+
+test('execution can manage receipt rules and read only local Lambda assets', () => {
+  for (const action of [
+    'ses:CreateReceiptRule',
+    'ses:UpdateReceiptRule',
+    'ses:DeleteReceiptRule',
+    'ses:DescribeReceiptRule',
+    'ses:DescribeReceiptRuleSet',
+  ]) {
+    assert.equal(allowed(execution, action, '*'), true, action);
+  }
+  for (const action of [
+    'ses:SetActiveReceiptRuleSet',
+    'ses:DeleteReceiptRuleSet',
+    'ses:CreateReceiptRuleSet',
+  ]) {
+    assert.equal(allowed(execution, action, '*'), false, action);
+  }
+  assert.equal(
+    allowed(execution, 's3:GetObject', 'arn:aws:s3:::local-assets/lambda.zip'),
+    true,
+  );
+  assert.equal(
+    allowed(
+      execution,
+      's3:GetObject',
+      'arn:aws:s3:::cdk-hnb659fds-assets/lambda.zip',
+    ),
+    false,
+  );
+});
+
+test('runtime boundary allows Step Functions logging delivery with unscoped IAM actions', () => {
+  for (const action of [
+    'CreateLogDelivery',
+    'GetLogDelivery',
+    'UpdateLogDelivery',
+    'DeleteLogDelivery',
+    'ListLogDeliveries',
+    'PutResourcePolicy',
+    'DescribeResourcePolicies',
+    'DescribeLogGroups',
+  ]) {
+    assert.equal(allowed(runtime, `logs:${action}`, '*'), true, action);
   }
 });

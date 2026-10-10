@@ -82,6 +82,14 @@ export function localBootstrap(template) {
             'logs:CreateLogGroup',
             'logs:CreateLogStream',
             'logs:PutLogEvents',
+            'logs:CreateLogDelivery',
+            'logs:GetLogDelivery',
+            'logs:UpdateLogDelivery',
+            'logs:DeleteLogDelivery',
+            'logs:ListLogDeliveries',
+            'logs:PutResourcePolicy',
+            'logs:DescribeResourcePolicies',
+            'logs:DescribeLogGroups',
             'sqs:SendMessage',
             'xray:PutTraceSegments',
             'xray:PutTelemetryRecords',
@@ -210,6 +218,25 @@ export function localBootstrap(template) {
           Action: services.map((service) => `${service}:*`),
           Resource: stableResources,
         },
+        statement(
+          'ManageEphemeralReceiptRules',
+          [
+            'ses:CreateReceiptRule',
+            'ses:UpdateReceiptRule',
+            'ses:DeleteReceiptRule',
+            'ses:DescribeReceiptRule',
+            'ses:DescribeReceiptRuleSet',
+          ],
+          '*',
+        ),
+        statement(
+          'ReadLambdaAssets',
+          ['s3:GetObject', 's3:GetBucketLocation'],
+          [
+            { 'Fn::GetAtt': ['StagingBucket', 'Arn'] },
+            sub('${StagingBucket.Arn}/*'),
+          ],
+        ),
         statement(
           'ReadConfiguration',
           [
