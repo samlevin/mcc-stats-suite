@@ -14,8 +14,6 @@ permissions:
   contents: read
   actions: read
   deployments: write
-  issues: write
-  pull-requests: read
   packages: read
   id-token: write
 
@@ -34,6 +32,7 @@ jobs:
     if: needs.dev.result == 'success'
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
       pull-requests: read
       issues: write
@@ -45,34 +44,49 @@ jobs:
           TARGET_SHA: ${{ inputs.sha }}
         with:
           script: |
-            const application = process.env.APPLICATION;
-            const sha = process.env.TARGET_SHA;
-            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const marker = `<!-- production-approval:${application} -->`;
-            const body = `${marker}\n@${context.repo.owner}, approve production for \`${application}\` at \`${sha.slice(0, 7)}\`.\n\n[Review deployments](${runUrl}) in this run after completing the dev smoke test. Select the pending production deployment to approve or reject it.`;
-            await core.summary.addRaw(body).write();
-            const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
-              ...context.repo,
-              commit_sha: sha,
-            });
-            const pull = pulls.find((pull) => pull.merged_at && pull.merge_commit_sha === sha && pull.base.repo.full_name === `${context.repo.owner}/${context.repo.repo}`);
-            if (!pull) {
-              core.info('No merged pull request for this commit; skipping approval comment.');
-              return;
-            }
-            const comments = await github.paginate(github.rest.issues.listComments, {
-              ...context.repo,
-              issue_number: pull.number,
-            });
-            const comment = comments.find((comment) => comment.user.login === 'github-actions[bot]' && comment.body.startsWith(marker));
-            if (comment) {
-              await github.rest.issues.updateComment({ ...context.repo, comment_id: comment.id, body });
-            } else {
-              await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
+            try {
+              const { data } = await github.rest.repos.getEnvironment({
+                ...context.repo,
+                environment_name: 'prod',
+              });
+              const reviewers = data.protection_rules?.find((rule) => rule.type === 'required_reviewers');
+              if (!reviewers?.reviewers?.length || data.can_admins_bypass !== false) {
+                core.warning('Production protection is invalid; skipping approval prompt.');
+                return;
+              }
+              const mentions = reviewers.reviewers.map(({ type, reviewer }) =>
+                type === 'Team' ? `@${context.repo.owner}/${reviewer.slug}` : `@${reviewer.login}`,
+              ).join(' ');
+              const application = process.env.APPLICATION;
+              const sha = process.env.TARGET_SHA;
+              const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+              const marker = `<!-- production-approval:${application}:run:${context.runId} -->`;
+              const body = `${marker}\n${mentions}, approve production for \`${application}\` at \`${sha.slice(0, 7)}\`.\n\n[Review deployments](${runUrl}) in this run after completing the dev smoke test. Once the production job is waiting, select it to approve or reject it.`;
+              await core.summary.addRaw(body).write();
+              const pulls = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+                ...context.repo,
+                commit_sha: sha,
+              });
+              const pull = pulls.find((pull) => pull.merged_at && pull.merge_commit_sha === sha);
+              if (!pull) {
+                core.info('No merged pull request for this commit; skipping approval comment.');
+                return;
+              }
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                ...context.repo,
+                issue_number: pull.number,
+              });
+              const comment = comments.find((comment) => comment.user?.login === 'github-actions[bot]' && comment.body?.startsWith(marker));
+              if (comment) {
+                await github.rest.issues.updateComment({ ...context.repo, comment_id: comment.id, body });
+              } else {
+                await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
+              }
+            } catch (error) {
+              core.warning(`Could not post production approval prompt: ${error.message}`);
             }
 
   prod:
-    name: 'Approve production: ${{ inputs.application }}'
     needs: dev
     if: needs.dev.result == 'success'
     uses: ./.github/workflows/_deploy-aws-application.yml

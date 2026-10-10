@@ -22,6 +22,12 @@ const evaluate = (expression, values) =>
     `return (${expression});`,
   )(...Object.values(values));
 
+const runScript = (script, globals) =>
+  new (Object.getPrototypeOf(async function () {}).constructor)(
+    ...Object.keys(globals),
+    script,
+  )(...Object.values(globals));
+
 test('only successful trusted main push CI qualifies stable delivery', () => {
   assert.deepEqual(orchestration.on.workflow_run, {
     workflows: ['ci'],
@@ -132,11 +138,6 @@ test('production requires reviewers and disabled bypass before protected job', a
     '${{ inputs.environment }}',
   );
   const script = guard.steps[0].with.script;
-  const run = new (Object.getPrototypeOf(async function () {}).constructor)(
-    'github',
-    'context',
-    script,
-  );
   for (const [data, allowed] of [
     [{ protection_rules: [], can_admins_bypass: false }, false],
     [
@@ -165,8 +166,8 @@ test('production requires reviewers and disabled bypass before protected job', a
       true,
     ],
   ]) {
-    const invocation = run(
-      {
+    const invocation = runScript(script, {
+      github: {
         rest: {
           repos: {
             getEnvironment: async (request) => {
@@ -176,8 +177,8 @@ test('production requires reviewers and disabled bypass before protected job', a
           },
         },
       },
-      { repo: { owner: 'owner', repo: 'repo' } },
-    );
+      context: { repo: { owner: 'owner', repo: 'repo' } },
+    });
     if (allowed) await invocation;
     else await assert.rejects(invocation, /prod requires reviewers/);
   }
@@ -233,6 +234,7 @@ test('approval prompt uses the qualified application and SHA with comment permis
   assert.equal(prompt.if, delivery.jobs.prod.if);
   assert.equal(prompt.environment, undefined);
   assert.deepEqual(prompt.permissions, {
+    actions: 'read',
     contents: 'read',
     'pull-requests': 'read',
     issues: 'write',
@@ -244,129 +246,181 @@ test('approval prompt uses the qualified application and SHA with comment permis
     TARGET_SHA: '${{ inputs.sha }}',
   });
   assert.equal(prompt.steps[0].with['github-token'], undefined);
-  assert.equal(
-    delivery.jobs.prod.name,
-    'Approve production: ${{ inputs.application }}',
-  );
+  assert.equal(delivery.jobs.prod.name, undefined);
+  assert.equal(delivery.permissions.issues, undefined);
+  assert.equal(delivery.permissions['pull-requests'], undefined);
   assert.match(deployment.jobs.deploy.name, /Approve production:/);
 });
 
-test('approval prompt creates or updates its bot comment and skips commits without a merged PR', async () => {
+test('approval prompt notifies configured reviewers per run and tolerates API failures', async () => {
   const script = delivery.jobs['approval-prompt'].steps[0].with.script;
-  const run = new (Object.getPrototypeOf(async function () {}).constructor)(
-    'github',
-    'context',
-    'core',
-    'process',
-    script,
-  );
   const sha = 'a'.repeat(40);
-  const pull = {
-    number: 38,
-    merged_at: 'merged',
-    merge_commit_sha: sha,
-    base: { repo: { full_name: 'owner/repo' } },
-  };
+  const marker = '<!-- production-approval:match-to-csv:run:123 -->';
   for (const scenario of [
     'create',
     'update',
+    'new-run',
     'no-pr',
     'unmerged',
     'other-sha',
-    'other-repo',
+    'invalid-protection',
+    'bypass',
+    'environment-error',
+    'pulls-error',
+    'list-error',
+    'create-error',
+    'update-error',
+    'summary-error',
   ]) {
     const calls = [];
+    const warnings = [];
     let summary;
-    const associated =
-      scenario === 'no-pr'
-        ? []
-        : [
-            {
-              ...pull,
-              ...(scenario === 'unmerged' ? { merged_at: null } : {}),
-              ...(scenario === 'other-sha'
-                ? { merge_commit_sha: 'b'.repeat(40) }
-                : {}),
-              ...(scenario === 'other-repo'
-                ? { base: { repo: { full_name: 'fork/repo' } } }
-                : {}),
-            },
-          ];
     const listPulls = Symbol('pulls');
     const listComments = Symbol('comments');
-    await run(
-      {
+    await runScript(script, {
+      github: {
         rest: {
-          repos: { listPullRequestsAssociatedWithCommit: listPulls },
+          repos: {
+            listPullRequestsAssociatedWithCommit: listPulls,
+            getEnvironment: async (request) => {
+              assert.equal(request.environment_name, 'prod');
+              if (scenario === 'environment-error')
+                throw new Error('environment unavailable');
+              return {
+                data: {
+                  can_admins_bypass: scenario === 'bypass',
+                  protection_rules: [
+                    {
+                      type: 'required_reviewers',
+                      reviewers:
+                        scenario === 'invalid-protection'
+                          ? []
+                          : [
+                              { type: 'User', reviewer: { login: 'approver' } },
+                              {
+                                type: 'Team',
+                                reviewer: { slug: 'release-team' },
+                              },
+                            ],
+                    },
+                  ],
+                },
+              };
+            },
+          },
           issues: {
             listComments,
-            createComment: async (request) => calls.push(['create', request]),
-            updateComment: async (request) => calls.push(['update', request]),
+            createComment: async (request) => {
+              if (scenario === 'create-error')
+                throw new Error('comment locked');
+              calls.push(['create', request]);
+            },
+            updateComment: async (request) => {
+              if (scenario === 'update-error')
+                throw new Error('write forbidden');
+              calls.push(['update', request]);
+            },
           },
         },
         paginate: async (method, request) => {
           assert.equal(request.owner, 'owner');
           assert.equal(request.repo, 'repo');
           if (method === listPulls) {
+            if (scenario === 'pulls-error')
+              throw new Error('pull lookup failed');
             assert.equal(request.commit_sha, sha);
-            return associated;
+            return scenario === 'no-pr'
+              ? []
+              : [
+                  {
+                    number: 38,
+                    merged_at: scenario === 'unmerged' ? null : 'merged',
+                    merge_commit_sha:
+                      scenario === 'other-sha' ? 'b'.repeat(40) : sha,
+                  },
+                ];
           }
           assert.equal(method, listComments);
           assert.equal(request.issue_number, 38);
-          calls.push(['list']);
+          if (scenario === 'list-error')
+            throw new Error('comments unavailable');
           return [
+            { user: null, body: marker },
+            { user: { login: 'github-actions[bot]' } },
+            { user: { login: 'human' }, body: marker },
             {
-              id: 1,
-              user: { login: 'human' },
-              body: '<!-- production-approval:match-to-csv -->',
-            },
-            {
-              id: 2,
               user: { login: 'github-actions[bot]' },
-              body: '<!-- production-approval:admin -->',
+              body: '<!-- production-approval:admin:run:123 -->',
             },
-            ...(scenario === 'update'
+            {
+              user: { login: 'github-actions[bot]' },
+              body: '<!-- production-approval:match-to-csv:run:122 -->',
+            },
+            ...(scenario === 'update' || scenario === 'update-error'
               ? [
                   {
                     id: 3,
                     user: { login: 'github-actions[bot]' },
-                    body: '<!-- production-approval:match-to-csv -->old',
+                    body: `${marker}old`,
                   },
                 ]
               : []),
           ];
         },
       },
-      {
+      context: {
         repo: { owner: 'owner', repo: 'repo' },
         serverUrl: 'https://github.com',
         runId: 123,
       },
-      {
+      core: {
         summary: {
           addRaw: (body) => {
             summary = body;
-            return { write: async () => {} };
+            return {
+              write: async () => {
+                if (scenario === 'summary-error')
+                  throw new Error('summary unavailable');
+              },
+            };
           },
         },
         info: () => {},
+        warning: (message) => warnings.push(message),
       },
-      { env: { APPLICATION: 'match-to-csv', TARGET_SHA: sha } },
-    );
-    assert.match(summary, /@owner/);
+      process: { env: { APPLICATION: 'match-to-csv', TARGET_SHA: sha } },
+    });
+    if (
+      ['invalid-protection', 'bypass', 'environment-error'].includes(scenario)
+    ) {
+      assert.equal(summary, undefined);
+      assert.equal(warnings.length, 1);
+      assert.deepEqual(calls, []);
+      continue;
+    }
+    assert.match(summary, /@approver @owner\/release-team/);
     assert.match(summary, /`match-to-csv` at `aaaaaaa`/);
     assert.match(
       summary,
       /https:\/\/github.com\/owner\/repo\/actions\/runs\/123/,
     );
-    if (scenario === 'create' || scenario === 'update') {
-      assert.equal(calls.length, 2);
-      assert.equal(calls[1][0], scenario);
-      assert.equal(calls[1][1].body, summary);
+    assert.match(summary, /Once the production job is waiting/);
+    if (scenario.endsWith('-error')) {
+      assert.equal(warnings.length, 1);
+      assert.deepEqual(calls, []);
+    } else if (['create', 'update', 'new-run'].includes(scenario)) {
+      assert.equal(warnings.length, 0);
+      assert.equal(calls.length, 1);
+      const operation = scenario === 'update' ? 'update' : 'create';
+      assert.equal(calls[0][0], operation);
+      assert.equal(calls[0][1].body, summary);
       assert.equal(
-        calls[1][1][scenario === 'create' ? 'issue_number' : 'comment_id'],
-        scenario === 'create' ? 38 : 3,
+        calls[0][1][operation === 'create' ? 'issue_number' : 'comment_id'],
+        operation === 'create' ? 38 : 3,
       );
-    } else assert.deepEqual(calls, []);
+    } else {
+      assert.equal(warnings.length, 0);
+      assert.deepEqual(calls, []);
+    }
   }
 });
