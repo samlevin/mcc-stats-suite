@@ -15,7 +15,10 @@ jobs:
   assign:
     # The owner's identity is what the agents use. Nothing is checked out, so
     # pull_request_target never runs pull request code.
-    if: github.event.sender.login == github.repository_owner
+    if: >-
+      github.event.sender.login == github.repository_owner &&
+      (github.event_name == 'issues' ||
+      github.event.pull_request.user.login == github.repository_owner)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
