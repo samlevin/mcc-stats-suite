@@ -1,13 +1,43 @@
+import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { ghGraphql, paginate, REPOSITORY } from './issue-triage.mjs';
+import { paginate, REPOSITORY } from './issue-triage.mjs';
 
 const PAGE = 'pageInfo { hasNextPage endCursor }';
+
+export function metadataGraphql(query, variables, run = execFileSync) {
+  let output;
+  try {
+    output = run('gh', ['api', 'graphql', '--input', '-'], {
+      input: JSON.stringify({ query, variables }),
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (error) {
+    if (!error.stdout) throw error;
+    output = error.stdout;
+  }
+  const result = JSON.parse(output);
+  if (result.errors?.length) {
+    const missingReference =
+      query.includes('issueOrPullRequest(number:') &&
+      result.errors.every(
+        (error) =>
+          error.type === 'NOT_FOUND' &&
+          error.path?.join('.') === 'repository.issueOrPullRequest',
+      ) &&
+      result.data?.repository?.issueOrPullRequest === null;
+    if (!missingReference)
+      throw new Error('GitHub GraphQL request returned errors');
+  }
+  return result.data;
+}
 
 export function linkedIssues(body, repository = REPOSITORY) {
   const text = (body ?? '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '')
-    .replace(/`[^`\n]*`/g, '')
+    .replace(/(`+)[\s\S]*?\1(?!`)/g, '')
+    .replace(/^(?: {4}|\t).*$/gm, '')
     .replace(/^.*\bparent\s+(?:issue|epic)\b.*$/gim, '');
   const numbers = new Set();
   const references =
@@ -159,7 +189,7 @@ if (
     if (!['true', 'false'].includes(mode))
       throw new Error('DRY_RUN must be true or false');
     await copyMetadata({
-      api: ghGraphql,
+      api: metadataGraphql,
       number: Number(process.env.PR_NUMBER),
       dryRun: mode === 'true',
     });

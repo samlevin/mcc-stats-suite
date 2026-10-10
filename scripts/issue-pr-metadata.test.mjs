@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   copyMetadata,
   linkedIssues,
+  metadataGraphql,
   readMetadata,
 } from './issue-pr-metadata.mjs';
 
@@ -211,4 +212,93 @@ test('discovery failures prevent partial writes', async () => {
     /Project access denied/,
   );
   assert.deepEqual(f.writes, []);
+});
+
+test('indented and multi-backtick code examples cannot supply links', () => {
+  assert.deepEqual(
+    linkedIssues(
+      '    Closes #1\n\tFixes #2\nUse ``Closes #3 and `#4` `` as an example.\nCloses #5',
+    ),
+    [5],
+  );
+});
+
+test('GitHub NOT_FOUND for a missing issue is skipped while other errors fail', () => {
+  const query =
+    'query { repository { issueOrPullRequest(number: 999) { id } } }';
+  const response = (type, path = ['repository', 'issueOrPullRequest']) => ({
+    data: { repository: { issueOrPullRequest: null } },
+    errors: [{ type, path }],
+  });
+  const run = (result) => () => {
+    throw Object.assign(new Error('gh exited with status 1'), {
+      stdout: JSON.stringify(result),
+    });
+  };
+  assert.deepEqual(metadataGraphql(query, {}, run(response('NOT_FOUND'))), {
+    repository: { issueOrPullRequest: null },
+  });
+  assert.throws(
+    () => metadataGraphql(query, {}, run(response('FORBIDDEN'))),
+    /returned errors/,
+  );
+  assert.throws(
+    () =>
+      metadataGraphql(query, {}, run(response('NOT_FOUND', ['repository']))),
+    /returned errors/,
+  );
+  assert.throws(
+    () =>
+      metadataGraphql(
+        'query { repository { pullRequest { id } } }',
+        {},
+        run(response('NOT_FOUND')),
+      ),
+    /returned errors/,
+  );
+  assert.throws(
+    () =>
+      metadataGraphql(
+        query,
+        {},
+        run({
+          ...response('NOT_FOUND'),
+          errors: [
+            ...response('NOT_FOUND').errors,
+            ...response('FORBIDDEN').errors,
+          ],
+        }),
+      ),
+    /returned errors/,
+  );
+});
+
+test('valid issues still supply metadata alongside missing references', async () => {
+  const f = fixture({ body: 'Closes #1 and #999' });
+  const original = f.api;
+  f.api = async (query, variables) =>
+    variables.number === 999
+      ? metadataGraphql(query, variables, () => {
+          throw Object.assign(new Error('gh exited with status 1'), {
+            stdout: JSON.stringify({
+              data: { repository: { issueOrPullRequest: null } },
+              errors: [
+                {
+                  type: 'NOT_FOUND',
+                  path: ['repository', 'issueOrPullRequest'],
+                },
+              ],
+            }),
+          });
+        })
+      : original(query, variables);
+  await copyMetadata({ ...f, number: 10, dryRun: false });
+  assert.deepEqual(
+    f.writes.map((write) => write.variables),
+    [
+      { id: 'pr', labels: ['l1', 'shared'] },
+      { id: 'pr', milestone: 'm1' },
+      { project: 'p1', id: 'pr' },
+    ],
+  );
 });
