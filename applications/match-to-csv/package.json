@@ -1,7 +1,7 @@
 {
   "name": "@samlevin/match-to-csv",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -17,8 +17,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.992.0",
     "@aws-sdk/client-textract": "^3.992.0",
-    "@samlevin/cdk-config": "1.0.0",
-    "@samlevin/contracts": "1.0.0",
+    "@samlevin/cdk-config": "1.1.0",
+    "@samlevin/contracts": "1.1.0",
     "mailparser": "^3.9.3",
     "sharp": "^0.35.3"
   },
