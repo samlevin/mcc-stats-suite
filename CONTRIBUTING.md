@@ -74,7 +74,7 @@ Use `feat` for a minor version, `fix` for a patch, and a documented breaking cha
 
 A merge to `main` deploys every affected application to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. You can follow it in the repository's Deployments page, but you do not run it.
 
-Foundation changes under `infrastructure/` work differently. The maintainer applies them to dev and then prod from your pull request, and Terrateam merges the pull request when both have applied.
+Foundation changes under `infrastructure/` work differently. The maintainer applies them to dev and then prod from your pull request, and Terrateam merges the pull request when both have applied. Terrateam runs in the `infra/foundation-dev` and `infra/foundation-prod` GitHub Environments, which have no required reviewers; Terrateam's access control, not the `prod` deployment approval, gates the prod apply.
 
 Release Please collects merged Conventional Commits into a release pull request. Merging it creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`. Applications pin internal packages at exact versions, and the release pull request patch-bumps consumers when a shared package changes:
 
