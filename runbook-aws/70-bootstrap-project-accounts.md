@@ -4,7 +4,7 @@ AWS Organizations and human Identity Center assignments remain manually
 managed. This repository bootstraps only project-owned state and deployment
 identities inside workload accounts.
 
-## Stable dev and prod
+## dev and prod
 
 With the matching Platform Administrator SSO profile, run each account's local
 OpenTofu bootstrap exactly once. It creates:
@@ -21,13 +21,13 @@ their own trust.
 
 Use the project procedures:
 
-- [Bootstrap stable dev](71-bootstrap-stable-dev.md)
-- [Bootstrap stable prod](72-bootstrap-stable-prod.md)
+- [Bootstrap dev](71-bootstrap-dev.md)
+- [Bootstrap prod](72-bootstrap-prod.md)
 
 ## Disposable developer account
 
 Use a separate checkout or worktree so its ignored backend files and `.terraform`
-metadata can never be confused with stable dev. Reuse the dev bootstrap root,
+metadata can never be confused with dev. Reuse the dev bootstrap root,
 but set these local inputs before applying:
 
 ```hcl
@@ -57,4 +57,4 @@ Use only `.example` files in commits. Role ARNs and account IDs are not secret
 credentials, but keeping them in GitHub runtime variables makes a public fork
 portable and avoids publishing account topology.
 
-Next: [Bootstrap stable dev](71-bootstrap-stable-dev.md).
+Next: [Bootstrap dev](71-bootstrap-dev.md).

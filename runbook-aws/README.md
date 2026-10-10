@@ -2,7 +2,7 @@
 
 This guide takes a new AWS customer from one account to a governed organization
 that can run this project. It is optional for contributors who already have
-stable `dev` and `prod` accounts and the required deployment roles.
+`dev` and `prod` accounts and the required deployment roles.
 
 If the landing zone is already healthy and only the management administrator
 exists, use the consolidated
@@ -20,8 +20,8 @@ Follow the files in order:
 7. [Centralize member-account root access](50-centralize-member-root-access.md)
 8. [Configure local SSO profiles](60-configure-local-sso.md)
 9. [Bootstrap project deployment access](70-bootstrap-project-accounts.md)
-10. [Bootstrap stable dev](71-bootstrap-stable-dev.md)
-11. [Bootstrap stable prod](72-bootstrap-stable-prod.md)
+10. [Bootstrap dev](71-bootstrap-dev.md)
+11. [Bootstrap prod](72-bootstrap-prod.md)
 12. [Bootstrap CDK](73-bootstrap-cdk.md)
 13. [Grant local CDK deployer access](74-grant-local-cdk-deployer-access.md)
 14. [Connect GitHub and Terrateam](80-connect-github-and-terrateam.md)
@@ -37,13 +37,13 @@ AWS organization
 │   ├── Log Archive account        Control Tower managed
 │   └── Audit account              Control Tower managed
 ├── Sandbox OU
-│   ├── dev account                stable; Terrateam-managed OpenTofu
+│   ├── dev account                Terrateam-managed OpenTofu
 │   └── dev-<owner> accounts       disposable; locally managed
 └── Production OU
-    └── prod account               stable; Terrateam-managed OpenTofu
+    └── prod account               Terrateam-managed OpenTofu
 ```
 
-Ephemeral CDK stacks live in the stable dev account and are named
+Ephemeral CDK stacks live in the dev account and are named
 `match-to-csv-<name>`. GitHub Actions deploys `match-to-csv-dev` for
 integration tests and `match-to-csv-prod` for production.
 

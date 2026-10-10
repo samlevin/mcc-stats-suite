@@ -1,6 +1,6 @@
-# Bootstrap stable prod
+# Bootstrap prod
 
-Repeat the stable-dev bootstrap from the production root and with a production
+Repeat the dev bootstrap from the production root and with a production
 Platform Administrator session:
 
 ```console

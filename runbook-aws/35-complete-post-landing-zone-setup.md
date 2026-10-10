@@ -65,7 +65,7 @@ Assign groups from **IAM Identity Center → AWS accounts**:
 |---|---|---|
 | Management | `AWSControlTowerAdmins` | Control Tower-created admin set |
 | Management | `AWSAccountFactory` | Control Tower-created Account Factory set |
-| Stable dev | `PlatformAdministrators` | `PlatformAdministratorAccess` |
+| dev | `PlatformAdministrators` | `PlatformAdministratorAccess` |
 | Prod | `PlatformAdministrators` | `PlatformAdministratorAccess` |
 | Prod | `ProductionReaders` | `ProductionViewAccess` |
 | Owned disposable dev | `PlatformAdministrators` | `PlatformAdministratorAccess` |
@@ -81,8 +81,8 @@ CI/CD.
 
 Use **Control Tower → Organization → Create resources → Create account**:
 
-- Stable `dev`: registered `Sandbox` OU.
-- Stable `prod`: registered `Production` OU.
+- `dev`: registered `Sandbox` OU.
+- `prod`: registered `Production` OU.
 - Disposable `<project>-dev-<owner>`: registered `Sandbox` OU.
 
 Reuse an existing enrolled account rather than recreating it. Each target must
@@ -90,7 +90,7 @@ show `Enrolled`, inherit `AWSControlTowerBaseline: Enabled`, and show no drift.
 `AWS Config baseline: Not enabled` is expected because the two OU baselines are
 mutually exclusive.
 
-Stable dev and prod receive CI roles. Disposable accounts remain local-only and
+dev and prod receive CI roles. Disposable accounts remain local-only and
 should be recycled rather than created per pull request.
 
 ## 4. Configure SSO profiles
@@ -120,7 +120,7 @@ aws sts get-caller-identity
 
 The CLI configuration and temporary SSO cache live outside the repository.
 
-## 5. Bootstrap stable dev and prod
+## 5. Bootstrap dev and prod
 
 In dev, copy the ignored bootstrap input:
 
@@ -152,9 +152,9 @@ github_oidc_subject_repository = "OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID"
 
 Run the local bootstrap with `mcc-dev-admin`, migrate its temporary state to the
 new bucket, and require a final no-change plan by following
-[Bootstrap stable dev](71-bootstrap-stable-dev.md). Repeat from the prod root
+[Bootstrap dev](71-bootstrap-dev.md). Repeat from the prod root
 with `mcc-prod-admin`, `github_environment_name = "prod"`, and
-[Bootstrap stable prod](72-bootstrap-stable-prod.md).
+[Bootstrap prod](72-bootstrap-prod.md).
 
 Each stable account creates:
 
@@ -177,7 +177,7 @@ for dev and then prod.
 The initial CloudFormation execution policy is `AdministratorAccess`. This is
 acceptable for the solo bootstrap but means anyone allowed to use those CDK
 roles can indirectly deploy broadly. Replace it with a project-scoped execution
-policy before granting stable-dev deployment access to a larger team.
+policy before granting dev deployment access to a larger team.
 
 ## 7. Connect Terrateam
 
@@ -228,7 +228,7 @@ keys.
 
 ## 9. Use personal and disposable development
 
-For a personal CDK stack in stable dev:
+For a personal CDK stack in dev:
 
 ```console
 export AWS_PROFILE=mcc-dev
@@ -256,11 +256,11 @@ the account.
 ## Completion check
 
 - Human management access works without root or IAM users.
-- Stable dev and prod are enrolled in registered OUs.
+- dev and prod are enrolled in registered OUs.
 - Stable accounts have separate bootstrap and foundation state.
 - Terrateam can plan only the durable foundation roots.
 - GitHub Actions can deploy only through `dev` or `prod` Environments.
-- Personal CDK stacks deploy locally to stable dev.
+- Personal CDK stacks deploy locally to dev.
 - Disposable accounts contain no CI trust.
 - No long-lived AWS credential exists in GitHub or the repository.
 

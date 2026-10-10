@@ -3,7 +3,7 @@
 Use Account Factory while signed in through Identity Center, never as root.
 Provision from the Control Tower home Region.
 
-## Create stable dev and prod
+## Create dev and prod
 
 From **Control Tower → Account factory → Create account**:
 

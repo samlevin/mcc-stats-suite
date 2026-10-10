@@ -101,7 +101,7 @@ jobs:
               | sub("^@mcc/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
-      - name: Save affected applications for stable dev deployment
+      - name: Save affected applications for dev deployment
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           APPLICATIONS: ${{ steps.affected.outputs.applications || '[]' }}

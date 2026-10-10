@@ -6,4 +6,4 @@ Run from the repository root:
 npm test --workspace @mcc/cdk-config
 ```
 
-The suite covers explicit ephemeral names, stable dev and production names, ingress ownership, and AWS account mismatch rejection.
+The suite covers explicit ephemeral names, dev and production names, ingress ownership, and AWS account mismatch rejection.

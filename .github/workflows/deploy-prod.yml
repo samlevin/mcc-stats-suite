@@ -1,9 +1,9 @@
-name: deploy-stable-prod
-run-name: Promote ${{ github.event.workflow_run.head_sha }} to stable prod
+name: deploy-prod
+run-name: Promote ${{ github.event.workflow_run.head_sha }} to prod
 
 on:
   workflow_run:
-    workflows: [deploy-stable-dev]
+    workflows: [deploy-dev]
     types: [completed]
     branches: [main]
 
@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: stable-dev-applications-${{ github.event.workflow_run.id }}
+          name: dev-applications-${{ github.event.workflow_run.id }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
           path: selection

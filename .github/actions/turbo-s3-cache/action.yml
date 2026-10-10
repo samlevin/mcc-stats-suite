@@ -2,13 +2,13 @@ name: Environment S3 Turbo cache
 description: Start the v2 remote cache with a dedicated short-lived workload session.
 inputs:
   environment:
-    description: Stable environment (dev or prod).
+    description: Environment (dev or prod).
     required: true
   account-id:
-    description: Expected stable AWS account.
+    description: Expected AWS account.
     required: true
   region:
-    description: Stable AWS region.
+    description: AWS region.
     required: true
 runs:
   using: composite

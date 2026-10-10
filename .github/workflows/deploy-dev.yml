@@ -1,5 +1,5 @@
-name: deploy-stable-dev
-run-name: Deploy ${{ github.event.workflow_run.head_sha }} to stable dev
+name: deploy-dev
+run-name: Deploy ${{ github.event.workflow_run.head_sha }} to dev
 
 on:
   workflow_run:
@@ -40,7 +40,7 @@ jobs:
           '
       - uses: actions/upload-artifact@v4
         with:
-          name: stable-dev-applications-${{ github.event.workflow_run.id }}
+          name: dev-applications-${{ github.event.workflow_run.id }}
           path: selection/applications.json
           retention-days: 1
 
