@@ -1,16 +1,13 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { isApplicationPath } from './ci-scope.mjs';
 
 export function workspaceMode(paths, event) {
   // Root configuration, infrastructure and unknown paths require every workspace.
   return event === 'pull_request' &&
     paths.length > 0 &&
-    paths.every((path) =>
-      /^(applications\/(admin|data-pipeline|match-to-csv|ocr-quality|player)|packages\/(contracts|cdk-config))\//.test(
-        path,
-      ),
-    )
+    paths.every(isApplicationPath)
     ? 'affected'
     : 'all';
 }
@@ -48,7 +45,6 @@ export function checks({ full, repository, mode }) {
           'scripts/deployment-workflows.test.mjs',
         ],
       ],
-      ['npm', ['run', 'tofu:fmt:check']],
       ['npx', workspaceArguments(mode)],
     );
   else if (repository)

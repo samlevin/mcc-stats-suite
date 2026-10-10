@@ -14,7 +14,113 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      full: ${{ steps.scope.outputs.full }}
+      repository: ${{ steps.scope.outputs.repository }}
+      infrastructure: ${{ steps.scope.outputs.infrastructure }}
+      check: ${{ steps.scope.outputs.check }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
+    steps:
+      - name: Checkout files for push classification
+        uses: actions/checkout@v4
+        if: github.event_name == 'push'
+        with:
+          fetch-depth: 1
+      - name: Classify changed files
+        uses: actions/github-script@v9
+        id: scope
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const { execFileSync } = require('child_process');
+            const { pathToFileURL } = require('url');
+            const event = context.eventName;
+            let base = event === 'pull_request'
+              ? context.payload.pull_request.base.sha
+              : context.payload.before;
+            const head = event === 'pull_request'
+              ? context.payload.pull_request.head.sha
+              : context.sha;
+            const all = { full: true, repository: true, infrastructure: true, check: true };
+            let scopes = all;
+            if (/^0+$/.test(base)) {
+              core.warning('Push has no usable base commit; running every gate.');
+              base = head;
+            } else {
+              try {
+                let paths;
+                if (event === 'push') {
+                  execFileSync('git', ['fetch', '--no-tags', '--depth=1', 'origin', base]);
+                  paths = execFileSync('git', ['diff', '--name-only', '--no-renames', '-z', base, head, '--'], { encoding: 'utf8' })
+                    .split('\0').filter(Boolean);
+                } else {
+                  const comparison = await github.rest.repos.compareCommitsWithBasehead({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    basehead: `${base}...${head}`,
+                  });
+                  paths = (comparison.data.files || []).flatMap((file) =>
+                    file.previous_filename
+                      ? [file.previous_filename, file.filename]
+                      : [file.filename],
+                  );
+                  if (comparison.data.files?.length >= 300) {
+                    core.warning('Comparison reached the file list limit; running every gate.');
+                    paths = null;
+                  }
+                }
+                if (paths) {
+                  const baseline = await github.rest.repos.getContent({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    path: 'scripts/ci-scope.mjs',
+                    ref: base,
+                  });
+                  const classifierPath = path.join(process.env.RUNNER_TEMP, 'ci-scope-baseline.mjs');
+                  let source = Buffer.from(baseline.data.content, 'base64').toString('utf8');
+                  if (!source.includes('export function selectScopes'))
+                    throw new Error('Baseline classifier has no supported entry point.');
+                  fs.writeFileSync(classifierPath, source);
+                  const { selectScopes } = await import(pathToFileURL(classifierPath));
+                  scopes = { ...all, ...selectScopes(paths) };
+                }
+              } catch (error) {
+                core.warning(`Could not classify the commit comparison; running every gate: ${error.message}`);
+                base = head;
+              }
+            }
+            for (const [name, value] of Object.entries({ ...scopes, base, head }))
+              core.setOutput(name, value);
+
+  infrastructure:
+    needs: scope
+    if: needs.scope.outputs.infrastructure == 'true'
+    runs-on: ubuntu-latest
+    env:
+      AWS_EC2_METADATA_DISABLED: 'true'
+      TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: '1.12.1'
+      - uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.tofu-plugin-cache
+          key: tofu-provider-${{ runner.os }}-${{ hashFiles('infrastructure/**/.terraform.lock.hcl') }}
+          restore-keys: tofu-provider-${{ runner.os }}-
+      - name: Create OpenTofu plugin cache
+        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - name: Check OpenTofu roots
+        run: ./scripts/tofu-checks.sh
+
+  application-checks:
+    needs: scope
+    if: needs.scope.outputs.check != 'false'
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
@@ -30,50 +136,17 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Select checks from changed files
-        id: scope
-        env:
-          EVENT: ${{ github.event_name }}
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD: ${{ github.event.pull_request.head.sha }}
-          PUSH_BASE: ${{ github.event.before }}
-          PUSH_HEAD: ${{ github.sha }}
-        run: |
-          if [[ "$EVENT" == "pull_request" ]]; then
-            BASE="$PR_BASE"
-            HEAD="$PR_HEAD"
-          else
-            BASE="$PUSH_BASE"
-            HEAD="$PUSH_HEAD"
-            if [[ "$BASE" =~ ^0+$ ]]; then
-              BASE="$(git rev-parse "$HEAD^" 2>/dev/null || true)"
-            fi
-          fi
-          if [[ "$BASE" =~ ^[0-9a-f]{40}$ ]] &&
-             git show "$BASE:scripts/ci-scope.mjs" > "$RUNNER_TEMP/ci-scope.mjs"; then
-            node "$RUNNER_TEMP/ci-scope.mjs" "$BASE" "$HEAD" "$EVENT" >> "$GITHUB_OUTPUT"
-          else
-            echo "full=true" >> "$GITHUB_OUTPUT"
-            echo "repository=true" >> "$GITHUB_OUTPUT"
-            echo "No baseline classifier; running all checks."
-          fi
-          echo "base=${BASE:-$HEAD}" >> "$GITHUB_OUTPUT"
-          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
           cache: npm
           registry-url: https://npm.pkg.github.com
           scope: '@samlevin'
-      - uses: opentofu/setup-opentofu@v1
-        if: steps.scope.outputs.full == 'true'
-        with:
-          tofu_version: '1.12.1'
       - run: npm ci
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.scope.outputs.full == 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
@@ -81,15 +154,15 @@ jobs:
           region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
       - name: Run independent checks concurrently
         env:
-          CI_BASE: ${{ steps.scope.outputs.base }}
-          CI_HEAD: ${{ steps.scope.outputs.head }}
+          CI_BASE: ${{ needs.scope.outputs.base }}
+          CI_HEAD: ${{ needs.scope.outputs.head }}
           CI_EVENT: ${{ github.event_name }}
-          CI_FULL: ${{ steps.scope.outputs.full }}
-          CI_REPOSITORY: ${{ steps.scope.outputs.repository }}
+          CI_FULL: ${{ needs.scope.outputs.full }}
+          CI_REPOSITORY: ${{ needs.scope.outputs.repository }}
         run: node scripts/ci-checks.mjs
       - name: Find affected deployable applications
         id: affected
-        if: github.event_name == 'push' && steps.scope.outputs.full == 'true'
+        if: github.event_name == 'push' && needs.scope.outputs.full == 'true'
         env:
           TURBO_SCM_BASE: ${{ github.event.before }}
           TURBO_SCM_HEAD: ${{ github.sha }}
@@ -106,15 +179,41 @@ jobs:
               | sub("^@samlevin/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
-      - name: Save affected applications for dev deployment
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  check:
+    needs: [scope, infrastructure, application-checks]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    outputs:
+      applications: ${{ needs.application-checks.outputs.applications }}
+    steps:
+      - name: Require every selected gate
         env:
-          APPLICATIONS: ${{ steps.affected.outputs.applications || '[]' }}
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          SCOPE_INFRASTRUCTURE: ${{ needs.scope.outputs.infrastructure }}
+          SCOPE_APPLICATIONS: ${{ needs.scope.outputs.check }}
+          INFRASTRUCTURE_RESULT: ${{ needs.infrastructure.result }}
+          APPLICATIONS_RESULT: ${{ needs.application-checks.result }}
+        run: |
+          test "$SCOPE_RESULT" = success
+          if [[ "$SCOPE_INFRASTRUCTURE" != false ]]; then
+            test "$INFRASTRUCTURE_RESULT" = success
+          fi
+          if [[ "$SCOPE_APPLICATIONS" != false ]]; then
+            test "$APPLICATIONS_RESULT" = success
+          fi
+
+  select-deployment:
+    needs: [scope, check]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Save application selection
+        env:
+          APPLICATIONS: ${{ needs.check.outputs.applications || '[]' }}
         run: |
           mkdir -p "${RUNNER_TEMP}/deploy-selection"
           printf '%s\n' "${APPLICATIONS}" > "${RUNNER_TEMP}/deploy-selection/applications.json"
       - uses: actions/upload-artifact@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         with:
           name: deploy-applications-${{ github.run_id }}
           path: ${{ runner.temp }}/deploy-selection/applications.json

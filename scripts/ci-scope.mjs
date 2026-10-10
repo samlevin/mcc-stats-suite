@@ -1,5 +1,3 @@
-import { execFileSync } from 'node:child_process';
-
 // Keep the allowlist narrow. A new or build-affecting path selects all checks.
 const repositoryFiles = new Set([
   '.github/labels.json',
@@ -14,37 +12,41 @@ const repositoryFiles = new Set([
   'scripts/issue-containers.mjs',
 ]);
 
-function classify(path) {
+// Known workspaces. Shared with scripts/ci-checks.mjs so selection and Turbo
+// affected mode never disagree about what counts as an application path.
+export function isApplicationPath(path) {
+  return /^(applications\/(admin|data-pipeline|match-to-csv|ocr-quality|player)|packages\/(contracts|cdk-config))\//.test(
+    path,
+  );
+}
+
+export function classify(path) {
   if (path.endsWith('.md')) return 'documentation';
+  // .terrateam/config.yml is Prettier-formatted, so it stays on the full path
+  // where format:check runs; full also selects the infrastructure job.
+  if (path.startsWith('infrastructure/') && /\.(tf|tfvars|hcl)$/.test(path))
+    return 'infrastructure';
   if (
     repositoryFiles.has(path) ||
     /^\.github\/ISSUE_TEMPLATE\/[^/]+\.ya?ml$/.test(path)
   )
     return 'repository';
+  if (isApplicationPath(path)) return 'application';
   return 'full';
 }
 
-const [base, head, event] = process.argv.slice(2);
-if (
-  !/^[0-9a-f]{40}$/.test(base ?? '') ||
-  !/^[0-9a-f]{40}$/.test(head ?? '') ||
-  !['pull_request', 'push'].includes(event)
-)
-  throw new Error('Expected base/head commit SHAs and pull_request or push');
-const diffBase =
-  event === 'pull_request'
-    ? execFileSync('git', ['merge-base', base, head], {
-        encoding: 'utf8',
-      }).trim()
-    : base;
-const paths = execFileSync(
-  'git',
-  ['diff', '--name-only', '--no-renames', '-z', diffBase, head, '--'],
-  { encoding: 'utf8' },
-)
-  .split('\0')
-  .filter(Boolean);
-const scopes = paths.map(classify);
-// Empty/unclassifiable changes never certify the shorter path.
-console.log(`full=${!scopes.length || scopes.includes('full')}`);
-console.log(`repository=${scopes.includes('repository')}`);
+export function selectScopes(paths) {
+  const scopes = paths.map(classify);
+  return {
+    full:
+      !scopes.length ||
+      scopes.includes('full') ||
+      scopes.includes('application'),
+    repository: scopes.includes('repository'),
+    infrastructure:
+      !scopes.length ||
+      scopes.includes('infrastructure') ||
+      scopes.includes('full'),
+    check: !scopes.length || scopes.some((scope) => scope !== 'infrastructure'),
+  };
+}
