@@ -12,7 +12,7 @@ Organization name:
 Management account name and email:
 Audit account name and email:
 Log Archive account name and email:
-Stable dev account name and email:
+dev account name and email:
 Production account name and email:
 Control Tower and Identity Center home Region:
 Project workload Region:
@@ -28,7 +28,7 @@ or production.
 - The initial AWS account becomes the **management account**. It is not a
   workload account and is never “registered” beneath Control Tower.
 - Control Tower creates or adopts **Audit** and **Log Archive** accounts.
-- The registered **Sandbox OU** contains stable dev and disposable developer
+- The registered **Sandbox OU** contains dev and disposable developer
   accounts.
 - A registered **Production OU** contains prod.
 - Do not create a separate data account yet.

@@ -86,7 +86,7 @@ set administrative sessions to one hour.
 | Group | Permission | Assignment |
 |---|---|---|
 | `AWSControlTowerAdmins` | Control Tower-created administrator access | Management and shared accounts |
-| `PlatformAdministrators` | New `PlatformAdministratorAccess` permission set using `AdministratorAccess` | Stable dev, prod, owned sandboxes |
+| `PlatformAdministrators` | New `PlatformAdministratorAccess` permission set using `AdministratorAccess` | dev, prod, owned sandboxes |
 | `ProductionReaders` | New `ProductionReadOnlyAccess` permission set using `ViewOnlyAccess` or `ReadOnlyAccess` | Prod |
 | `AWSAccountFactory` | Control Tower-created Service Catalog access | Management only |
 

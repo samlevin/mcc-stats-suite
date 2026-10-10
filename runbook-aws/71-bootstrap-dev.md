@@ -1,6 +1,6 @@
-# Bootstrap stable dev
+# Bootstrap dev
 
-Use a Platform Administrator session in the stable dev account:
+Use a Platform Administrator session in the dev account:
 
 First, from the repository root, create the local environment file with
 `cp .envrc.example .envrc`, replace its placeholders, and run `direnv allow`.
@@ -14,7 +14,7 @@ aws sts get-caller-identity --profile "$AWS_PROFILE"
 cp bootstrap.auto.tfvars.example bootstrap.auto.tfvars
 ```
 
-Stop unless STS reports the stable dev account. Populate the ignored input with
+Stop unless STS reports the dev account. Populate the ignored input with
 the CI-role choices. The root `.envrc` supplies the workload Region and exact
 case-sensitive GitHub owner and repository; the directory `.envrc` selects the
 dev administrator profile and GitHub Environment.
@@ -65,4 +65,4 @@ tofu output -raw workload_boundary_arn
 
 Commit only source and `.terraform.lock.hcl`, never populated inputs or state.
 
-Next: [Bootstrap stable prod](72-bootstrap-stable-prod.md).
+Next: [Bootstrap prod](72-bootstrap-prod.md).

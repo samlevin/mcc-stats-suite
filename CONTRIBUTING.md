@@ -14,7 +14,7 @@ MCC Stats Suite is an NPM and Turbo monorepo. Each application owns a CDK stack 
 | `packages/contracts` | `@mcc/contracts` | Types shared across application boundaries |
 | `packages/cdk-config` | `@mcc/cdk-config` | Account checks, environment rules, stack names, and resource prefixes |
 | `infrastructure/modules` | n/a | Reusable OpenTofu bootstrap, foundation, and data-platform modules |
-| `infrastructure/dev` and `infrastructure/prod` | n/a | Stable environment roots |
+| `infrastructure/dev` and `infrastructure/prod` | n/a | Environment roots |
 
 Only `match-to-csv` contains a working product pipeline today. The other application workspaces establish stack and release boundaries for planned features. Keep specifications honest about that distinction.
 
@@ -81,7 +81,7 @@ The [linked issue metadata workflow](.github/workflows/pr-issue-metadata.yml) co
 
 The workflow reuses `MCC_PROJECT_TOKEN` from issue triage. Its credential needs repository issue and pull-request write access and read/write access to the source projects. The workflow runs trusted default-branch scripts with `pull_request_target`, including for fork PRs, and never executes PR code. It becomes active after publication on the default branch. See [GitHub's project authentication guidance](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions).
 
-Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs the repository quality gate, CDK synthesis, native bundle verification, and OpenTofu formatting. Pull requests do not deploy applications.
+Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs independent repository checks and workspace tasks concurrently in one ARM64 job. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. CI retains CDK synthesis, native bundle verification, and OpenTofu formatting. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
 
 ## Use personal Codex delivery agents
 
@@ -127,31 +127,25 @@ npm run app:deploy -- <application> --environment dev --ephemeral <name>
 
 Only `match-to-csv` needs `MCC_EMAIL_DOMAIN` during deployment. Ephemeral stacks do not enable shared email ingress, so invoke their workflows directly when testing them. Follow [`runbooks/21-deploy-ephemeral-match-to-csv.md`](runbooks/21-deploy-ephemeral-match-to-csv.md) for setup and cleanup.
 
-### Stable dev
+### dev
 
-Stable dev deploys only from GitHub Actions. Merge the reviewed change to `main`. The `ci` workflow asks Turbo which applications are affected and calls the reusable deployment workflow once for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
+dev deploys only from GitHub Actions. Merge the reviewed change to `main`. After the `ci` workflow succeeds, `deploy-dev` downloads the affected-application list from that exact CI run and calls the reusable deployment workflow for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
 
-Open the `ci` run for the merge SHA and verify the application-specific `deploy-dev` job. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Re-run that GitHub Actions job to repeat the same deployment. Do not deploy the plain `dev` stack from a local shell.
+Open the `deploy-dev` run for the merge SHA to verify deployments. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Do not deploy the plain `dev` stack from a local shell.
 
 ## Deploy one application to prod
 
-Production accepts a published application release that already succeeded in stable dev.
+After every affected application deploys successfully to dev, `deploy-prod` starts for the same commit and waits for approval through the protected GitHub `prod` environment. A required reviewer must approve the pending deployment in the Actions run before it can assume production credentials. Configure required reviewers on the `prod` environment in repository settings.
 
-1. Merge the application change to `main` and wait for its stable dev deployment.
-2. Complete the application’s integration or smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`.
-3. Review and merge the Release Please pull request containing the application release.
-4. Wait for Release Please to publish `<application>-v<version>` and for CI to deploy the release commit successfully to dev.
-5. Open **GitHub Actions -> promote-aws-application -> Run workflow** from `main`.
-6. Select `promote`, select the application, enter its release tag, and run the workflow.
-7. Review the production CDK diff and verify the stack health checks and application smoke test.
+Review and approve the pending production deployment in **GitHub Actions -> deploy-prod -> Review deployments** after completing any application smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`. Then review the production CDK diff and verify the stack health checks and application smoke test. The workflow deploys the exact commit that succeeded in dev. The manual `rollback-aws-application` workflow remains available to restore a prior production release; read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) first.
 
-The workflow rejects draft or prerelease tags, mismatched application versions, commits outside `main`, and revisions without a successful dev deployment for the same application. To restore an older production version, choose `rollback`, supply a release previously deployed successfully to prod, and record the reason. Read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) before operating the prod workflow.
+To restore an older production version, use the manual `rollback-aws-application` workflow with a release previously deployed to prod, and record the reason. Read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) before rolling back.
 
 ## Change shared infrastructure
 
 OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it.
 
-Bootstrap is a local administrative procedure. Terrateam plans stable foundation changes on pull requests. After merge, it applies the merged revision to dev before it plans and applies prod. Foundation does not have a separate release ID. A failed or stale dev layer blocks prod. If another foundation change reaches `main` during a run, treat the newer revision as the promotion candidate and require its layered run to finish successfully.
+Bootstrap is a local administrative procedure. Terrateam plans foundation changes on pull requests. After merge, it applies the merged revision to dev before it plans and applies prod. Foundation does not have a separate release ID. A failed or stale dev layer blocks prod. If another foundation change reaches `main` during a run, treat the newer revision as the promotion candidate and require its layered run to finish successfully.
 
 Terrateam checks foundation roots for drift weekly and opens a GitHub issue when it finds a difference. Reconciliation remains reviewed and manual. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
 

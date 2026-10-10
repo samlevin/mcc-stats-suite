@@ -21,8 +21,8 @@ OpenTofu owns persistent shared resources, state, OIDC roles, permissions bounda
 
 ## Environment rules
 
-- Stable environments are `dev` and `prod`.
-- GitHub Actions alone deploys stable application stacks.
+- Environments are `dev` and `prod`.
+- GitHub Actions alone deploys application stacks to `dev` and `prod`.
 - Local deployments require `--environment dev --ephemeral <name>`.
 - Production does not support ephemeral stacks or local deploys.
 - Verify the AWS identity before any stateful command. Do not weaken account checks in `scripts/cdk-app.mjs` or `packages/cdk-config`.
@@ -45,7 +45,7 @@ npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 
 ## Release and deployment rules
 
-Pull requests run checks only. On `main`, Turbo finds affected applications and CI deploys them to stable dev at the exact merge SHA. Production promotes an immutable application tag through `.github/workflows/deploy-aws.yml` after the same app and SHA succeed in dev.
+Pull requests run checks only. On `main`, Turbo finds affected applications; `.github/workflows/deploy-dev.yml` deploys them after CI succeeds. `.github/workflows/deploy-prod.yml` deploys the same revision after dev succeeds and a reviewer approves the GitHub `prod` environment.
 
 Foundation promotion is different from application release promotion. Terrateam plans foundation changes on pull requests. After merge, its layered run applies the merged revision to dev before prod. There is no foundation release ID or release tag. A failed or stale dev layer blocks prod. Scheduled foundation drift opens an issue and must never auto-apply.
 

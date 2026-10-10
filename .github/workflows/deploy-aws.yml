@@ -1,15 +1,14 @@
-name: promote-aws-application
-run-name: ${{ inputs.operation }} ${{ inputs.application }} ${{ inputs.release-tag }} to prod
+name: rollback-aws-application
+run-name: Roll back ${{ inputs.application }} from ${{ inputs.release-tag }}
 
 on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Promote a new release or restore a previous production release
+        description: Restore a previous production release
         required: true
         type: choice
         options:
-          - promote
           - rollback
       application:
         description: Logical application workspace

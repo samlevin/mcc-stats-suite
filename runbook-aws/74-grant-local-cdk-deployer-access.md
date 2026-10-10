@@ -1,6 +1,6 @@
 # Grant local CDK deployer access
 
-Do this only after stable dev has completed [CDK bootstrap](73-bootstrap-cdk.md).
+Do this only after dev has completed [CDK bootstrap](73-bootstrap-cdk.md).
 It grants humans local CDK deployment access to **dev only**. Production stays
 GitHub-only.
 
@@ -23,7 +23,7 @@ roles created by modern CDK bootstrap and read bootstrap deployment metadata.
 
 ## Assign and use it
 
-1. In **IAM Identity Center → AWS accounts**, select the stable dev account.
+1. In **IAM Identity Center → AWS accounts**, select the dev account.
 2. Choose **Assign users or groups**.
 3. Select `MccStatsSuiteLocalCdkDeployers` and
    `MccStatsSuiteLocalCdkDeploy`.

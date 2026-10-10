@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
 
+# A unique push group never supersedes main validation or deployments.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
@@ -13,6 +18,11 @@ jobs:
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCC_BUILD_ENVIRONMENT: dev
     outputs:
       applications: ${{ steps.affected.outputs.applications }}
     steps:
@@ -46,6 +56,8 @@ jobs:
             echo "repository=true" >> "$GITHUB_OUTPUT"
             echo "No baseline classifier; running all checks."
           fi
+          echo "base=${BASE:-$HEAD}" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
@@ -55,23 +67,21 @@ jobs:
         with:
           tofu_version: '1.12.1'
       - run: npm ci
-      - name: Check formatting, lint, types, tests, and builds
-        if: steps.scope.outputs.full == 'true'
-        run: npm run check
-      - name: Check documentation and repository formatting
-        if: steps.scope.outputs.full != 'true'
-        run: npm run format:check
-      - name: Check repository automation
-        if: steps.scope.outputs.full != 'true' && steps.scope.outputs.repository == 'true'
-        run: |
-          npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0
-          node --test scripts/issue-*.test.mjs
-      - if: steps.scope.outputs.full == 'true'
-        run: npm run cdk:synth --workspaces --if-present -- -c environment=dev -c ephemeral=ci
-      - if: steps.scope.outputs.full == 'true'
-        run: npm run verify:bundle --workspace @mcc/match-to-csv
-      - if: steps.scope.outputs.full == 'true'
-        run: npm run tofu:fmt:check
+      - name: Start trusted dev Turbo cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.scope.outputs.full == 'true'
+        uses: ./.github/actions/turbo-s3-cache
+        with:
+          environment: dev
+          account-id: ${{ vars.DEV_AWS_ACCOUNT_ID }}
+          region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
+      - name: Run independent checks concurrently
+        env:
+          CI_BASE: ${{ steps.scope.outputs.base }}
+          CI_HEAD: ${{ steps.scope.outputs.head }}
+          CI_EVENT: ${{ github.event_name }}
+          CI_FULL: ${{ steps.scope.outputs.full }}
+          CI_REPOSITORY: ${{ steps.scope.outputs.repository }}
+        run: node scripts/ci-checks.mjs
       - name: Find affected deployable applications
         id: affected
         if: github.event_name == 'push' && steps.scope.outputs.full == 'true'
@@ -91,22 +101,16 @@ jobs:
               | sub("^@mcc/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
-
-  deploy-dev:
-    if: github.event_name == 'push' && needs.check.outputs.applications != '' && needs.check.outputs.applications != '[]'
-    needs: check
-    strategy:
-      fail-fast: false
-      matrix:
-        application: ${{ fromJSON(needs.check.outputs.applications) }}
-    permissions:
-      contents: read
-      deployments: write
-      id-token: write
-    uses: ./.github/workflows/_deploy-aws-application.yml
-    with:
-      application: ${{ matrix.application }}
-      environment: dev
-      sha: ${{ github.sha }}
-      operation: continuous-delivery
-      source: main
+      - name: Save affected applications for dev deployment
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          APPLICATIONS: ${{ steps.affected.outputs.applications || '[]' }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/deploy-selection"
+          printf '%s\n' "${APPLICATIONS}" > "${RUNNER_TEMP}/deploy-selection/applications.json"
+      - uses: actions/upload-artifact@v4
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        with:
+          name: deploy-applications-${{ github.run_id }}
+          path: ${{ runner.temp }}/deploy-selection/applications.json
+          retention-days: 1

@@ -4,7 +4,9 @@
 [![Secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml)
 [![Semantic PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml)
 [![Release Please](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml)
-[![Deploy application](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
+[![dev deployment](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-dev.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-dev.yml)
+[![prod deployment](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-prod.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-prod.yml)
+[![Production rollback](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
 [![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
 [![Application deploy workflow](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/_deploy-aws-application.yml)
 
@@ -60,14 +62,14 @@ NPM workspaces provide package boundaries. Turbo follows their dependency graph 
 
 ## How AWS is divided
 
-OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. After a reviewed pull request merges, Terrateam applies stable foundation changes to dev and then prod from that revision. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
+OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, and SSM parameters that publish resource names and ARNs. After a reviewed pull request merges, Terrateam applies foundation changes to dev and then prod from that revision. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
 
 CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, SES receipt rules, IAM grants, and logs. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
 
-There are stable `dev` and `prod` environments. GitHub Actions deploys stable application stacks. Local developers may create named ephemeral stacks in the dev account.
+There are `dev` and `prod` environments. GitHub Actions deploys application stacks to them. Local developers may create named ephemeral stacks in the dev account.
 
 ```text
-match-to-csv-dev         stable integration stack
+match-to-csv-dev         dev integration stack
 match-to-csv-<name>      local ephemeral stack in dev
 match-to-csv-prod        live stack
 ```
@@ -84,7 +86,7 @@ AWS and infrastructure work also requires:
 - Docker for CDK assets containing Linux ARM64 native dependencies
 - access to the project dev or prod AWS account for the task being performed
 
-Stable infrastructure automation also depends on GitHub Actions, GitHub Environments named `dev` and `prod`, and Terrateam. DNS and a verified SES identity are required before `match-to-csv` can receive email.
+Infrastructure automation also depends on GitHub Actions, GitHub Environments named `dev` and `prod`, and Terrateam. DNS and a verified SES identity are required before `match-to-csv` can receive email.
 
 With `asdf` installed:
 
@@ -135,6 +137,6 @@ npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to stable `dev` at the merged commit SHA. Release Please versions applications and private shared packages. Production promotion is manual and accepts an immutable application release tag after that exact revision succeeds in dev.
+Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to `dev` at the merged commit SHA. After dev succeeds, `prod` waits for approval in the GitHub Actions run. Release Please versions applications and private shared packages.
 
 See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.

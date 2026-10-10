@@ -20,7 +20,7 @@ From the management account, open **IAM → Root access management**:
 
 ## Remove member-account root credentials
 
-For every member account, including stable dev, prod, Audit, and Log Archive:
+For every member account, including dev, prod, Audit, and Log Archive:
 
 1. Select the account.
 2. Choose **Take privileged action**.

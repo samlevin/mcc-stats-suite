@@ -39,3 +39,25 @@ Current application guidance:
 Every application workspace participates in the root checks and can be targeted independently by the deployment workflow.
 
 `npm test` is AWS-free. CDK synth verifies infrastructure structure. After a merge to `main`, CI deploys affected applications to `dev` and verifies the resulting CloudFormation stack. The `match-to-csv` check also requires its Lambda functions and Step Functions state machines to be active. Run the full email integration test before promoting a material ingestion or processing change.
+
+## Concurrent CI checks
+
+The ARM64 `check` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside one Turbo task graph. Turbo orders workspace builds before read-only `ci:test` tasks and shared builds before consumers. The focused `npm test --workspace @mcc/cdk-config` command still builds its own declarations; concurrent CI tests reuse the tracked build and never invoke a second compiler. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. Synthesis and native verification are never cached.
+
+For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, infrastructure, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. The existing baseline classifier still controls documentation and recognized repository checks. Deployment requires the successful `check` job and remains limited to pushes to `main`.
+
+Run the selection, concurrency, failure propagation, cache policy, and deployment guard tests with:
+
+```console
+node --test scripts/ci-checks.test.mjs
+```
+
+Npm downloads use the setup-node cache. Trusted main validation uses the dev S3 Turbo bucket through `rharkor/caching-for-turbo@v2.5.1`. Dev deployments use that bucket; production promotion and rollback builds use the prod bucket. A dedicated OIDC cache role resolves and validates the environment's bucket and KMS SSM contracts. OS, architecture, and Node version isolate object prefixes. `MCC_BUILD_ENVIRONMENT` participates in Turbo task hashes, and the explicitly worktree-local cache prevents another checkout from supplying outputs. Each deployment job has a fresh runner and exactly one environment, including historical releases whose Turbo configuration predates this hash input.
+
+Pull requests use only their ephemeral local Turbo cache and never assume a cache role. The main-only role trust policy rejects PR subjects and refs. The remote API credentials are passed explicitly from the cache role to the action, including its session token; later CDK credentials cannot replace that session. AWS credentials are removed from the build environment after the server starts. Synthesis and native verification remain uncached. The action performs prefix-scoped bucket listing for hash lookup, but has no deletion grant or action cleanup settings. Both buckets expire objects after seven days through S3 lifecycle.
+
+Foundation PR #14 must be applied before activating the trusted main path. Set repository variables `DEV_AWS_ACCOUNT_ID` and `DEV_AWS_REGION` to the dev foundation account and region. Deployment jobs continue using their protected environment's `AWS_ACCOUNT_ID` and `AWS_REGION`. Configure `github_oidc_subject_repository` in both foundation roots to match bootstrap if immutable OIDC repository subjects are enabled. The foundation creates `mcc-stats-suite-<environment>-github-turbo-cache` with the existing bootstrap OIDC provider and workload boundary. No long-lived AWS key or public HTTP cache service is required. The reusable deployment workflow checks out its cache action from the calling workflow SHA so a historical release can use the current cache integration.
+
+The prior five-run CI comparison used the GitHub Turbo-output backend and is historical evidence for concurrency and affected selection. It does not establish S3 cache effectiveness. After foundation activation, record new cold and warm trusted-main and production build runs, including cache server logs, before claiming an S3 performance improvement.
+
+Only superseded PR runs are cancelled. Main uses a unique run group and never cancels earlier validation or deployment jobs. Compare the `ci` run start with the last job completion for wall time, sum job start-to-completion intervals for runner time, and retain Turbo summaries and cache restore logs when benchmarking. Include cold and warm runs, record synthesis/bundle results, and compare full-scope PRs with full-scope baselines before claiming a performance improvement.
