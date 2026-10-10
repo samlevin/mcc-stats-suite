@@ -1,5 +1,5 @@
 {
-  "packages/cdk-config": "1.0.0",
+  "packages/cdk-config": "1.0.1",
   "packages/contracts": "1.0.0",
   "applications/match-to-csv": "1.0.0",
   "applications/ocr-quality": "1.0.0",
