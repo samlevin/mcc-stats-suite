@@ -214,6 +214,63 @@ export async function reconcile({
   return { candidates, updated };
 }
 
+export async function reconcileEpicLabels({
+  api,
+  dryRun = true,
+  issueNumber,
+  log = console.log,
+}) {
+  const forbidden = new Set([
+    'bug',
+    'enhancement',
+    'documentation',
+    'question',
+    'good first issue',
+    'help wanted',
+    'duplicate',
+    'invalid',
+    'wontfix',
+  ]);
+  const epics = await paginate(async (cursor) => {
+    const data = await api(
+      `query($cursor: String) { repository(owner: "samlevin", name: "mcc-stats-suite") {
+      issues(first: 100, after: $cursor, states: [OPEN, CLOSED], labels: ["epic"]) {
+        nodes { id number } ${PAGE}
+      }
+    } }`,
+      { cursor },
+    );
+    return data.repository?.issues;
+  });
+  for (const epic of epics) {
+    if (issueNumber !== undefined && epic.number !== issueNumber) continue;
+    const labels = await paginate(async (cursor) => {
+      const data = await api(
+        `query($id: ID!, $cursor: String) { node(id: $id) { ... on Issue {
+        labels(first: 100, after: $cursor) { nodes { id name } ${PAGE} }
+      } } }`,
+        { id: epic.id, cursor },
+      );
+      return data.node?.labels;
+    });
+    if (!labels.some((label) => label.name === 'epic')) continue;
+    const remove = labels.filter(
+      (label) => forbidden.has(label.name) || label.name.startsWith('type:'),
+    );
+    if (!remove.length) continue;
+    log(
+      `${dryRun ? 'DRY_RUN would remove' : 'Removing'} ${remove.length} conflicting category labels from epic #${epic.number}`,
+    );
+    if (!dryRun)
+      await api(
+        `mutation($id: ID!, $labels: [ID!]!) {
+      removeLabelsFromLabelable(input: { labelableId: $id, labelIds: $labels }) { clientMutationId }
+    }`,
+        { id: epic.id, labels: remove.map((label) => label.id) },
+      );
+  }
+}
+
 export function configuration(env, args) {
   if (env.GITHUB_ACTIONS === 'true' && !env.MCC_PROJECT_TOKEN)
     throw new Error(
@@ -258,6 +315,7 @@ if (
     const config = configuration(process.env, process.argv.slice(2));
     if (process.env.GITHUB_ACTIONS === 'true')
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
+    await reconcileEpicLabels({ api: ghGraphql, ...config });
     await reconcile({ api: ghGraphql, ...config });
   } catch (error) {
     // Do not print subprocess stderr, which can contain authentication details.

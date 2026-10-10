@@ -127,9 +127,9 @@
       "description": "Planned capability or maintenance with no evidenced defect"
     },
     {
-      "name": "type: epic",
+      "name": "epic",
       "color": "6f42c1",
-      "description": "Outcome that groups executable sub-issues"
+      "description": "Explicitly requested notable body of work; exclusive work-category label"
     },
     {
       "name": "wontfix",

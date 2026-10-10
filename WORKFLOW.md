@@ -26,7 +26,7 @@ Milestones group work for a dated release or outcome and may be referenced by ep
 
 `In review` means a pull request links the issue and CI has started. New decisions and scope changes go on the issue or pull request. If review exposes missing requirements, update the issue acceptance criteria and resolve them before resuming implementation. Metadata reconciliation leaves later statuses alone.
 
-`Done` means the change is merged, required checks pass, and the issue contains enough evidence to verify its acceptance criteria. Close leaf issues through their pull requests. Automation closes any container when all direct children are closed and rolls completion up through ancestors. Put all container acceptance and integration work in children. Deployment is independent; an epic need not deploy at once.
+`Done` means the change is merged, required checks pass, and the issue contains enough evidence to verify its acceptance criteria. Close leaf issues through their pull requests. Automation closes any container when all direct children are closed and rolls completion up through ancestors. Containers have no acceptance criteria; executable leaves own acceptance criteria and any integration or verification work. Deployment is independent; an epic need not deploy at once.
 
 Use GitHub's blocked-by and blocking relationships for execution order. A blocked issue stays in `Ready` while its blocker remains open, unless the dependency can be satisfied by a reviewed implementation in the same native PR stack. That exception requires the blocker to have passing required checks, an independent pre-PR `APPROVE` at its initial submission, and an open PR ready for formal review. Base the dependent branch on the blocker's current pushed head and record the dependency and SHA in the claim. Later changes require renewed validation of affected branches. Keep the issue dependency open until merge. A dependency that requires deployment or merged behavior remains blocked.
 
@@ -61,7 +61,7 @@ During implementation, the agent keeps durable decisions in the issue or pull re
 
 The final required pull request closes its executable leaf issue and references its immediate parent issue or epic. Earlier stack layers reference the leaf without closing it. No PR closes a container. Its title follows the Conventional Commits rules in `CONTRIBUTING.md`. The author moves the issue to `In review`. After merge, the issue closes and moves to `Done`. Follow-up work remains open as separate issues.
 
-Agents may investigate an `Inbox` item, but they may not implement it until it is `Ready` and the separate implementation gate is satisfied within the authorized scope. Container acceptance must be represented in child work. The deterministic automation owns container completion after native children close.
+Agents may investigate an `Inbox` item, but they may not implement it until it is `Ready` and the separate implementation gate is satisfied within the authorized scope. Container bodies use What, Why, and How without acceptance criteria. Deliverable leaves retain the existing issue template and acceptance criteria. The deterministic automation owns container completion after native children close.
 
 ## Codex delivery and review
 
