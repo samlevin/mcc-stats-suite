@@ -1,9 +1,9 @@
 {
   "name": "@samlevin/player",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "dependencies": {
-    "@samlevin/cdk-config": "1.0.0"
+    "@samlevin/cdk-config": "1.1.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
