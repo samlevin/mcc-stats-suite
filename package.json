@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "test": "node --test scripts/issue-triage.test.mjs scripts/publish-packages.test.mjs && turbo run test",
+    "test": "node --test scripts/issue-triage.test.mjs scripts/publish-packages.test.mjs scripts/deployment-workflows.test.mjs && turbo run test",
     "typecheck": "turbo run typecheck",
     "build:shared": "turbo run build --filter=@samlevin/contracts --filter=@samlevin/cdk-config",
     "prelint": "npm run build:shared",
@@ -40,7 +40,8 @@
     "sharp": "0.35.3",
     "turbo": "2.10.7",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.67.0"
+    "typescript-eslint": "^8.67.0",
+    "yaml": "^2.9.1"
   },
   "engines": {
     "node": ">=22.16.0"

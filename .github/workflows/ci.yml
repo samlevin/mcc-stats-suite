@@ -119,30 +119,3 @@ jobs:
           name: deploy-applications-${{ github.run_id }}
           path: ${{ runner.temp }}/deploy-selection/applications.json
           retention-days: 1
-
-  publish-packages:
-    needs: check
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    concurrency:
-      group: publish-shared-packages
-      cancel-in-progress: false
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22.16.0'
-          cache: npm
-          registry-url: https://npm.pkg.github.com
-          scope: '@samlevin'
-      - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
-      - run: npm run build:shared
-      - name: Publish missing shared package versions
-        run: node scripts/publish-packages.mjs
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}

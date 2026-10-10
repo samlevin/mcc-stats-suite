@@ -1,5 +1,5 @@
-name: deploy-dev
-run-name: Deploy ${{ github.event.workflow_run.head_sha }} to dev
+name: deploy-applications
+run-name: Deliver ${{ github.event.workflow_run.head_sha }} through dev and prod
 
 on:
   workflow_run:
@@ -13,7 +13,7 @@ permissions:
 
 jobs:
   qualify:
-    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       applications: ${{ steps.selection.outputs.applications }}
@@ -38,11 +38,6 @@ jobs:
             applications.sort();
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `applications=${JSON.stringify(applications)}\n`);
           '
-      - uses: actions/upload-artifact@v4
-        with:
-          name: dev-applications-${{ github.event.workflow_run.id }}
-          path: selection/applications.json
-          retention-days: 1
 
   deploy:
     needs: qualify
@@ -52,14 +47,12 @@ jobs:
       matrix:
         application: ${{ fromJSON(needs.qualify.outputs.applications) }}
     permissions:
+      actions: read
       contents: read
       deployments: write
       packages: read
       id-token: write
-    uses: ./.github/workflows/_deploy-aws-application.yml
+    uses: ./.github/workflows/_deliver-aws-application.yml
     with:
       application: ${{ matrix.application }}
-      environment: dev
       sha: ${{ needs.qualify.outputs.sha }}
-      operation: continuous-delivery
-      source: main

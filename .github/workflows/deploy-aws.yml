@@ -155,6 +155,7 @@ jobs:
   deploy-prod:
     needs: qualify
     permissions:
+      actions: read
       contents: read
       deployments: write
       packages: read

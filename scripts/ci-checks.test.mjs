@@ -239,6 +239,27 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
           .sort(),
         expected.sort(),
       );
+      const deploymentPlan = JSON.parse(
+        execFileSync(turbo, ['run', 'cdk:deploy', '--affected', '--dry=json'], {
+          cwd: directory,
+          encoding: 'utf8',
+          env: { ...process.env, TURBO_SCM_BASE: base, TURBO_SCM_HEAD: head },
+        }),
+      );
+      assert.deepEqual(
+        deploymentPlan.tasks
+          .filter(
+            (task) =>
+              task.task === 'cdk:deploy' && task.command !== '<NONEXISTENT>',
+          )
+          .map((task) => task.package)
+          .sort(),
+        expected
+          .filter((name) =>
+            applicationNames.includes(name.replace('@samlevin/', '')),
+          )
+          .sort(),
+      );
       git('revert', '--no-edit', head);
     }
   } finally {
@@ -328,12 +349,16 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
   );
   assert.match(dev, /workflows: \[ci\]/);
   assert.match(dev, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(dev, /environment: dev/);
+  assert.match(dev, /_deliver-aws-application/);
   const prod = readFileSync(
-    new URL('../.github/workflows/deploy-prod.yml', import.meta.url),
+    new URL(
+      '../.github/workflows/_deliver-aws-application.yml',
+      import.meta.url,
+    ),
     'utf8',
   );
-  assert.match(prod, /workflows: \[deploy-dev\]/);
+  assert.match(prod, /needs: dev/);
+  assert.match(prod, /needs\.dev\.result == 'success'/);
   assert.match(prod, /environment: prod/);
   assert.ok(!workflow.includes('continue-on-error'));
   assert.ok(!workflow.includes('pull_request_target'));
