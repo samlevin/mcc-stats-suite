@@ -36,8 +36,10 @@ npm run app:destroy -- <application> --environment dev --ephemeral <name>
 2. `ci` validates the merge commit and records which applications it affects. A shared-package change affects every consumer, and an empty selection deploys nothing.
 3. `deploy-applications` starts at that exact commit and runs one sequence per affected application. Each sequence deploys and verifies the application's `-dev` stack, then queues its `-prod` job.
 4. The production job waits for approval on the `prod` environment. Finish the application's smoke test in dev first; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv).
-5. Open **Actions -> deploy-applications** for the merge commit, choose **Review deployments**, check the application and commit, and approve. Rejecting leaves production unchanged.
+5. Follow the **Review deployments** link in the merged pull request’s approval comment or the run summary. The comment names the application and short commit SHA and mentions the users or teams configured as required reviewers on the `prod` environment. In the run, choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Approve production: <application>`. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.
+
+The workflow posts one approval comment per application and run using its `GITHUB_TOKEN`. Repeating the prompt within the same run updates that comment; a new run posts a fresh comment to notify reviewers again. Invalid production protection skips the prompt, and notification failures produce warnings without failing deployment. Direct pushes without a merged pull request still show the prompt in the run summary and skip the comment. Approval remains a manual GitHub environment review.
 
 Each application's production job depends only on its own successful dev job. A failed, cancelled, or skipped dev job blocks that application and nothing else. GitHub records every deployment, with its commit, application version, and shared-package versions, on the repository's Deployments page.
 
