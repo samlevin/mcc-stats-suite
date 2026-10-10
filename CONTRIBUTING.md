@@ -104,6 +104,8 @@ Delivery prompts request implementation through ready-for-review PRs. The implem
 
 Release Please manages every application plus `@mcc/cdk-config` and `@mcc/contracts`. It creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`.
 
+Release Please uses `GITHUB_TOKEN` with `contents: write` and `pull-requests: write`. The repository must also allow GitHub Actions to create and approve pull requests. Keep the default workflow token permissions read-only; the release workflow declares its own write permissions. See the [release pull request recovery procedure](runbooks/31-release-promote-and-recover-applications.md#recover-release-pull-request-creation) for the permission preflight and end-to-end verification. Repository settings changes require separate authorization.
+
 Applications pin internal packages at exact versions. The Node workspace release plugin updates those pins and patch-bumps consumers when a shared package changes:
 
 - a `cdk-config` release affects `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, and `player`;
