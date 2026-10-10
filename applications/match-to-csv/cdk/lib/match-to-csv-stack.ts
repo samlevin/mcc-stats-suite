@@ -5,8 +5,10 @@ import {
   CfnParameter,
   Duration,
   Fn,
+  RemovalPolicy,
   Stack,
   Tags,
+  Validations,
   type StackProps,
 } from 'aws-cdk-lib';
 import type { Construct } from 'constructs';
@@ -278,12 +280,6 @@ export class MatchToCsvStack extends Stack {
       emailDomain.valueAsString,
     ]);
     const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
-    let receiptRuleSet: ses.CfnReceiptRuleSet | undefined;
-    if (!deployment.isEphemeral) {
-      receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
-        ruleSetName: receiptRuleSetName,
-      });
-    }
     const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
       ruleSetName: receiptRuleSetName,
       rule: {
@@ -303,7 +299,22 @@ export class MatchToCsvStack extends Stack {
         ],
       },
     });
-    if (receiptRuleSet) {
+    if (!deployment.isEphemeral) {
+      const receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
+        ruleSetName: receiptRuleSetName,
+      });
+      // Migration step 1: keep the live rule set and rule when later releases
+      // stop declaring them, because OpenTofu takes ownership (issue #45).
+      receiptRuleSet.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      // Retain only on deletion. A replaced rule must not stay behind and
+      // duplicate every inbound email.
+      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN, {
+        applyToUpdateReplacePolicy: false,
+      });
+      Validations.of(receiptRule).acknowledge({
+        id: 'CloudFormation-Validate::W3011',
+        reason: 'Only deletion is retained; a replaced rule must be removed',
+      });
       receiptRule.node.addDependency(receiptRuleSet);
       const activateRules = new customResources.AwsCustomResource(
         this,
@@ -323,11 +334,8 @@ export class MatchToCsvStack extends Stack {
             physicalResourceId:
               customResources.PhysicalResourceId.of(receiptRuleSetName),
           },
-          onDelete: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: {},
-          },
+          // No onDelete: removing this resource must never deactivate the
+          // account's active rule set.
           policy: customResources.AwsCustomResourcePolicy.fromSdkCalls({
             resources: customResources.AwsCustomResourcePolicy.ANY_RESOURCE,
           }),
@@ -382,7 +390,8 @@ export class MatchToCsvStack extends Stack {
         sourceMap: true,
         target: 'node22',
         nodeModules: includeSharp ? ['sharp'] : undefined,
-        forceDockerBundling: includeSharp,
+        // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
+        forceDockerBundling: includeSharp && Stack.of(this).bundlingRequired,
       },
     });
   }
