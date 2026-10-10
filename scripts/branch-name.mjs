@@ -56,9 +56,13 @@ export function parseArguments(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === '--check') options.check = true;
-    else if (argument === '--actor') options.actor = argv[++index];
-    else if (argument === '--layer') options.layer = Number(argv[++index]);
-    else if (argument.startsWith('--'))
+    else if (argument === '--actor' || argument === '--layer') {
+      const value = argv[++index];
+      if (value === undefined || value.startsWith('--'))
+        throw new Error(`Option ${argument} requires a value`);
+      if (argument === '--actor') options.actor = value;
+      else options.layer = Number(value);
+    } else if (argument.startsWith('--'))
       throw new Error(`Unknown option ${argument}`);
     else positional.push(argument);
   }
@@ -99,6 +103,8 @@ export function run(
   }
   if (!options.value)
     throw new Error('Usage: branch-name.mjs <issue> | --check [name]');
+  if (!/^[1-9][0-9]*$/.test(options.value))
+    throw new Error('Issue must be a positive number');
   return branchName({
     issue: options.value,
     title: title(options.value),

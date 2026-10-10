@@ -91,3 +91,24 @@ test('run generates and checks without calling GitHub', () => {
   assert.throws(() => run([]), /Usage/);
   assert.throws(() => run(['1', '--bogus']), /Unknown/);
 });
+
+test('run rejects non-numeric issues before calling GitHub', () => {
+  const title = () => assert.fail('GitHub must not be called');
+  for (const value of ['-w', '--foo', 'abc', '0', '1x'])
+    assert.throws(() => run([value], { title }), /Issue must be|Unknown/);
+  assert.throws(() => run(['-w'], { title }), /Issue must be a positive/);
+});
+
+test('options that need a value reject a missing one', () => {
+  const title = () => 'x';
+  assert.throws(() => run(['5', '--actor'], { title }), /requires a value/);
+  assert.throws(() => run(['5', '--layer'], { title }), /requires a value/);
+  assert.throws(
+    () => run(['5', '--actor', '--layer', '2'], { title }),
+    /requires a value/,
+  );
+  assert.throws(
+    () => run(['5', '--layer', '--check'], { title }),
+    /requires a value/,
+  );
+});
