@@ -2,9 +2,12 @@
 
 ## Environments
 
-Create GitHub Environments named `dev` and `prod`. The CDK entry roles trust only the deployment workflow on `main` in the matching environment, so a deployment from any other branch fails at role assumption.
+Create four GitHub Environments:
 
-Give `prod` at least one required reviewer and disable administrator bypass. The deployment workflow checks both before every production job and fails if either is missing. As the only reviewer, leave **Prevent self-review** off so you can approve your own deployments.
+- `dev` and `prod` serve application deployments. The CDK entry roles trust only the deployment workflow on `main` in the matching environment, so a deployment from any other branch fails at role assumption.
+- `infra/foundation-dev` and `infra/foundation-prod` serve Terrateam. Give them no required reviewers, so Terrateam jobs never wait for an Actions approval.
+
+Give `prod` at least one required reviewer and disable administrator bypass. The deployment workflow checks both before every production job and fails if either is missing. As the only reviewer, leave **Prevent self-review** off so you can approve your own deployments. This gate covers application deployments and rollbacks only. Terrateam's `access_control` is the production gate for infrastructure: only repository administrators can apply prod or change Terrateam's configuration and workflow.
 
 ## Variables and secrets
 
@@ -16,11 +19,11 @@ Every value comes from the bootstrap outputs or your own configuration. Store id
 | `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | variable | dev `cdk_deploy_role_arn` | application deploys |
 | `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
 | `dev` environment | `MCC_EMAIL_DOMAIN` | variable | verified SES domain | `match-to-csv` deploys |
-| `dev` environment | `DEV_TERRATEAM_ROLE_ARN` | variable | dev `terrateam_role_arn` | Terrateam |
-| `dev` environment | `DEV_TOFU_STATE_BUCKET` | variable | dev `state_bucket_name` | Terrateam |
-| `dev` environment | `DEV_AWS_REGION` | variable | workload Region | Terrateam |
+| `infra/foundation-dev` environment | `DEV_TERRATEAM_ROLE_ARN` | variable | dev `terrateam_role_arn` | Terrateam |
+| `infra/foundation-dev` environment | `DEV_TOFU_STATE_BUCKET` | variable | dev `state_bucket_name` | Terrateam |
+| `infra/foundation-dev` environment | `DEV_AWS_REGION` | variable | workload Region | Terrateam |
 | `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION`, `MCC_EMAIL_DOMAIN` | variables | prod equivalents of the dev values | application deploys |
-| `prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values | Terrateam |
+| `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values | Terrateam |
 | repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | Turbo cache in `main` CI |
 | repository | `DEV_AWS_REGION` | variable | workload Region | Turbo cache in `main` CI |
 | repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, when the repository uses immutable OIDC subjects | Terrateam, for the Turbo cache role trust |
@@ -44,7 +47,8 @@ The committed configuration does the following:
 - plans the foundation roots on every pull request that changes them;
 - never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
 - locks each root from its first apply until the pull request merges;
-- squash-merges the pull request with its title once every planned root has applied;
+- runs dev jobs in `infra/foundation-dev` and prod jobs in `infra/foundation-prod`, neither of which has required reviewers;
+- squash-merges the pull request with its title once every planned root has applied without error, never after a failed apply, so a pull request sees only a dev, a prod, or a dev-then-prod sequence;
 - lets repository writers apply dev and only administrators apply prod;
 - requires an administrator for changes to Terrateam's workflow or configuration;
 - never touches the bootstrap roots; and
@@ -54,7 +58,7 @@ The Terrateam role trust requires this repository, the `.github/workflows/terrat
 
 Verify the setup before relying on it:
 
-1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans dev.
+1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans dev in `infra/foundation-dev` with no pending deployment review.
 2. Confirm a pull request from a non-administrator that changes `.terrateam/config.yml` is blocked from Terrateam operations.
 3. From an unrelated workflow, request an OIDC token and try to assume the Terrateam role. AWS must reject it.
 4. After a Terrateam run, check CloudTrail for an assumed-role session from the expected workflow and repository.
