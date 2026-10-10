@@ -23,6 +23,7 @@ Every value comes from the bootstrap outputs or your own configuration. Store id
 | `prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values | Terrateam |
 | repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | Turbo cache in `main` CI |
 | repository | `DEV_AWS_REGION` | variable | workload Region | Turbo cache in `main` CI |
+| repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, when the repository uses immutable OIDC subjects | Terrateam, for the Turbo cache role trust |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
 
