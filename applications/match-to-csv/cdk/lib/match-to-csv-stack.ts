@@ -8,6 +8,7 @@ import {
   RemovalPolicy,
   Stack,
   Tags,
+  Validations,
   type StackProps,
 } from 'aws-cdk-lib';
 import type { Construct } from 'constructs';
@@ -279,15 +280,6 @@ export class MatchToCsvStack extends Stack {
       emailDomain.valueAsString,
     ]);
     const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
-    let receiptRuleSet: ses.CfnReceiptRuleSet | undefined;
-    if (!deployment.isEphemeral) {
-      receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
-        ruleSetName: receiptRuleSetName,
-      });
-      // Migration step 1: keep the live rule set and rule when later releases
-      // stop declaring them, because OpenTofu takes ownership (issue #45).
-      receiptRuleSet.applyRemovalPolicy(RemovalPolicy.RETAIN);
-    }
     const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
       ruleSetName: receiptRuleSetName,
       rule: {
@@ -307,8 +299,22 @@ export class MatchToCsvStack extends Stack {
         ],
       },
     });
-    if (receiptRuleSet) {
-      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN);
+    if (!deployment.isEphemeral) {
+      const receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
+        ruleSetName: receiptRuleSetName,
+      });
+      // Migration step 1: keep the live rule set and rule when later releases
+      // stop declaring them, because OpenTofu takes ownership (issue #45).
+      receiptRuleSet.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      // Retain only on deletion. A replaced rule must not stay behind and
+      // duplicate every inbound email.
+      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN, {
+        applyToUpdateReplacePolicy: false,
+      });
+      Validations.of(receiptRule).acknowledge({
+        id: 'CloudFormation-Validate::W3011',
+        reason: 'Only deletion is retained; a replaced rule must be removed',
+      });
       receiptRule.node.addDependency(receiptRuleSet);
       const activateRules = new customResources.AwsCustomResource(
         this,
