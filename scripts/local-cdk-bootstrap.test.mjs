@@ -55,6 +55,11 @@ function allowed(policy, action, resource, context = {}) {
       Object.entries(entry.Condition?.StringEquals ?? {}).every(
         ([key, expected]) =>
           [expected].flat().map(resolve).includes(context[key]),
+      ) &&
+      Object.entries(entry.Condition?.StringLike ?? {}).every(
+        ([key, expected]) =>
+          context[key] !== undefined &&
+          [expected].flat().some((item) => matches(item, context[key])),
       ),
   );
   return (
@@ -488,4 +493,38 @@ test('ephemeral deploys name the local change set unless deploying directly', ()
     /remove --change-set-name/,
   );
   assert.throws(() => localDeployArguments(['--change-set-name=mine']));
+});
+
+test('shared stack protection covers every reserved dev name', () => {
+  for (const name of ['admin-dev', 'match-to-csv-dev-replay']) {
+    assert.equal(
+      allowed(deployment, 'cloudformation:DeleteStack', stack(name)),
+      false,
+      name,
+    );
+  }
+});
+
+test('runtime lists only ephemeral and non-shared inbound prefixes', () => {
+  const list = (prefix) =>
+    allowed(runtime, 's3:ListBucket', 'arn:aws:s3:::evidence', {
+      's3:prefix': prefix,
+    });
+  assert.equal(list('ephemeral/alice/'), true);
+  assert.equal(list('incoming/alice/'), true);
+  assert.equal(list('incoming/dev/'), false);
+  assert.equal(list('submissions/'), false);
+  assert.equal(
+    allowed(runtime, 's3:ListBucket', 'arn:aws:s3:::evidence'),
+    false,
+    'listing the whole bucket',
+  );
+});
+
+test('ephemeral deploys reject hotswap and honour the -m alias', () => {
+  assert.deepEqual(localDeployArguments(['-m', 'direct']), []);
+  assert.deepEqual(localDeployArguments(['-m=direct']), []);
+  for (const option of ['--hotswap', '--hotswap-fallback']) {
+    assert.throws(() => localDeployArguments([option]), /cannot hotswap/);
+  }
 });

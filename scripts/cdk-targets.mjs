@@ -12,9 +12,14 @@ export const LOCAL_TOOLKIT_STACK_NAME = 'CDKToolkitLocal';
 // The local deployment role executes only change sets with this name.
 export const LOCAL_CHANGE_SET_NAME = `${LOCAL_QUALIFIER}-deploy`;
 
-// Returns the arguments an ephemeral deploy adds, or throws for a change-set name the
-// local bootstrap cannot execute. `--method=direct` deploys without a change set.
+// Returns the arguments an ephemeral deploy adds, or throws for options the local
+// bootstrap cannot run. `--method=direct` deploys without a change set.
 export function localDeployArguments(passthrough) {
+  if (passthrough.some((argument) => /^--hotswap/.test(argument))) {
+    throw new Error(
+      'Ephemeral deploys cannot hotswap; the local bootstrap updates resources only through CloudFormation',
+    );
+  }
   if (
     passthrough.some((argument) => /^--change-set-name(=|$)/.test(argument))
   ) {
@@ -23,7 +28,7 @@ export function localDeployArguments(passthrough) {
     );
   }
   const index = passthrough.findIndex((argument) =>
-    /^--method(=|$)/.test(argument),
+    /^(--method|-m)(=|$)/.test(argument),
   );
   const method =
     index === -1

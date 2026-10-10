@@ -46,7 +46,7 @@ export function localBootstrap(template) {
     arn('cloudformation', `stack/${app}-*/*`),
   );
   const sharedStacks = applications.map((app) =>
-    arn('cloudformation', `stack/${app}-dev/*`),
+    arn('cloudformation', `stack/${app}-dev*/*`),
   );
   const roles = applications.map((app) => roleArn(`${app}-*`));
   const sharedRoles = applications.map((app) => roleArn(`${app}-dev*`));
@@ -74,7 +74,6 @@ export function localBootstrap(template) {
         statement(
           'WorkloadActions',
           [
-            's3:ListBucket',
             'kms:Decrypt',
             'kms:Encrypt',
             'kms:ReEncrypt*',
@@ -109,11 +108,23 @@ export function localBootstrap(template) {
           objects('ephemeral/*'),
           objects('incoming/*'),
         ]),
+        statement('ListEphemeralObjects', 's3:ListBucket', '*', {
+          Condition: {
+            StringLike: { 's3:prefix': ['ephemeral/*', 'incoming/*'] },
+          },
+        }),
         {
           Sid: 'ProtectSharedInboundEmail',
           Effect: 'Deny',
           Action: 's3:*',
           Resource: objects('incoming/dev*'),
+        },
+        {
+          Sid: 'ProtectSharedInboundEmailListing',
+          Effect: 'Deny',
+          Action: 's3:ListBucket',
+          Resource: '*',
+          Condition: { StringLike: { 's3:prefix': 'incoming/dev*' } },
         },
         statement(
           'UseEphemeralCompute',
