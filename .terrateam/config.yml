@@ -85,7 +85,7 @@ dirs:
 
 workflows:
   - tag_query: 'dev'
-    environment: dev
+    environment: infra/foundation-dev
     plan:
       - type: oidc
         provider: aws
@@ -118,7 +118,7 @@ workflows:
       - type: apply
 
   - tag_query: 'prod'
-    environment: prod
+    environment: infra/foundation-prod
     plan:
       - type: oidc
         provider: aws

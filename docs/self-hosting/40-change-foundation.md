@@ -14,9 +14,9 @@ The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/f
 1. Comment `terrateam apply dev and foundation`. Terrateam locks both roots for this pull request. No other pull request can apply them until this one merges.
 2. Validate dev. If the change needs fixing, push a new commit, review the new plans, and apply dev again.
 3. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values. Prod cannot apply until dev has applied.
-4. Comment `terrateam apply prod and foundation`. Only repository administrators can apply prod.
+4. Comment `terrateam apply prod and foundation`. Only repository administrators can apply prod. Terrateam runs in the `infra/foundation-dev` and `infra/foundation-prod` environments, which have no required reviewers, so neither apply waits for an Actions approval.
 
-When every planned root has applied, Terrateam squash-merges the pull request using its title. The merge releases the locks, and nothing else runs. If the merge is blocked, for example by a pending required check, merge the pull request yourself once the checks pass.
+When every planned root has applied without error, Terrateam squash-merges the pull request using its title. It never merges after a failed apply. Because prod waits for dev whenever dev is in the run, a pull request ends after a dev-only, prod-only, or dev-then-prod sequence; a change confined to `infrastructure/prod/foundation` has no dev layer. The merge releases the locks, and nothing else runs. If the merge is blocked, for example by a pending required check, merge the pull request yourself once the checks pass.
 
 Do not merge a foundation pull request before applying it. With the strict lock policy, the merge takes the locks anyway, and the roots stay locked until the change is applied. Never force-unlock a pull request that has applied part of a change.
 
