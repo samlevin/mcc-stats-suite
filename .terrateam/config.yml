@@ -84,6 +84,9 @@ workflows:
       - type: env
         name: TF_VAR_aws_region
         cmd: ['echo', '${DEV_AWS_REGION}']
+      - type: env
+        name: TF_VAR_github_oidc_subject_repository
+        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
       - type: plan
     apply:
       - type: oidc
@@ -96,6 +99,9 @@ workflows:
       - type: env
         name: TF_VAR_aws_region
         cmd: ['echo', '${DEV_AWS_REGION}']
+      - type: env
+        name: TF_VAR_github_oidc_subject_repository
+        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
       - type: apply
 
   - tag_query: 'prod'
@@ -111,6 +117,9 @@ workflows:
       - type: env
         name: TF_VAR_aws_region
         cmd: ['echo', '${PROD_AWS_REGION}']
+      - type: env
+        name: TF_VAR_github_oidc_subject_repository
+        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
       - type: plan
     apply:
       - type: oidc
@@ -123,4 +132,7 @@ workflows:
       - type: env
         name: TF_VAR_aws_region
         cmd: ['echo', '${PROD_AWS_REGION}']
+      - type: env
+        name: TF_VAR_github_oidc_subject_repository
+        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
       - type: apply
