@@ -4,24 +4,24 @@ import { BUNDLING_STACKS } from 'aws-cdk-lib/cx-api';
 import { createMatchToCsvApp } from '../cdk/lib/app';
 
 function synthesize(context: Record<string, string>): Template {
-  const { stack } = createMatchToCsvApp(
-    { context: { [BUNDLING_STACKS]: [], ...context } },
-    {},
+  return Template.fromStack(
+    createMatchToCsvApp({ context: { [BUNDLING_STACKS]: [], ...context } }, {}),
   );
-  return Template.fromStack(stack);
 }
 
 const stable = synthesize({ environment: 'dev' });
 
 t.test('stable stacks retain the receipt rule set and rule', (t) => {
+  // RetainExceptOnCreate: a failed first deploy rolls back cleanly instead of
+  // stranding the names and failing every retry with AlreadyExists.
   stable.hasResource('AWS::SES::ReceiptRuleSet', {
-    DeletionPolicy: 'Retain',
+    DeletionPolicy: 'RetainExceptOnCreate',
     UpdateReplacePolicy: 'Retain',
   });
   stable.resourceCountIs('AWS::SES::ReceiptRule', 1);
   // A replaced rule must be removed, or it would duplicate every inbound email.
   stable.hasResource('AWS::SES::ReceiptRule', {
-    DeletionPolicy: 'Retain',
+    DeletionPolicy: 'RetainExceptOnCreate',
     UpdateReplacePolicy: Match.absent(),
   });
   t.end();

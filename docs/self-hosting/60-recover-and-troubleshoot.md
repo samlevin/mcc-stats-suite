@@ -40,13 +40,15 @@ Do not enable unattended reconciliation to silence drift, and do not edit state 
 
 Inspect the CloudFormation stack events, fix the application or configuration, and redeploy. Do not recreate stack-owned resources by hand.
 
+If the deploy stops with `Refusing deploy: <stack> has not received the release that retains its SES receipt resources`, the stack is still running a template that would delete the SES receipt rule set, rule, or activation when a newer release removes them. Deploy the release that retains them to that stack first, then retry.
+
 ## Application incident after a production deployment
 
 If an older release is known safe and compatible with current data, [roll back](50-deploy-and-release-applications.md#roll-back). After service recovers, revert or correct the change on current `main`. Prefer fixing forward when the current release changed persistent schemas or wrote data an older version cannot read.
 
 ## Stale personal development stack
 
-Confirm the instance owner, then remove only that ephemeral application stack. The shared `-dev` and `-prod` stacks cannot be destroyed with this command, because they retain the SES receipt rule set and a redeploy would fail with `AlreadyExists`:
+Confirm the instance owner, then remove only that ephemeral application stack. The shared `-dev` and `-prod` stacks deploy only from `main` through GitHub Actions, have termination protection, and cannot be destroyed with this command:
 
 ```console
 aws sso login --profile <dev-profile>

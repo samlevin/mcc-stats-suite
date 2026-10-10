@@ -29,13 +29,15 @@ import * as customResources from 'aws-cdk-lib/custom-resources';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
+  /** Commit recorded in Lambda environments and OCR evidence. */
+  gitSha: string;
 }
 
 export class MatchToCsvStack extends Stack {
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
-    const { deployment } = props;
+    const { deployment, gitSha } = props;
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -53,7 +55,7 @@ export class MatchToCsvStack extends Stack {
       OBJECT_PREFIX: deployment.objectPrefix,
     };
     const buildEnvironment = {
-      GIT_SHA: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? 'local',
+      GIT_SHA: gitSha,
       DEPLOYMENT_ENVIRONMENT: deployment.environment.toUpperCase(),
     };
     const rawEmailBucket = s3.Bucket.fromBucketName(
@@ -305,10 +307,14 @@ export class MatchToCsvStack extends Stack {
       });
       // Migration step 1: keep the live rule set and rule when later releases
       // stop declaring them, because OpenTofu takes ownership (issue #45).
-      receiptRuleSet.applyRemovalPolicy(RemovalPolicy.RETAIN);
+      // RetainExceptOnCreate lets a failed first deploy roll back cleanly
+      // instead of stranding the names and failing every retry.
+      receiptRuleSet.applyRemovalPolicy(
+        RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
+      );
       // Retain only on deletion. A replaced rule must not stay behind and
       // duplicate every inbound email.
-      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN, {
+      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE, {
         applyToUpdateReplacePolicy: false,
       });
       Validations.of(receiptRule).acknowledge({

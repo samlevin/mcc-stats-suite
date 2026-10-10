@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { findUnsafeRemovals } from './stack-migration-guard.mjs';
 
 const applications = new Set([
   'admin',
@@ -41,9 +45,9 @@ if (environment === 'prod' && ephemeral) {
 }
 if (action === 'destroy' && !ephemeral) {
   fail(
-    'Only ephemeral stacks can be destroyed. Stable stacks retain the shared ' +
-      'SES receipt rule set, so destroying one leaves it behind and the next ' +
-      'deploy fails with AlreadyExists. Pass --ephemeral <name>',
+    'Only ephemeral stacks can be destroyed. Stable stacks deploy from main ' +
+      'through GitHub Actions and have termination protection. ' +
+      'Pass --ephemeral <name>',
   );
 }
 if (!ephemeral && action === 'deploy') {
@@ -133,20 +137,25 @@ const sharedBuild = spawnSync(
 );
 if (sharedBuild.status !== 0) process.exit(sharedBuild.status ?? 1);
 
+const contextArguments = ['-c', `environment=${environment}`];
+if (ephemeral) contextArguments.push('-c', `ephemeral=${ephemeral}`);
+if (expectedAccount) {
+  contextArguments.push('-c', `expectedAccount=${expectedAccount}`);
+}
+if (profile) contextArguments.push('--profile', profile);
+
+if (action === 'deploy' && !ephemeral) {
+  refuseUnsafeRemovals(`${application}-${environment}`);
+}
+
 const cdkArguments = [
   'run',
   `cdk:${action}`,
   '--workspace',
   `@samlevin/${application}`,
   '--',
-  '-c',
-  `environment=${environment}`,
+  ...contextArguments,
 ];
-if (ephemeral) cdkArguments.push('-c', `ephemeral=${ephemeral}`);
-if (expectedAccount) {
-  cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
-}
-if (profile) cdkArguments.push('--profile', profile);
 if (
   application === 'match-to-csv' &&
   (action === 'deploy' || action === 'diff') &&
@@ -193,6 +202,84 @@ function environmentFromProfile(profile) {
   if (/(^|[-_])prod(uction)?($|[-_])/.test(normalized)) return 'prod';
   if (/(^|[-_])dev(elopment)?($|[-_])/.test(normalized)) return 'dev';
   return undefined;
+}
+
+// CloudFormation deletes removed resources using the DeletionPolicy of the
+// template that is already deployed. A release that drops a resource is only
+// safe after the release that retains it has reached this stack.
+function refuseUnsafeRemovals(stackName) {
+  const liveTemplate = deployedTemplate(stackName);
+  if (!liveTemplate) return;
+  const problems = findUnsafeRemovals(
+    liveTemplate,
+    synthesizedTemplate(stackName),
+  );
+  if (problems.length === 0) return;
+  fail(
+    [
+      `Refusing deploy: ${stackName} has not received the release that retains its SES receipt resources.`,
+      ...problems.map((problem) => `  - ${problem}`),
+      'Deploy the retaining release to this stack first.',
+    ].join('\n'),
+  );
+}
+
+function deployedTemplate(stackName) {
+  const templateArguments = [
+    'cloudformation',
+    'get-template',
+    '--stack-name',
+    stackName,
+    '--output',
+    'json',
+  ];
+  if (profile) templateArguments.push('--profile', profile);
+  const result = spawnSync('aws', templateArguments, {
+    encoding: 'utf8',
+    env: childEnvironment,
+  });
+  if (result.status !== 0) {
+    if (/does not exist/.test(result.stderr ?? '')) return undefined;
+    process.stderr.write(result.stderr ?? '');
+    fail(`Unable to read the deployed template of ${stackName}`);
+  }
+  const body = JSON.parse(result.stdout).TemplateBody;
+  if (typeof body !== 'string') return body;
+  try {
+    return JSON.parse(body);
+  } catch {
+    fail(`The deployed template of ${stackName} is not JSON; refusing deploy`);
+  }
+}
+
+function synthesizedTemplate(stackName) {
+  const outputDirectory = mkdtempSync(path.join(tmpdir(), 'mcc-synth-'));
+  try {
+    const synth = spawnSync(
+      'npm',
+      [
+        'run',
+        'cdk:synth',
+        '--workspace',
+        `@samlevin/${application}`,
+        '--',
+        ...contextArguments,
+        '--quiet',
+        '--output',
+        outputDirectory,
+      ],
+      { stdio: 'inherit', env: childEnvironment },
+    );
+    if (synth.status !== 0) process.exit(synth.status ?? 1);
+    return JSON.parse(
+      readFileSync(
+        path.join(outputDirectory, `${stackName}.template.json`),
+        'utf8',
+      ),
+    );
+  } finally {
+    rmSync(outputDirectory, { recursive: true, force: true });
+  }
 }
 
 function profileSsoAccount(profile) {
