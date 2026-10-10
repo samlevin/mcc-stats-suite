@@ -39,22 +39,31 @@ Expected: both policies are `Retain`, and the active rule set matches the state 
 
 ## Step 2: import them into the foundation
 
-Do this on the foundation pull request. It adds `email_domain` and the `aws_ses_*` resources, and it removes the resources from the stack. Do not merge it yet. If Terrateam plans before the import, the plan proposes to create resources that already exist, and an apply fails. Import first, then plan.
+Terrateam has no import command, so import with declarative `import` blocks, as in [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist). Do this on the foundation pull request, which adds `email_domain` and the `aws_ses_*` resources and removes the resources from the stack. Do not merge it yet. Planning without the import proposes to create resources that already exist, and an apply fails.
 
-1. For dev, import the three resources into the dev foundation root with Terrateam comments on the pull request, using the addresses and IDs below. Target the `infrastructure/dev/foundation` root, the same way you target it for plan and apply.
+1. Add `infrastructure/dev/foundation/ses-imports.tf` to the pull request. It holds no domain and no account ID. Do not add it to a new installation, where the resources do not exist yet.
 
-   | Address | ID |
-   | --- | --- |
-   | `module.foundation.aws_ses_receipt_rule_set.inbound` | `mcc-match-to-csv-dev` |
-   | `module.foundation.aws_ses_receipt_rule.store_raw_email` | `mcc-match-to-csv-dev:match-to-csv-dev` |
-   | `module.foundation.aws_ses_active_receipt_rule_set.inbound` | `mcc-match-to-csv-dev` |
+   ```hcl
+   import {
+     to = module.foundation.aws_ses_receipt_rule_set.inbound
+     id = "mcc-match-to-csv-dev"
+   }
 
-   For example, `terrateam import module.foundation.aws_ses_receipt_rule_set.inbound mcc-match-to-csv-dev`. Use the prod names and root for prod later.
+   import {
+     to = module.foundation.aws_ses_receipt_rule.store_raw_email
+     id = "mcc-match-to-csv-dev:match-to-csv-dev"
+   }
 
-2. Comment `terrateam plan dev and foundation`. Expected: the only change is one new SSM parameter, `/mcc/dev/match-to-csv/receipt-rule-set-name`. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means the `DEV_MCC_EMAIL_DOMAIN` value differs from the one the stack uses.
-3. Comment `terrateam apply dev and foundation`. Expected: one resource added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
-4. Repeat steps 1 to 3 for prod with `mcc-match-to-csv-prod`, `match-to-csv-prod`, and `terrateam apply prod and foundation`. Confirm the prod plan has the same shape as dev.
-5. Comment `terrateam plan dev and foundation` and the same for prod. Expected: both plans are empty.
+   import {
+     to = module.foundation.aws_ses_active_receipt_rule_set.inbound
+     id = "mcc-match-to-csv-dev"
+   }
+   ```
+
+2. Comment `terrateam plan dev and foundation`. Expected: three resources to import, one new SSM parameter `/mcc/dev/match-to-csv/receipt-rule-set-name`, and nothing else. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means `DEV_MCC_EMAIL_DOMAIN` differs from the domain the stack uses.
+3. Comment `terrateam apply dev and foundation`. Expected: three imported, one added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
+4. Add `infrastructure/prod/foundation/ses-imports.tf` with the same blocks, using `mcc-match-to-csv-prod` and `mcc-match-to-csv-prod:match-to-csv-prod`. Comment `terrateam plan prod and foundation`, confirm the same shape as dev, then `terrateam apply prod and foundation`.
+5. Once both applies succeed, the resources are in state. Delete both `ses-imports.tf` files in the same pull request, then comment `terrateam plan dev and foundation` and the same for prod. Expected: both plans are empty.
 
 Terrateam merges the pull request after both applies. That starts step 3 for dev.
 
@@ -75,9 +84,10 @@ Expected: the events show the rule set and the rule as `DELETE_SKIPPED`, and the
 ## After the move
 
 - Existing ephemeral stacks keep working. Their rule already targets `mcc-match-to-csv-dev`. The next deployment reads that name from `/mcc/dev/match-to-csv/receipt-rule-set-name`, with no replacement.
+- Roll `match-to-csv` back only to the release that contains step 3 or a later one. Earlier tags declare the rule set and rule again, and CloudFormation fails with `AlreadyExists`. The failure causes no email outage.
 - Destroying a `match-to-csv` stack no longer touches the rule set or the shared rule.
 - Domain verification and the MX record are still manual prerequisites. The application deployment no longer checks them, so check that the domain identity is verified in the deployment Region and that the MX record points at SES inbound receiving there. See [Check prerequisites](00-prerequisites.md).
 
 ## If something looks wrong
 
-Stop at the first unexpected plan or stack event. Do not apply a plan that creates or replaces a receipt rule set, rule, or activation. A failed import leaves the live resources untouched, so you can retry it. If inbound mail stops, restore it with `aws ses set-active-receipt-rule-set --rule-set-name mcc-match-to-csv-<environment>`. The rule set and its rule are retained at every step, so this recovers the state.
+Stop at the first unexpected plan or stack event. Do not apply a plan that creates or replaces a receipt rule set, rule, or activation. A failed import leaves the live resources untouched, so you can fix the block and retry. If inbound mail stops, restore it with `aws ses set-active-receipt-rule-set --rule-set-name mcc-match-to-csv-<environment>`. The rule set and its rule are retained at every step, so this recovers the state.
