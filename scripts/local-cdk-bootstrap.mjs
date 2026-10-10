@@ -108,23 +108,15 @@ export function localBootstrap(template) {
           objects('ephemeral/*'),
           objects('incoming/*'),
         ]),
+        // Listing cannot be scoped per developer under incoming/, and the app never lists.
         statement('ListEphemeralObjects', 's3:ListBucket', '*', {
-          Condition: {
-            StringLike: { 's3:prefix': ['ephemeral/*', 'incoming/*'] },
-          },
+          Condition: { StringLike: { 's3:prefix': 'ephemeral/*' } },
         }),
         {
           Sid: 'ProtectSharedInboundEmail',
           Effect: 'Deny',
           Action: 's3:*',
           Resource: objects('incoming/dev*'),
-        },
-        {
-          Sid: 'ProtectSharedInboundEmailListing',
-          Effect: 'Deny',
-          Action: 's3:ListBucket',
-          Resource: '*',
-          Condition: { StringLike: { 's3:prefix': 'incoming/dev*' } },
         },
         statement(
           'UseEphemeralCompute',
@@ -169,34 +161,31 @@ export function localBootstrap(template) {
       ]),
     },
   };
-  // ReadOnlyAccess includes data reads; synthesis needs only metadata and the bootstrap version.
-  resources.LookupRole.Properties.Policies[0].PolicyDocument.Statement.push({
-    Sid: 'DontReadWorkloadData',
-    Effect: 'Deny',
-    Action: [
-      's3:GetObject*',
-      'lambda:GetFunction',
-      'lambda:GetFunctionConfiguration',
-      'logs:GetLogEvents',
-      'logs:FilterLogEvents',
-      'logs:StartQuery',
-      'states:DescribeExecution',
-      'states:GetExecutionHistory',
-      'sqs:ReceiveMessage',
-      'dynamodb:GetItem',
-      'dynamodb:BatchGetItem',
-      'dynamodb:Query',
-      'dynamodb:Scan',
-      'textract:Get*',
-    ],
-    Resource: '*',
-  });
-  resources.LookupRole.Properties.Policies[0].PolicyDocument.Statement.push({
-    Sid: 'ReadOnlyBootstrapParameters',
-    Effect: 'Deny',
-    Action: 'ssm:GetParameter*',
-    NotResource: arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/*`),
-  });
+  // This repository makes no context lookups, so the lookup role reads only stack
+  // metadata and the bootstrap version instead of inheriting ReadOnlyAccess.
+  const lookup = resources.LookupRole.Properties;
+  lookup.ManagedPolicyArns = [];
+  lookup.Policies = [
+    {
+      PolicyName: 'LookupRolePolicy',
+      PolicyDocument: document([
+        statement(
+          'ReadStacks',
+          [
+            'cloudformation:DescribeStacks',
+            'cloudformation:GetTemplate',
+            'cloudformation:ListStacks',
+          ],
+          '*',
+        ),
+        statement(
+          'ReadBootstrapVersion',
+          ['ssm:GetParameter', 'ssm:GetParameters'],
+          arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
+        ),
+      ]),
+    },
+  ];
   const deployment = resources.DeploymentActionRole.Properties;
   deployment.ManagedPolicyArns = [];
   deployment.Policies = [

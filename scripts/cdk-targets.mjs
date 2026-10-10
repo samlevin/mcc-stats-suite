@@ -13,30 +13,33 @@ export const LOCAL_TOOLKIT_STACK_NAME = 'CDKToolkitLocal';
 export const LOCAL_CHANGE_SET_NAME = `${LOCAL_QUALIFIER}-deploy`;
 
 // Returns the arguments an ephemeral deploy adds, or throws for options the local
-// bootstrap cannot run. `--method=direct` deploys without a change set.
+// bootstrap cannot run. Rather than parse every spelling yargs accepts, reject any
+// hotswap, watch, change-set-name, or method option except a single direct method.
 export function localDeployArguments(passthrough) {
-  if (passthrough.some((argument) => /^--hotswap/.test(argument))) {
+  if (passthrough.some((argument) => /^--(hotswap|watch)/i.test(argument))) {
     throw new Error(
-      'Ephemeral deploys cannot hotswap; the local bootstrap updates resources only through CloudFormation',
+      'Ephemeral deploys cannot hotswap or watch; the local bootstrap updates resources only through CloudFormation',
     );
   }
-  if (
-    passthrough.some((argument) => /^--change-set-name(=|$)/.test(argument))
-  ) {
+  if (passthrough.some((argument) => /^--change-?set-?name/i.test(argument))) {
     throw new Error(
-      `Ephemeral deploys use the ${LOCAL_CHANGE_SET_NAME} change set; remove --change-set-name`,
+      `Ephemeral deploys use the ${LOCAL_CHANGE_SET_NAME} change set; remove the change-set name option`,
     );
   }
-  const index = passthrough.findIndex((argument) =>
-    /^(--method|-m)(=|$)/.test(argument),
+  const methods = passthrough.flatMap((argument, index) =>
+    /^(-m|--method)/i.test(argument) ? [index] : [],
   );
-  const method =
-    index === -1
-      ? undefined
-      : passthrough[index].includes('=')
-        ? passthrough[index].split('=')[1]
-        : passthrough[index + 1];
-  return method === 'direct'
-    ? []
-    : ['--change-set-name', LOCAL_CHANGE_SET_NAME];
+  if (methods.length === 0) return ['--change-set-name', LOCAL_CHANGE_SET_NAME];
+  const [index] = methods;
+  const direct =
+    methods.length === 1 &&
+    (passthrough[index] === '--method=direct' ||
+      (passthrough[index] === '--method' &&
+        passthrough[index + 1] === 'direct'));
+  if (!direct) {
+    throw new Error(
+      'Ephemeral deploys accept only --method=direct; omit the option to deploy with a change set',
+    );
+  }
+  return [];
 }

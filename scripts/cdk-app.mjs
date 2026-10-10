@@ -142,14 +142,12 @@ if (expectedAccount) {
   cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
 }
 if (profile) cdkArguments.push('--profile', profile);
-if (ephemeral && action !== 'synth') {
+if (ephemeral && action === 'deploy') {
   cdkArguments.push('--toolkit-stack-name', LOCAL_TOOLKIT_STACK_NAME);
-  if (action === 'deploy') {
-    try {
-      cdkArguments.push(...localDeployArguments(passthrough));
-    } catch (error) {
-      fail(error.message);
-    }
+  try {
+    cdkArguments.push(...localDeployArguments(passthrough));
+  } catch (error) {
+    fail(error.message);
   }
 }
 if (

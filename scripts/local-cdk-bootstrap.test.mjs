@@ -416,30 +416,29 @@ test('execution decrypts staged Lambda assets only through S3', () => {
   assert.equal(allowed(execution, 'kms:Decrypt', '*'), false);
 });
 
-test('lookup role cannot read workload data', () => {
-  const lookup =
-    resources.LookupRole.Properties.Policies[0].PolicyDocument.Statement;
-  const data = lookup.find((entry) => entry.Sid === 'DontReadWorkloadData');
-  for (const action of [
-    's3:GetObject',
-    'lambda:GetFunction',
-    'sqs:ReceiveMessage',
-  ]) {
-    assert.ok(
-      data.Action.some((item) => matches(item, action)),
-      action,
-    );
-  }
-  const parameters = lookup.find(
-    (entry) => entry.Sid === 'ReadOnlyBootstrapParameters',
-  );
-  assert.equal(parameters.Effect, 'Deny');
-  assert.ok(
-    matches(
-      resolve(parameters.NotResource),
+test('lookup role reads only stack metadata and the bootstrap version', () => {
+  const lookup = resources.LookupRole.Properties;
+  const policy = lookup.Policies[0].PolicyDocument;
+  assert.deepEqual(lookup.ManagedPolicyArns, []);
+  assert.equal(lookup.Policies.length, 1);
+  assert.equal(
+    allowed(
+      policy,
+      'ssm:GetParameter',
       'arn:aws:ssm:us-east-1:000000000000:parameter/cdk-bootstrap/mcclocal1/version',
     ),
+    true,
   );
+  assert.equal(allowed(policy, 'cloudformation:GetTemplate', '*'), true);
+  for (const action of [
+    's3:GetObject',
+    'lambda:ListFunctions',
+    'logs:StartLiveTail',
+    'ecr:BatchGetImage',
+    'ssm:GetParameter',
+  ]) {
+    assert.equal(allowed(policy, action, '*'), false, action);
+  }
 });
 
 test('deployment deletes failed ephemeral stacks without a role but never shared ones', () => {
@@ -481,18 +480,32 @@ test('runtime boundary allows X-Ray sampling lookups', () => {
 test('ephemeral deploys name the local change set unless deploying directly', () => {
   const named = ['--change-set-name', LOCAL_CHANGE_SET_NAME];
   assert.deepEqual(localDeployArguments([]), named);
-  assert.deepEqual(localDeployArguments(['--method=change-set']), named);
   assert.deepEqual(
-    localDeployArguments(['--method', 'prepare-change-set']),
+    localDeployArguments(['--require-approval', 'never']),
     named,
   );
   assert.deepEqual(localDeployArguments(['--method=direct']), []);
   assert.deepEqual(localDeployArguments(['--method', 'direct']), []);
-  assert.throws(
-    () => localDeployArguments(['--change-set-name', 'mine']),
-    /remove --change-set-name/,
-  );
-  assert.throws(() => localDeployArguments(['--change-set-name=mine']));
+  for (const options of [
+    ['--change-set-name', 'mine'],
+    ['--change-set-name=mine'],
+    ['--changeSetName', 'mine'],
+  ]) {
+    assert.throws(() => localDeployArguments(options), /change-set name/);
+  }
+  for (const options of [
+    ['--method=change-set'],
+    ['--method', 'prepare-change-set'],
+    ['-m', 'direct'],
+    ['-mdirect'],
+    ['--method=direct', '--method=change-set'],
+  ]) {
+    assert.throws(
+      () => localDeployArguments(options),
+      /only --method=direct/,
+      options.join(' '),
+    );
+  }
 });
 
 test('shared stack protection covers every reserved dev name', () => {
@@ -505,15 +518,20 @@ test('shared stack protection covers every reserved dev name', () => {
   }
 });
 
-test('runtime lists only ephemeral and non-shared inbound prefixes', () => {
+test('runtime lists only ephemeral prefixes', () => {
   const list = (prefix) =>
     allowed(runtime, 's3:ListBucket', 'arn:aws:s3:::evidence', {
       's3:prefix': prefix,
     });
   assert.equal(list('ephemeral/alice/'), true);
-  assert.equal(list('incoming/alice/'), true);
-  assert.equal(list('incoming/dev/'), false);
-  assert.equal(list('submissions/'), false);
+  for (const prefix of [
+    'incoming/',
+    'incoming/d',
+    'incoming/dev/',
+    'submissions/',
+  ]) {
+    assert.equal(list(prefix), false, prefix);
+  }
   assert.equal(
     allowed(runtime, 's3:ListBucket', 'arn:aws:s3:::evidence'),
     false,
@@ -521,10 +539,17 @@ test('runtime lists only ephemeral and non-shared inbound prefixes', () => {
   );
 });
 
-test('ephemeral deploys reject hotswap and honour the -m alias', () => {
-  assert.deepEqual(localDeployArguments(['-m', 'direct']), []);
-  assert.deepEqual(localDeployArguments(['-m=direct']), []);
-  for (const option of ['--hotswap', '--hotswap-fallback']) {
-    assert.throws(() => localDeployArguments([option]), /cannot hotswap/);
+test('ephemeral deploys reject hotswap and watch', () => {
+  for (const option of [
+    '--hotswap',
+    '--hotswap-fallback',
+    '--hotswapFallback',
+    '--watch',
+  ]) {
+    assert.throws(
+      () => localDeployArguments([option]),
+      /cannot hotswap/,
+      option,
+    );
   }
 });
