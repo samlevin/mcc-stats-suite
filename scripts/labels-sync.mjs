@@ -8,6 +8,7 @@ const PROTECTED = new Set(['autorelease: pending']);
 const CATALOG = new URL('../.github/labels.json', import.meta.url);
 
 const same = (a, b) =>
+  a.name === b.name &&
   (a.color ?? '').toLowerCase() === (b.color ?? '').toLowerCase() &&
   (a.description ?? '') === (b.description ?? '');
 
@@ -29,6 +30,14 @@ export function planLabelSync(desired, actual) {
     if (!wanted.has(label.name.toLowerCase()) && !PROTECTED.has(label.name))
       plan.delete.push(label);
   return plan;
+}
+
+// Pure: a label still carried by any issue or pull request is never deleted.
+export function partitionPrune(deletes, counts) {
+  const result = { delete: [], skip: [] };
+  for (const label of deletes)
+    (counts.get(label.name) > 0 ? result.skip : result.delete).push(label);
+  return result;
 }
 
 function gh(args) {
@@ -89,20 +98,20 @@ export function run(argv = process.argv.slice(2)) {
         ...fields(label),
       ]);
   }
-  for (const label of plan.delete) {
-    if (!prune) {
-      console.log(`${verb}delete: ${label.name}`);
-      continue;
-    }
-    const used = usage(label.name);
-    if (used > 0) {
+  if (!prune)
+    for (const label of plan.delete)
+      console.log(`would delete (needs --prune): ${label.name}`);
+  else {
+    const counts = new Map(plan.delete.map((l) => [l.name, usage(l.name)]));
+    const { delete: unused, skip } = partitionPrune(plan.delete, counts);
+    for (const label of skip)
       console.log(
-        `skip delete (${used} issues or pull requests): ${label.name}`,
+        `skip delete (${counts.get(label.name)} issues or pull requests): ${label.name}`,
       );
-      continue;
+    for (const label of unused) {
+      console.log(`delete: ${label.name}`);
+      gh(['-X', 'DELETE', `${base}/${encodeURIComponent(label.name)}`]);
     }
-    console.log(`delete: ${label.name}`);
-    gh(['-X', 'DELETE', `${base}/${encodeURIComponent(label.name)}`]);
   }
   for (const label of plan.unchanged) console.log(`unchanged: ${label.name}`);
 }

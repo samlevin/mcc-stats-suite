@@ -20,7 +20,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: mcc-labels-sync
+  group: mcc-labels-sync-${{ github.event_name == 'pull_request' && github.ref || 'apply' }}
   cancel-in-progress: false
 
 jobs:

@@ -41,6 +41,7 @@ export function checks({ full, repository, mode }) {
         [
           '--test',
           'scripts/issue-triage.test.mjs',
+          'scripts/labels-sync.test.mjs',
           'scripts/issue-pr-metadata.test.mjs',
           'scripts/issue-pr-status.test.mjs',
           'scripts/ci-checks.test.mjs',
@@ -61,11 +62,20 @@ export function checks({ full, repository, mode }) {
           'scripts/issue-triage.mjs',
           'scripts/issue-containers.mjs',
           'scripts/issue-triage.test.mjs',
+          'scripts/labels-sync.mjs',
+          'scripts/labels-sync.test.mjs',
           '--max-warnings',
           '0',
         ],
       ],
-      ['node', ['--test', 'scripts/issue-triage.test.mjs']],
+      [
+        'node',
+        [
+          '--test',
+          'scripts/issue-triage.test.mjs',
+          'scripts/labels-sync.test.mjs',
+        ],
+      ],
     );
   return commands;
 }

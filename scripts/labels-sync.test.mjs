@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { planLabelSync } from './labels-sync.mjs';
+import { partitionPrune, planLabelSync } from './labels-sync.mjs';
 
 const bug = { name: 'bug', color: 'd73a4a', description: 'Broken' };
 
@@ -10,8 +10,8 @@ test('creates labels missing from the repository', () => {
   assert.deepEqual([plan.update, plan.delete, plan.unchanged], [[], [], []]);
 });
 
-test('updates changed description, ignoring color and name case', () => {
-  const docs = { name: 'Docs', color: 'ABCDEF', description: 'D' };
+test('updates changed description, ignoring color case', () => {
+  const docs = { name: 'docs', color: 'ABCDEF', description: 'D' };
   const plan = planLabelSync(
     [bug, docs],
     [
@@ -52,4 +52,22 @@ test('lists file-absent labels for deletion but never autorelease: pending', () 
     ['type: task'],
   );
   assert.deepEqual(plan.unchanged, [bug]);
+});
+
+test('renames a label that differs only by name case', () => {
+  const plan = planLabelSync([bug], [{ ...bug, name: 'Bug' }]);
+  assert.deepEqual(plan.update, [{ ...bug, current: 'Bug' }]);
+});
+
+test('prune skips labels still in use and deletes unused ones', () => {
+  const used = { name: 'used' };
+  const unused = { name: 'unused' };
+  const counts = new Map([
+    ['used', 3],
+    ['unused', 0],
+  ]);
+  assert.deepEqual(partitionPrune([used, unused], counts), {
+    delete: [unused],
+    skip: [used],
+  });
 });
