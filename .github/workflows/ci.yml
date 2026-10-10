@@ -24,8 +24,9 @@ jobs:
       base: ${{ steps.scope.outputs.base }}
       head: ${{ steps.scope.outputs.head }}
     steps:
-      - name: Select checks from changed files
+      - name: Checkout files for push classification
         uses: actions/checkout@v4
+        if: github.event_name == 'push'
         with:
           fetch-depth: 1
       - name: Classify changed files
@@ -81,22 +82,8 @@ jobs:
                   });
                   const classifierPath = path.join(process.env.RUNNER_TEMP, 'ci-scope-baseline.mjs');
                   let source = Buffer.from(baseline.data.content, 'base64').toString('utf8');
-                  if (!source.includes('export function selectScopes')) {
-                    const entrypoint = source.indexOf('const [base, head, event]');
-                    if (entrypoint < 0) throw new Error('Baseline classifier has no supported entry point.');
-                    source = `${source.slice(0, entrypoint)}
-                      export { classify };
-                      export function selectScopes(paths) {
-                        const scopes = paths.map(classify);
-                        return {
-                          full: !scopes.length || scopes.includes('full'),
-                          repository: scopes.includes('repository'),
-                          infrastructure: !scopes.length || scopes.includes('full'),
-                          check: true,
-                        };
-                      }
-                    `;
-                  }
+                  if (!source.includes('export function selectScopes'))
+                    throw new Error('Baseline classifier has no supported entry point.');
                   fs.writeFileSync(classifierPath, source);
                   const { selectScopes } = await import(pathToFileURL(classifierPath));
                   scopes = { ...all, ...selectScopes(paths) };
@@ -129,24 +116,8 @@ jobs:
         run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
       - name: Check OpenTofu formatting
         run: tofu fmt -check -recursive infrastructure
-      - name: Validate and test environment roots without a backend
-        run: |
-          for environment in dev prod; do
-            for module in bootstrap foundation data-platform; do
-              root="infrastructure/$environment/$module"
-              test_directory=""
-              if [[ "$environment" == dev && ( "$module" == bootstrap || "$module" == foundation ) ]]; then
-                test_directory="../../modules/$module/tests"
-                tofu -chdir="$root" init -backend=false -input=false -test-directory="$test_directory"
-              else
-                tofu -chdir="$root" init -backend=false -input=false
-              fi
-              tofu -chdir="$root" validate
-              if [[ -n "$test_directory" ]]; then
-                tofu -chdir="$root" test -test-directory="$test_directory"
-              fi
-            done
-          done
+      - name: Check OpenTofu roots
+        run: bash scripts/tofu-checks.sh
 
   application-checks:
     needs: scope
@@ -225,7 +196,7 @@ jobs:
           APPLICATIONS_RESULT: ${{ needs.application-checks.result }}
         run: |
           test "$SCOPE_RESULT" = success
-          if [[ "$SCOPE_INFRASTRUCTURE" == true ]]; then
+          if [[ "$SCOPE_INFRASTRUCTURE" != false ]]; then
             test "$INFRASTRUCTURE_RESULT" = success
           fi
           if [[ "$SCOPE_APPLICATIONS" != false ]]; then

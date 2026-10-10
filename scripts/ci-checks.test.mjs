@@ -12,9 +12,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { createRequire } from 'node:module';
 import ts from 'typescript';
 import { classify, selectScopes } from './ci-scope.mjs';
-import { evaluate, workflow } from './workflow-test-helpers.mjs';
+import {
+  evaluate,
+  workflow as loadWorkflow,
+} from './workflow-test-helpers.mjs';
 import {
   checks,
   runChecks,
@@ -31,6 +35,8 @@ const applicationNames = [
   'ocr-quality',
   'player',
 ];
+const require = createRequire(import.meta.url);
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 
 for (const name of [
   ...applicationNames.map((name) => `applications/${name}`),
@@ -328,6 +334,7 @@ test('CI cdk-config tests cannot invoke another compiler or modify built declara
 });
 
 test('workflow isolates cache namespaces and deploys dev and prod after CI', () => {
+  const parsedWorkflow = loadWorkflow('ci');
   const workflow = readFileSync(
     new URL('../.github/workflows/ci.yml', import.meta.url),
     'utf8',
@@ -345,6 +352,11 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
   assert.match(workflow, /compareCommitsWithBasehead/);
   assert.match(workflow, /getContent\([\s\S]*scripts\/ci-scope\.mjs/);
   assert.match(workflow, /actions\/cache@v4/);
+  assert.ok(
+    !JSON.stringify(parsedWorkflow.jobs['application-checks'].steps).includes(
+      'actions/cache@',
+    ),
+  );
   assert.match(
     workflow,
     /needs: \[scope, infrastructure, application-checks\]/,
@@ -442,7 +454,7 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
 });
 
 test('classifier selects independent infrastructure and application gates', () => {
-  const ciWorkflow = workflow('ci');
+  const ciWorkflow = loadWorkflow('ci');
   for (const key of [
     'full',
     'repository',
@@ -520,25 +532,157 @@ test('classifier selects independent infrastructure and application gates', () =
   });
   assert.equal(ciWorkflow.jobs.scope.steps[1].uses, 'actions/github-script@v9');
   assert.match(ciWorkflow.jobs.scope.steps[0].uses, /^actions\/checkout@v4$/);
+  assert.equal(
+    ciWorkflow.jobs.scope.steps[0].if,
+    "github.event_name == 'push'",
+  );
+  assert.equal(
+    ciWorkflow.jobs.scope.steps[0].name,
+    'Checkout files for push classification',
+  );
   assert.match(ciWorkflow.jobs.scope.steps[1].with.script, /event === 'push'/);
   assert.match(ciWorkflow.jobs.scope.steps[1].with.script, /base, head, '--'/);
   assert.match(
     ciWorkflow.jobs.scope.steps[1].with.script,
-    /source\.indexOf\('const \[base, head, event\]'\)/,
+    /supported entry point/,
   );
-  assert.match(
+  assert.doesNotMatch(
     ciWorkflow.jobs.scope.steps[1].with.script,
-    /infrastructure: !scopes\.length \|\| scopes\.includes\('full'\)/,
+    /source\.slice\(/,
+  );
+  const aggregator = ciWorkflow.jobs.check.steps[0].run;
+  assert.ok(
+    aggregator.includes('if [[ "$SCOPE_INFRASTRUCTURE" != false ]]; then'),
+  );
+  assert.ok(
+    aggregator.includes('if [[ "$SCOPE_APPLICATIONS" != false ]]; then'),
   );
 });
 
+test('workflow executes gate selection for push, PR, retired baseline, and API failure', async () => {
+  const ciWorkflow = loadWorkflow('ci');
+  const script = ciWorkflow.jobs.scope.steps[1].with.script;
+  const currentClassifier = readFileSync(
+    new URL('./ci-scope.mjs', import.meta.url),
+  );
+  const oldRunnerTemp = process.env.RUNNER_TEMP;
+  const run = async ({
+    event = 'pull_request',
+    paths = [],
+    baseline = currentClassifier,
+    apiError = false,
+  }) => {
+    const directory = mkdtempSync(join(tmpdir(), 'mcc-scope-script-'));
+    process.env.RUNNER_TEMP = directory;
+    const outputs = {};
+    const warnings = [];
+    const github = {
+      rest: {
+        repos: {
+          compareCommitsWithBasehead: async () => {
+            if (apiError) throw new Error('comparison unavailable');
+            return { data: { files: paths.map((filename) => ({ filename })) } };
+          },
+          getContent: async () => ({
+            data: { content: Buffer.from(baseline).toString('base64') },
+          }),
+        },
+      },
+    };
+    const mockedRequire = (name) =>
+      name === 'child_process'
+        ? {
+            execFileSync: (_command, args) =>
+              args[0] === 'fetch' ? '' : paths.join('\0'),
+          }
+        : require(name);
+    const context = {
+      eventName: event,
+      repo: { owner: 'owner', repo: 'repo' },
+      sha: 'b'.repeat(40),
+      payload: {
+        before: 'a'.repeat(40),
+        pull_request: {
+          base: { sha: 'a'.repeat(40) },
+          head: { sha: 'b'.repeat(40) },
+        },
+      },
+    };
+    try {
+      await new AsyncFunction('require', 'context', 'github', 'core', script)(
+        mockedRequire,
+        context,
+        github,
+        {
+          setOutput: (name, value) => {
+            outputs[name] = value;
+          },
+          warning: (message) => warnings.push(message),
+        },
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      if (oldRunnerTemp === undefined) delete process.env.RUNNER_TEMP;
+      else process.env.RUNNER_TEMP = oldRunnerTemp;
+    }
+    return { outputs, warnings };
+  };
+
+  const infra = await run({ paths: ['infrastructure/dev/foundation/main.tf'] });
+  assert.deepEqual(
+    [
+      infra.outputs.full,
+      infra.outputs.repository,
+      infra.outputs.infrastructure,
+      infra.outputs.check,
+    ],
+    [false, false, true, false],
+  );
+  const push = await run({ event: 'push', paths: ['scripts/ci-scope.mjs'] });
+  assert.deepEqual(
+    [
+      push.outputs.full,
+      push.outputs.repository,
+      push.outputs.infrastructure,
+      push.outputs.check,
+    ],
+    [true, false, true, true],
+  );
+  const retired = await run({ baseline: 'export function classify() {}' });
+  assert.deepEqual(
+    [
+      retired.outputs.full,
+      retired.outputs.repository,
+      retired.outputs.infrastructure,
+      retired.outputs.check,
+    ],
+    [true, true, true, true],
+  );
+  assert.match(retired.warnings.join('\n'), /supported entry point/);
+  const failed = await run({ apiError: true });
+  assert.deepEqual(
+    [
+      failed.outputs.full,
+      failed.outputs.repository,
+      failed.outputs.infrastructure,
+      failed.outputs.check,
+    ],
+    [true, true, true, true],
+  );
+  assert.match(failed.warnings.join('\n'), /comparison unavailable/);
+});
+
 test('standalone infrastructure gate formats, validates all roots, and tests without credentials', () => {
-  const ciWorkflow = workflow('ci');
+  const ciWorkflow = loadWorkflow('ci');
   const job = ciWorkflow.jobs.infrastructure;
-  const commands = job.steps
-    .filter((step) => step.run)
-    .map((step) => step.run)
-    .join('\n');
+  assert.equal(
+    job.steps.find((step) => step.name === 'Check OpenTofu roots').run,
+    'bash scripts/tofu-checks.sh',
+  );
+  const commands = readFileSync(
+    new URL('./tofu-checks.sh', import.meta.url),
+    'utf8',
+  );
   assert.match(commands, /tofu fmt -check -recursive infrastructure/);
   assert.match(commands, /for environment in dev prod/);
   assert.match(commands, /for module in bootstrap foundation data-platform/);

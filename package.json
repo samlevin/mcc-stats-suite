@@ -27,7 +27,8 @@
     "app:deploy": "node scripts/cdk-app.mjs deploy",
     "app:destroy": "node scripts/cdk-app.mjs destroy",
     "tofu:fmt": "tofu fmt -recursive infrastructure",
-    "tofu:fmt:check": "tofu fmt -check -recursive infrastructure"
+    "tofu:fmt:check": "tofu fmt -check -recursive infrastructure",
+    "tofu:check": "bash scripts/tofu-checks.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
