@@ -1,0 +1,39 @@
+name: deliver-aws-application-reusable
+
+on:
+  workflow_call:
+    inputs:
+      application:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  deployments: write
+  packages: read
+  id-token: write
+
+jobs:
+  dev:
+    uses: ./.github/workflows/_deploy-aws-application.yml
+    with:
+      application: ${{ inputs.application }}
+      environment: dev
+      sha: ${{ inputs.sha }}
+      operation: continuous-delivery
+      source: main
+
+  prod:
+    needs: dev
+    if: needs.dev.result == 'success'
+    uses: ./.github/workflows/_deploy-aws-application.yml
+    with:
+      application: ${{ inputs.application }}
+      environment: prod
+      sha: ${{ inputs.sha }}
+      operation: continuous-delivery
+      source: main

@@ -29,13 +29,35 @@ concurrency:
   cancel-in-progress: ${{ inputs.environment == 'dev' }}
 
 permissions:
+  actions: read
   contents: read
   deployments: write
   packages: read
   id-token: write
 
 jobs:
+  qualify-production:
+    if: inputs.environment == 'prod'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    steps:
+      - name: Require production reviewer protection
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { data } = await github.rest.repos.getEnvironment({
+              ...context.repo,
+              environment_name: 'prod',
+            });
+            const reviewers = data.protection_rules?.find((rule) => rule.type === 'required_reviewers');
+            if (!reviewers?.reviewers?.length || data.can_admins_bypass !== false) {
+              throw new Error('prod requires reviewers and disabled administrator bypass; configure the Environment with separate authorization');
+            }
+
   deploy:
+    needs: qualify-production
+    if: ${{ always() && !cancelled() && (inputs.environment == 'dev' || needs.qualify-production.result == 'success') }}
     # match-to-csv's ARM64 Lambda bundling needs a native ARM Docker host.
     runs-on: ${{ inputs.application == 'match-to-csv' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     environment:

@@ -1,19 +1,18 @@
 # Release, promote, and recover applications
 
-Application releases and deployments are separate. Release Please creates a named, immutable candidate. The production workflow promotes that candidate after the same application and commit pass in `dev`.
+Application releases and deployments are separate. Successful CI for a trusted main push starts `deploy-applications` at that exact merge SHA. Each affected application deploys and verifies in dev, then queues production for human approval. Routine delivery needs no release tag or manual dispatch. Release Please continues versioning independently.
 
-The `@samlevin/cdk-config` and `@samlevin/contracts` shared packages have independent semantic versions and GitHub releases. Applications use exact local dependency versions. Release Please updates those pins and patch-bumps every affected application in the same release commit. A `cdk-config` change therefore creates releases for all dependent applications. A `contracts` change creates a new `match-to-csv` release. After successful main CI, the `publish-packages` job publishes built shared package versions to GitHub Packages and skips existing immutable versions. See [package publication and recovery](../CONTRIBUTING.md#understand-release-versioning) for authentication and retry instructions.
+The `@samlevin/cdk-config` and `@samlevin/contracts` shared packages have independent semantic versions and GitHub releases. Applications use exact local dependency versions. Release Please updates those pins and patch-bumps every affected application in the same release commit. A `cdk-config` change therefore creates releases for all dependent applications. A `contracts` change creates a new `match-to-csv` release. After successful main CI, the `publish-shared-packages` workflow publishes built shared package versions to GitHub Packages and skips existing immutable versions. See [package publication and recovery](../CONTRIBUTING.md#understand-release-versioning) for authentication and retry instructions.
 
 ## Release an application
 
-1. Merge the application change to `main` after its pull request checks pass.
-2. Open the `ci` workflow run for the merge commit.
-3. Confirm CI identifies the application as affected and deploys that exact SHA successfully to `dev`.
-4. Complete the application-specific integration test. For `match-to-csv`, follow [`22-validate-match-to-csv-in-dev.md`](22-validate-match-to-csv-in-dev.md).
-5. Review the Release Please pull request. Its changelogs must describe the application and shared-package changes intended for production. A shared-package change may group several dependent releases into one pull request.
-6. Merge the release pull request.
-7. Wait for Release Please to create a published GitHub Release with a tag in the form `<application>-v<version>`.
-8. Wait for CI to deploy the release commit to `dev`. Release Please changes the application version and changelog, so the release commit requires its own successful qualification.
+1. Test application and business-logic changes in a local ephemeral dev environment before opening the PR.
+2. Merge the reviewed change to `main` after PR checks pass.
+3. Confirm the `ci` run succeeds, then open its `deploy-applications` run. It downloads the affected selection from that CI run and preserves the CI run's exact SHA.
+4. Confirm the application's dev deployment and stack verification succeed. Shared package changes select dependent applications; an empty selection deploys nothing.
+5. Complete the application smoke test before approving production. For `match-to-csv`, follow [`22-validate-match-to-csv-in-dev.md`](22-validate-match-to-csv-in-dev.md).
+6. Follow the production approval procedure below. One application's failed or cancelled dev job cannot qualify it or prevent another successful application's promotion.
+7. Review and merge Release Please PRs for versioning and changelogs. Their published component tags remain available for recovery; tag publication is independent of routine production delivery.
 
 ## Recover release pull request creation
 
@@ -46,21 +45,19 @@ gh pr list --repo samlevin/mcc-stats-suite --state open --base main \
   --jq '.[] | select(.headRefName | startswith("release-please--"))'
 ```
 
-## Promote a release to production
+## Approve production delivery
 
-1. Open **GitHub Actions -> promote-aws-application -> Run workflow**.
-2. Keep the workflow branch set to `main`.
-3. Select `promote`.
-4. Select the application.
-5. Enter its published release tag.
-6. Optionally record why the release is being promoted.
-7. Run the workflow.
-8. Confirm the qualification job resolves the release to a full commit SHA and finds a successful `dev` deployment for the same application and SHA.
-9. Inspect the recorded CDK diff in the production deployment job.
-10. Confirm the CDK deployment and deployed-stack verification succeed.
-11. Run the application-specific production health check.
+The `prod` GitHub Environment must have a nonempty required-reviewer rule and administrator bypass disabled. The reusable deployment harness checks this before queueing its protected job and fails closed if protection is missing. A workflow Environment declaration alone does not require approval. At issue #12 implementation, the API reported no protection rules; enabling protection needs separate repository-settings authorization.
 
-The workflow rejects draft releases, prereleases, tags belonging to another application, commits outside `main`, and revisions without successful `dev` qualification.
+1. Open **GitHub Actions -> deploy-applications** for the merge SHA.
+2. Check the selected application's dev job succeeded, including stack verification, and complete its smoke test.
+3. Select **Review deployments**, inspect the application and exact SHA, and approve `prod`. Rejecting prevents that production job from running.
+4. After approval, review the recorded production CDK diff and confirm deployment and stack verification succeed.
+5. Run the application-specific production health check.
+
+Each application's production job depends only on its own successful dev job at the same SHA. Failure, cancellation, skipped dev jobs, unsuccessful CI, and PR runs cannot qualify stable production delivery.
+
+Under separate deployment-validation authorization, record a successful dev run, the pending approval prompt, the approved deployment's application/SHA, and a rejected approval that leaves production unchanged. AWS-free regression tests cover qualification and workflow wiring; they cannot demonstrate the live approval prompt.
 
 ## Roll back during an incident
 
@@ -68,19 +65,19 @@ Rollback restores a complete prior application release. It does not reset `main`
 
 1. Identify the most recent known-good release tag for the affected application.
 2. Confirm that release appears in the application's production deployment history.
-3. Open **GitHub Actions -> promote-aws-application -> Run workflow** from `main`.
+3. Open **GitHub Actions -> rollback-aws-application -> Run workflow** from `main`.
 4. Select `rollback` and the affected application.
 5. Enter the known-good release tag and a short incident reason.
 6. Run the workflow.
 7. Confirm qualification finds a successful prior `prod` deployment for the same application and SHA.
-8. Review the CDK diff, complete the deployment, and check production health.
+8. Approve the protected production job, review the CDK diff, complete the deployment, and check production health.
 9. Record the incident and begin the roll-forward repair.
 
 The rollback path cannot deploy arbitrary historical code. It accepts only a published application release that this workflow previously deployed successfully to production.
 
 ## Preserve later work with a roll-forward repair
 
-Create a normal pull request from current `main`. Revert the offending commit or add a corrective change, then pass through CI, `dev`, Release Please, and production promotion again. Do not reset `main`, force-move a release tag, or construct an unreviewed production-only commit.
+Create a normal pull request from current `main`. Revert the offending commit or add a corrective change, then pass through CI, `dev`, and production approval again. Do not reset `main`, force-move a release tag, or construct an unreviewed production-only commit.
 
 Use rollback to restore service quickly. Use a roll-forward release to remove the defect while retaining later good changes. Schema and data changes must remain backward-compatible throughout the rollback window.
 

@@ -113,7 +113,7 @@ Applications pin internal packages at exact versions. The Node workspace release
 - a `cdk-config` release affects `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, and `player`;
 - a `contracts` release affects `match-to-csv`.
 
-The release pull request updates package versions, changelogs, the root lockfile, and `.release-please-manifest.json` together. `npm run release:check` rejects drift between those files. Release Please opens one coordinated release pull request so shared versions and exact consumer pins change together. Component versions and tags remain independent. After successful `main` CI, the `publish-packages` job builds and publishes `@samlevin/contracts` and `@samlevin/cdk-config` to GitHub Packages using `GITHUB_TOKEN`. The first successful run publishes the current versions; later runs skip versions already present. Registry or publication errors fail the job. Packages inherit access from this repository; registry downloads require authentication even for public packages. Applications remain private workspaces.
+The release pull request updates package versions, changelogs, the root lockfile, and `.release-please-manifest.json` together. `npm run release:check` rejects drift between those files. Release Please opens one coordinated release pull request so shared versions and exact consumer pins change together. Component versions and tags remain independent. After successful `main` CI, the `publish-shared-packages` workflow builds and publishes `@samlevin/contracts` and `@samlevin/cdk-config` to GitHub Packages using `GITHUB_TOKEN`. The first successful run publishes the current versions; later runs skip versions already present. Registry or publication errors fail the job. Packages inherit access from this repository; registry downloads require authentication even for public packages. Applications remain private workspaces.
 
 Existing separate Release Please pull requests predate this configuration and should be closed when the coordinated replacement opens. Re-run the failed main CI run to retry package publication; immutable existing versions are skipped.
 
@@ -123,7 +123,7 @@ There are two dev deployment paths.
 
 ### Local ephemeral dev
 
-Use an ephemeral stack for development. Replace `<application>` with `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, or `player`.
+Test application and business-logic changes in an ephemeral dev stack before opening a pull request. Replace `<application>` with `admin`, `data-pipeline`, `match-to-csv`, `ocr-quality`, or `player`.
 
 ```console
 npm run app:synth -- <application> --environment dev --ephemeral <name>
@@ -135,15 +135,15 @@ Only `match-to-csv` needs `MCC_EMAIL_DOMAIN` during deployment. Ephemeral stacks
 
 ### dev
 
-dev deploys only from GitHub Actions. Merge the reviewed change to `main`. After the `ci` workflow succeeds, `deploy-dev` downloads the affected-application list from that exact CI run and calls the reusable deployment workflow for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
+dev deploys only from GitHub Actions. Merge the reviewed change to `main`. After the `ci` workflow succeeds, `deploy-applications` downloads the affected-application list from that exact CI run and calls the reusable deployment workflow for each result. A change confined to one application deploys that application. A shared-package change deploys all consumers.
 
-Open the `deploy-dev` run for the merge SHA to verify deployments. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Do not deploy the plain `dev` stack from a local shell.
+Open the `deploy-applications` run for the merge SHA to verify deployments. GitHub records the exact SHA, application version, shared-package versions, and final status in Deployments. Do not deploy the plain `dev` stack from a local shell.
 
 ## Deploy one application to prod
 
-After every affected application deploys successfully to dev, `deploy-prod` starts for the same commit and waits for approval through the protected GitHub `prod` environment. A required reviewer must approve the pending deployment in the Actions run before it can assume production credentials. Configure required reviewers on the `prod` environment in repository settings.
+Each affected application has its own dev-to-prod sequence in `deploy-applications`. After that application deploys and verifies successfully in dev, its production job waits for approval through the protected GitHub `prod` environment. Failed, cancelled, or skipped dev jobs cannot qualify production; other applications proceed independently. A required reviewer must approve the pending deployment in the Actions run before it can assume production credentials. Production qualification requires a nonempty required-reviewer rule and disabled administrator bypass on `prod`; missing protection fails before requesting production credentials. Configure these settings only with separate authorization.
 
-Review and approve the pending production deployment in **GitHub Actions -> deploy-prod -> Review deployments** after completing any application smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`. Then review the production CDK diff and verify the stack health checks and application smoke test. The workflow deploys the exact commit that succeeded in dev. The manual `rollback-aws-application` workflow remains available to restore a prior production release; read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) first.
+Review and approve the pending production deployment in **GitHub Actions -> deploy-applications -> Review deployments** after completing any application smoke test. Use [`runbooks/22-validate-match-to-csv-in-dev.md`](runbooks/22-validate-match-to-csv-in-dev.md) for `match-to-csv`. Then review the production CDK diff and verify the stack health checks and application smoke test. The workflow deploys the exact commit that succeeded in dev. The manual `rollback-aws-application` workflow remains available to restore a prior production release; read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) first.
 
 To restore an older production version, use the manual `rollback-aws-application` workflow with a release previously deployed to prod, and record the reason. Read [`runbooks/31-release-promote-and-recover-applications.md`](runbooks/31-release-promote-and-recover-applications.md) before rolling back.
 
@@ -151,7 +151,7 @@ To restore an older production version, use the manual `rollback-aws-application
 
 OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it.
 
-Bootstrap is a local administrative procedure. Terrateam plans foundation changes on pull requests. After merge, it applies the merged revision to dev before it plans and applies prod. Foundation does not have a separate release ID. A failed or stale dev layer blocks prod. If another foundation change reaches `main` during a run, treat the newer revision as the promotion candidate and require its layered run to finish successfully.
+Bootstrap is a local administrative procedure. Terrateam plans foundation changes on pull requests. Some working-branch guidance describes applies during PRs; the current configuration applies after merge. Changing Terrateam apply timing is outside application delivery. After merge, it applies the merged revision to dev before it plans and applies prod. Foundation does not have a separate release ID. A failed or stale dev layer blocks prod. If another foundation change reaches `main` during a run, treat the newer revision as the promotion candidate and require its layered run to finish successfully.
 
 Terrateam checks foundation roots for drift weekly and opens a GitHub issue when it finds a difference. Reconciliation remains reviewed and manual. Infrastructure changes can affect several applications even when no application source file changed, so follow the ordered procedures in [`runbooks/README.md`](runbooks/README.md).
 
