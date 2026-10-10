@@ -19,5 +19,5 @@ Guidelines:
 Run fixtures:
 
 ```bash
-npm test --workspace @mcc/match-to-csv
+npm test --workspace @samlevin/match-to-csv
 ```

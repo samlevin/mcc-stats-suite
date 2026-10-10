@@ -24,7 +24,7 @@ if (applicationIndex !== -1) {
   if (!requested || requested.startsWith('--')) {
     fail('--application requires a workspace name');
   }
-  const workspace = packagesByName.get(`@mcc/${requested}`);
+  const workspace = packagesByName.get(`@samlevin/${requested}`);
   if (!workspace || !workspace.path.startsWith('applications/')) {
     fail(`unknown application: ${requested}`);
   }

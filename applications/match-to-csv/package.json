@@ -1,5 +1,5 @@
 {
-  "name": "@mcc/match-to-csv",
+  "name": "@samlevin/match-to-csv",
   "private": true,
   "version": "1.0.0",
   "scripts": {
@@ -17,8 +17,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.992.0",
     "@aws-sdk/client-textract": "^3.992.0",
-    "@mcc/cdk-config": "1.0.0",
-    "@mcc/contracts": "1.0.0",
+    "@samlevin/cdk-config": "1.0.0",
+    "@samlevin/contracts": "1.0.0",
     "mailparser": "^3.9.3",
     "sharp": "^0.35.3"
   },

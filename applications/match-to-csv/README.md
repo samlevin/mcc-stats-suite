@@ -116,10 +116,10 @@ The split algorithm hashes the seed and `screenshotId`. Eighty percent of screen
 ## Development and tests
 
 ```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/match-to-csv
+npm test --workspace @samlevin/match-to-csv
+npm run typecheck --workspace @samlevin/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @mcc/match-to-csv
+npm run verify:bundle --workspace @samlevin/match-to-csv
 ```
 
 The test suite enforces minimum statement, branch, line, and function coverage. It covers MIME intake behavior, multiple attachments, rejections, submission events, processing success and failure records, parser behavior, semantic mapping, multiple tables, CSV escaping, comparison behavior, ephemeral paths, materialization joins, and deterministic dataset splits. Tests do not call AWS.

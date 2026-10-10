@@ -10,7 +10,7 @@ import type {
   RejectedAttachment,
   S3ObjectReference,
   SourceScreenshot,
-} from '@mcc/contracts';
+} from '@samlevin/contracts';
 import { simpleParser } from 'mailparser';
 import sharp from 'sharp';
 import { bodyToBuffer, namespacedObjectKey, safeObjectName } from '../lib/s3';

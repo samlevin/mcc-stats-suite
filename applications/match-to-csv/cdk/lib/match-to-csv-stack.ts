@@ -1,5 +1,5 @@
 import * as path from 'path';
-import type { DeploymentConfig } from '@mcc/cdk-config';
+import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
   CfnOutput,
   CfnParameter,

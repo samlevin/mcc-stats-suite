@@ -8,7 +8,7 @@ import type {
   MaterializeTrainingDataInput,
   MaterializeTrainingDataOutput,
   S3ObjectReference,
-} from '@mcc/contracts';
+} from '@samlevin/contracts';
 import { createHash } from 'node:crypto';
 import { bodyToBuffer, namespacedObjectKey } from '../lib/s3';
 import { evidenceId, now, putJson } from '../lib/evidence';

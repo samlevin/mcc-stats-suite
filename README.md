@@ -125,8 +125,8 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 Target a workspace without running every package:
 
 ```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/match-to-csv
+npm test --workspace @samlevin/match-to-csv
+npm run typecheck --workspace @samlevin/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
 ```
 
@@ -137,6 +137,6 @@ npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to `dev` at the merged commit SHA. After dev succeeds, `prod` waits for approval in the GitHub Actions run. Release Please versions applications and private shared packages.
+Pull requests run the full CI gate without deploying. A merge to `main` deploys affected applications to `dev` at the merged commit SHA. After dev succeeds, `prod` waits for approval in the GitHub Actions run. Release Please versions applications and shared packages published to GitHub Packages.
 
 See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and exact dev and prod deployment paths. Use the [runbooks](runbooks/README.md) for account bootstrap, foundation changes, end-to-end validation, and incident recovery.

@@ -6,9 +6,9 @@ Use the dev account and choose a lowercase ephemeral name:
 direnv allow
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity
-npm test --workspace @mcc/match-to-csv
+npm test --workspace @samlevin/match-to-csv
 npm run app:synth -- match-to-csv --environment dev --ephemeral <name>
-npm run verify:bundle --workspace @mcc/match-to-csv
+npm run verify:bundle --workspace @samlevin/match-to-csv
 npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```

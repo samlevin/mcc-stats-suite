@@ -31,6 +31,7 @@ concurrency:
 permissions:
   contents: read
   deployments: write
+  packages: read
   id-token: write
 
 jobs:
@@ -89,7 +90,11 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@samlevin'
       - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Read release metadata
         id: release-metadata
         env:
@@ -104,9 +109,13 @@ jobs:
           account-id: ${{ vars.AWS_ACCOUNT_ID }}
           region: ${{ env.AWS_REGION }}
       - name: Build selected application with dependencies
-        run: npx turbo run build --filter="@mcc/${{ inputs.application }}..."
+        env:
+          APPLICATION: ${{ inputs.application }}
+        run: |
+          PACKAGE_NAME="$(node -p 'require(`./applications/${process.env.APPLICATION}/package.json`).name')"
+          npx turbo run build --filter="${PACKAGE_NAME}..."
       - name: Test selected application
-        run: npm test --workspace "@mcc/${{ inputs.application }}"
+        run: npm test --workspace "applications/${{ inputs.application }}"
       - uses: aws-actions/configure-aws-credentials@v5
         with:
           role-to-assume: ${{ vars.AWS_CDK_DEPLOY_ROLE_ARN }}
@@ -157,7 +166,7 @@ jobs:
             --environment "${{ inputs.environment }}"
       - name: Verify native Lambda bundles
         if: inputs.application == 'match-to-csv'
-        run: npm run verify:bundle --workspace @mcc/match-to-csv
+        run: npm run verify:bundle --workspace applications/match-to-csv
       - name: Reviewable production diff
         if: inputs.environment == 'prod'
         run: |

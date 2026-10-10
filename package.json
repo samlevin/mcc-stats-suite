@@ -9,9 +9,9 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "test": "node --test scripts/issue-*.test.mjs && turbo run ci:test",
+    "test": "node --test scripts/issue-triage.test.mjs scripts/publish-packages.test.mjs && turbo run test",
     "typecheck": "turbo run typecheck",
-    "build:shared": "turbo run build --filter=@mcc/contracts --filter=@mcc/cdk-config",
+    "build:shared": "turbo run build --filter=@samlevin/contracts --filter=@samlevin/cdk-config",
     "prelint": "npm run build:shared",
     "lint": "eslint . --max-warnings 0",
     "prelint:fix": "npm run build:shared",
