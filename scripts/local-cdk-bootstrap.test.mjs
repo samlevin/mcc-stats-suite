@@ -78,7 +78,7 @@ function allowed(policy, action, resource, context = {}) {
           [expected]
             .flat()
             .some((item) =>
-              matches(withVariables(item, context), context[key]),
+              matches(withVariables(resolve(item), context), context[key]),
             ),
       ),
   );
@@ -92,13 +92,7 @@ const stack = (name) =>
 const role = (name) => `arn:aws:iam::000000000000:role/${name}`;
 
 test('local deployment allows ephemeral writes and denies all shared stack writes', () => {
-  for (const app of [
-    'admin',
-    'data-pipeline',
-    'match-to-csv',
-    'ocr-quality',
-    'player',
-  ]) {
+  for (const app of APPLICATIONS) {
     for (const action of [
       'CreateStack',
       'UpdateStack',
@@ -652,4 +646,52 @@ test('every application synthesizes with the deployment bootstrap qualifier', ()
       app,
     );
   }
+});
+
+test('deployment executes the local change set by name or ARN only', () => {
+  const execute = (changeSet) =>
+    allowed(
+      deployment,
+      'cloudformation:ExecuteChangeSet',
+      stack('admin-alice'),
+      {
+        'cloudformation:ChangeSetName': changeSet,
+      },
+    );
+  const changeSetArn = (name) =>
+    `arn:aws:cloudformation:us-east-1:000000000000:changeSet/${name}/0f2c`;
+  assert.equal(execute(LOCAL_CHANGE_SET_NAME), true);
+  assert.equal(execute(changeSetArn(LOCAL_CHANGE_SET_NAME)), true);
+  assert.equal(execute('cdk-deploy-change-set'), false);
+  assert.equal(execute(changeSetArn('cdk-deploy-change-set')), false);
+});
+
+test('deployment reads only application SSM parameters', () => {
+  const read = (name) =>
+    allowed(
+      deployment,
+      'ssm:GetParameters',
+      `arn:aws:ssm:us-east-1:000000000000:parameter/${name}`,
+    );
+  assert.equal(read('mcc/dev/match-to-csv/data-key-arn'), true);
+  assert.equal(read('mcc/dev/turbo-cache/bucket-name'), false);
+});
+
+test('ephemeral deploys reject a role ARN option', () => {
+  for (const options of [
+    ['--role-arn', 'arn:aws:iam::000000000000:role/other'],
+    ['--role-arn=arn:aws:iam::000000000000:role/other'],
+    ['--roleArn', 'other'],
+    ['-r', 'other'],
+  ]) {
+    assert.throws(
+      () => localDeployArguments(options),
+      /remove the role ARN option/,
+      options.join(' '),
+    );
+  }
+  assert.deepEqual(localDeployArguments(['--require-approval', 'never']), [
+    '--change-set-name',
+    LOCAL_CHANGE_SET_NAME,
+  ]);
 });

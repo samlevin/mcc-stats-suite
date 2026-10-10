@@ -59,8 +59,9 @@ export function localBootstrap(template) {
   ]);
   // Unanchored denies stay short and only over-match shared names.
   const stableResources = applications.map((app) => arn('*', `*${app}-dev*`));
-  // ${!...} renders a literal IAM policy variable through Fn::Sub.
-  const OWN = '${!aws:PrincipalTag/Ephemeral}';
+  const OWN_TAG = '${aws:PrincipalTag/Ephemeral}';
+  // ${!...} renders the literal IAM policy variable through Fn::Sub.
+  const OWN = OWN_TAG.replace('${', '${!');
   const objects = (prefix) =>
     sub(`arn:${'${AWS::Partition}'}:s3:::*/${prefix}`);
   const localExecution = {
@@ -114,7 +115,7 @@ export function localBootstrap(template) {
         statement('ListEphemeralObjects', 's3:ListBucket', '*', {
           Condition: {
             StringLike: {
-              's3:prefix': 'ephemeral/${aws:PrincipalTag/Ephemeral}/*',
+              's3:prefix': `ephemeral/${OWN_TAG}/*`,
             },
           },
         }),
@@ -237,15 +238,19 @@ export function localBootstrap(template) {
           },
         ),
         // ExecuteChangeSet has no RoleArn condition. Requiring the wrapper's change-set name
-        // keeps change sets created under the administrator bootstrap unexecutable.
+        // keeps change sets created under the administrator bootstrap unexecutable. The CLI
+        // passes the change-set ARN in ChangeSetName, so accept the name in either form.
         statement(
           'ExecuteLocalChangeSets',
           'cloudformation:ExecuteChangeSet',
           stacks,
           {
             Condition: {
-              StringEquals: {
-                'cloudformation:ChangeSetName': LOCAL_CHANGE_SET_NAME,
+              StringLike: {
+                'cloudformation:ChangeSetName': [
+                  LOCAL_CHANGE_SET_NAME,
+                  arn('cloudformation', `changeSet/${LOCAL_CHANGE_SET_NAME}/*`),
+                ],
               },
             },
           },
@@ -277,7 +282,9 @@ export function localBootstrap(template) {
           ['ssm:GetParameter', 'ssm:GetParameters'],
           [
             arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
-            arn('ssm', 'parameter/mcc/dev/*'),
+            ...applications.map((app) =>
+              arn('ssm', `parameter/mcc/dev/${app}/*`),
+            ),
           ],
         ),
       ]),

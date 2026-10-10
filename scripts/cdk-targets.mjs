@@ -14,11 +14,20 @@ export const LOCAL_CHANGE_SET_NAME = `${LOCAL_QUALIFIER}-deploy`;
 
 // Returns the arguments an ephemeral deploy adds, or throws for options the local
 // bootstrap cannot run. Rather than parse every spelling yargs accepts, reject any
-// hotswap, watch, change-set-name, or method option except a single direct method.
+// hotswap, watch, role, change-set-name, or method option except a single direct method.
 export function localDeployArguments(passthrough) {
   if (passthrough.some((argument) => /^--(hotswap|watch)/i.test(argument))) {
     throw new Error(
       'Ephemeral deploys cannot hotswap or watch; the local bootstrap updates resources only through CloudFormation',
+    );
+  }
+  if (
+    passthrough.some(
+      (argument) => /^--role-?arn/i.test(argument) || /^-r/.test(argument),
+    )
+  ) {
+    throw new Error(
+      'Ephemeral deploys always use the local CloudFormation execution role; remove the role ARN option',
     );
   }
   if (passthrough.some((argument) => /^--change-?set-?name/i.test(argument))) {
