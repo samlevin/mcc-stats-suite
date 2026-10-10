@@ -71,3 +71,11 @@ test('prune skips labels still in use and deletes unused ones', () => {
     skip: [used],
   });
 });
+
+test('never deletes a live autorelease: tagged label absent from the file', () => {
+  const plan = planLabelSync(
+    [bug],
+    [bug, { name: 'autorelease: tagged', color: 'ededed' }],
+  );
+  assert.deepEqual(plan.delete, []);
+});

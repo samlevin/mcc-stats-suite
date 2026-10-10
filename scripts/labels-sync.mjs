@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 export const REPOSITORY = 'samlevin/mcc-stats-suite';
-// Release Please owns this label; the sync never deletes it.
-const PROTECTED = new Set(['autorelease: pending']);
+// Release Please owns every `autorelease:` label; the sync never deletes them.
+const isProtected = (name) => name.startsWith('autorelease:');
 const CATALOG = new URL('../.github/labels.json', import.meta.url);
 
 const same = (a, b) =>
@@ -27,7 +27,7 @@ export function planLabelSync(desired, actual) {
     else plan.update.push({ ...label, current: current.name });
   }
   for (const label of actual)
-    if (!wanted.has(label.name.toLowerCase()) && !PROTECTED.has(label.name))
+    if (!wanted.has(label.name.toLowerCase()) && !isProtected(label.name))
       plan.delete.push(label);
   return plan;
 }
