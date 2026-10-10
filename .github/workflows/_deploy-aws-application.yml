@@ -217,7 +217,7 @@ jobs:
             --template-stage Original \
             --query TemplateBody \
             --output json 2>"${RUNNER_TEMP}/get-template.err")"; then
-            if grep -q "does not exist" "${RUNNER_TEMP}/get-template.err"; then
+            if grep -qF "Stack with id ${STACK_NAME} does not exist" "${RUNNER_TEMP}/get-template.err"; then
               echo "${STACK_NAME} does not exist yet"
               exit 0
             fi

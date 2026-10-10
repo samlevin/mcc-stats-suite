@@ -58,6 +58,47 @@ test('allows the retain release itself on a stack deployed before it', () => {
   assert.deepEqual(handoverBlockers(beforeRetain, retained), []);
 });
 
+test('blocks a replacement that the deployed stack does not retain', () => {
+  const properties = (name, extra = {}) => ({
+    RuleSetName: 'mcc-match-to-csv-dev',
+    Rule: { Name: name, ...extra },
+  });
+  const deployedRule = {
+    Resources: {
+      StoreRawEmail: rule({
+        DeletionPolicy: 'Retain',
+        Properties: properties('match-to-csv-dev'),
+      }),
+    },
+  };
+  const renamed = {
+    Resources: { StoreRawEmail: rule({ Properties: properties('renamed') }) },
+  };
+  // Rule.Name is immutable, so CloudFormation creates a new rule and deletes
+  // the live one unless the deployed template retains it on replacement.
+  assert.deepEqual(handoverBlockers(deployedRule, renamed), [
+    'StoreRawEmail (AWS::SES::ReceiptRule) would be replaced, which deletes the live resource',
+  ]);
+  const retainedOnReplace = {
+    Resources: {
+      StoreRawEmail: {
+        ...deployedRule.Resources.StoreRawEmail,
+        UpdateReplacePolicy: 'Retain',
+      },
+    },
+  };
+  assert.deepEqual(handoverBlockers(retainedOnReplace, renamed), []);
+  // A mutable property change updates in place and is allowed.
+  const toggled = {
+    Resources: {
+      StoreRawEmail: rule({
+        Properties: properties('match-to-csv-dev', { Enabled: false }),
+      }),
+    },
+  };
+  assert.deepEqual(handoverBlockers(deployedRule, toggled), []);
+});
+
 test('allows dropping the resources once the deployed stack retains them', () => {
   assert.deepEqual(handoverBlockers(retained, dropped), []);
 });
@@ -118,10 +159,27 @@ test('the CLI reads the deployed template from stdin, string-encoded or not', ()
   assert.equal(allowed.stderr, '');
 });
 
-test('the CLI fails clearly without a readable synthesized template', () => {
+test('the CLI fails clearly without readable, well-formed templates', () => {
   const usage = runCli([], '{}');
   assert.equal(usage.status, 2);
   assert.match(usage.stderr, /^Usage:/);
+
+  const incomingPath = join(
+    mkdtempSync(join(tmpdir(), 'handover-')),
+    'incoming.json',
+  );
+  writeFileSync(incomingPath, JSON.stringify(dropped));
+  const malformed = runCli([incomingPath], '');
+  assert.equal(malformed.status, 2);
+  assert.match(malformed.stderr, /^Cannot parse the deployed template/);
+
+  writeFileSync(incomingPath, '{');
+  const malformedIncoming = runCli([incomingPath], '{}');
+  assert.equal(malformedIncoming.status, 2);
+  assert.match(
+    malformedIncoming.stderr,
+    /^Cannot parse the synthesized template/,
+  );
 
   const missing = runCli(
     [join(tmpdir(), 'handover-missing.template.json')],

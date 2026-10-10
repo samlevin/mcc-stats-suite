@@ -64,7 +64,7 @@ Terrateam plans and applies only pull requests that target `main`. If the founda
    }
    ```
 
-2. Retarget the pull request to `main` if it still targets the step 1 branch. If the automatic plan is missing or stale, comment `terrateam plan dev and foundation`. Expected: three resources to import, two new SSM parameters `/mcc/dev/match-to-csv/receipt-rule-set-name` and `/mcc/dev/match-to-csv/email-domain`, and nothing else. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means `DEV_MCC_EMAIL_DOMAIN` differs from the domain the stack uses.
+2. Retarget the pull request to `main` if it still targets the step 1 branch. If the automatic plan is missing or stale, comment `terrateam plan dev and foundation`. Expected: three resources to import, two new SSM parameters `/mcc/dev/match-to-csv/receipt-rule-set-name` and `/mcc/dev/match-to-csv/email-domain`, and nothing else. The domain is a sensitive input, so the plan shows the rule's recipients and the domain parameter as sensitive values. If the plan proposes to create, replace, or destroy the rule set, the rule, or the activation, or to change the rule's recipients, stop and do not apply. A changed recipient means `DEV_MCC_EMAIL_DOMAIN` differs from the domain the stack uses.
 3. Comment `terrateam apply dev and foundation`. Expected: three imported, two added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
 4. Comment `terrateam plan prod and foundation`, confirm the same shape as dev, then `terrateam apply prod and foundation`, and run the same `describe` check.
 
@@ -88,7 +88,7 @@ Expected: the events show the rule set and the rule as `DELETE_SKIPPED`, and the
 
 ## After the move
 
-- Existing ephemeral stacks keep working. Their rule already targets `mcc-match-to-csv-dev`. The next deployment reads that name and the domain from SSM instead of `MCC_EMAIL_DOMAIN`, and the rule is unchanged when the domains match.
+- Existing ephemeral stacks keep working once the dev foundation apply in step 2 is done. Their rule already targets `mcc-match-to-csv-dev`. The next deployment reads that name and the domain from SSM instead of `MCC_EMAIL_DOMAIN`, and the rule is unchanged when the domains match. Before that apply, an ephemeral deploy from a revision after this change stops before it changes anything, because CDK cannot resolve the two SSM parameters.
 - Roll `match-to-csv` back only to the release that contains step 3 or a later one. Earlier tags declare the rule set and rule again, and CloudFormation fails with `AlreadyExists`. The deployment workflow still supplies the domain those revisions expect, so the failure happens in CloudFormation and causes no email outage.
 - Destroying a `match-to-csv` stack no longer touches the rule set or the shared rule.
 - Domain verification and the MX record are still manual prerequisites. Each `match-to-csv` deployment reads the domain from SSM and stops if the rule set is not active, the identity is not verified in the deployment Region, or the MX record does not point at SES inbound receiving there. See [Check prerequisites](00-prerequisites.md).

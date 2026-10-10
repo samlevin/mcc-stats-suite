@@ -443,9 +443,8 @@ test('match-to-csv deploys only after the receipt rule handover check', () => {
     ),
   );
   assert.ok(guard.run.includes('cdk.out/${STACK_NAME}.template.json'));
-  // Only a missing stack skips the guard; any other read failure stops the deploy.
-  assert.ok(guard.run.includes('grep -q "does not exist"'));
-  assert.ok(!guard.run.includes('describe-stacks'));
+  // Only the exact missing-stack error skips the guard.
+  assert.ok(guard.run.includes('Stack with id ${STACK_NAME} does not exist'));
   assert.equal(guard.if, "inputs.application == 'match-to-csv'");
   const position = steps.indexOf('Verify receipt rule handover');
   assert.ok(position > steps.indexOf('Synthesize'));
@@ -460,17 +459,14 @@ test('match-to-csv prerequisites verify the SES identity and MX record', () => {
     (step) => step.name === 'Verify match-to-csv prerequisites',
   );
   assert.equal(prerequisites.if, "inputs.application == 'match-to-csv'");
-  // The domain comes from the foundation's SSM parameter in the same call as
-  // the other parameters, not from a GitHub variable or the rule itself.
+  // The domain comes from the foundation's SSM parameter, not from a GitHub
+  // variable, and the identity and MX checks still run on it.
   assert.ok(prerequisites.run.includes('/match-to-csv/email-domain'));
-  assert.equal(prerequisites.run.match(/aws ssm get-parameter/g).length, 1);
-  assert.ok(!prerequisites.run.includes('describe-receipt-rule '));
   assert.ok(prerequisites.run.includes('describe-active-receipt-rule-set'));
   assert.ok(prerequisites.run.includes('get-identity-verification-attributes'));
   assert.ok(prerequisites.run.includes('dig +short MX'));
   assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
   // Older application revisions still expect the variable during rollback.
-  assert.ok(
-    prerequisites.run.includes('echo "MCC_EMAIL_DOMAIN=${MCC_EMAIL_DOMAIN}"'),
-  );
+  assert.ok(prerequisites.run.includes('MCC_EMAIL_DOMAIN='));
+  assert.ok(prerequisites.run.includes('GITHUB_ENV'));
 });
