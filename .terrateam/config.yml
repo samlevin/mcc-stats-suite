@@ -34,6 +34,19 @@ access_control:
       apply: ['role:admin']
 
 dirs:
+  # Bootstrap stays manual; exclusions also block indexer-added module patterns.
+  infrastructure/dev/bootstrap:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/prod/bootstrap:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
