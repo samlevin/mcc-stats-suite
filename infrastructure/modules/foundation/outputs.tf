@@ -30,3 +30,8 @@ output "turbo_cache_service_policy_json" {
   description = "Object read/write and bucket-scoped S3 KMS permissions for a future cache service role. Does not create or grant access to any role."
   value       = data.aws_iam_policy_document.turbo_cache_service.json
 }
+
+output "github_turbo_cache_role_arn" {
+  description = "Dedicated cache workload role; never the CDK deployment role."
+  value       = var.create_github_cache_role ? local.cache_role_arn : null
+}

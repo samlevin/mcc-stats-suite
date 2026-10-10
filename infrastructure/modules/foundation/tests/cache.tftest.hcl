@@ -251,3 +251,95 @@ run "reject_cross_account_service_role" {
   }
   expect_failures = [var.cache_service_role_arns]
 }
+
+run "dev_github_cache_role" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment                    = "dev"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = "owner@1/repository@2"
+  }
+  override_resource {
+    target = aws_s3_bucket.turbo_cache
+    values = {
+      id  = "mcc-stats-suite-dev-000000000000-turbo-cache"
+      arn = "arn:aws:s3:::mcc-stats-suite-dev-000000000000-turbo-cache"
+    }
+  }
+  assert {
+    condition     = aws_iam_role.github_cache[0].permissions_boundary == "arn:aws:iam::000000000000:policy/mcc-stats-suite-workload-boundary" && aws_iam_role.github_cache[0].max_session_duration == 3600
+    error_message = "The cache role must use the existing bootstrap workload boundary and a short-lived session."
+  }
+  assert {
+    condition = alltrue([for statement in data.aws_iam_policy_document.cache_assume_role.statement :
+      statement.actions == toset(["sts:AssumeRoleWithWebIdentity"]) && alltrue([for condition in statement.condition :
+        condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:owner@1/repository@2:environment:dev", "repo:owner@1/repository@2:ref:refs/heads/main"]) :
+        condition.variable == "token.actions.githubusercontent.com:ref" ? toset(condition.values) == toset(["refs/heads/main"]) :
+        condition.variable == "token.actions.githubusercontent.com:aud" ? toset(condition.values) == toset(["sts.amazonaws.com"]) :
+        condition.variable == "token.actions.githubusercontent.com:repository" && toset(condition.values) == toset(["samlevin/mcc-stats-suite"])
+      ])
+    ])
+    error_message = "Only exact main/environment subjects may assume the matching cache role, never a PR or another environment."
+  }
+  assert {
+    condition     = alltrue([for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : statement.sid == "DenyInsecureTransport" ? true : anytrue([for condition in statement.condition : condition.variable == "aws:PrincipalArn" && contains(condition.values, output.github_turbo_cache_role_arn)])])
+    error_message = "The managed role must escape the bucket data/listing deny statements."
+  }
+  assert {
+    condition = length(data.aws_iam_policy_document.github_cache.statement) == 4 && alltrue([for statement in data.aws_iam_policy_document.github_cache.statement :
+      statement.sid == "ReadWriteCacheObjects" ? statement.actions == toset(["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]) && statement.resources == toset(["arn:aws:s3:::mcc-stats-suite-dev-000000000000-turbo-cache/turbogha/dev/*"]) :
+      statement.sid == "ListCacheHashCandidates" ? statement.actions == toset(["s3:ListBucket"]) && one(statement.condition).test == "StringLike" && one(statement.condition).variable == "s3:prefix" && toset(one(statement.condition).values) == toset(["turbogha/dev/*"]) :
+      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc/dev/turbo-cache/${name}"]) :
+      statement.sid == "UseCacheKeyThroughS3" && statement.actions == toset(["kms:Decrypt", "kms:GenerateDataKey"]) && length(statement.condition) == 2
+    ])
+    error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
+  }
+}
+
+run "prod_github_cache_role" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment                    = "prod"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = "owner@1/repository@2"
+  }
+  override_resource {
+    target = aws_s3_bucket.turbo_cache
+    values = {
+      id  = "mcc-stats-suite-prod-000000000000-turbo-cache"
+      arn = "arn:aws:s3:::mcc-stats-suite-prod-000000000000-turbo-cache"
+    }
+  }
+  assert {
+    condition     = aws_iam_role.github_cache[0].permissions_boundary == "arn:aws:iam::000000000000:policy/mcc-stats-suite-workload-boundary" && aws_iam_role.github_cache[0].max_session_duration == 3600
+    error_message = "The cache role must use the existing bootstrap workload boundary and a short-lived session."
+  }
+  assert {
+    condition = alltrue([for statement in data.aws_iam_policy_document.cache_assume_role.statement :
+      statement.actions == toset(["sts:AssumeRoleWithWebIdentity"]) && alltrue([for condition in statement.condition :
+        condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:owner@1/repository@2:environment:prod"]) :
+        condition.variable == "token.actions.githubusercontent.com:ref" ? toset(condition.values) == toset(["refs/heads/main"]) :
+        condition.variable == "token.actions.githubusercontent.com:aud" ? toset(condition.values) == toset(["sts.amazonaws.com"]) :
+        condition.variable == "token.actions.githubusercontent.com:repository" && toset(condition.values) == toset(["samlevin/mcc-stats-suite"])
+      ])
+    ])
+    error_message = "Only exact main/environment subjects may assume the matching cache role, never a PR or another environment."
+  }
+  assert {
+    condition     = alltrue([for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : statement.sid == "DenyInsecureTransport" ? true : anytrue([for condition in statement.condition : condition.variable == "aws:PrincipalArn" && contains(condition.values, output.github_turbo_cache_role_arn)])])
+    error_message = "The managed role must escape the bucket data/listing deny statements."
+  }
+  assert {
+    condition = length(data.aws_iam_policy_document.github_cache.statement) == 4 && alltrue([for statement in data.aws_iam_policy_document.github_cache.statement :
+      statement.sid == "ReadWriteCacheObjects" ? statement.actions == toset(["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]) && statement.resources == toset(["arn:aws:s3:::mcc-stats-suite-prod-000000000000-turbo-cache/turbogha/prod/*"]) :
+      statement.sid == "ListCacheHashCandidates" ? statement.actions == toset(["s3:ListBucket"]) && one(statement.condition).test == "StringLike" && one(statement.condition).variable == "s3:prefix" && toset(one(statement.condition).values) == toset(["turbogha/prod/*"]) :
+      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc/prod/turbo-cache/${name}"]) :
+      statement.sid == "UseCacheKeyThroughS3" && statement.actions == toset(["kms:Decrypt", "kms:GenerateDataKey"]) && length(statement.condition) == 2
+    ])
+    error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
+  }
+}

@@ -71,7 +71,7 @@ data "aws_iam_policy_document" "turbo_cache_bucket" {
     actions   = ["s3:*"]
     resources = ["${aws_s3_bucket.turbo_cache.arn}/*"]
     dynamic "condition" {
-      for_each = length(var.cache_service_role_arns) == 0 ? [] : [var.cache_service_role_arns]
+      for_each = length(local.cache_role_arns) == 0 ? [] : [local.cache_role_arns]
       content {
         test     = "ArnNotEquals"
         variable = "aws:PrincipalArn"
@@ -96,7 +96,7 @@ data "aws_iam_policy_document" "turbo_cache_bucket" {
       values   = ["0"]
     }
     dynamic "condition" {
-      for_each = length(var.cache_service_role_arns) == 0 ? [] : [var.cache_service_role_arns]
+      for_each = length(local.cache_role_arns) == 0 ? [] : [local.cache_role_arns]
       content {
         test     = "ArnNotEquals"
         variable = "aws:PrincipalArn"
@@ -115,7 +115,7 @@ data "aws_iam_policy_document" "turbo_cache_bucket" {
     actions   = ["s3:ListBucketVersions", "s3:ListBucketMultipartUploads"]
     resources = [aws_s3_bucket.turbo_cache.arn]
     dynamic "condition" {
-      for_each = length(var.cache_service_role_arns) == 0 ? [] : [var.cache_service_role_arns]
+      for_each = length(local.cache_role_arns) == 0 ? [] : [local.cache_role_arns]
       content {
         test     = "ArnNotEquals"
         variable = "aws:PrincipalArn"

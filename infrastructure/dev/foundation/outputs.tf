@@ -12,3 +12,7 @@ output "foundation" {
 output "turbo_cache_service_policy_json" {
   value = module.foundation.turbo_cache_service_policy_json
 }
+
+output "github_turbo_cache_role_arn" {
+  value = module.foundation.github_turbo_cache_role_arn
+}

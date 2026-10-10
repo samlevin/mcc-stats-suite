@@ -9,7 +9,13 @@ variable "force_destroy" {
 }
 
 variable "cache_service_role_arns" {
-  description = "Explicit future cache service workload roles. Empty until a service is selected; never GitHub Actions roles."
+  description = "Additional approved cache workload roles."
   type        = set(string)
   default     = []
+}
+
+variable "github_oidc_subject_repository" {
+  description = "OIDC subject repository segment matching bootstrap, including immutable IDs when enabled."
+  type        = string
+  default     = null
 }
