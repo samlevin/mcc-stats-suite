@@ -51,7 +51,7 @@ Confirm the instance owner, then remove only that application stack:
 ```console
 aws sso login --profile <dev-profile>
 aws sts get-caller-identity --profile <dev-profile>
-npm run app:destroy -- <application> --profile <dev-profile>
+npm run app:destroy -- <application> --environment dev --ephemeral <name> --profile <dev-profile>
 ```
 
 ## Release Please cannot open a release pull request

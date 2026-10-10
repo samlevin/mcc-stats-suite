@@ -25,13 +25,31 @@ The `CDKToolkit` stack belongs to CDK. Do not import it into OpenTofu. The GitHu
 
 `AdministratorAccess` is a broad starting execution policy. Anyone who can assume the CDK deploy role can deploy almost anything in that account. Replace it with a reviewed project policy once the application resource set is stable.
 
+## Bootstrap local deployments separately
+
+Keep the default `hnb659fds` bootstrap for GitHub Actions. Local developers use the separate `mcclocal1` bootstrap and its restricted execution policy. As the dev administrator, verify the identity and create it:
+
+```console
+aws sts get-caller-identity --profile mcc-dev-admin
+npx cdk bootstrap --show-template | node scripts/local-cdk-bootstrap.mjs > /tmp/mcc-local-bootstrap.yaml
+npx cdk bootstrap "aws://${MCC_DEV_ACCOUNT_ID}/${MCC_AWS_REGION}" \
+  --profile mcc-dev-admin --qualifier mcclocal1 \
+  --toolkit-stack-name CDKToolkitLocal --template /tmp/mcc-local-bootstrap.yaml
+```
+
+The custom template scopes CloudFormation writes to the five application stack prefixes and explicitly denies `<application>-dev`. Its execution role can manage ephemeral compute and bounded runtime roles; it cannot call CloudFormation, assume roles, change bootstrap IAM, or pass existing privileged roles. Local runtime roles use a separate boundary allowing pipeline data operations and denying deployment and identity administration. Ephemeral synthesis selects this bootstrap and boundary automatically. GitHub Actions keeps the default bootstrap for shared stacks.
+
+This policy covers the currently implemented resources. Review and extend it when an application introduces a new AWS resource type. Do not replace it with `AdministratorAccess`. Names beginning `<application>-dev` are reserved for shared resources; choose another ephemeral name.
+
+For an existing installation, create `CDKToolkitLocal` first, then replace and reprovision the local permission set below. Revoke existing SSO role sessions or wait for them to expire before treating the boundary as active. Before granting local access, an administrator must destroy old ephemeral stacks and delete their change sets, then recreate them with the local bootstrap. An existing stack or change set can retain its old administrator execution role. Do not create administrator-backed stacks under the ephemeral application prefixes after enabling local access.
+
 ## Grant local deploy access
 
-Developers deploy ephemeral stacks to dev from their own shells. Production deploys only from GitHub Actions. Do this after the dev CDK bootstrap.
+Developers deploy ephemeral stacks to dev from their own shells. Production deploys only from GitHub Actions. Do this after both dev CDK bootstraps.
 
 1. In IAM Identity Center, create a group named `MccStatsSuiteLocalCdkDeployers`.
 2. Create a custom permission set named `MccStatsSuiteLocalCdkDeploy` with a four-hour session. Do not attach `AdministratorAccess` or `PowerUserAccess`.
-3. Copy [the policy template](policies/local-cdk-deployer-dev.json.template), replace both `DEV_ACCOUNT_ID` occurrences and `AWS_REGION`, and paste it as the permission set's inline policy. It allows assuming the four CDK bootstrap roles and reading bootstrap metadata.
+3. Copy [the policy template](policies/local-cdk-deployer-dev.json.template), replace every `DEV_ACCOUNT_ID` and `AWS_REGION` placeholder, and paste it as the permission set's inline policy. It allows assuming only the four `mcclocal1` CDK bootstrap roles and reading bootstrap metadata.
 4. Assign the group and permission set to the dev account only. Never assign them to prod or to management accounts.
 5. Add developers to the group, then point the `mcc-dev` SSO profile at this permission set.
 
@@ -43,8 +61,12 @@ aws sts get-caller-identity --profile mcc-dev
 npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-If CDK reports `sts:AssumeRole` denied, check that the role names in the policy match the `CDKToolkit` account, Region, and `hnb659fds` qualifier. Do not fix the error with a broad AWS managed policy.
+If CDK reports `sts:AssumeRole` denied, check that the role names in the policy match the `CDKToolkitLocal` account, Region, and `mcclocal1` qualifier. Do not fix the error with a broad AWS managed policy.
 
-Because the CDK execution policy is `AdministratorAccess`, this permission set can still change any stack in dev, including the shared `<application>-dev` stacks. [#32](https://github.com/samlevin/mcc-stats-suite/issues/32) tracks restricting it with IAM.
+## Validate the boundary
+
+Use a disposable dev account. Sign in with the local permission set, verify the identity, and deploy, diff, and destroy `admin-<name>` through the wrapper. In that account, test `cdk deploy` and `cdk destroy` targeting `admin-dev`, and `aws cloudformation update-stack` and `delete-stack` targeting every `<application>-dev`; each write must return `AccessDenied`. Include `CreateChangeSet` and `ExecuteChangeSet` in policy simulation, and verify passing the default execution role, removing a runtime boundary, and creating an unbounded role are denied. Never run destructive denial probes against shared dev.
+
+After the operator creates the local bootstrap and updates the permission set, verify a merge to `main` still deploys shared dev through GitHub Actions. AWS-free tests validate the generated policies and synthesizer selection; they do not replace this live validation.
 
 Next: [Configure GitHub, Terrateam, and Release Please](30-configure-github.md).

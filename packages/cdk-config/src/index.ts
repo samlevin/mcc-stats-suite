@@ -14,6 +14,7 @@ export interface DeploymentConfig {
   resourcePrefix: string;
   objectPrefix: string;
   workloadBoundaryName: string;
+  bootstrapQualifier: string;
   isEphemeral: boolean;
   ingressEnabled: boolean;
 }
@@ -81,7 +82,10 @@ export function resolveDeployment(
     stackName,
     resourcePrefix: stackName,
     objectPrefix: isEphemeral ? `ephemeral/${ephemeral}` : '',
-    workloadBoundaryName: 'mcc-stats-suite-workload-boundary',
+    workloadBoundaryName: isEphemeral
+      ? 'mcc-stats-suite-local-workload-boundary'
+      : 'mcc-stats-suite-workload-boundary',
+    bootstrapQualifier: isEphemeral ? 'mcclocal1' : 'hnb659fds',
     isEphemeral,
     ingressEnabled: !isEphemeral,
   };
