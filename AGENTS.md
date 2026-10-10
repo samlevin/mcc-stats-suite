@@ -33,3 +33,4 @@ Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://gi
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
 - Issue states: claim and move to `In progress` before coding; move to `In review` when the PR opens. Never mark issues `Done`.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
+- Assign every issue and PR you open to the owner: pass `--assignee samlevin` to `gh issue create` and `gh pr create`. `.github/workflows/assign-owner.yml` is the backstop for the owner's identity.

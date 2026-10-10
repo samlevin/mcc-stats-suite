@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 // Keep the allowlist narrow. A new or build-affecting path selects all checks.
 const repositoryFiles = new Set([
   '.github/labels.json',
+  '.github/workflows/assign-owner.yml',
   '.github/workflows/issue-triage.yml',
   '.github/workflows/semantic.pr.yaml',
   '.github/workflows/secret-scan.yml',
