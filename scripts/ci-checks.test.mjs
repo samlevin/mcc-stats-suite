@@ -342,9 +342,15 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
     workflow,
     /Start trusted dev Turbo cache\n[ ]+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
   );
-  assert.ok(!workflow.includes('actions/cache/'));
-  assert.match(workflow, /git show "\$BASE:scripts\/ci-scope\.mjs"/);
-  assert.match(workflow, /Save affected applications for dev deployment/);
+  assert.match(workflow, /compareCommitsWithBasehead/);
+  assert.match(workflow, /getContent\([\s\S]*scripts\/ci-scope\.mjs/);
+  assert.match(workflow, /actions\/cache@v4/);
+  assert.match(
+    workflow,
+    /needs: \[scope, infrastructure, application-checks\]/,
+  );
+  assert.match(workflow, /if: always\(\)/);
+  assert.match(workflow, /select-deployment:/);
   const dev = readFileSync(
     new URL('../.github/workflows/deploy-dev.yml', import.meta.url),
     'utf8',
@@ -461,6 +467,10 @@ test('classifier selects independent infrastructure and application gates', () =
       { full: false, repository: false, infrastructure: true, check: false },
     ],
     [
+      ['infrastructure/dev/foundation/backend.tfvars'],
+      { full: false, repository: false, infrastructure: true, check: false },
+    ],
+    [
       ['applications/match-to-csv/src/index.ts'],
       { full: true, repository: false, infrastructure: false, check: true },
     ],
@@ -475,6 +485,13 @@ test('classifier selects independent infrastructure and application gates', () =
       ['infrastructure/README.md'],
       { full: false, repository: false, infrastructure: false, check: true },
     ],
+    [
+      [
+        'infrastructure/.envrc.example',
+        'infrastructure/dev/backend.tfvars.example',
+      ],
+      { full: true, repository: false, infrastructure: false, check: true },
+    ],
     [[], { full: true, repository: false, infrastructure: false, check: true }],
   ]) {
     assert.deepEqual(selectScopes(paths), expected);
@@ -487,7 +504,10 @@ test('classifier selects independent infrastructure and application gates', () =
     };
     const evaluate = (expression) =>
       Function('needs', `return (${expression})`)(needs);
-    assert.equal(evaluate(workflow.jobs.check.if), expected.check);
+    assert.equal(
+      evaluate(workflow.jobs['application-checks'].if),
+      expected.check,
+    );
     assert.equal(
       evaluate(workflow.jobs.infrastructure.if),
       expected.infrastructure,
@@ -497,6 +517,9 @@ test('classifier selects independent infrastructure and application gates', () =
     classify('infrastructure/modules/foundation/tests/cache.tftest.hcl'),
     'infrastructure',
   );
+  assert.equal(classify('infrastructure/.envrc.example'), 'full');
+  assert.equal(classify('infrastructure/.tool-versions'), 'full');
+  assert.equal(classify('infrastructure/dev/backend.tfvars.example'), 'full');
   assert.equal(classify('.terrateam/other.yml'), 'full');
   assert.deepEqual(workflow.on, {
     pull_request: null,
@@ -521,19 +544,18 @@ test('standalone infrastructure gate formats, validates all roots, and tests wit
   assert.match(commands, /for module in bootstrap foundation data-platform/);
   assert.match(commands, /init -backend=false -input=false/);
   assert.match(commands, /tofu -chdir="\$root" validate/);
-  assert.match(commands, /for module in bootstrap foundation; do/);
   assert.match(
     commands,
-    /init .* -test-directory="\.\.\/\.\.\/modules\/\$module\/tests"/,
+    /init -backend=false -input=false -test-directory="\$test_directory"/,
   );
-  assert.match(
-    commands,
-    /test -test-directory="\.\.\/\.\.\/modules\/\$module\/tests"/,
-  );
+  assert.match(commands, /test -test-directory="\$test_directory"/);
+  assert.match(job.env.TF_PLUGIN_CACHE_DIR, /tofu-plugin-cache/);
+  assert.ok(job.steps.some((step) => step.uses === 'actions/cache@v4'));
+  assert.equal((commands.match(/tofu -chdir="\$root" init/g) || []).length, 2);
   assert.ok(
     !JSON.stringify(job).match(
       /id-token|configure-aws|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|secrets\./,
     ),
   );
-  assert.deepEqual(job.env, { AWS_EC2_METADATA_DISABLED: 'true' });
+  assert.equal(job.env.AWS_EC2_METADATA_DISABLED, 'true');
 });

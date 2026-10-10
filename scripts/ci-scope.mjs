@@ -17,7 +17,10 @@ const repositoryFiles = new Set([
 
 export function classify(path) {
   if (path.endsWith('.md')) return 'documentation';
-  if (path.startsWith('infrastructure/') || path === '.terrateam/config.yml')
+  if (
+    (path.startsWith('infrastructure/') && /\.(tf|tfvars|hcl)$/.test(path)) ||
+    path === '.terrateam/config.yml'
+  )
     return 'infrastructure';
   if (
     repositoryFiles.has(path) ||

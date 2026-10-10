@@ -430,36 +430,45 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
   }
 });
 
-test('infrastructure-only main pushes publish an empty selection before skipping check', () => {
-  const scope = ci.jobs.scope;
-  const save = scope.steps.find(
-    (step) =>
-      step.name === 'Save empty application selection when check is skipped',
+test('one deployment selector publishes the application selection after the required gate', () => {
+  const select = ci.jobs['select-deployment'];
+  const save = select.steps.find(
+    (step) => step.name === 'Save application selection',
   );
-  const upload = scope.steps.find((step) =>
-    step.uses?.startsWith('actions/upload-artifact'),
+  const uploads = Object.values(ci.jobs).flatMap((job) =>
+    job.steps.filter((step) =>
+      step.uses?.startsWith('actions/upload-artifact'),
+    ),
   );
-  for (const event_name of ['push', 'pull_request']) {
-    for (const check of ['true', 'false', '']) {
-      const values = {
-        github: { event_name, ref: 'refs/heads/main' },
-        steps: { scope: { outputs: { check } } },
-      };
-      assert.equal(
-        evaluate(save.if, values),
-        event_name === 'push' && check === 'false',
-      );
-      assert.equal(
-        evaluate(upload.if, values),
-        event_name === 'push' && check === 'false',
-      );
-    }
-  }
-  assert.match(save.run, /printf '\[\]\\n'/);
-  assert.match(save.run, /deploy-selection\/applications\.json/);
-  assert.equal(upload.with.name, 'deploy-applications-${{ github.run_id }}');
+  assert.equal(uploads.length, 1);
+  assert.deepEqual(select.needs, ['scope', 'check']);
+  assert.match(select.if, /always\(\)/);
+  assert.match(
+    save.env.APPLICATIONS,
+    /needs\.check\.outputs\.applications \|\| '\[\]'/,
+  );
   assert.equal(
-    upload.with.path,
+    ci.jobs.check.outputs.applications,
+    '${{ needs.application-checks.outputs.applications }}',
+  );
+  assert.match(ci.jobs.check.steps[0].run, /INFRASTRUCTURE_RESULT/);
+  assert.match(ci.jobs.check.steps[0].run, /APPLICATIONS_RESULT/);
+  for (const event_name of ['push', 'pull_request']) {
+    const values = {
+      github: { event_name, ref: 'refs/heads/main' },
+      needs: { scope: { result: 'success' }, check: { result: 'success' } },
+      always: () => true,
+    };
+    assert.equal(evaluate(select.if, values), event_name === 'push');
+  }
+  assert.match(save.run, /printf '%s\\n'/);
+  assert.match(save.run, /deploy-selection\/applications\.json/);
+  assert.equal(
+    uploads[0].with.name,
+    'deploy-applications-${{ github.run_id }}',
+  );
+  assert.equal(
+    uploads[0].with.path,
     '${{ runner.temp }}/deploy-selection/applications.json',
   );
   assert.equal(
