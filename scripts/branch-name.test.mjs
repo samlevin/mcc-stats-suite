@@ -112,3 +112,50 @@ test('options that need a value reject a missing one', () => {
     /requires a value/,
   );
 });
+
+test('--require-issue accepts an existing issue', () => {
+  const seen = [];
+  const message = run(['--check', 'agent/48-foo', '--require-issue'], {
+    issue: (number) => {
+      seen.push(number);
+      return { number: 48 };
+    },
+  });
+  assert.equal(message, 'Branch agent/48-foo is valid');
+  assert.deepEqual(seen, ['48']);
+});
+
+test('--require-issue rejects a pull request number', () => {
+  assert.throws(
+    () =>
+      run(['--check', 'agent/52-foo', '--require-issue'], {
+        issue: () => ({ number: 52, pull_request: {} }),
+      }),
+    /pull request, not an issue/,
+  );
+});
+
+test('--require-issue rejects a missing issue', () => {
+  const missing = () => {
+    throw new Error('404');
+  };
+  assert.throws(
+    () =>
+      run(['--check', 'agent/9-foo', '--require-issue'], { issue: missing }),
+    /not found/,
+  );
+  assert.throws(
+    () =>
+      run(['--check', 'agent/9-foo', '--require-issue'], { issue: () => null }),
+    /not found/,
+  );
+});
+
+test('--require-issue skips exempt branches and needs --check', () => {
+  const never = () => assert.fail('must not fetch');
+  assert.match(
+    run(['--check', 'dependabot/npm/x', '--require-issue'], { issue: never }),
+    /Skipping/,
+  );
+  assert.throws(() => run(['48', '--require-issue']), /needs --check/);
+});

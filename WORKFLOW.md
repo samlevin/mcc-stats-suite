@@ -34,7 +34,7 @@ Without write access to the repository, you cannot assign yourself or change pro
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
-People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. CI checks the name and that the issue exists.
+People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. CI checks the name and that the issue exists. Branches opened before this rule fail the check on their next push; after renaming a branch, close and reopen the PR to re-run it, because a rename emits no pull_request event.
 
 ## Pull requests and review
 
