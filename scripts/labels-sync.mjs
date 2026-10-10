@@ -1,0 +1,111 @@
+import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+export const REPOSITORY = 'samlevin/mcc-stats-suite';
+// Release Please owns this label; the sync never deletes it.
+const PROTECTED = new Set(['autorelease: pending']);
+const CATALOG = new URL('../.github/labels.json', import.meta.url);
+
+const same = (a, b) =>
+  (a.color ?? '').toLowerCase() === (b.color ?? '').toLowerCase() &&
+  (a.description ?? '') === (b.description ?? '');
+
+// Pure: compares the desired catalogue with live labels. GitHub matches names
+// case-insensitively.
+export function planLabelSync(desired, actual) {
+  const live = new Map(
+    actual.map((label) => [label.name.toLowerCase(), label]),
+  );
+  const wanted = new Set(desired.map((label) => label.name.toLowerCase()));
+  const plan = { create: [], update: [], delete: [], unchanged: [] };
+  for (const label of desired) {
+    const current = live.get(label.name.toLowerCase());
+    if (!current) plan.create.push(label);
+    else if (same(label, current)) plan.unchanged.push(label);
+    else plan.update.push({ ...label, current: current.name });
+  }
+  for (const label of actual)
+    if (!wanted.has(label.name.toLowerCase()) && !PROTECTED.has(label.name))
+      plan.delete.push(label);
+  return plan;
+}
+
+function gh(args) {
+  return execFileSync('gh', ['api', ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+function liveLabels() {
+  return JSON.parse(
+    gh(['--paginate', '--slurp', `repos/${REPOSITORY}/labels?per_page=100`]),
+  ).flat();
+}
+
+function usage(name) {
+  const query = `repo:${REPOSITORY} label:"${name}"`;
+  return JSON.parse(
+    gh(['-X', 'GET', 'search/issues', '-f', `q=${query}`, '-F', 'per_page=1']),
+  ).total_count;
+}
+
+const fields = (label) => [
+  '-f',
+  `color=${label.color}`,
+  '-f',
+  `description=${label.description ?? ''}`,
+];
+
+export function run(argv = process.argv.slice(2)) {
+  const apply = argv.includes('--apply');
+  const prune = argv.includes('--prune');
+  if (
+    argv.some((arg) => !['--apply', '--prune'].includes(arg)) ||
+    (prune && !apply)
+  )
+    throw new Error('Usage: labels-sync.mjs [--apply [--prune]]');
+  const catalog = JSON.parse(readFileSync(CATALOG, 'utf8'));
+  if (catalog.repository !== REPOSITORY)
+    throw new Error(`labels.json targets ${catalog.repository}`);
+  const plan = planLabelSync(catalog.labels, liveLabels());
+  const base = `repos/${REPOSITORY}/labels`;
+  const verb = apply ? '' : 'would ';
+  for (const label of plan.create) {
+    console.log(`${verb}create: ${label.name}`);
+    if (apply)
+      gh(['-X', 'POST', base, '-f', `name=${label.name}`, ...fields(label)]);
+  }
+  for (const label of plan.update) {
+    console.log(`${verb}update: ${label.name}`);
+    if (apply)
+      gh([
+        '-X',
+        'PATCH',
+        `${base}/${encodeURIComponent(label.current)}`,
+        '-f',
+        `new_name=${label.name}`,
+        ...fields(label),
+      ]);
+  }
+  for (const label of plan.delete) {
+    if (!prune) {
+      console.log(`${verb}delete: ${label.name}`);
+      continue;
+    }
+    const used = usage(label.name);
+    if (used > 0) {
+      console.log(
+        `skip delete (${used} issues or pull requests): ${label.name}`,
+      );
+      continue;
+    }
+    console.log(`delete: ${label.name}`);
+    gh(['-X', 'DELETE', `${base}/${encodeURIComponent(label.name)}`]);
+  }
+  for (const label of plan.unchanged) console.log(`unchanged: ${label.name}`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  run();

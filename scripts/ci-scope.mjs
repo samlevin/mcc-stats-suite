@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 const repositoryFiles = new Set([
   '.github/labels.json',
   '.github/workflows/issue-triage.yml',
+  '.github/workflows/labels.yml',
   '.github/workflows/semantic.pr.yaml',
   '.github/workflows/secret-scan.yml',
   '.github/CODEOWNERS',
@@ -12,6 +13,8 @@ const repositoryFiles = new Set([
   'scripts/issue-triage.mjs',
   'scripts/issue-triage.test.mjs',
   'scripts/issue-containers.mjs',
+  'scripts/labels-sync.mjs',
+  'scripts/labels-sync.test.mjs',
 ]);
 
 function classify(path) {
