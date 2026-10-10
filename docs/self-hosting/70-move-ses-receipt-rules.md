@@ -14,7 +14,7 @@ Run the steps in dev first and confirm each expected state before starting the s
 ## Before you start
 
 1. Confirm the dev and prod `match-to-csv` stacks exist and inbound mail currently works.
-2. Set `DEV_MCC_EMAIL_DOMAIN` in the `infra/foundation-dev` GitHub Environment and `PROD_MCC_EMAIL_DOMAIN` in `infra/foundation-prod`. Each must equal the domain the matching stack uses today. Keep the existing `MCC_EMAIL_DOMAIN` variable in the `dev` and `prod` environments until step 3's pull request has merged. After that, the deployment workflow and ephemeral stacks read the domain from SSM, and you can delete the variable.
+2. Set `DEV_MCC_EMAIL_DOMAIN` in the `infra/foundation-dev` GitHub Environment and `PROD_MCC_EMAIL_DOMAIN` in `infra/foundation-prod`. Each must equal the domain the matching stack uses today. Keep the existing `MCC_EMAIL_DOMAIN` variable in the `dev` and `prod` environments until the step 2 pull request has merged, because the step 1 deployment workflow still reads it. After that, the deployment workflow and ephemeral stacks read the domain from SSM, and you can delete the variable.
 3. Record the current state for each environment and keep it for comparison:
 
    ```console

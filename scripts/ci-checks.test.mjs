@@ -83,8 +83,7 @@ test('full gate contains repository checks and the dependency-aware workspace ga
     'format:check',
     'eslint',
     'release:check',
-    'issue-triage.test.mjs',
-    'ci-checks.test.mjs',
+    'scripts/*.test.mjs',
     'tofu:fmt:check',
   ]) {
     assert.ok(JSON.stringify(commands).includes(command));

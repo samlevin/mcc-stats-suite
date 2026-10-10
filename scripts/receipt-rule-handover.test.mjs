@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { handoverBlockers } from './receipt-rule-handover.mjs';
 
 const script = fileURLToPath(
-  new URL('./receipt-rule-handover.mjs', import.meta.url),
+  new URL('./receipt-rule-handover-cli.mjs', import.meta.url),
 );
 const runCli = (args, input) =>
   spawnSync(process.execPath, [script, ...args], { input, encoding: 'utf8' });
@@ -75,11 +75,21 @@ test('blocks a replacement that the deployed stack does not retain', () => {
     Resources: { StoreRawEmail: rule({ Properties: properties('renamed') }) },
   };
   // Rule.Name is immutable, so CloudFormation creates a new rule and deletes
-  // the live one unless the deployed template retains it on replacement.
+  // the live one unless the incoming template retains it on replacement.
   assert.deepEqual(handoverBlockers(deployedRule, renamed), [
     'StoreRawEmail (AWS::SES::ReceiptRule) would be replaced, which deletes the live resource',
   ]);
   const retainedOnReplace = {
+    Resources: {
+      StoreRawEmail: {
+        ...renamed.Resources.StoreRawEmail,
+        UpdateReplacePolicy: 'Retain',
+      },
+    },
+  };
+  assert.deepEqual(handoverBlockers(deployedRule, retainedOnReplace), []);
+  // The deployed policy does not apply to the replacement, so it is not enough.
+  const deployedRetainedOnReplace = {
     Resources: {
       StoreRawEmail: {
         ...deployedRule.Resources.StoreRawEmail,
@@ -87,7 +97,7 @@ test('blocks a replacement that the deployed stack does not retain', () => {
       },
     },
   };
-  assert.deepEqual(handoverBlockers(retainedOnReplace, renamed), []);
+  assert.equal(handoverBlockers(deployedRetainedOnReplace, renamed).length, 1);
   // A mutable property change updates in place and is allowed.
   const toggled = {
     Resources: {
@@ -101,6 +111,29 @@ test('blocks a replacement that the deployed stack does not retain', () => {
 
 test('allows dropping the resources once the deployed stack retains them', () => {
   assert.deepEqual(handoverBlockers(retained, dropped), []);
+});
+
+test('blocks replacing an activation that still deactivates on delete', () => {
+  const deployedActivation = {
+    Resources: {
+      Activate: activation({ Create: create, Delete: deactivate }),
+    },
+  };
+  // A changed Create call carries a new physical ID, so CloudFormation replaces
+  // the custom resource and runs the old delete handler.
+  const moved = {
+    Resources: {
+      Activate: activation({
+        Create: create.replace('SES', 'SES","physicalResourceId":{"id":"v2'),
+        Update: create,
+      }),
+    },
+  };
+  assert.deepEqual(handoverBlockers(deployedActivation, moved), [
+    'Activate would be replaced and its delete handler deactivates the receipt rule set',
+  ]);
+  // The retain release keeps Create and only drops Delete, which updates in place.
+  assert.deepEqual(handoverBlockers(deployedActivation, retained), []);
 });
 
 test('blocks a replacement that changes the type behind a logical ID', () => {

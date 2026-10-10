@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "turbo run build",
-    "test": "node --test scripts/issue-triage.test.mjs scripts/issue-pr-metadata.test.mjs scripts/issue-pr-status.test.mjs scripts/publish-packages.test.mjs scripts/deployment-workflows.test.mjs scripts/receipt-rule-handover.test.mjs && turbo run test",
+    "test": "node --test 'scripts/*.test.mjs' && turbo run test",
     "typecheck": "turbo run typecheck",
     "build:shared": "turbo run build --filter=@samlevin/contracts --filter=@samlevin/cdk-config",
     "prelint": "npm run build:shared",

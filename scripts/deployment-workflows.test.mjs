@@ -439,7 +439,7 @@ test('match-to-csv deploys only after the receipt rule handover check', () => {
   // and compares the deployed template with the synthesized one.
   assert.ok(
     guard.run.includes(
-      'node .cache-workflow/scripts/receipt-rule-handover.mjs',
+      'node .cache-workflow/scripts/receipt-rule-handover-cli.mjs',
     ),
   );
   assert.ok(guard.run.includes('cdk.out/${STACK_NAME}.template.json'));

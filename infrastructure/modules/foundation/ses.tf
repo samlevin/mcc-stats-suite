@@ -33,6 +33,13 @@ resource "aws_ses_receipt_rule" "store_raw_email" {
 
   // SES checks that it can write to the bucket when the rule is saved.
   depends_on = [aws_s3_bucket_policy.raw_email]
+
+  // Ephemeral stacks insert their rules at the top of the set, so the shared
+  // rule's position is not ours to manage. Without this, importing an existing
+  // rule and the weekly drift check both report a position change.
+  lifecycle {
+    ignore_changes = [after]
+  }
 }
 
 resource "aws_ses_active_receipt_rule_set" "inbound" {

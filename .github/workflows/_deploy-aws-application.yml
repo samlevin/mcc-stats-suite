@@ -225,7 +225,7 @@ jobs:
             echo "::error::Unable to read the deployed ${STACK_NAME} template"
             exit 1
           fi
-          printf '%s' "${TEMPLATE}" | node .cache-workflow/scripts/receipt-rule-handover.mjs \
+          printf '%s' "${TEMPLATE}" | node .cache-workflow/scripts/receipt-rule-handover-cli.mjs \
             "applications/match-to-csv/cdk.out/${STACK_NAME}.template.json"
       - name: Reviewable production diff
         if: inputs.environment == 'prod'
