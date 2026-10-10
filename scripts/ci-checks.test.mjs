@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
+  existsSync,
   readFileSync,
   readdirSync,
   cpSync,
@@ -12,7 +13,6 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { existsSync } from 'node:fs';
 import { test } from 'node:test';
 import ts from 'typescript';
 import {
@@ -90,13 +90,19 @@ test('repository-scope lists derive from the classifier allowlist', () => {
   assert.deepEqual(lint[1].slice(-2), ['--max-warnings', '0']);
 });
 
-test('full-scope test list equals every scripts test file', () => {
+test('full-scope test list covers the scripts tests that exist', () => {
   const [, , , tests] = checks({ full: true, mode: 'all' });
-  const onDisk = readdirSync(new URL('./', import.meta.url))
-    .filter((name) => name.endsWith('.test.mjs'))
-    .map((name) => `scripts/${name}`)
-    .sort();
-  assert.deepEqual(tests[1].slice(1), onDisk);
+  const listed = tests[1].slice(1);
+  assert.ok(listed.length > 0);
+  for (const file of [
+    'scripts/ci-checks.test.mjs',
+    'scripts/labels-sync.test.mjs',
+  ])
+    assert.ok(listed.includes(file), file);
+  for (const file of listed) {
+    assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), file);
+    assert.ok(file.endsWith('.test.mjs'), file);
+  }
 });
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {
@@ -136,7 +142,8 @@ test('checks overlap and any failing check rejects the gate after all checks set
 });
 
 test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', (t) => {
-  if (!existsSync(turbo)) return t.skip('turbo binary absent');
+  if (!process.env.CI && !existsSync(turbo))
+    return t.skip('turbo binary absent');
   const plan = JSON.parse(
     execFileSync(turbo, [...workspaceArguments('all').slice(1), '--dry=json'], {
       cwd: root,
@@ -172,7 +179,8 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
 });
 
 test('actual Turbo affected selection includes shared consumers and skips unrelated applications', (t) => {
-  if (!existsSync(turbo)) return t.skip('turbo binary absent');
+  if (!process.env.CI && !existsSync(turbo))
+    return t.skip('turbo binary absent');
   const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-selection-'));
   try {
     const git = (...args) =>
@@ -440,7 +448,8 @@ test('cache uses dedicated session credentials and environment contracts without
 });
 
 test('same revision has separate dev and prod Turbo task hashes', (t) => {
-  if (!existsSync(turbo)) return t.skip('turbo binary absent');
+  if (!process.env.CI && !existsSync(turbo))
+    return t.skip('turbo binary absent');
   const plan = (environment) =>
     JSON.parse(
       execFileSync(

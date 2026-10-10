@@ -9,10 +9,12 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 | Changed | Run |
 | --- | --- |
 | Docs only | `npm run format:check` |
-| `scripts/` only | `npm run format:check`, `npx eslint scripts --max-warnings 0`, `node --test scripts/*.test.mjs` |
+| `scripts/` only | `npm run format:check`, `npx eslint scripts --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/labels-sync.test.mjs` |
 | A workspace | iterate with `npm test --workspace @samlevin/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:fmt:check` |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev`; `npm run verify:bundle --workspace @samlevin/match-to-csv` |
+
+`scripts/ci-checks.test.mjs` runs only in the CI full gate because it needs installed workspaces.
 
 Pipe long output through `tail -n 60`. Tests never call AWS.
 
