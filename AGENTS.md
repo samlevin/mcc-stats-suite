@@ -11,7 +11,7 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 | Docs only | `npm run format:check` |
 | `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs` |
 | A workspace | iterate with `npm test --workspace @samlevin/<pkg>`; before push `npm run check` |
-| `infrastructure/` | `npm run tofu:fmt:check` |
+| `infrastructure/` | `tofu fmt -check -recursive infrastructure`; `tofu -chdir=<root> init -backend=false -input=false` and `validate` for each dev/prod bootstrap, foundation, and data-platform root; `tofu test -test-directory=../../modules/<bootstrap-or-foundation>/tests` from the initialized dev roots |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev`; `npm run verify:bundle --workspace @samlevin/match-to-csv` |
 
 Pipe long output through `tail -n 60`. Tests never call AWS.

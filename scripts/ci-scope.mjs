@@ -35,7 +35,10 @@ export function selectScopes(paths) {
   return {
     full: !scopes.length || scopes.includes('full'),
     repository: scopes.includes('repository'),
-    infrastructure: scopes.includes('infrastructure'),
+    infrastructure:
+      !scopes.length ||
+      scopes.includes('infrastructure') ||
+      scopes.includes('full'),
     check: !scopes.length || scopes.some((scope) => scope !== 'infrastructure'),
   };
 }

@@ -1,26 +1,10 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { parse } from 'yaml';
-
-const workflow = (name) =>
-  parse(
-    readFileSync(
-      new URL(`../.github/workflows/${name}.yml`, import.meta.url),
-      'utf8',
-    ),
-  );
+import { evaluate, workflow } from './workflow-test-helpers.mjs';
 const ci = workflow('ci');
 const orchestration = workflow('deploy-dev');
 const delivery = workflow('_deliver-aws-application');
 const deployment = workflow('_deploy-aws-application');
-
-// Execute the workflow's actual expression with GitHub's documented result values.
-const evaluate = (expression, values) =>
-  Function(
-    ...Object.keys(values),
-    `return (${expression});`,
-  )(...Object.values(values));
 
 const runScript = (script, globals) =>
   new (Object.getPrototypeOf(async function () {}).constructor)(
@@ -442,7 +426,10 @@ test('one deployment selector publishes the application selection after the requ
   );
   assert.equal(uploads.length, 1);
   assert.deepEqual(select.needs, ['scope', 'check']);
-  assert.match(select.if, /always\(\)/);
+  assert.equal(
+    select.if,
+    "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+  );
   assert.match(
     save.env.APPLICATIONS,
     /needs\.check\.outputs\.applications \|\| '\[\]'/,
@@ -457,7 +444,6 @@ test('one deployment selector publishes the application selection after the requ
     const values = {
       github: { event_name, ref: 'refs/heads/main' },
       needs: { scope: { result: 'success' }, check: { result: 'success' } },
-      always: () => true,
     };
     assert.equal(evaluate(select.if, values), event_name === 'push');
   }

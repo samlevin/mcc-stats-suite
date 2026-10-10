@@ -13,8 +13,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import ts from 'typescript';
-import { parse } from 'yaml';
 import { classify, selectScopes } from './ci-scope.mjs';
+import { evaluate, workflow } from './workflow-test-helpers.mjs';
 import {
   checks,
   runChecks,
@@ -442,12 +442,7 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
 });
 
 test('classifier selects independent infrastructure and application gates', () => {
-  const workflow = parse(
-    readFileSync(
-      new URL('../.github/workflows/ci.yml', import.meta.url),
-      'utf8',
-    ),
-  );
+  const ciWorkflow = workflow('ci');
   for (const key of [
     'full',
     'repository',
@@ -457,7 +452,7 @@ test('classifier selects independent infrastructure and application gates', () =
     'head',
   ]) {
     assert.equal(
-      workflow.jobs.scope.outputs[key],
+      ciWorkflow.jobs.scope.outputs[key],
       '${{ steps.scope.outputs.' + key + ' }}',
     );
   }
@@ -472,7 +467,7 @@ test('classifier selects independent infrastructure and application gates', () =
     ],
     [
       ['applications/match-to-csv/src/index.ts'],
-      { full: true, repository: false, infrastructure: false, check: true },
+      { full: true, repository: false, infrastructure: true, check: true },
     ],
     [
       [
@@ -490,9 +485,9 @@ test('classifier selects independent infrastructure and application gates', () =
         'infrastructure/.envrc.example',
         'infrastructure/dev/backend.tfvars.example',
       ],
-      { full: true, repository: false, infrastructure: false, check: true },
+      { full: true, repository: false, infrastructure: true, check: true },
     ],
-    [[], { full: true, repository: false, infrastructure: false, check: true }],
+    [[], { full: true, repository: false, infrastructure: true, check: true }],
   ]) {
     assert.deepEqual(selectScopes(paths), expected);
     const needs = {
@@ -502,14 +497,12 @@ test('classifier selects independent infrastructure and application gates', () =
         ),
       },
     };
-    const evaluate = (expression) =>
-      Function('needs', `return (${expression})`)(needs);
     assert.equal(
-      evaluate(workflow.jobs['application-checks'].if),
+      evaluate(ciWorkflow.jobs['application-checks'].if, { needs }),
       expected.check,
     );
     assert.equal(
-      evaluate(workflow.jobs.infrastructure.if),
+      evaluate(ciWorkflow.jobs.infrastructure.if, { needs }),
       expected.infrastructure,
     );
   }
@@ -521,20 +514,27 @@ test('classifier selects independent infrastructure and application gates', () =
   assert.equal(classify('infrastructure/.tool-versions'), 'full');
   assert.equal(classify('infrastructure/dev/backend.tfvars.example'), 'full');
   assert.equal(classify('.terrateam/other.yml'), 'full');
-  assert.deepEqual(workflow.on, {
+  assert.deepEqual(ciWorkflow.on, {
     pull_request: null,
     push: { branches: ['main'] },
   });
+  assert.equal(ciWorkflow.jobs.scope.steps[1].uses, 'actions/github-script@v9');
+  assert.match(ciWorkflow.jobs.scope.steps[0].uses, /^actions\/checkout@v4$/);
+  assert.match(ciWorkflow.jobs.scope.steps[1].with.script, /event === 'push'/);
+  assert.match(ciWorkflow.jobs.scope.steps[1].with.script, /base, head, '--'/);
+  assert.match(
+    ciWorkflow.jobs.scope.steps[1].with.script,
+    /source\.indexOf\('const \[base, head, event\]'\)/,
+  );
+  assert.match(
+    ciWorkflow.jobs.scope.steps[1].with.script,
+    /infrastructure: !scopes\.length \|\| scopes\.includes\('full'\)/,
+  );
 });
 
 test('standalone infrastructure gate formats, validates all roots, and tests without credentials', () => {
-  const workflow = parse(
-    readFileSync(
-      new URL('../.github/workflows/ci.yml', import.meta.url),
-      'utf8',
-    ),
-  );
-  const job = workflow.jobs.infrastructure;
+  const ciWorkflow = workflow('ci');
+  const job = ciWorkflow.jobs.infrastructure;
   const commands = job.steps
     .filter((step) => step.run)
     .map((step) => step.run)
@@ -549,7 +549,11 @@ test('standalone infrastructure gate formats, validates all roots, and tests wit
     /init -backend=false -input=false -test-directory="\$test_directory"/,
   );
   assert.match(commands, /test -test-directory="\$test_directory"/);
-  assert.match(job.env.TF_PLUGIN_CACHE_DIR, /tofu-plugin-cache/);
+  assert.equal(
+    job.env.TF_PLUGIN_CACHE_DIR,
+    '${{ github.workspace }}/.tofu-plugin-cache',
+  );
+  assert.doesNotMatch(job.env.TF_PLUGIN_CACHE_DIR, /runner\./);
   assert.ok(job.steps.some((step) => step.uses === 'actions/cache@v4'));
   assert.equal((commands.match(/tofu -chdir="\$root" init/g) || []).length, 2);
   assert.ok(
