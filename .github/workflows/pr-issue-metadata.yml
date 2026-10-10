@@ -1,4 +1,4 @@
-name: Reconcile linked issue metadata and review status
+name: Copy linked issue metadata
 
 on:
   pull_request_target:
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
-      - name: Copy metadata and move linked issues to In review
+      - name: Copy labels, milestone, and project membership
         env:
           MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number || inputs.pull_request }}

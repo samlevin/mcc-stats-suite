@@ -32,7 +32,6 @@ function fixture({
   body = 'Closes #1 and #2',
   milestone = null,
   state = 'OPEN',
-  draft = false,
   changed = false,
   existing = {},
   sources,
@@ -40,16 +39,12 @@ function fixture({
   sources ??= {
     1: {
       id: 'i1',
-      state: 'OPEN',
-      projectStatus: 'In progress',
       labels: ['l1', 'shared'],
       projects: ['p1'],
       milestone: { id: 'm1' },
     },
     2: {
       id: 'i2',
-      state: 'OPEN',
-      projectStatus: 'Ready',
       labels: ['l2', 'shared'],
       projects: ['p1', 'p2'],
       milestone: { id: 'm1' },
@@ -65,9 +60,7 @@ function fixture({
     }
     if (query.includes('pullRequest(number:'))
       return {
-        repository: {
-          pullRequest: { id: 'pr', body, state, isDraft: draft, milestone },
-        },
+        repository: { pullRequest: { id: 'pr', body, state, milestone } },
       };
     if (query.includes('issueOrPullRequest(')) {
       const issue = sources[variables.number];
@@ -76,77 +69,6 @@ function fixture({
           issueOrPullRequest: issue
             ? { __typename: 'Issue', ...issue }
             : { __typename: 'PullRequest' },
-        },
-      };
-    }
-    if (query.includes('projectV2(number: 1)'))
-      return {
-        user: {
-          projectV2: {
-            id: 'p1',
-            fields: {
-              nodes: [
-                {
-                  id: 'status',
-                  name: 'Status',
-                  options: [
-                    { id: 'inbox', name: 'Inbox' },
-                    { id: 'ready', name: 'Ready' },
-                    { id: 'progress', name: 'In progress' },
-                    { id: 'review', name: 'In review' },
-                    { id: 'done', name: 'Done' },
-                  ],
-                },
-                {
-                  id: 'priority',
-                  name: 'Priority',
-                  options: ['P0', 'P1', 'P2', 'P3'].map((name) => ({
-                    id: name,
-                    name,
-                  })),
-                },
-                {
-                  id: 'size',
-                  name: 'Size',
-                  options: ['XS', 'S', 'M', 'L'].map((name) => ({
-                    id: name,
-                    name,
-                  })),
-                },
-              ],
-              pageInfo: { hasNextPage: false },
-            },
-          },
-        },
-      };
-    if (query.includes('fieldValues(first:')) {
-      const source = Object.values(sources).find(
-        (issue) => issue.id === variables.id,
-      );
-      return {
-        node: {
-          projectItems: {
-            nodes: (source.projects ?? []).map((id) => ({
-              id: `item-${source.id}-${id}`,
-              project: { id },
-              fieldValues: {
-                nodes: [
-                  {
-                    field: { id: 'status' },
-                    optionId:
-                      source.projectStatus === 'In review'
-                        ? 'review'
-                        : source.projectStatus === 'Done'
-                          ? 'done'
-                          : source.projectStatus === 'Ready'
-                            ? 'ready'
-                            : 'progress',
-                  },
-                ],
-              },
-            })),
-            pageInfo: { hasNextPage: false },
-          },
         },
       };
     }
@@ -181,14 +103,7 @@ function fixture({
       };
     }
     if (query.includes('... on PullRequest { body'))
-      return {
-        node: {
-          body: changed ? 'Closes #3' : body,
-          state,
-          isDraft: draft,
-          milestone,
-        },
-      };
+      return { node: { body: changed ? 'Closes #3' : body, state, milestone } };
     throw new Error(`Unexpected query: ${query}`);
   };
   return { api, writes, calls, log: () => {} };
@@ -208,18 +123,6 @@ test('copies the union once while preserving PR labels and projects', async () =
       { id: 'pr', labels: ['l1', 'l2'] },
       { id: 'pr', milestone: 'm1' },
       { project: 'p2', id: 'pr' },
-      {
-        project: 'p1',
-        item: 'item-i1-p1',
-        field: 'status',
-        option: 'review',
-      },
-      {
-        project: 'p1',
-        item: 'item-i2-p1',
-        field: 'status',
-        option: 'review',
-      },
     ],
   );
 });
@@ -227,24 +130,6 @@ test('reruns with matching metadata make no writes', async () => {
   const f = fixture({
     existing: { labels: ['l1', 'l2', 'shared'], projects: ['p1', 'p2'] },
     milestone: { id: 'm1' },
-    sources: {
-      1: {
-        id: 'i1',
-        state: 'OPEN',
-        projectStatus: 'In review',
-        labels: ['l1', 'shared'],
-        projects: ['p1'],
-        milestone: { id: 'm1' },
-      },
-      2: {
-        id: 'i2',
-        state: 'OPEN',
-        projectStatus: 'In review',
-        labels: ['l2', 'shared'],
-        projects: ['p1', 'p2'],
-        milestone: { id: 'm1' },
-      },
-    },
   });
   await copyMetadata({ ...f, number: 10, dryRun: false });
   assert.deepEqual(f.writes, []);
@@ -260,61 +145,6 @@ test('dry runs and unlinked or closed PRs make no writes', async () => {
     await copyMetadata({ ...f, number: 10 });
     assert.deepEqual(f.writes, []);
   }
-});
-test('ready PRs move linked open work to review, while drafts and done issues stay put', async () => {
-  const sources = {
-    1: {
-      id: 'i1',
-      state: 'OPEN',
-      projectStatus: 'In progress',
-      labels: [],
-      projects: ['p1'],
-    },
-    2: {
-      id: 'i2',
-      state: 'OPEN',
-      projectStatus: 'In review',
-      labels: [],
-      projects: ['p1'],
-    },
-    3: {
-      id: 'i3',
-      state: 'CLOSED',
-      projectStatus: 'In progress',
-      labels: [],
-      projects: ['p1'],
-    },
-    4: {
-      id: 'i4',
-      state: 'OPEN',
-      projectStatus: 'Done',
-      labels: [],
-      projects: ['p1'],
-    },
-    5: {
-      id: 'i5',
-      state: 'OPEN',
-      projectStatus: 'In progress',
-      labels: [],
-      projects: [],
-    },
-  };
-  const body = '#1 #2 #3 #4 #5';
-  const ready = fixture({ body, sources });
-  await copyMetadata({ ...ready, number: 10, dryRun: false });
-  assert.deepEqual(
-    ready.writes
-      .filter((write) => write.variables.field === 'status')
-      .map((write) => write.variables.item),
-    ['item-i1-p1'],
-  );
-
-  const draft = fixture({ body, sources, draft: true });
-  await copyMetadata({ ...draft, number: 10, dryRun: false });
-  assert.equal(
-    draft.writes.some((write) => write.variables.field === 'status'),
-    false,
-  );
 });
 test('conflicting milestones and existing PR milestones are preserved', async () => {
   for (const options of [
@@ -469,12 +299,6 @@ test('valid issues still supply metadata alongside missing references', async ()
       { id: 'pr', labels: ['l1', 'shared'] },
       { id: 'pr', milestone: 'm1' },
       { project: 'p1', id: 'pr' },
-      {
-        project: 'p1',
-        item: 'item-i1-p1',
-        field: 'status',
-        option: 'review',
-      },
     ],
   );
 });

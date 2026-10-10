@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { discover, paginate, REPOSITORY } from './issue-triage.mjs';
+import { paginate, REPOSITORY } from './issue-triage.mjs';
 
 const PAGE = 'pageInfo { hasNextPage endCursor }';
 
@@ -32,13 +32,17 @@ export function metadataGraphql(query, variables, run = execFileSync) {
   return result.data;
 }
 
-export function linkedIssues(body, repository = REPOSITORY) {
-  const text = (body ?? '')
+export function referenceText(body) {
+  return (body ?? '')
     .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '')
     .replace(/(`+)[\s\S]*?\1(?!`)/g, '')
     .replace(/^(?: {4}|\t).*$/gm, '')
     .replace(/^.*\bparent\s+(?:issue|epic)\b.*$/gim, '');
+}
+
+export function linkedIssues(body, repository = REPOSITORY) {
+  const text = referenceText(body);
   const numbers = new Set();
   const references =
     /https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/([1-9]\d*)\b|([\w.-]+\/[\w.-]+)#([1-9]\d*)\b|(?<![\w/#])#([1-9]\d*)\b/g;
@@ -87,74 +91,6 @@ export async function readMetadata(api, id) {
   };
 }
 
-async function readProjectStatus(api, id, context) {
-  const items = await paginate(async (cursor) => {
-    const data = await api(
-      `query($id: ID!, $cursor: String) { node(id: $id) {
-        ... on Issue { projectItems(first: 100, after: $cursor, includeArchived: false) {
-          nodes { id project { id } fieldValues(first: 100) { nodes {
-            ... on ProjectV2ItemFieldSingleSelectValue { optionId field {
-              ... on ProjectV2SingleSelectField { id }
-            } }
-          } } } ${PAGE}
-        } }
-      } }`,
-      { id, cursor },
-    );
-    return data.node?.projectItems;
-  });
-  const item = items.find((value) => value.project?.id === context.projectId);
-  if (!item) return null;
-  const statusField = context.fields.Status;
-  const statusValue = item.fieldValues.nodes.find(
-    (value) => value.field?.id === statusField.id,
-  );
-  return {
-    itemId: item.id,
-    status: statusField.options.find(
-      (option) => option.id === statusValue?.optionId,
-    )?.name,
-  };
-}
-
-async function linkedIssueReviewPlan(api, issues) {
-  const openIssues = issues.filter((issue) => issue.state === 'OPEN');
-  if (!openIssues.length) return { context: null, updates: [] };
-  const context = await discover(api);
-  const reviewOption = context.fields.Status.options.find(
-    (option) => option.name === 'In review',
-  );
-  if (!reviewOption) throw new Error('Missing project status In review');
-  const updates = [];
-  for (const issue of openIssues) {
-    const projectItem = await readProjectStatus(api, issue.id, context);
-    if (
-      projectItem &&
-      projectItem.status !== 'In review' &&
-      projectItem.status !== 'Done'
-    )
-      updates.push({ itemId: projectItem.itemId, optionId: reviewOption.id });
-  }
-  return { context, updates };
-}
-
-async function applyLinkedIssueReviewPlan(api, plan) {
-  if (!plan.context) return;
-  for (const update of plan.updates)
-    await api(
-      `mutation($project: ID!, $item: ID!, $field: ID!, $option: String!) {
-        updateProjectV2ItemFieldValue(input: {projectId: $project, itemId: $item,
-          fieldId: $field, value: {singleSelectOptionId: $option}}) { projectV2Item { id } }
-      }`,
-      {
-        project: plan.context.projectId,
-        item: update.itemId,
-        field: plan.context.fields.Status.id,
-        option: update.optionId,
-      },
-    );
-}
-
 export async function copyMetadata({
   api,
   number,
@@ -168,7 +104,7 @@ export async function copyMetadata({
   const data = await api(
     `query($owner: String!, $name: String!, $number: Int!) {
       repository(owner: $owner, name: $name) { pullRequest(number: $number) {
-        id body state isDraft milestone { id }
+        id body state milestone { id }
       } }
     }`,
     variables,
@@ -183,7 +119,7 @@ export async function copyMetadata({
     const result = await api(
       `query($owner: String!, $name: String!, $number: Int!) {
         repository(owner: $owner, name: $name) { issueOrPullRequest(number: $number) {
-          __typename ... on Issue { id state milestone { id } }
+          __typename ... on Issue { id milestone { id } }
         } }
       }`,
       { owner, name, number: issueNumber },
@@ -214,23 +150,13 @@ export async function copyMetadata({
   log(
     `PR #${number}: ${labels.length} labels, ${projects.length} projects, ${milestone ? 1 : 0} milestone to copy${dryRun ? ' (dry run)' : ''}.`,
   );
-  const reviewPlan = pr.isDraft
-    ? { context: null, updates: [] }
-    : await linkedIssueReviewPlan(api, issues);
-  log(
-    `${reviewPlan.updates.length} linked issues to move to In review${dryRun ? ' (dry run)' : ''}.`,
-  );
   if (dryRun) return;
   // A description edit during discovery must not apply stale issue metadata.
   const fresh = await api(
-    `query($id: ID!) { node(id: $id) { ... on PullRequest { body state isDraft milestone { id } } } }`,
+    `query($id: ID!) { node(id: $id) { ... on PullRequest { body state milestone { id } } } }`,
     { id: pr.id },
   );
-  if (
-    fresh.node?.body !== pr.body ||
-    fresh.node.state !== 'OPEN' ||
-    fresh.node.isDraft !== pr.isDraft
-  )
+  if (fresh.node?.body !== pr.body || fresh.node.state !== 'OPEN')
     throw new Error(
       'Pull request changed during discovery; rerun reconciliation',
     );
@@ -249,7 +175,6 @@ export async function copyMetadata({
       `mutation($project: ID!, $id: ID!) { addProjectV2ItemById(input: {projectId: $project, contentId: $id}) { item { id } } }`,
       { project, id: pr.id },
     );
-  await applyLinkedIssueReviewPlan(api, reviewPlan);
 }
 
 if (
