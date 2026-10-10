@@ -39,3 +39,15 @@ t.test('stable activation never deactivates the rule set on delete', (t) => {
   t.ok(activation[0].Properties.Create);
   t.end();
 });
+
+t.test('ephemeral stacks keep one unretained rule and no rule set', (t) => {
+  const template = synthesize({ environment: 'dev', ephemeral: 'test' });
+  const rules = Object.values(template.findResources('AWS::SES::ReceiptRule'));
+
+  template.resourceCountIs('AWS::SES::ReceiptRuleSet', 0);
+  template.resourceCountIs('Custom::AWS', 0);
+  t.equal(rules.length, 1);
+  t.equal(rules[0].DeletionPolicy, undefined);
+  t.equal(rules[0].UpdateReplacePolicy, undefined);
+  t.end();
+});
