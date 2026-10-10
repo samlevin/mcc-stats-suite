@@ -220,6 +220,20 @@ jobs:
               auto_inactive: false,
             });
             return response.data.id;
+      - name: Verify receipt rule handover
+        if: inputs.application == 'match-to-csv'
+        env:
+          STACK_NAME: match-to-csv-${{ inputs.environment }}
+        run: |
+          if ! aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
+            echo "${STACK_NAME} does not exist yet"
+            exit 0
+          fi
+          aws cloudformation get-template \
+            --stack-name "${STACK_NAME}" \
+            --template-stage Original \
+            --query TemplateBody \
+            --output json | node scripts/receipt-rule-handover.mjs
       - name: Deploy
         id: deploy
         run: |

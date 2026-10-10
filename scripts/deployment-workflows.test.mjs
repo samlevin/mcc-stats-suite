@@ -429,3 +429,15 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
     }
   }
 });
+
+test('match-to-csv deploys only after the receipt rule handover check', () => {
+  const steps = deployment.jobs.deploy.steps.map((step) => step.name);
+  const guard = deployment.jobs.deploy.steps.find(
+    (step) => step.name === 'Verify receipt rule handover',
+  );
+  assert.ok(guard.run.includes('node scripts/receipt-rule-handover.mjs'));
+  assert.equal(guard.if, "inputs.application == 'match-to-csv'");
+  assert.ok(
+    steps.indexOf('Verify receipt rule handover') < steps.indexOf('Deploy'),
+  );
+});

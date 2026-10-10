@@ -35,7 +35,9 @@ aws cloudformation get-template --stack-name match-to-csv-<environment> --profil
 aws ses describe-active-receipt-rule-set --profile <profile>
 ```
 
-Expected: both policies are `Retain`, and the active rule set matches the state you recorded. Do not continue until prod also shows this. Without it, step 3 deletes the live resources.
+Expected: both policies are `Retain`, and the active rule set matches the state you recorded. Do not continue until prod also shows this. Without it, step 3 deletes the live resources. The deployment workflow enforces this. Before each `match-to-csv` deploy, its **Verify receipt rule handover** step reads the deployed template and stops if the rule set or rule is not retained or the activation still has its delete handler.
+
+Between this step and step 3, do not destroy a stable `match-to-csv` stack. The retained rule set and rule stay in SES, so recreating the stack fails with `AlreadyExists` and rolls back. Do not delete the active rule set to get past this, because that stops inbound email. Finish step 2 instead, so the foundation owns the resources and the stack no longer declares them.
 
 ## Step 2: import them into the foundation
 
@@ -64,7 +66,7 @@ Terrateam has no import command, so import with declarative `import` blocks, as 
 3. Comment `terrateam apply dev and foundation`. Expected: three imported, one added, none changed or destroyed. Run `aws ses describe-active-receipt-rule-set` again. The result must match the recorded state.
 4. Comment `terrateam plan prod and foundation`, confirm the same shape as dev, then `terrateam apply prod and foundation`, and run the same `describe` check.
 
-The import files are in state after the applies and then do nothing, like `recovery-imports.tf`. Do not copy them into a new installation, where the resources do not exist yet and the import would fail. After the merge, remove them in a follow-up foundation pull request. Expected: its dev and prod plans are empty.
+The import files are in state after the applies and then do nothing, like `recovery-imports.tf`. Do not copy them into a new installation, where the resources do not exist yet and the import would fail. After the merge, remove them in a follow-up foundation pull request. Expected: its dev and prod plans are empty. Still comment `terrateam apply dev and foundation` and then `terrateam apply prod and foundation`, which release the strict locks and let Terrateam merge it.
 
 Terrateam merges the pull request after both applies. That starts step 3 for dev.
 
