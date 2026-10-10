@@ -42,11 +42,11 @@ session. Terrateam manages only stable operational roots.
 
 ## Foundation promotion
 
-Foundation code is not packaged or assigned a separate release ID. Terrateam plans pull-request revisions. After merge, it applies the merged revision to dev before planning and applying prod. A failed or stale dev layer blocks prod. Follow the [dev review](../runbooks/20-promote-foundation-to-dev.md) and [prod verification](../runbooks/30-promote-foundation-to-prod.md) procedures.
+Foundation code is not packaged or assigned a separate release ID. Terrateam plans pull-request revisions. After merge, it applies the merged revision to dev before planning and applying prod. A failed or stale dev layer blocks prod. Follow [Change the foundation](../docs/self-hosting/40-change-foundation.md).
 
 Changes to `modules/foundation` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
 
-Do not run OpenTofu from this directory. Use the bootstrap procedure for initial account setup and the Terrateam runbooks for stable foundation changes.
+Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and Terrateam for foundation changes.
 
 ## Turborepo cache storage contract
 
@@ -54,7 +54,7 @@ The foundation module defines a cache bucket named `<project>-<environment>-<acc
 
 Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc/<environment>/turbo-cache/bucket-name` and `/mcc/<environment>/turbo-cache/data-key-arn`.
 
-Before the foundation update, apply the separate bootstrap permission change in each account. Follow [the bootstrap update procedure](../runbooks/02-bootstrap-opentofu.md#update-cache-workload-permissions).
+The Terrateam role can create this cache role only after the bootstrap grants it permission. Apply the bootstrap first, following [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later).
 
 Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role. It uses the existing bootstrap GitHub provider and workload permissions boundary; foundation never creates a second provider. The role trusts this repository at `refs/heads/main`. Dev accepts the main branch subject for CI and the protected dev environment subject for deployment builds. Prod accepts only the protected prod environment subject. When GitHub immutable repository subjects are enabled, set the `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` repository variable to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, matching bootstrap. Terrateam passes it to both foundation roots as `github_oidc_subject_repository`; without it, the role trusts the mutable `OWNER/REPOSITORY` subject that GitHub no longer sends. No pull request subject is trusted.
 
@@ -62,7 +62,7 @@ The dedicated role can read the two environment-specific SSM cache contracts, li
 
 `cache_service_role_arns` remains an additional explicit same-account workload allowlist and defaults empty. The managed CI cache role is included automatically in both stable roots. Bucket policy denies data/listing access to other principals, including broadly privileged CDK deployment roles. The allowlist removes a denial and grants no permissions itself. Lifecycle expiration still works. OpenTofu `HeadBucket` refreshes remain possible because the listing denial applies to positive `s3:max-keys`, which object-list requests supply; metadata-only refreshes expose no cache names.
 
-The `turbo_cache_service_policy_json` output preserves the minimal object/KMS policy for additional approved workload roles. The managed CI role adds prefix-scoped listing because the selected v2 S3 provider calls `ListObjectsV2` before `GetObject`. Cleanup options are omitted and deletion is denied; S3 lifecycle owns seven-day expiry. Cache integration in PR #13 uses an explicit temporary cache session, including its session token, independently of later deployment credentials.
+The `turbo_cache_service_policy_json` output preserves the minimal object/KMS policy for additional approved workload roles. The managed CI role adds prefix-scoped listing because the selected v2 S3 provider calls `ListObjectsV2` before `GetObject`. Cleanup options are omitted and deletion is denied; S3 lifecycle owns seven-day expiry. CI uses an explicit temporary cache session, including its session token, independently of later deployment credentials.
 
 To empty a populated cache bucket manually, use an approved service workload role with a separately reviewed deletion grant, or wait for lifecycle expiry. A deployment role cannot bypass the data denial with `force_destroy`.
 
