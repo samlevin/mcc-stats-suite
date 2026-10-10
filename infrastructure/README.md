@@ -54,7 +54,7 @@ The foundation module defines a cache bucket named `<project>-<environment>-<acc
 
 Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc/<environment>/turbo-cache/bucket-name` and `/mcc/<environment>/turbo-cache/data-key-arn`.
 
-Before the foundation update, apply the reviewed bootstrap update separately in each account. Its Terrateam inline policy permits management of only the exact cache workload role and requires the existing workload boundary at creation. PowerUserAccess alone cannot create IAM roles. This grant does not permit removing/changing the boundary, attaching managed policies, or managing other roles.
+Before the foundation update, apply the separate bootstrap permission change in each account. Follow [the bootstrap update procedure](../runbooks/02-bootstrap-opentofu.md#update-cache-workload-permissions).
 
 Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role. It uses the existing bootstrap GitHub provider and workload permissions boundary; foundation never creates a second provider. The role trusts this repository at `refs/heads/main`. Dev accepts the main branch subject for CI and the protected dev environment subject for deployment builds. Prod accepts only the protected prod environment subject. Match `github_oidc_subject_repository` to bootstrap when GitHub immutable repository subjects are enabled. No pull request subject is trusted.
 
@@ -69,8 +69,6 @@ To empty a populated cache bucket manually, use an approved service workload rol
 Run the AWS-free contract tests with fake provider credentials and local-plan overrides:
 
 ```console
-tofu -chdir=infrastructure/dev/bootstrap init -backend=false -lockfile=readonly -test-directory=../../modules/bootstrap/tests
-tofu -chdir=infrastructure/dev/bootstrap test -test-directory=../../modules/bootstrap/tests
 tofu -chdir=infrastructure/dev/foundation init -backend=false -lockfile=readonly -test-directory=../../modules/foundation/tests
 tofu -chdir=infrastructure/dev/foundation validate
 tofu -chdir=infrastructure/dev/foundation test -test-directory=../../modules/foundation/tests
