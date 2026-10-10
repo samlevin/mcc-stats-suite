@@ -3,7 +3,11 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { parse } from 'yaml';
-import { LOCAL_CHANGE_SET_NAME, localDeployArguments } from './cdk-targets.mjs';
+import {
+  APPLICATIONS,
+  LOCAL_CHANGE_SET_NAME,
+  localDeployArguments,
+} from './cdk-targets.mjs';
 import { localBootstrap } from './local-cdk-bootstrap.mjs';
 
 const upstream = parse(
@@ -24,6 +28,7 @@ const replacements = {
   'AWS::AccountId': '000000000000',
   'AWS::Region': 'us-east-1',
   'StagingBucket.Arn': 'arn:aws:s3:::local-assets',
+  '!aws:PrincipalTag/Ephemeral': '${aws:PrincipalTag/Ephemeral}',
 };
 function resolve(value) {
   if (typeof value === 'string') return value;
@@ -39,19 +44,30 @@ function resolve(value) {
     );
   throw new Error(`Unhandled test value: ${JSON.stringify(value)}`);
 }
-const matches = (pattern, value) =>
+// IAM matches actions case-insensitively but ARNs and condition values exactly.
+const wildcard = (pattern, flags) =>
   new RegExp(
     `^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replaceAll('*', '.*')}$`,
-    'i',
-  ).test(value);
+    flags,
+  );
+const matches = (pattern, value) => wildcard(pattern, '').test(value);
+const matchesAction = (pattern, value) => wildcard(pattern, 'i').test(value);
+// Unset tags make a policy variable match nothing, as in IAM.
+const withVariables = (pattern, context) =>
+  pattern.replaceAll(
+    '${aws:PrincipalTag/Ephemeral}',
+    context['aws:PrincipalTag/Ephemeral'] ?? '\u0000',
+  );
 // Evaluate the statement forms this template emits. AWS simulation remains an operator gate.
 function allowed(policy, action, resource, context = {}) {
   const relevant = policy.Statement.filter(
     (entry) =>
-      [entry.Action].flat().some((item) => matches(item, action)) &&
+      [entry.Action].flat().some((item) => matchesAction(item, action)) &&
       [entry.Resource]
         .flat()
-        .some((item) => matches(resolve(item), resource)) &&
+        .some((item) =>
+          matches(withVariables(resolve(item), context), resource),
+        ) &&
       Object.entries(entry.Condition?.StringEquals ?? {}).every(
         ([key, expected]) =>
           [expected].flat().map(resolve).includes(context[key]),
@@ -59,7 +75,11 @@ function allowed(policy, action, resource, context = {}) {
       Object.entries(entry.Condition?.StringLike ?? {}).every(
         ([key, expected]) =>
           context[key] !== undefined &&
-          [expected].flat().some((item) => matches(item, context[key])),
+          [expected]
+            .flat()
+            .some((item) =>
+              matches(withVariables(item, context), context[key]),
+            ),
       ),
   );
   return (
@@ -226,6 +246,7 @@ test('runtime roles cannot mutate compute, deploy stacks, or assume another role
       runtime,
       's3:PutObject',
       'arn:aws:s3:::evidence/ephemeral/alice/result',
+      { 'aws:PrincipalTag/Ephemeral': 'alice' },
     ),
     true,
   );
@@ -341,7 +362,9 @@ test('runtime boundary confines data and compute to ephemeral resources', () => 
     'shared evidence',
   );
   assert.equal(
-    allowed(runtime, 's3:GetObject', evidence('incoming/alice/message')),
+    allowed(runtime, 's3:GetObject', evidence('incoming/alice/message'), {
+      'aws:PrincipalTag/Ephemeral': 'alice',
+    }),
     true,
   );
   for (const key of ['incoming/dev/message', 'incoming/devin/message']) {
@@ -522,8 +545,10 @@ test('runtime lists only ephemeral prefixes', () => {
   const list = (prefix) =>
     allowed(runtime, 's3:ListBucket', 'arn:aws:s3:::evidence', {
       's3:prefix': prefix,
+      'aws:PrincipalTag/Ephemeral': 'alice',
     });
   assert.equal(list('ephemeral/alice/'), true);
+  assert.equal(list('ephemeral/bob/'), false, 'another developer');
   for (const prefix of [
     'incoming/',
     'incoming/d',
@@ -550,6 +575,81 @@ test('ephemeral deploys reject hotswap and watch', () => {
       () => localDeployArguments([option]),
       /cannot hotswap/,
       option,
+    );
+  }
+});
+
+test('runtime objects are scoped to the role Ephemeral tag', () => {
+  const alice = { 'aws:PrincipalTag/Ephemeral': 'alice' };
+  assert.equal(
+    allowed(runtime, 's3:PutObject', evidence('ephemeral/alice/run'), alice),
+    true,
+  );
+  for (const key of ['ephemeral/bob/run', 'submissions/x/ingestion.json']) {
+    assert.equal(
+      allowed(runtime, 's3:PutObject', evidence(key), alice),
+      false,
+      key,
+    );
+  }
+  assert.equal(
+    allowed(runtime, 's3:GetObject', evidence('incoming/bob/message'), alice),
+    false,
+  );
+  assert.equal(
+    allowed(runtime, 's3:PutObject', evidence('ephemeral/alice/run')),
+    false,
+    'untagged role',
+  );
+});
+
+test('deployment reads SSM-typed stack parameters and execution describes log groups', () => {
+  for (const name of [
+    'mcc/dev/match-to-csv/evidence-bucket-name',
+    'cdk-bootstrap/mcclocal1/version',
+  ]) {
+    assert.equal(
+      allowed(
+        deployment,
+        'ssm:GetParameters',
+        `arn:aws:ssm:us-east-1:000000000000:parameter/${name}`,
+      ),
+      true,
+      name,
+    );
+  }
+  assert.equal(
+    allowed(
+      deployment,
+      'ssm:GetParameters',
+      'arn:aws:ssm:us-east-1:000000000000:parameter/mcc/prod/match-to-csv/evidence-bucket-name',
+    ),
+    false,
+  );
+  assert.equal(allowed(execution, 'logs:DescribeLogGroups', '*'), true);
+});
+
+test('policy resources match case-sensitively, like IAM ARNs', () => {
+  assert.equal(
+    allowed(
+      execution,
+      'lambda:DeleteFunction',
+      fn('Match-To-Csv-alice-ProcessEmail'),
+    ),
+    false,
+  );
+});
+
+test('every application synthesizes with the deployment bootstrap qualifier', () => {
+  for (const app of APPLICATIONS) {
+    const source = readFileSync(
+      `applications/${app}/cdk/bin/${app}.ts`,
+      'utf8',
+    );
+    assert.match(
+      source,
+      /new (?:\w+\.)?DefaultStackSynthesizer\(\{\s*qualifier: deployment\.bootstrapQualifier,/,
+      app,
     );
   }
 });

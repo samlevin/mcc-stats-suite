@@ -59,6 +59,8 @@ export function localBootstrap(template) {
   ]);
   // Unanchored denies stay short and only over-match shared names.
   const stableResources = applications.map((app) => arn('*', `*${app}-dev*`));
+  // ${!...} renders a literal IAM policy variable through Fn::Sub.
+  const OWN = '${!aws:PrincipalTag/Ephemeral}';
   const objects = (prefix) =>
     sub(`arn:${'${AWS::Partition}'}:s3:::*/${prefix}`);
   const localExecution = {
@@ -98,19 +100,23 @@ export function localBootstrap(template) {
           ],
           '*',
         ),
-        // Shared dev evidence lives outside ephemeral/, so local runtimes cannot overwrite it.
+        // Each stack tags its roles Ephemeral=<name>, so a runtime reaches only its own
+        // ephemeral/<name>/ and incoming/<name>/ objects. Shared dev evidence is outside both.
         statement(
           'WriteEphemeralObjects',
           's3:PutObject',
-          objects('ephemeral/*'),
+          objects(`ephemeral/${OWN}/*`),
         ),
         statement('ReadEphemeralObjects', 's3:GetObject*', [
-          objects('ephemeral/*'),
-          objects('incoming/*'),
+          objects(`ephemeral/${OWN}/*`),
+          objects(`incoming/${OWN}/*`),
         ]),
-        // Listing cannot be scoped per developer under incoming/, and the app never lists.
         statement('ListEphemeralObjects', 's3:ListBucket', '*', {
-          Condition: { StringLike: { 's3:prefix': 'ephemeral/*' } },
+          Condition: {
+            StringLike: {
+              's3:prefix': 'ephemeral/${aws:PrincipalTag/Ephemeral}/*',
+            },
+          },
         }),
         {
           Sid: 'ProtectSharedInboundEmail',
@@ -265,10 +271,14 @@ export function localBootstrap(template) {
             sub('${StagingBucket.Arn}/*'),
           ],
         ),
+        // CloudFormation resolves SSM-typed template parameters with the caller's credentials.
         statement(
-          'ReadBootstrapVersion',
+          'ReadDeploymentParameters',
           ['ssm:GetParameter', 'ssm:GetParameters'],
-          arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
+          [
+            arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
+            arn('ssm', 'parameter/mcc/dev/*'),
+          ],
         ),
       ]),
     },
@@ -288,6 +298,8 @@ export function localBootstrap(template) {
           services.map((service) => `${service}:*`),
           workloadResources,
         ),
+        // The AWS::Logs::LogGroup handler lists groups, which IAM checks against no group ARN.
+        statement('DescribeLogGroups', 'logs:DescribeLogGroups', '*'),
         {
           Sid: 'ProtectStableCompute',
           Effect: 'Deny',

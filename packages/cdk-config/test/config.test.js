@@ -85,7 +85,13 @@ test('rejects deployment to the wrong account', () => {
 });
 
 test('rejects ephemeral names reserved for shared dev resources', () => {
-  for (const ephemeral of ['dev', 'devin', 'dev-2']) {
+  for (const ephemeral of [
+    'dev',
+    'devin',
+    'dev-2',
+    'admin-dev',
+    'sam-devtest',
+  ]) {
     assert.throws(
       () =>
         resolveDeployment(
@@ -94,6 +100,16 @@ test('rejects ephemeral names reserved for shared dev resources', () => {
           {},
         ),
       /reserved for shared dev/,
+      ephemeral,
+    );
+  }
+});
+
+test('accepts ephemeral names that only resemble reserved names', () => {
+  for (const ephemeral of ['sam', 'kevin', 'sam-2', 'adev']) {
+    assert.equal(
+      resolveDeployment(context({ environment: 'dev', ephemeral }), 'admin', {})
+        .ephemeral,
       ephemeral,
     );
   }

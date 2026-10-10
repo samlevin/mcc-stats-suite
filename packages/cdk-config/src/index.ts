@@ -48,10 +48,14 @@ export function resolveDeployment(
         'Development ephemeral deployments require -c ephemeral=<name> using 1-20 lowercase letters, numbers, or hyphens',
       );
     }
-    // Shared dev resources own every <application>-dev* name.
-    if (requestedEphemeral.startsWith('dev')) {
+    // Shared dev resources own every <application>-dev* name, including names such as
+    // player-admin-dev-* that an ephemeral name containing -dev would produce.
+    if (
+      requestedEphemeral.startsWith('dev') ||
+      requestedEphemeral.includes('-dev')
+    ) {
       throw new Error(
-        'Ephemeral names beginning with "dev" are reserved for shared dev resources',
+        'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources',
       );
     }
     ephemeral = requestedEphemeral;

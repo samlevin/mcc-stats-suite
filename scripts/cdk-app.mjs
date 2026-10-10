@@ -53,6 +53,16 @@ if (ephemeral && process.env.GITHUB_ACTIONS === 'true') {
   fail('Ephemeral deployments are only allowed from a local developer shell');
 }
 
+// Reject options the local bootstrap cannot run before any AWS call or build.
+let localArguments = [];
+if (ephemeral && action === 'deploy') {
+  try {
+    localArguments = localDeployArguments(passthrough);
+  } catch (error) {
+    fail(error.message);
+  }
+}
+
 const accountVariable =
   environment === 'dev' ? 'MCC_DEV_ACCOUNT_ID' : 'MCC_PROD_ACCOUNT_ID';
 const emailDomain = process.env.MCC_EMAIL_DOMAIN;
@@ -143,12 +153,11 @@ if (expectedAccount) {
 }
 if (profile) cdkArguments.push('--profile', profile);
 if (ephemeral && action === 'deploy') {
-  cdkArguments.push('--toolkit-stack-name', LOCAL_TOOLKIT_STACK_NAME);
-  try {
-    cdkArguments.push(...localDeployArguments(passthrough));
-  } catch (error) {
-    fail(error.message);
-  }
+  cdkArguments.push(
+    '--toolkit-stack-name',
+    LOCAL_TOOLKIT_STACK_NAME,
+    ...localArguments,
+  );
 }
 if (
   application === 'match-to-csv' &&
