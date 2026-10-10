@@ -32,7 +32,7 @@ Local developer stacks are explicit:
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-`MCC_EMAIL_DOMAIN` must be set in ignored local configuration or the selected GitHub Environment. Never put its value in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
+Ephemeral deployments need `MCC_EMAIL_DOMAIN` in ignored local configuration for their `submit+<name>@` rule. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
 
 ## Evidence layout
 

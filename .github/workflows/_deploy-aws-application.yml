@@ -69,7 +69,6 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && vars.AWS_ACCOUNT_ID || '' }}
       MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && vars.AWS_ACCOUNT_ID || '' }}
-      MCC_EMAIL_DOMAIN: ${{ vars.MCC_EMAIL_DOMAIN }}
     steps:
       - name: Validate deployment request
         env:
@@ -153,33 +152,17 @@ jobs:
       - name: Verify match-to-csv prerequisites
         if: inputs.application == 'match-to-csv'
         run: |
-          if [ -z "${MCC_EMAIL_DOMAIN}" ]; then
-            echo "::error::The selected GitHub Environment has no inbound domain configured"
-            exit 1
-          fi
           PARAMETER_COUNT="$(aws ssm get-parameters \
             --names \
               /cdk-bootstrap/hnb659fds/version \
               "/mcc/${{ inputs.environment }}/match-to-csv/raw-email-bucket-name" \
               "/mcc/${{ inputs.environment }}/match-to-csv/evidence-bucket-name" \
               "/mcc/${{ inputs.environment }}/match-to-csv/data-key-arn" \
+              "/mcc/${{ inputs.environment }}/match-to-csv/receipt-rule-set-name" \
             --query 'length(Parameters)' \
             --output text)"
-          if [ "${PARAMETER_COUNT}" != "4" ]; then
+          if [ "${PARAMETER_COUNT}" != "5" ]; then
             echo "::error::CDK bootstrap or match-to-csv foundation parameters are missing"
-            exit 1
-          fi
-          IDENTITY_STATUS="$(aws ses get-identity-verification-attributes \
-            --identities "${MCC_EMAIL_DOMAIN}" \
-            --query 'VerificationAttributes.*.VerificationStatus | [0]' \
-            --output text)"
-          if [ "${IDENTITY_STATUS}" != "Success" ]; then
-            echo "::error::The configured SES identity is not verified in the deployment region"
-            exit 1
-          fi
-          if ! dig +short MX "${MCC_EMAIL_DOMAIN}" | \
-            grep -Fq "inbound-smtp.${AWS_REGION}.amazonaws.com."; then
-            echo "::error::The configured MX record does not target SES inbound receiving in the deployment region"
             exit 1
           fi
       - name: Synthesize
@@ -237,6 +220,20 @@ jobs:
               auto_inactive: false,
             });
             return response.data.id;
+      - name: Verify receipt rule handover
+        if: inputs.application == 'match-to-csv'
+        env:
+          STACK_NAME: match-to-csv-${{ inputs.environment }}
+        run: |
+          if ! aws cloudformation describe-stacks --stack-name "${STACK_NAME}" >/dev/null 2>&1; then
+            echo "${STACK_NAME} does not exist yet"
+            exit 0
+          fi
+          aws cloudformation get-template \
+            --stack-name "${STACK_NAME}" \
+            --template-stage Original \
+            --query TemplateBody \
+            --output json | node scripts/receipt-rule-handover.mjs
       - name: Deploy
         id: deploy
         run: |

@@ -15,7 +15,6 @@ export interface DeploymentConfig {
   objectPrefix: string;
   workloadBoundaryName: string;
   isEphemeral: boolean;
-  ingressEnabled: boolean;
 }
 
 const INSTANCE_PATTERN = /^[a-z0-9][a-z0-9-]{0,19}$/;
@@ -83,7 +82,6 @@ export function resolveDeployment(
     objectPrefix: isEphemeral ? `ephemeral/${ephemeral}` : '',
     workloadBoundaryName: 'mcc-stats-suite-workload-boundary',
     isEphemeral,
-    ingressEnabled: !isEphemeral,
   };
 }
 

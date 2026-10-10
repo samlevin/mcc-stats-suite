@@ -6,6 +6,7 @@ output "foundation" {
     data_key_arn            = module.foundation.data_key_arn
     turbo_cache_bucket_name = module.foundation.turbo_cache_bucket_name
     turbo_cache_key_arn     = module.foundation.turbo_cache_key_arn
+    receipt_rule_set_name   = module.foundation.receipt_rule_set_name
   }
 }
 

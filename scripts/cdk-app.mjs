@@ -57,8 +57,15 @@ if (ephemeral && process.env.GITHUB_ACTIONS === 'true') {
 const accountVariable =
   environment === 'dev' ? 'MCC_DEV_ACCOUNT_ID' : 'MCC_PROD_ACCOUNT_ID';
 const emailDomain = process.env.MCC_EMAIL_DOMAIN;
-if (application === 'match-to-csv' && action === 'deploy' && !emailDomain) {
-  fail('Export MCC_EMAIL_DOMAIN before deploying match-to-csv');
+if (
+  application === 'match-to-csv' &&
+  ephemeral &&
+  action === 'deploy' &&
+  !emailDomain
+) {
+  fail(
+    'Export MCC_EMAIL_DOMAIN before deploying an ephemeral match-to-csv stack',
+  );
 }
 let expectedAccount = process.env[accountVariable];
 let expectedAccountSource = accountVariable;
@@ -145,6 +152,7 @@ if (expectedAccount) {
 if (profile) cdkArguments.push('--profile', profile);
 if (
   application === 'match-to-csv' &&
+  ephemeral &&
   (action === 'deploy' || action === 'diff') &&
   emailDomain
 ) {

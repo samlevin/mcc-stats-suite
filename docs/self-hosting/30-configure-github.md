@@ -18,12 +18,12 @@ Every value comes from the bootstrap outputs or your own configuration. Store id
 | `dev` environment | `AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | application deploys |
 | `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | variable | dev `cdk_deploy_role_arn` | application deploys |
 | `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
-| `dev` environment | `MCC_EMAIL_DOMAIN` | variable | verified SES domain | `match-to-csv` deploys |
 | `infra/foundation-dev` environment | `DEV_TERRATEAM_ROLE_ARN` | variable | dev `terrateam_role_arn` | Terrateam |
 | `infra/foundation-dev` environment | `DEV_TOFU_STATE_BUCKET` | variable | dev `state_bucket_name` | Terrateam |
 | `infra/foundation-dev` environment | `DEV_AWS_REGION` | variable | workload Region | Terrateam |
-| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION`, `MCC_EMAIL_DOMAIN` | variables | prod equivalents of the dev values | application deploys |
-| `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values | Terrateam |
+| `infra/foundation-dev` environment | `DEV_MCC_EMAIL_DOMAIN` | variable | verified SES domain that receives dev email | Terrateam, for the shared receipt rule |
+| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION` | variables | prod equivalents of the dev values | application deploys |
+| `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION`, `PROD_MCC_EMAIL_DOMAIN` | variables | prod equivalents of the dev values | Terrateam |
 | repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | Turbo cache in `main` CI |
 | repository | `DEV_AWS_REGION` | variable | workload Region | Turbo cache in `main` CI |
 | repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, when the repository uses immutable OIDC subjects | Terrateam, for the Turbo cache role trust |

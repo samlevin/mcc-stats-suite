@@ -5,10 +5,8 @@ import {
   CfnParameter,
   Duration,
   Fn,
-  RemovalPolicy,
   Stack,
   Tags,
-  Validations,
   type StackProps,
 } from 'aws-cdk-lib';
 import type { Construct } from 'constructs';
@@ -25,7 +23,6 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import * as customResources from 'aws-cdk-lib/custom-resources';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -270,81 +267,40 @@ export class MatchToCsvStack extends Stack {
       }),
     );
 
-    const emailDomain = new CfnParameter(this, 'EmailDomain', {
-      type: 'String',
-      description: 'Verified SES domain used for inbound match-to-CSV email',
-      allowedPattern: '^[A-Za-z0-9.-]+$',
-    });
-    const recipient = Fn.join('', [
-      !deployment.ephemeral ? 'submit@' : `submit+${deployment.ephemeral}@`,
-      emailDomain.valueAsString,
-    ]);
-    const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
-    const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
-      ruleSetName: receiptRuleSetName,
-      rule: {
-        name: deployment.resourcePrefix,
-        enabled: true,
-        recipients: [recipient],
-        scanEnabled: true,
-        tlsPolicy: 'Optional',
-        actions: [
-          {
-            s3Action: {
-              bucketName: rawEmailBucket.bucketName,
-              objectKeyPrefix: inboundPrefix,
+    // The foundation owns the receipt rule set, its activation, and the shared
+    // submit@ rule. An ephemeral stack adds only its own plus-addressed rule.
+    if (deployment.ephemeral) {
+      const emailDomain = new CfnParameter(this, 'EmailDomain', {
+        type: 'String',
+        description: 'Verified SES domain used for inbound match-to-CSV email',
+        allowedPattern: '^[A-Za-z0-9.-]+$',
+      });
+      new ses.CfnReceiptRule(this, 'StoreRawEmail', {
+        ruleSetName: ssm.StringParameter.valueForStringParameter(
+          this,
+          `${prefix}/receipt-rule-set-name`,
+        ),
+        rule: {
+          name: deployment.resourcePrefix,
+          enabled: true,
+          recipients: [
+            Fn.join('', [
+              `submit+${deployment.ephemeral}@`,
+              emailDomain.valueAsString,
+            ]),
+          ],
+          scanEnabled: true,
+          tlsPolicy: 'Optional',
+          actions: [
+            {
+              s3Action: {
+                bucketName: rawEmailBucket.bucketName,
+                objectKeyPrefix: inboundPrefix,
+              },
             },
-          },
-          { stopAction: { scope: 'RuleSet' } },
-        ],
-      },
-    });
-    if (!deployment.isEphemeral) {
-      const receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
-        ruleSetName: receiptRuleSetName,
-      });
-      // Migration step 1: keep the live rule set and rule when later releases
-      // stop declaring them, because OpenTofu takes ownership (issue #45).
-      receiptRuleSet.applyRemovalPolicy(RemovalPolicy.RETAIN);
-      // Retain only on deletion. A replaced rule must not stay behind and
-      // duplicate every inbound email.
-      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN, {
-        applyToUpdateReplacePolicy: false,
-      });
-      Validations.of(receiptRule).acknowledge({
-        id: 'CloudFormation-Validate::W3011',
-        reason: 'Only deletion is retained; a replaced rule must be removed',
-      });
-      receiptRule.node.addDependency(receiptRuleSet);
-      const activateRules = new customResources.AwsCustomResource(
-        this,
-        'ActivateReceiptRuleSet',
-        {
-          onCreate: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: { RuleSetName: receiptRuleSetName },
-            physicalResourceId:
-              customResources.PhysicalResourceId.of(receiptRuleSetName),
-          },
-          onUpdate: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: { RuleSetName: receiptRuleSetName },
-            physicalResourceId:
-              customResources.PhysicalResourceId.of(receiptRuleSetName),
-          },
-          // No onDelete: removing this resource must never deactivate the
-          // account's active rule set.
-          policy: customResources.AwsCustomResourcePolicy.fromSdkCalls({
-            resources: customResources.AwsCustomResourcePolicy.ANY_RESOURCE,
-          }),
+            { stopAction: { scope: 'RuleSet' } },
+          ],
         },
-      );
-      activateRules.node.addDependency(receiptRule);
-
-      new CfnOutput(this, 'ReceiptRuleSetName', {
-        value: receiptRuleSetName,
       });
     }
 

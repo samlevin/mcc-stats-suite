@@ -19,3 +19,8 @@ variable "github_oidc_subject_repository" {
   type        = string
   default     = null
 }
+
+variable "email_domain" {
+  description = "Verified SES domain for inbound email. Terrateam supplies it from a GitHub variable; never commit it."
+  type        = string
+}
