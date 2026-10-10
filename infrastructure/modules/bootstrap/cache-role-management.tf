@@ -23,6 +23,7 @@ data "aws_iam_policy_document" "terrateam_cache_role_management" {
       "iam:UpdateAssumeRolePolicy", "iam:ListRolePolicies", "iam:GetRolePolicy",
       "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:ListAttachedRolePolicies",
       "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags",
+      "iam:ListInstanceProfilesForRole",
     ]
     resources = [local.github_cache_role_arn]
   }
