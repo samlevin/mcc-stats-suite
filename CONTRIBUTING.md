@@ -34,7 +34,7 @@ npm run check
 npm run tofu:fmt:check
 ```
 
-For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0` and `node --test scripts/issue-triage.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
+For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0` and `node --test scripts/issue-*.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
 
 The first command checks formatting, lint rules, release metadata, types, tests, and builds. Neither command calls AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
 
@@ -75,7 +75,11 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
-Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately. A pull request closes executable leaf work; container completion follows its children.
+Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children.
+
+The [linked issue metadata workflow](.github/workflows/pr-issue-metadata.yml) copies labels, a milestone, and active GitHub Projects membership when a PR is opened, its description is edited, it is reopened, or it becomes ready for review. It reads same-repository references such as `#123`, `owner/repository#123`, and GitHub issue URLs from the description. Parent issue or epic lines, code examples, and HTML comments are excluded. References to pull requests are ignored. With several linked issues, it copies the union of their labels and projects. It fills an empty PR milestone only when the linked issues have one distinct milestone; conflicts leave the milestone unchanged. Existing PR labels, milestones, project membership, and project fields are preserved. Removing a link does not remove metadata previously copied. Later issue metadata changes can be copied by rerunning the workflow with the PR number; the manual run defaults to a dry run.
+
+The workflow reuses `MCC_PROJECT_TOKEN` from issue triage. Its credential needs repository issue and pull-request write access and read/write access to the source projects. The workflow runs trusted default-branch scripts with `pull_request_target`, including for fork PRs, and never executes PR code. It becomes active after publication on the default branch. See [GitHub's project authentication guidance](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/automating-projects-using-actions).
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs the repository quality gate, CDK synthesis, native bundle verification, and OpenTofu formatting. Pull requests do not deploy applications.
 

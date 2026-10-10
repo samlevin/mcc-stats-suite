@@ -7,13 +7,13 @@ npm ci
 npm test
 ```
 
-The AWS-free issue triage tests cover eligibility, pagination, idempotency, and metadata changes before mutation:
+The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs:
 
 ```console
-node --test scripts/issue-triage.test.mjs
+node --test scripts/issue-*.test.mjs
 ```
 
-These tests use metadata mocks and never call GitHub. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
+These tests use metadata mocks and never call GitHub. To preview PR metadata with authenticated local `gh`, run `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`; it defaults to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
 
 The full local quality gate is:
 
