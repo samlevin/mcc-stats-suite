@@ -14,6 +14,7 @@ export interface DeploymentConfig {
   resourcePrefix: string;
   objectPrefix: string;
   workloadBoundaryName: string;
+  bootstrapQualifier: string;
   isEphemeral: boolean;
   ingressEnabled: boolean;
 }
@@ -45,6 +46,16 @@ export function resolveDeployment(
     if (!INSTANCE_PATTERN.test(requestedEphemeral)) {
       throw new Error(
         'Development ephemeral deployments require -c ephemeral=<name> using 1-20 lowercase letters, numbers, or hyphens',
+      );
+    }
+    // Shared dev resources own every <application>-dev* name, including names such as
+    // player-admin-dev-* that an ephemeral name containing -dev would produce.
+    if (
+      requestedEphemeral.startsWith('dev') ||
+      requestedEphemeral.includes('-dev')
+    ) {
+      throw new Error(
+        'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources',
       );
     }
     ephemeral = requestedEphemeral;
@@ -81,7 +92,10 @@ export function resolveDeployment(
     stackName,
     resourcePrefix: stackName,
     objectPrefix: isEphemeral ? `ephemeral/${ephemeral}` : '',
-    workloadBoundaryName: 'mcc-stats-suite-workload-boundary',
+    workloadBoundaryName: isEphemeral
+      ? 'mcc-stats-suite-local-workload-boundary'
+      : 'mcc-stats-suite-workload-boundary',
+    bootstrapQualifier: isEphemeral ? 'mcclocal1' : 'hnb659fds',
     isEphemeral,
     ingressEnabled: !isEphemeral,
   };

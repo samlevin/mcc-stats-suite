@@ -1,13 +1,12 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import {
+  APPLICATIONS,
+  LOCAL_TOOLKIT_STACK_NAME,
+  localDeployArguments,
+} from './cdk-targets.mjs';
 
-const applications = new Set([
-  'admin',
-  'data-pipeline',
-  'match-to-csv',
-  'ocr-quality',
-  'player',
-]);
+const applications = new Set(APPLICATIONS);
 const actions = new Set(['synth', 'diff', 'deploy', 'destroy']);
 
 const [action, application, ...rawArguments] = process.argv.slice(2);
@@ -52,6 +51,16 @@ if (!ephemeral && action === 'deploy') {
 }
 if (ephemeral && process.env.GITHUB_ACTIONS === 'true') {
   fail('Ephemeral deployments are only allowed from a local developer shell');
+}
+
+// Reject options the local bootstrap cannot run before any AWS call or build.
+let localArguments = [];
+if (ephemeral && action === 'deploy') {
+  try {
+    localArguments = localDeployArguments(passthrough);
+  } catch (error) {
+    fail(error.message);
+  }
 }
 
 const accountVariable =
@@ -143,6 +152,13 @@ if (expectedAccount) {
   cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
 }
 if (profile) cdkArguments.push('--profile', profile);
+if (ephemeral && action === 'deploy') {
+  cdkArguments.push(
+    '--toolkit-stack-name',
+    LOCAL_TOOLKIT_STACK_NAME,
+    ...localArguments,
+  );
+}
 if (
   application === 'match-to-csv' &&
   (action === 'deploy' || action === 'diff') &&
