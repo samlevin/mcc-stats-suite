@@ -1,6 +1,7 @@
-import { spawn, execFileSync } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { appendFileSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { changedPaths, diffBase, repositoryFiles } from './ci-scope.mjs';
 
 export function workspaceMode(paths, event) {
   // Root configuration, infrastructure and unknown paths require every workspace.
@@ -30,42 +31,32 @@ export function workspaceArguments(mode) {
   ];
 }
 
+// Single sources: the full list is the scripts directory, the repository list comes from the
+// classifier's allowlist, so a new script needs no edit here.
+export const fullTests = () =>
+  readdirSync(new URL('./', import.meta.url))
+    .filter((name) => name.endsWith('.test.mjs'))
+    .sort()
+    .map((name) => `scripts/${name}`);
+export const repositoryTests = () =>
+  [...repositoryFiles].filter((file) => file.endsWith('.test.mjs')).sort();
+export const repositoryTargets = () =>
+  [...repositoryFiles].filter((file) => file.endsWith('.mjs')).sort();
+
 export function checks({ full, repository, mode }) {
   const commands = [['npm', ['run', 'format:check']]];
   if (full)
     commands.push(
       ['npx', ['eslint', '.', '--max-warnings', '0']],
       ['npm', ['run', 'release:check']],
-      [
-        'node',
-        [
-          '--test',
-          'scripts/issue-triage.test.mjs',
-          'scripts/issue-pr-metadata.test.mjs',
-          'scripts/issue-pr-status.test.mjs',
-          'scripts/ci-checks.test.mjs',
-          'scripts/publish-packages.test.mjs',
-          'scripts/deployment-workflows.test.mjs',
-        ],
-      ],
+      ['node', ['--test', ...fullTests()]],
       ['npm', ['run', 'tofu:fmt:check']],
       ['npx', workspaceArguments(mode)],
     );
   else if (repository)
     commands.push(
-      [
-        'npx',
-        [
-          'eslint',
-          'scripts/ci-scope.mjs',
-          'scripts/issue-triage.mjs',
-          'scripts/issue-containers.mjs',
-          'scripts/issue-triage.test.mjs',
-          '--max-warnings',
-          '0',
-        ],
-      ],
-      ['node', ['--test', 'scripts/issue-triage.test.mjs']],
+      ['npx', ['eslint', ...repositoryTargets(), '--max-warnings', '0']],
+      ['node', ['--test', ...repositoryTests()]],
     );
   return commands;
 }
@@ -107,21 +98,9 @@ async function main() {
     throw new Error('Expected explicit baseline scope flags');
   const full = process.env.CI_FULL === 'true';
   const repository = process.env.CI_REPOSITORY === 'true';
-  const diffBase =
-    event === 'pull_request'
-      ? execFileSync('git', ['merge-base', base, head], {
-          encoding: 'utf8',
-        }).trim()
-      : base;
-  const paths = execFileSync(
-    'git',
-    ['diff', '--name-only', '--no-renames', '-z', diffBase, head],
-    { encoding: 'utf8' },
-  )
-    .split('\0')
-    .filter(Boolean);
+  const paths = changedPaths(base, head, event);
   const mode = workspaceMode(paths, event);
-  process.env.TURBO_SCM_BASE = diffBase;
+  process.env.TURBO_SCM_BASE = diffBase(base, head, event);
   process.env.TURBO_SCM_HEAD = head;
   console.log(`Workspace validation: ${full ? mode : 'none'}`);
   if (full) {
