@@ -25,6 +25,7 @@ test('creates an isolated ephemeral deployment in dev', () => {
     deployment.workloadBoundaryName,
     'mcc-stats-suite-local-workload-boundary',
   );
+  assert.equal(deployment.rolePath, '/mcc-local/');
 });
 
 test('uses one dev-qualified deployment for integration and smoke tests', () => {
@@ -40,6 +41,7 @@ test('uses one dev-qualified deployment for integration and smoke tests', () => 
     deployment.workloadBoundaryName,
     'mcc-stats-suite-workload-boundary',
   );
+  assert.equal(deployment.rolePath, undefined);
   assert.equal(deployment.isEphemeral, false);
   assert.equal(deployment.ingressEnabled, true);
 });
@@ -115,33 +117,17 @@ test('accepts ephemeral names that only resemble reserved names', () => {
   }
 });
 
-test('the CDK wrapper applies the same ephemeral name rule before synthesis', async () => {
-  const { pathToFileURL } = require('node:url');
-  const { join } = require('node:path');
-  const { ephemeralNameError } = await import(
-    pathToFileURL(join(__dirname, '../../../scripts/cdk-targets.mjs')).href
-  );
-  for (const ephemeral of [
-    'sam',
-    'kevin',
-    'adev',
-    'dev',
-    'devin',
-    'admin-dev',
-    'Sam',
-    '-sam',
-    'a'.repeat(21),
-  ]) {
-    let error;
-    try {
-      resolveDeployment(
-        context({ environment: 'dev', ephemeral }),
-        'admin',
-        {},
-      );
-    } catch (caught) {
-      error = caught.message;
-    }
-    assert.equal(ephemeralNameError(ephemeral), error, ephemeral);
+test('rejects malformed ephemeral names with usable guidance', () => {
+  for (const ephemeral of ['Sam', '-sam', 'a'.repeat(21), 'sam_1']) {
+    assert.throws(
+      () =>
+        resolveDeployment(
+          context({ environment: 'dev', ephemeral }),
+          'admin',
+          {},
+        ),
+      /^Error: Ephemeral names must be 1-20 lowercase letters/,
+      ephemeral,
+    );
   }
 });

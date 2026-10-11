@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
+  Aspects,
   CfnOutput,
   CfnParameter,
   Duration,
@@ -9,7 +10,7 @@ import {
   Tags,
   type StackProps,
 } from 'aws-cdk-lib';
-import type { Construct } from 'constructs';
+import type { Construct, IConstruct } from 'constructs';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -41,6 +42,16 @@ export class MatchToCsvStack extends Stack {
         deployment.workloadBoundaryName,
       ),
     );
+    // Ephemeral roles live under the local role path, the only path the local bootstrap
+    // lets CloudFormation create, change, or pass.
+    const rolePath = deployment.rolePath;
+    if (rolePath) {
+      Aspects.of(this).add({
+        visit(node: IConstruct) {
+          if (node instanceof iam.CfnRole) node.path = rolePath;
+        },
+      });
+    }
     Tags.of(this).add('Application', deployment.application);
     Tags.of(this).add('Environment', deployment.environment);
     if (deployment.ephemeral) {
@@ -382,7 +393,8 @@ export class MatchToCsvStack extends Stack {
         sourceMap: true,
         target: 'node22',
         nodeModules: includeSharp ? ['sharp'] : undefined,
-        forceDockerBundling: includeSharp,
+        // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
+        forceDockerBundling: includeSharp && Stack.of(this).bundlingRequired,
       },
     });
   }

@@ -4,6 +4,7 @@ import {
   APPLICATIONS as applications,
   LOCAL_CHANGE_SET_NAME,
   LOCAL_QUALIFIER,
+  LOCAL_ROLE_PATH,
 } from './cdk-targets.mjs';
 
 const sub = (value) => ({ 'Fn::Sub': value });
@@ -22,18 +23,36 @@ const statement = (Sid, Action, Resource, extra = {}) => ({
   Resource,
   ...extra,
 });
+const deny = (Sid, Action, Resource, extra = {}) => ({
+  ...statement(Sid, Action, Resource, extra),
+  Effect: 'Deny',
+});
 const document = (Statement) => ({ Version: '2012-10-17', Statement });
+const managedPolicy = (ManagedPolicyName, Statement) => ({
+  Type: 'AWS::IAM::ManagedPolicy',
+  Properties: { ManagedPolicyName, PolicyDocument: document(Statement) },
+});
+
+// Logical IDs of the policies this transform adds. The operator's stack policy protects
+// them from deletion, so a default re-bootstrap cannot silently restore administrator roles.
+export const LOCAL_POLICY_RESOURCES = [
+  'LocalWorkloadBoundary',
+  'LocalExecutionBoundary',
+  'LocalExecutionPolicy',
+  'LocalExecutionComputePolicy',
+  'LocalExecutionEventsPolicy',
+];
 
 export function localBootstrap(template) {
   const result = structuredClone(template);
   const resources = result.Resources;
-  for (const name of [
+  const trustedRoles = [
     'DeploymentActionRole',
-    'CloudFormationExecutionRole',
     'FilePublishingRole',
     'ImagePublishingRole',
     'LookupRole',
-  ]) {
+  ];
+  for (const name of [...trustedRoles, 'CloudFormationExecutionRole']) {
     if (!resources[name])
       throw new Error(
         `Missing bootstrap resource ${name}; review the CDK template upgrade`,
@@ -42,132 +61,164 @@ export function localBootstrap(template) {
   result.Parameters.Qualifier.Default = LOCAL_QUALIFIER;
   // An operator cannot accidentally turn this template into the stable bootstrap.
   result.Parameters.Qualifier.AllowedValues = [LOCAL_QUALIFIER];
+  // Only this account's principals may assume the local roles, even if an operator
+  // passes --trust or --trust-for-lookup.
+  for (const name of trustedRoles) {
+    const trust = resources[name].Properties.AssumeRolePolicyDocument;
+    trust.Statement = trust.Statement.filter((entry) => !entry['Fn::If']);
+  }
+
   const stacks = applications.map((app) =>
     arn('cloudformation', `stack/${app}-*/*`),
   );
   const sharedStacks = applications.map((app) =>
     arn('cloudformation', `stack/${app}-dev*/*`),
   );
-  const roles = applications.map((app) => roleArn(`${app}-*`));
-  const sharedRoles = applications.map((app) => roleArn(`${app}-dev*`));
-  // Anchor allows on a delimiter so unrelated names such as sysadmin-* never match.
-  const workloadResources = applications.flatMap((app) => [
-    arn('*', `*:${app}-*`),
-    arn('sqs', `${app}-*`),
-    arn('events', `rule/${app}-*`),
-    arn('logs', `log-group:/aws/*/${app}-*`),
-  ]);
+  const roles = applications.map((app) =>
+    roleArn(`${LOCAL_ROLE_PATH.slice(1)}${app}-*`),
+  );
+  const sharedRoles = applications.map((app) => roleArn(`*${app}-dev*`));
+  // Name-anchored per service, so neither unrelated names such as sysadmin-* nor
+  // aliases, executions, or streams of other resources match.
+  const functions = applications.map((app) =>
+    arn('lambda', `function:${app}-*`),
+  );
+  const stateMachines = applications.map((app) =>
+    arn('states', `stateMachine:${app}-*`),
+  );
+  const queues = applications.map((app) => arn('sqs', `${app}-*`));
+  const computeResources = [
+    ...functions,
+    ...stateMachines,
+    ...applications.map((app) => arn('states', `execution:${app}-*`)),
+    ...queues,
+    ...applications.map((app) => arn('logs', `log-group:/aws/*/${app}-*`)),
+  ];
+  const rules = applications.map((app) => arn('events', `rule/${app}-*`));
   // Unanchored denies stay short and only over-match shared names.
   const stableResources = applications.map((app) => arn('*', `*${app}-dev*`));
+  const deploymentParameters = [
+    arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
+    ...applications.map((app) => arn('ssm', `parameter/mcc/dev/${app}/*`)),
+  ];
   const OWN_TAG = '${aws:PrincipalTag/Ephemeral}';
   // ${!...} renders the literal IAM policy variable through Fn::Sub.
   const OWN = OWN_TAG.replace('${', '${!');
   const objects = (prefix) =>
     sub(`arn:${'${AWS::Partition}'}:s3:::*/${prefix}`);
+  const viaS3 = {
+    StringEquals: { 'kms:ViaService': sub('s3.${AWS::Region}.amazonaws.com') },
+  };
   const localExecution = {
     'Fn::GetAtt': ['CloudFormationExecutionRole', 'Arn'],
   };
   const runtimeBoundary = { Ref: 'LocalWorkloadBoundary' };
-
-  resources.LocalWorkloadBoundary = {
-    Type: 'AWS::IAM::ManagedPolicy',
-    Properties: {
-      ManagedPolicyName: 'mcc-stats-suite-local-workload-boundary',
-      PolicyDocument: document([
-        statement(
-          'WorkloadActions',
-          [
-            'kms:Decrypt',
-            'kms:Encrypt',
-            'kms:ReEncrypt*',
-            'kms:GenerateDataKey*',
-            'kms:DescribeKey',
-            'textract:AnalyzeDocument',
-            'logs:CreateLogGroup',
-            'logs:CreateLogStream',
-            'logs:PutLogEvents',
-            'logs:CreateLogDelivery',
-            'logs:GetLogDelivery',
-            'logs:UpdateLogDelivery',
-            'logs:DeleteLogDelivery',
-            'logs:ListLogDeliveries',
-            'logs:PutResourcePolicy',
-            'logs:DescribeResourcePolicies',
-            'logs:DescribeLogGroups',
-            'xray:PutTraceSegments',
-            'xray:PutTelemetryRecords',
-            'xray:GetSamplingRules',
-            'xray:GetSamplingTargets',
-          ],
-          '*',
-        ),
-        // Each stack tags its roles Ephemeral=<name>, so a runtime reaches only its own
-        // ephemeral/<name>/ and incoming/<name>/ objects. Shared dev evidence is outside both.
-        statement(
-          'WriteEphemeralObjects',
-          's3:PutObject',
-          objects(`ephemeral/${OWN}/*`),
-        ),
-        statement('ReadEphemeralObjects', 's3:GetObject*', [
-          objects(`ephemeral/${OWN}/*`),
-          objects(`incoming/${OWN}/*`),
-        ]),
-        statement('ListEphemeralObjects', 's3:ListBucket', '*', {
-          Condition: {
-            StringLike: {
-              's3:prefix': `ephemeral/${OWN_TAG}/*`,
-            },
-          },
-        }),
-        {
-          Sid: 'ProtectSharedInboundEmail',
-          Effect: 'Deny',
-          Action: 's3:*',
-          Resource: objects('incoming/dev*'),
-        },
-        statement(
-          'UseEphemeralCompute',
-          [
-            'lambda:InvokeFunction',
-            'states:StartExecution',
-            'states:DescribeExecution',
-            'states:StopExecution',
-            'states:GetExecutionHistory',
-            'sqs:SendMessage',
-          ],
-          workloadResources,
-        ),
-        {
-          Sid: 'ProtectSharedCompute',
-          Effect: 'Deny',
-          Action: ['lambda:*', 'states:*', 'sqs:*', 'events:*'],
-          Resource: stableResources,
-        },
-        {
-          Sid: 'NoDeploymentOrIdentityAdministration',
-          Effect: 'Deny',
-          Action: [
-            'iam:*',
-            'sts:*',
-            'cloudformation:*',
-            'account:*',
-            'organizations:*',
-          ],
-          Resource: '*',
-        },
-        {
-          Sid: 'ProtectStableBootstrapAssets',
-          Effect: 'Deny',
-          Action: ['s3:*', 'ecr:*'],
-          Resource: [
-            sub('arn:${AWS::Partition}:s3:::cdk-hnb659fds-*'),
-            sub('arn:${AWS::Partition}:s3:::cdk-hnb659fds-*/*'),
-            arn('ecr', 'repository/cdk-hnb659fds-*'),
-          ],
-        },
-      ]),
+  const withRuntimeBoundary = {
+    Condition: {
+      StringEquals: { 'iam:PermissionsBoundary': runtimeBoundary },
     },
   };
+
+  resources.LocalWorkloadBoundary = managedPolicy(
+    'mcc-stats-suite-local-workload-boundary',
+    [
+      statement(
+        'WorkloadActions',
+        [
+          'kms:DescribeKey',
+          'textract:AnalyzeDocument',
+          'logs:CreateLogGroup',
+          'logs:CreateLogStream',
+          'logs:PutLogEvents',
+          'logs:CreateLogDelivery',
+          'logs:GetLogDelivery',
+          'logs:UpdateLogDelivery',
+          'logs:DeleteLogDelivery',
+          'logs:ListLogDeliveries',
+          'logs:PutResourcePolicy',
+          'logs:DescribeResourcePolicies',
+          'logs:DescribeLogGroups',
+          'xray:PutTraceSegments',
+          'xray:PutTelemetryRecords',
+          'xray:GetSamplingRules',
+          'xray:GetSamplingTargets',
+        ],
+        '*',
+      ),
+      // The app uses keys only for S3 server-side encryption.
+      statement(
+        'UseKeysThroughS3',
+        [
+          'kms:Decrypt',
+          'kms:Encrypt',
+          'kms:ReEncrypt*',
+          'kms:GenerateDataKey*',
+        ],
+        '*',
+        { Condition: viaS3 },
+      ),
+      // Each stack tags its roles Ephemeral=<name>, so a runtime reaches only its own
+      // ephemeral/<name>/ and incoming/<name>/ objects. Shared dev evidence is outside both.
+      statement(
+        'WriteEphemeralObjects',
+        's3:PutObject',
+        objects(`ephemeral/${OWN}/*`),
+      ),
+      statement('ReadEphemeralObjects', 's3:GetObject*', [
+        objects(`ephemeral/${OWN}/*`),
+        objects(`incoming/${OWN}/*`),
+      ]),
+      statement('ListEphemeralObjects', 's3:ListBucket', '*', {
+        Condition: { StringLike: { 's3:prefix': `ephemeral/${OWN_TAG}/*` } },
+      }),
+      // IAM's * also matches /, so the allows above would otherwise match these prefixes
+      // anywhere in a key, such as submissions/ephemeral/<name>/ in shared evidence.
+      deny('EphemeralPrefixesAtKeyRoot', 's3:*', [
+        objects('*/ephemeral/*'),
+        objects('*/incoming/*'),
+      ]),
+      // S3 ARNs carry no account, so the object allows would also match other accounts.
+      deny('OnlyThisAccountsBuckets', 's3:*', '*', {
+        Condition: {
+          StringNotEquals: { 's3:ResourceAccount': '${aws:PrincipalAccount}' },
+          Null: { 's3:ResourceAccount': 'false' },
+        },
+      }),
+      deny('ProtectSharedInboundEmail', 's3:*', objects('incoming/dev*')),
+      statement(
+        'UseEphemeralCompute',
+        [
+          'lambda:InvokeFunction',
+          'states:StartExecution',
+          'states:DescribeExecution',
+          'states:StopExecution',
+          'states:GetExecutionHistory',
+          'sqs:SendMessage',
+        ],
+        computeResources,
+      ),
+      deny(
+        'ProtectSharedCompute',
+        ['lambda:*', 'states:*', 'sqs:*', 'events:*'],
+        stableResources,
+      ),
+      deny(
+        'NoDeploymentOrIdentityAdministration',
+        ['iam:*', 'sts:*', 'cloudformation:*', 'account:*', 'organizations:*'],
+        '*',
+      ),
+      deny(
+        'ProtectStableBootstrapAssets',
+        ['s3:*', 'ecr:*'],
+        [
+          sub('arn:${AWS::Partition}:s3:::cdk-hnb659fds-*'),
+          sub('arn:${AWS::Partition}:s3:::cdk-hnb659fds-*/*'),
+          arn('ecr', 'repository/cdk-hnb659fds-*'),
+        ],
+      ),
+    ],
+  );
+
   // This repository makes no context lookups, so the lookup role reads only stack
   // metadata and the bootstrap version instead of inheriting ReadOnlyAccess.
   const lookup = resources.LookupRole.Properties;
@@ -188,11 +239,12 @@ export function localBootstrap(template) {
         statement(
           'ReadBootstrapVersion',
           ['ssm:GetParameter', 'ssm:GetParameters'],
-          arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
+          deploymentParameters[0],
         ),
       ]),
     },
   ];
+
   const deployment = resources.DeploymentActionRole.Properties;
   deployment.ManagedPolicyArns = [];
   deployment.Policies = [
@@ -255,12 +307,7 @@ export function localBootstrap(template) {
             },
           },
         ),
-        {
-          Sid: 'ProtectSharedStacks',
-          Effect: 'Deny',
-          Action: 'cloudformation:*',
-          Resource: sharedStacks,
-        },
+        deny('ProtectSharedStacks', 'cloudformation:*', sharedStacks),
         statement('PassLocalExecution', 'iam:PassRole', localExecution, {
           Condition: {
             StringEquals: {
@@ -280,129 +327,210 @@ export function localBootstrap(template) {
         statement(
           'ReadDeploymentParameters',
           ['ssm:GetParameter', 'ssm:GetParameters'],
-          [
-            arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
-            ...applications.map((app) =>
-              arn('ssm', `parameter/mcc/dev/${app}/*`),
-            ),
-          ],
+          deploymentParameters,
         ),
       ]),
     },
   ];
-  // Never inherit AdministratorAccess or user-supplied execution policy parameters.
+
+  // Never inherit AdministratorAccess or user-supplied execution policy parameters. The
+  // identity policies hold the scoped grants (split to fit the managed policy size limit);
+  // the boundary caps the role at those services and denies deployment and identity
+  // administration.
   const execution = resources.CloudFormationExecutionRole.Properties;
-  execution.PermissionsBoundary = { Ref: 'LocalExecutionPolicy' };
-  execution.ManagedPolicyArns = [{ Ref: 'LocalExecutionPolicy' }];
-  const services = ['lambda', 'events', 'states', 'sqs', 'logs'];
-  resources.LocalExecutionPolicy = {
-    Type: 'AWS::IAM::ManagedPolicy',
-    Properties: {
-      ManagedPolicyName: 'mcc-stats-suite-local-cdk-execution',
-      PolicyDocument: document([
-        statement(
-          'ManageEphemeralCompute',
-          services.map((service) => `${service}:*`),
-          workloadResources,
-        ),
-        // The AWS::Logs::LogGroup handler lists groups, which IAM checks against no group ARN.
-        statement('DescribeLogGroups', 'logs:DescribeLogGroups', '*'),
-        {
-          Sid: 'ProtectStableCompute',
-          Effect: 'Deny',
-          Action: services.map((service) => `${service}:*`),
-          Resource: stableResources,
+  execution.ManagedPolicyArns = [
+    { Ref: 'LocalExecutionPolicy' },
+    { Ref: 'LocalExecutionComputePolicy' },
+    { Ref: 'LocalExecutionEventsPolicy' },
+  ];
+  execution.PermissionsBoundary = { Ref: 'LocalExecutionBoundary' };
+  const computeServices = ['lambda', 'states', 'sqs', 'logs'];
+
+  resources.LocalExecutionBoundary = managedPolicy(
+    'mcc-stats-suite-local-cdk-execution-boundary',
+    [
+      statement(
+        'ExecutionServices',
+        [
+          ...computeServices.map((service) => `${service}:*`),
+          'events:*',
+          'ses:*ReceiptRule*',
+          's3:GetObject',
+          's3:GetBucketLocation',
+          'kms:Decrypt',
+          'kms:DescribeKey',
+          'ssm:GetParameter',
+          'ssm:GetParameters',
+          'iam:*Role*',
+          'iam:GetPolicy',
+          'iam:GetPolicyVersion',
+        ],
+        '*',
+      ),
+      deny(
+        'NoDeploymentOrIdentityAdministration',
+        [
+          'cloudformation:*',
+          'sts:*',
+          'account:*',
+          'organizations:*',
+          'iam:DeleteRolePermissionsBoundary',
+          'iam:CreateServiceLinkedRole',
+        ],
+        '*',
+      ),
+    ],
+  );
+
+  resources.LocalExecutionComputePolicy = managedPolicy(
+    'mcc-stats-suite-local-cdk-execution-compute',
+    [
+      statement(
+        'ManageEphemeralCompute',
+        computeServices.map((service) => `${service}:*`),
+        computeResources,
+      ),
+      // The AWS::Logs::LogGroup handler lists groups, which IAM checks against no group ARN.
+      statement('DescribeLogGroups', 'logs:DescribeLogGroups', '*'),
+      deny(
+        'ProtectStableCompute',
+        [...computeServices.map((service) => `${service}:*`), 'events:*'],
+        stableResources,
+      ),
+    ],
+  );
+
+  resources.LocalExecutionEventsPolicy = managedPolicy(
+    'mcc-stats-suite-local-cdk-execution-events',
+    [
+      statement(
+        'ManageEphemeralRules',
+        [
+          'events:DescribeRule',
+          'events:DeleteRule',
+          'events:EnableRule',
+          'events:DisableRule',
+          'events:ListTargetsByRule',
+          'events:RemoveTargets',
+          'events:TagResource',
+          'events:UntagResource',
+          'events:ListTagsForResource',
+        ],
+        rules,
+      ),
+      // Rules may match only S3 events, so a local template cannot subscribe to the shared
+      // workflows' Step Functions events.
+      statement('PutEphemeralRules', 'events:PutRule', rules, {
+        Condition: {
+          'ForAllValues:StringEquals': { 'events:source': 'aws.s3' },
+          Null: { 'events:source': 'false' },
         },
-        statement(
-          'ManageEphemeralReceiptRules',
-          [
-            'ses:CreateReceiptRule',
-            'ses:UpdateReceiptRule',
-            'ses:DeleteReceiptRule',
-            'ses:DescribeReceiptRule',
-            'ses:DescribeReceiptRuleSet',
-          ],
-          '*',
-        ),
-        statement(
-          'ReadLambdaAssets',
-          ['s3:GetObject', 's3:GetBucketLocation'],
-          [
-            { 'Fn::GetAtt': ['StagingBucket', 'Arn'] },
-            sub('${StagingBucket.Arn}/*'),
-          ],
-        ),
-        // Lambda reads the code object with the caller's credentials; the staging bucket uses SSE-KMS.
-        statement('DecryptLambdaAssets', 'kms:Decrypt', '*', {
-          Condition: {
-            StringEquals: {
-              'kms:ViaService': sub('s3.${AWS::Region}.amazonaws.com'),
-            },
+      }),
+      // Rules may deliver only to ephemeral compute.
+      statement('PutEphemeralTargets', 'events:PutTargets', rules, {
+        Condition: {
+          'ForAllValues:ArnLike': {
+            'events:TargetArn': [...functions, ...stateMachines, ...queues],
           },
-        }),
-        statement(
-          'ReadConfiguration',
-          [
-            'ssm:GetParameter',
-            'ssm:GetParameters',
-            'kms:DescribeKey',
-            'iam:GetPolicy',
-            'iam:GetPolicyVersion',
-          ],
-          '*',
-        ),
-        statement(
-          'CreateBoundedRoles',
-          ['iam:CreateRole', 'iam:PutRolePermissionsBoundary'],
-          roles,
-          {
-            Condition: {
-              StringEquals: { 'iam:PermissionsBoundary': runtimeBoundary },
-            },
-          },
-        ),
-        statement(
-          'ManageEphemeralRoles',
-          [
-            'iam:GetRole',
-            'iam:DeleteRole',
-            'iam:UpdateAssumeRolePolicy',
-            'iam:PutRolePolicy',
-            'iam:DeleteRolePolicy',
-            'iam:AttachRolePolicy',
-            'iam:DetachRolePolicy',
-            'iam:ListInstanceProfilesForRole',
-            'iam:GetRolePolicy',
-            'iam:ListRolePolicies',
-            'iam:ListAttachedRolePolicies',
-            'iam:TagRole',
-            'iam:UntagRole',
-            'iam:ListRoleTags',
-            'iam:UpdateRole',
-            'iam:UpdateRoleDescription',
-          ],
-          roles,
-        ),
-        statement('PassRuntimeRoles', 'iam:PassRole', roles, {
-          Condition: {
-            StringEquals: {
-              'iam:PassedToService': [
-                'lambda.amazonaws.com',
-                'states.amazonaws.com',
-                'events.amazonaws.com',
-              ],
-            },
-          },
-        }),
-        {
-          Sid: 'ProtectStableRoles',
-          Effect: 'Deny',
-          Action: 'iam:*',
-          Resource: sharedRoles,
+          Null: { 'events:TargetArn': 'false' },
         },
-      ]),
-    },
-  };
+      }),
+      // The allow patterns above also match <app>-dev* names, and the shared-compute deny
+      // covers resources, not targets, so refuse any shared target explicitly.
+      deny('ProtectSharedTargets', 'events:PutTargets', '*', {
+        Condition: {
+          'ForAnyValue:ArnLike': { 'events:TargetArn': stableResources },
+        },
+      }),
+    ],
+  );
+
+  resources.LocalExecutionPolicy = managedPolicy(
+    'mcc-stats-suite-local-cdk-execution',
+    [
+      statement(
+        'ManageEphemeralReceiptRules',
+        [
+          'ses:CreateReceiptRule',
+          'ses:UpdateReceiptRule',
+          'ses:DeleteReceiptRule',
+          'ses:DescribeReceiptRule',
+          'ses:DescribeReceiptRuleSet',
+        ],
+        '*',
+      ),
+      statement(
+        'ReadLambdaAssets',
+        ['s3:GetObject', 's3:GetBucketLocation'],
+        [
+          { 'Fn::GetAtt': ['StagingBucket', 'Arn'] },
+          sub('${StagingBucket.Arn}/*'),
+        ],
+      ),
+      // Lambda reads the code object with the caller's credentials; the staging bucket uses SSE-KMS.
+      statement('DecryptLambdaAssets', 'kms:Decrypt', '*', {
+        Condition: viaS3,
+      }),
+      statement(
+        'ReadConfiguration',
+        ['kms:DescribeKey', 'iam:GetPolicy', 'iam:GetPolicyVersion'],
+        '*',
+      ),
+      statement(
+        'ReadDeploymentParameters',
+        ['ssm:GetParameter', 'ssm:GetParameters'],
+        deploymentParameters,
+      ),
+      // Roles under the local path exist only through CreateRole with the runtime boundary.
+      statement(
+        'CreateBoundedRoles',
+        ['iam:CreateRole', 'iam:PutRolePermissionsBoundary'],
+        roles,
+        withRuntimeBoundary,
+      ),
+      statement(
+        'ChangeBoundedRolePolicies',
+        [
+          'iam:PutRolePolicy',
+          'iam:DeleteRolePolicy',
+          'iam:AttachRolePolicy',
+          'iam:DetachRolePolicy',
+        ],
+        roles,
+        withRuntimeBoundary,
+      ),
+      statement(
+        'ManageEphemeralRoles',
+        [
+          'iam:GetRole',
+          'iam:DeleteRole',
+          'iam:UpdateAssumeRolePolicy',
+          'iam:ListInstanceProfilesForRole',
+          'iam:GetRolePolicy',
+          'iam:ListRolePolicies',
+          'iam:ListAttachedRolePolicies',
+          'iam:TagRole',
+          'iam:UntagRole',
+          'iam:ListRoleTags',
+          'iam:UpdateRole',
+          'iam:UpdateRoleDescription',
+        ],
+        roles,
+      ),
+      statement('PassRuntimeRoles', 'iam:PassRole', roles, {
+        Condition: {
+          StringEquals: {
+            'iam:PassedToService': [
+              'lambda.amazonaws.com',
+              'states.amazonaws.com',
+              'events.amazonaws.com',
+            ],
+          },
+        },
+      }),
+      deny('ProtectStableRoles', 'iam:*', sharedRoles),
+    ],
+  );
   return result;
 }
 

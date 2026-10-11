@@ -8,11 +8,11 @@ Each application owns a CDK stack per environment:
 <application>-prod      production stack, deployed by GitHub Actions
 ```
 
-`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, and refuses ephemeral deploys inside GitHub Actions.
+`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, and refuses ephemeral deploys inside GitHub Actions. Ephemeral deploys use the local `mcclocal1` bootstrap, which deploys only through CloudFormation change sets named `mcclocal1-deploy`. The wrapper therefore rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`.
 
 ## Ephemeral stacks
 
-Test application changes in an ephemeral stack before opening a pull request. Use the `mcc-dev` profile and a lowercase name of up to 20 characters:
+Test application changes in an ephemeral stack before opening a pull request. Use the `mcc-dev` profile and a name of 1 to 20 lowercase letters, numbers, or hyphens that starts with a letter or number. Names that begin with `dev` or contain `-dev` are reserved for shared resources:
 
 ```console
 aws sso login --profile "$AWS_PROFILE"

@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import {
   APPLICATIONS,
-  LOCAL_TOOLKIT_STACK_NAME,
+  cdkArguments,
   ephemeralNameError,
   localDeployArguments,
 } from './cdk-targets.mjs';
@@ -59,10 +59,9 @@ if (ephemeral && process.env.GITHUB_ACTIONS === 'true') {
 }
 
 // Reject options the local bootstrap cannot run before any AWS call or build.
-let localArguments = [];
 if (ephemeral && action === 'deploy') {
   try {
-    localArguments = localDeployArguments(passthrough);
+    localDeployArguments(passthrough);
   } catch (error) {
     fail(error.message);
   }
@@ -143,37 +142,18 @@ const sharedBuild = spawnSync(
 );
 if (sharedBuild.status !== 0) process.exit(sharedBuild.status ?? 1);
 
-const cdkArguments = [
-  'run',
-  `cdk:${action}`,
-  '--workspace',
-  `@samlevin/${application}`,
-  '--',
-  '-c',
-  `environment=${environment}`,
-];
-if (ephemeral) cdkArguments.push('-c', `ephemeral=${ephemeral}`);
-if (expectedAccount) {
-  cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
-}
-if (profile) cdkArguments.push('--profile', profile);
-if (ephemeral && action === 'deploy') {
-  cdkArguments.push(
-    '--toolkit-stack-name',
-    LOCAL_TOOLKIT_STACK_NAME,
-    ...localArguments,
-  );
-}
-if (
-  application === 'match-to-csv' &&
-  (action === 'deploy' || action === 'diff') &&
-  emailDomain
-) {
-  cdkArguments.push('--parameters', `EmailDomain=${emailDomain}`);
-}
-cdkArguments.push(...passthrough);
+const npmArguments = cdkArguments({
+  action,
+  application,
+  environment,
+  ephemeral,
+  expectedAccount,
+  profile,
+  emailDomain,
+  passthrough,
+});
 
-const command = spawnSync('npm', cdkArguments, {
+const command = spawnSync('npm', npmArguments, {
   stdio: 'inherit',
   env: childEnvironment,
 });

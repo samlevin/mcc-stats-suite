@@ -15,6 +15,8 @@ export interface DeploymentConfig {
   objectPrefix: string;
   workloadBoundaryName: string;
   bootstrapQualifier: string;
+  /** IAM path for every role in an ephemeral stack; undefined for shared stacks. */
+  rolePath?: string;
   isEphemeral: boolean;
   ingressEnabled: boolean;
 }
@@ -45,7 +47,7 @@ export function resolveDeployment(
     }
     if (!INSTANCE_PATTERN.test(requestedEphemeral)) {
       throw new Error(
-        'Development ephemeral deployments require -c ephemeral=<name> using 1-20 lowercase letters, numbers, or hyphens',
+        'Ephemeral names must be 1-20 lowercase letters, numbers, or hyphens, starting with a letter or number',
       );
     }
     // Shared dev resources own every <application>-dev* name, including names such as
@@ -96,6 +98,7 @@ export function resolveDeployment(
       ? 'mcc-stats-suite-local-workload-boundary'
       : 'mcc-stats-suite-workload-boundary',
     bootstrapQualifier: isEphemeral ? 'mcclocal1' : 'hnb659fds',
+    rolePath: isEphemeral ? '/mcc-local/' : undefined,
     isEphemeral,
     ingressEnabled: !isEphemeral,
   };

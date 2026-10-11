@@ -1,0 +1,22 @@
+{
+  "Statement": [
+    {
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": ["Update:Delete", "Update:Replace"],
+      "Resource": [
+        "LogicalResourceId/LocalWorkloadBoundary",
+        "LogicalResourceId/LocalExecutionBoundary",
+        "LogicalResourceId/LocalExecutionPolicy",
+        "LogicalResourceId/LocalExecutionComputePolicy",
+        "LogicalResourceId/LocalExecutionEventsPolicy"
+      ]
+    },
+    {
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "Update:*",
+      "Resource": "*"
+    }
+  ]
+}
