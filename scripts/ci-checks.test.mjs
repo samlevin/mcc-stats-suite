@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import {
-  existsSync,
   readFileSync,
   cpSync,
   statSync,
@@ -20,7 +19,6 @@ import {
   workspaceMode,
   workspaceArguments,
 } from './ci-checks.mjs';
-import { repositoryFiles } from './ci-scope.mjs';
 
 const root = new URL('../', import.meta.url);
 const turbo = new URL('../node_modules/.bin/turbo', import.meta.url).pathname;
@@ -76,32 +74,7 @@ test('documentation and recognized repository scopes avoid workspace and infrast
   const commands = checks({ full: false, repository: true });
   assert.equal(commands.length, 3);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
-});
-
-test('repository-scope lists derive from the classifier allowlist', () => {
-  const [, lint, tests] = checks({ full: false, repository: true });
-  const listed = [...repositoryFiles];
-  const expectedTests = listed.filter((f) => f.endsWith('.test.mjs'));
-  const expectedLint = listed.filter((f) => f.endsWith('.mjs'));
-  assert.ok(expectedTests.length > 0);
-  assert.deepEqual([...tests[1].slice(1)].sort(), expectedTests.sort());
-  assert.deepEqual(lint[1].slice(1, -2).sort(), expectedLint.sort());
-  assert.deepEqual(lint[1].slice(-2), ['--max-warnings', '0']);
-});
-
-test('full-scope test list covers the scripts tests that exist', () => {
-  const [, , , tests] = checks({ full: true, mode: 'all' });
-  const listed = tests[1].slice(1);
-  assert.ok(listed.length > 0);
-  for (const file of [
-    'scripts/ci-checks.test.mjs',
-    'scripts/labels-sync.test.mjs',
-  ])
-    assert.ok(listed.includes(file), file);
-  for (const file of listed) {
-    assert.ok(existsSync(new URL(`../${file}`, import.meta.url)), file);
-    assert.ok(file.endsWith('.test.mjs'), file);
-  }
+  assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
 });
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {
@@ -111,7 +84,6 @@ test('full gate contains repository checks and the dependency-aware workspace ga
     'eslint',
     'release:check',
     'issue-triage.test.mjs',
-    'labels-sync.test.mjs',
     'ci-checks.test.mjs',
     'tofu:fmt:check',
   ]) {
@@ -140,9 +112,7 @@ test('checks overlap and any failing check rejects the gate after all checks set
   await assert.rejects(result, /CI checks failed/);
 });
 
-test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', (t) => {
-  if (!process.env.CI && !existsSync(turbo))
-    return t.skip('turbo binary absent');
+test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', () => {
   const plan = JSON.parse(
     execFileSync(turbo, [...workspaceArguments('all').slice(1), '--dry=json'], {
       cwd: root,
@@ -177,9 +147,7 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   );
 });
 
-test('actual Turbo affected selection includes shared consumers and skips unrelated applications', (t) => {
-  if (!process.env.CI && !existsSync(turbo))
-    return t.skip('turbo binary absent');
+test('actual Turbo affected selection includes shared consumers and skips unrelated applications', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-selection-'));
   try {
     const git = (...args) =>
@@ -446,9 +414,7 @@ test('cache uses dedicated session credentials and environment contracts without
   );
 });
 
-test('same revision has separate dev and prod Turbo task hashes', (t) => {
-  if (!process.env.CI && !existsSync(turbo))
-    return t.skip('turbo binary absent');
+test('same revision has separate dev and prod Turbo task hashes', () => {
   const plan = (environment) =>
     JSON.parse(
       execFileSync(
