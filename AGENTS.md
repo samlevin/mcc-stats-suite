@@ -32,5 +32,4 @@ Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://gi
 
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
 - Issue states: claim and move to `In progress` before coding; move to `In review` when the PR opens. Never mark issues `Done`.
-- `.github/labels.json` lists the labels; the shared core is identical to prismatic's. To change a shared label, edit both repos' files and apply the same change by hand with `gh label create/edit/delete` in both repos.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
