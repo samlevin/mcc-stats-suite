@@ -52,3 +52,17 @@ export function localDeployArguments(passthrough) {
   }
   return [];
 }
+
+const EPHEMERAL_NAME = /^[a-z0-9][a-z0-9-]{0,19}$/;
+
+// Mirrors resolveDeployment in packages/cdk-config so the wrapper fails before any AWS
+// call or build; a cdk-config test keeps the two in step. Returns an error or undefined.
+export function ephemeralNameError(name) {
+  if (!EPHEMERAL_NAME.test(name)) {
+    return 'Development ephemeral deployments require -c ephemeral=<name> using 1-20 lowercase letters, numbers, or hyphens';
+  }
+  if (name.startsWith('dev') || name.includes('-dev')) {
+    return 'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources';
+  }
+  return undefined;
+}

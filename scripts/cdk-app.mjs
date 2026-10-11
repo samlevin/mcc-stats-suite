@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import {
   APPLICATIONS,
   LOCAL_TOOLKIT_STACK_NAME,
+  ephemeralNameError,
   localDeployArguments,
 } from './cdk-targets.mjs';
 
@@ -37,6 +38,10 @@ if (
 }
 if (environment === 'prod' && ephemeral) {
   fail('Production does not support --ephemeral');
+}
+if (ephemeral) {
+  const nameError = ephemeralNameError(ephemeral);
+  if (nameError) fail(nameError);
 }
 if (environment === 'prod' && action === 'destroy') {
   fail('Production destruction is not supported by this command');

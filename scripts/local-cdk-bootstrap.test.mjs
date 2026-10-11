@@ -6,6 +6,7 @@ import { parse } from 'yaml';
 import {
   APPLICATIONS,
   LOCAL_CHANGE_SET_NAME,
+  LOCAL_QUALIFIER,
   localDeployArguments,
 } from './cdk-targets.mjs';
 import { localBootstrap } from './local-cdk-bootstrap.mjs';
@@ -694,4 +695,48 @@ test('ephemeral deploys reject a role ARN option', () => {
     '--change-set-name',
     LOCAL_CHANGE_SET_NAME,
   ]);
+});
+
+test('cdk-config names the same local boundary and qualifier as the bootstrap', () => {
+  const source = readFileSync('packages/cdk-config/src/index.ts', 'utf8');
+  const boundary = resources.LocalWorkloadBoundary.Properties.ManagedPolicyName;
+  assert.ok(source.includes(`'${boundary}'`), boundary);
+  assert.ok(source.includes(`'${LOCAL_QUALIFIER}'`), LOCAL_QUALIFIER);
+});
+
+test('the local permission set reads only the local bootstrap version', () => {
+  const permissionSet = JSON.parse(
+    readFileSync(
+      'docs/self-hosting/policies/local-cdk-deployer-dev.json.template',
+      'utf8',
+    ),
+  );
+  const ssm = permissionSet.Statement.filter((entry) =>
+    [entry.Action].flat().some((action) => action.startsWith('ssm:')),
+  );
+  assert.deepEqual(
+    ssm.map((entry) => entry.Resource),
+    [
+      'arn:aws:ssm:AWS_REGION:DEV_ACCOUNT_ID:parameter/cdk-bootstrap/mcclocal1/version',
+    ],
+  );
+});
+
+test('execution can update ephemeral role settings', () => {
+  for (const action of [
+    'iam:UpdateRole',
+    'iam:UpdateRoleDescription',
+    'iam:ListRoleTags',
+  ]) {
+    assert.equal(
+      allowed(execution, action, role('match-to-csv-alice-ServiceRole-hash')),
+      true,
+      action,
+    );
+    assert.equal(
+      allowed(execution, action, role('match-to-csv-dev-ServiceRole-hash')),
+      false,
+      action,
+    );
+  }
 });

@@ -18,10 +18,15 @@
       "Action": [
         "cloudformation:DescribeStackEvents",
         "cloudformation:DescribeStacks",
-        "cloudformation:GetTemplate",
-        "ssm:GetParameter"
+        "cloudformation:GetTemplate"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "ReadLocalBootstrapVersion",
+      "Effect": "Allow",
+      "Action": "ssm:GetParameter",
+      "Resource": "arn:aws:ssm:AWS_REGION:DEV_ACCOUNT_ID:parameter/cdk-bootstrap/mcclocal1/version"
     }
   ]
 }
