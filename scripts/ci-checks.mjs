@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { appendFileSync, readdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { changedPaths, diffBase, repositoryFiles } from './ci-scope.mjs';
+import { changedPathsSince, diffBase, repositoryFiles } from './ci-scope.mjs';
 
 export function workspaceMode(paths, event) {
   // Root configuration, infrastructure and unknown paths require every workspace.
@@ -98,9 +98,10 @@ async function main() {
     throw new Error('Expected explicit baseline scope flags');
   const full = process.env.CI_FULL === 'true';
   const repository = process.env.CI_REPOSITORY === 'true';
-  const paths = changedPaths(base, head, event);
+  const scmBase = diffBase(base, head, event);
+  const paths = changedPathsSince(scmBase, head);
   const mode = workspaceMode(paths, event);
-  process.env.TURBO_SCM_BASE = diffBase(base, head, event);
+  process.env.TURBO_SCM_BASE = scmBase;
   process.env.TURBO_SCM_HEAD = head;
   console.log(`Workspace validation: ${full ? mode : 'none'}`);
   if (full) {

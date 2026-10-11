@@ -14,6 +14,8 @@ export const repositoryFiles = new Set([
   'scripts/issue-triage.mjs',
   'scripts/issue-triage.test.mjs',
   'scripts/issue-containers.mjs',
+  'scripts/github-rest.mjs',
+  'scripts/github-rest.test.mjs',
   'scripts/labels-sync.mjs',
   'scripts/labels-sync.test.mjs',
 ]);
@@ -37,22 +39,18 @@ export function diffBase(base, head, event) {
     : base;
 }
 
-export function changedPaths(base, head, event) {
+export function changedPathsSince(resolvedBase, head) {
   return execFileSync(
     'git',
-    [
-      'diff',
-      '--name-only',
-      '--no-renames',
-      '-z',
-      diffBase(base, head, event),
-      head,
-      '--',
-    ],
+    ['diff', '--name-only', '--no-renames', '-z', resolvedBase, head, '--'],
     { encoding: 'utf8' },
   )
     .split('\0')
     .filter(Boolean);
+}
+
+export function changedPaths(base, head, event) {
+  return changedPathsSince(diffBase(base, head, event), head);
 }
 
 function main() {
