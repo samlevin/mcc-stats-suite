@@ -11,6 +11,8 @@ import {
 import {
   findUnsafeRemovals,
   parseTemplateBody,
+  stableDeployOptionsError,
+  stackArtifact,
   stackStatusAction,
 } from './stack-migration-guard.mjs';
 
@@ -71,6 +73,13 @@ if (ephemeral && process.env.GITHUB_ACTIONS === 'true') {
   fail('Ephemeral deployments are only allowed from a local developer shell');
 }
 
+// Stable deploys reuse the guard's assembly, so options that change synthesis
+// cannot apply; reject them before any AWS call or build.
+if (!ephemeral && action === 'deploy') {
+  const optionsError = stableDeployOptionsError(passthrough);
+  if (optionsError) fail(optionsError);
+}
+
 // Reject options the local bootstrap cannot run before any AWS call or build.
 if (ephemeral && action === 'deploy') {
   try {
@@ -94,7 +103,7 @@ if (needsAws && !profile && process.env.GITHUB_ACTIONS !== 'true') {
   fail('Export AWS_PROFILE or pass --profile before using AWS');
 }
 if (needsAws && !expectedAccount && profile) {
-  expectedAccount = profileSsoAccount(profile);
+  expectedAccount = profileSsoAccount();
   expectedAccountSource = `AWS_PROFILE=${profile} sso_account_id`;
 }
 if (needsAws && !expectedAccount) {
@@ -124,11 +133,7 @@ if (needsAws) {
     '--output',
     'text',
   ];
-  if (profile) identityArguments.push('--profile', profile);
-  const identity = spawnSync('aws', identityArguments, {
-    encoding: 'utf8',
-    env: childEnvironment,
-  });
+  const identity = awsCli(identityArguments, childEnvironment);
   if (identity.status !== 0) {
     process.stderr.write(identity.stderr ?? '');
     fail('Unable to resolve the active AWS account');
@@ -165,7 +170,7 @@ const targetOptions = {
 };
 const npmArguments = cdkArguments({ ...targetOptions, action, passthrough });
 if (action === 'deploy' && !ephemeral) {
-  refuseUnsafeRemovals(`${application}-${environment}`);
+  refuseUnsafeRemovals();
   // Deploy the assembly the guard just synthesized instead of bundling again.
   npmArguments.push('--app', 'cdk.out');
 }
@@ -214,8 +219,8 @@ function environmentFromProfile(profile) {
 // is only safe after a release that retains it has reached the stack.
 // The deploy always uses the assembly synthesized here, even when there is no
 // deployed template to compare against.
-function refuseUnsafeRemovals(stackName) {
-  const nextTemplate = synthesizedTemplate(stackName);
+function refuseUnsafeRemovals() {
+  const { stackName, template: nextTemplate } = synthesizedStack();
   const liveTemplate = deployedTemplate(stackName);
   if (!liveTemplate) return;
   const problems = findUnsafeRemovals(liveTemplate, nextTemplate);
@@ -224,7 +229,7 @@ function refuseUnsafeRemovals(stackName) {
     [
       `Refusing deploy: ${stackName} would lose resources that its deployed template does not retain.`,
       ...problems.map((problem) => `  - ${problem}`),
-      'Retain each resource, or drop its delete call, in a release that keeps its logical ID. Deploy that release, then remove the resource in the next one.',
+      'Retain each resource, or drop its delete call, in a release that keeps its logical ID and properties. Deploy that release, then remove or replace the resource in the next one.',
     ].join('\n'),
   );
 }
@@ -251,7 +256,10 @@ function deployedTemplate(stackName) {
   }
   const stackStatus = status.stdout.trim();
   const statusAction = stackStatusAction(stackStatus);
-  if (statusAction === 'skip') return undefined;
+  if (statusAction === 'skip') {
+    if (stackStatus === 'ROLLBACK_COMPLETE') allowReplacement(stackName);
+    return undefined;
+  }
   if (statusAction === 'refuse') {
     guardFail(
       `${stackName} is ${stackStatus}; wait for it to settle, then redeploy`,
@@ -276,7 +284,31 @@ function deployedTemplate(stackName) {
   }
 }
 
-function synthesizedTemplate(stackName) {
+// A first create that rolled back owns no resources, and cdk deploy deletes it
+// before creating it again. Stable stacks are created with termination
+// protection, which would block that delete, so lift it on this stack only.
+function allowReplacement(stackName) {
+  const result = awsCli([
+    'cloudformation',
+    'update-termination-protection',
+    '--no-enable-termination-protection',
+    '--stack-name',
+    stackName,
+  ]);
+  if (result.status !== 0) {
+    process.stderr.write(result.stderr ?? '');
+    guardFail(
+      `unable to lift termination protection on rolled-back ${stackName}`,
+    );
+  }
+  process.stdout.write(
+    `${stackName} is ROLLBACK_COMPLETE; lifted its termination protection so the deploy can replace it\n`,
+  );
+}
+
+// Synthesizes the stack the deploy targets and reads its name and template
+// from the cloud assembly, so the guard never rebuilds the stack name.
+function synthesizedStack() {
   const synth = spawnSync(
     'npm',
     [
@@ -286,32 +318,37 @@ function synthesizedTemplate(stackName) {
     { stdio: 'inherit', env: childEnvironment },
   );
   if (synth.status !== 0) process.exit(synth.status ?? 1);
-  const templatePath = fileURLToPath(
-    new URL(
-      `../applications/${application}/cdk.out/${stackName}.template.json`,
-      import.meta.url,
-    ),
+  const assembly = fileURLToPath(
+    new URL(`../applications/${application}/cdk.out/`, import.meta.url),
   );
   try {
-    return JSON.parse(readFileSync(templatePath, 'utf8'));
+    const { stackName, templateFile } = stackArtifact(
+      JSON.parse(readFileSync(`${assembly}manifest.json`, 'utf8')),
+    );
+    return {
+      stackName,
+      template: JSON.parse(readFileSync(`${assembly}${templateFile}`, 'utf8')),
+    };
   } catch (error) {
-    guardFail(`unable to read ${templatePath}: ${error.message}`);
+    guardFail(
+      `unable to read the cloud assembly in ${assembly}: ${error.message}`,
+    );
   }
 }
 
-function awsCli(commandArguments) {
+// Every AWS CLI call goes through here so the profile is applied one way.
+function awsCli(commandArguments, environmentVariables = childEnvironment) {
   const profileArguments = profile ? ['--profile', profile] : [];
   return spawnSync('aws', [...commandArguments, ...profileArguments], {
     encoding: 'utf8',
-    env: childEnvironment,
+    env: environmentVariables,
   });
 }
 
-function profileSsoAccount(profile) {
-  const configured = spawnSync(
-    'aws',
-    ['configure', 'get', 'sso_account_id', '--profile', profile],
-    { encoding: 'utf8', env: process.env },
+function profileSsoAccount() {
+  const configured = awsCli(
+    ['configure', 'get', 'sso_account_id'],
+    process.env,
   );
   return configured.status === 0 ? configured.stdout.trim() : undefined;
 }
