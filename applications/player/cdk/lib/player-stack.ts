@@ -1,5 +1,5 @@
-import { CfnOutput, Stack, Tags, type StackProps } from 'aws-cdk-lib';
-import type { Construct } from 'constructs';
+import { Aspects, CfnOutput, Stack, Tags, type StackProps } from 'aws-cdk-lib';
+import type { Construct, IConstruct } from 'constructs';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import * as iam from 'aws-cdk-lib/aws-iam';
 
@@ -17,6 +17,16 @@ export class PlayerStack extends Stack {
         props.deployment.workloadBoundaryName,
       ),
     );
+    // Ephemeral roles live under the local role path, the only path the local bootstrap
+    // lets CloudFormation create, change, or pass.
+    const rolePath = props.deployment.rolePath;
+    if (rolePath) {
+      Aspects.of(this).add({
+        visit(node: IConstruct) {
+          if (node instanceof iam.CfnRole) node.path = rolePath;
+        },
+      });
+    }
     Tags.of(this).add('Application', 'player');
     Tags.of(this).add('Environment', props.deployment.environment);
     if (props.deployment.ephemeral) {

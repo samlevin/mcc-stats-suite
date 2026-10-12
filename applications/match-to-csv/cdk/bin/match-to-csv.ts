@@ -8,6 +8,9 @@ const app = new cdk.App();
 const deployment = resolveDeployment(app.node, 'match-to-csv');
 new MatchToCsvStack(app, deployment.stackName, {
   deployment,
+  synthesizer: new cdk.DefaultStackSynthesizer({
+    qualifier: deployment.bootstrapQualifier,
+  }),
   env: {
     account: deployment.account,
     region: deployment.region,

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import {
+  APPLICATIONS,
+  cdkArguments,
+  ephemeralNameError,
+  localDeployArguments,
+} from './cdk-targets.mjs';
 
-const applications = new Set([
-  'admin',
-  'data-pipeline',
-  'match-to-csv',
-  'ocr-quality',
-  'player',
-]);
+const applications = new Set(APPLICATIONS);
 const actions = new Set(['synth', 'diff', 'deploy', 'destroy']);
 
 const [action, application, ...rawArguments] = process.argv.slice(2);
@@ -39,6 +39,10 @@ if (
 if (environment === 'prod' && ephemeral) {
   fail('Production does not support --ephemeral');
 }
+if (ephemeral) {
+  const nameError = ephemeralNameError(ephemeral);
+  if (nameError) fail(nameError);
+}
 if (environment === 'prod' && action === 'destroy') {
   fail('Production destruction is not supported by this command');
 }
@@ -52,6 +56,15 @@ if (!ephemeral && action === 'deploy') {
 }
 if (ephemeral && process.env.GITHUB_ACTIONS === 'true') {
   fail('Ephemeral deployments are only allowed from a local developer shell');
+}
+
+// Reject options the local bootstrap cannot run before any AWS call or build.
+if (ephemeral && action === 'deploy') {
+  try {
+    localDeployArguments(passthrough);
+  } catch (error) {
+    fail(error.message);
+  }
 }
 
 const accountVariable =
@@ -129,30 +142,18 @@ const sharedBuild = spawnSync(
 );
 if (sharedBuild.status !== 0) process.exit(sharedBuild.status ?? 1);
 
-const cdkArguments = [
-  'run',
-  `cdk:${action}`,
-  '--workspace',
-  `@samlevin/${application}`,
-  '--',
-  '-c',
-  `environment=${environment}`,
-];
-if (ephemeral) cdkArguments.push('-c', `ephemeral=${ephemeral}`);
-if (expectedAccount) {
-  cdkArguments.push('-c', `expectedAccount=${expectedAccount}`);
-}
-if (profile) cdkArguments.push('--profile', profile);
-if (
-  application === 'match-to-csv' &&
-  (action === 'deploy' || action === 'diff') &&
-  emailDomain
-) {
-  cdkArguments.push('--parameters', `EmailDomain=${emailDomain}`);
-}
-cdkArguments.push(...passthrough);
+const npmArguments = cdkArguments({
+  action,
+  application,
+  environment,
+  ephemeral,
+  expectedAccount,
+  profile,
+  emailDomain,
+  passthrough,
+});
 
-const command = spawnSync('npm', cdkArguments, {
+const command = spawnSync('npm', npmArguments, {
   stdio: 'inherit',
   env: childEnvironment,
 });

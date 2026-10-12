@@ -93,7 +93,7 @@ aws sts get-caller-identity
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
 
-The deployment harness checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and `--ephemeral`.
+The deployment harness checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and `--ephemeral`. Ephemeral names are 1 to 20 lowercase letters, numbers, or hyphens; names that begin with `dev` or contain `-dev` are reserved for shared resources.
 
 Never commit credentials, account IDs, email addresses, domain names, populated `backend.hcl`, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
 
