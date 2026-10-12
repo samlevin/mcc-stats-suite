@@ -8,7 +8,9 @@ Each application owns a CDK stack per environment:
 <application>-prod      production stack, deployed by GitHub Actions
 ```
 
-`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, and refuses ephemeral deploys inside GitHub Actions. Ephemeral deploys use the local `mcclocal1` bootstrap, which deploys only through CloudFormation change sets named `mcclocal1-deploy`. The wrapper therefore rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`.
+`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, refuses ephemeral deploys inside GitHub Actions, and refuses to destroy a stable stack. Ephemeral deploys use the local `mcclocal1` bootstrap, which deploys only through CloudFormation change sets named `mcclocal1-deploy`. The wrapper therefore rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`.
+
+Before a stable deploy, the wrapper synthesizes the release and compares it with the deployed template. It refuses to remove, by logical ID, a stateful resource or a custom resource with a delete call that the deployed template does not retain, and it refuses while the stack is still updating; see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure). The check runs from the revision being deployed, so a rollback to a release from before the check runs without it.
 
 ## Ephemeral stacks
 

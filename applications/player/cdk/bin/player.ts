@@ -12,5 +12,5 @@ new PlayerStack(app, deployment.stackName, {
     qualifier: deployment.bootstrapQualifier,
   }),
   env: { account: deployment.account, region: deployment.region },
-  terminationProtection: deployment.environment === 'prod',
+  terminationProtection: !deployment.isEphemeral,
 });
