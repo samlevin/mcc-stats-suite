@@ -9,7 +9,6 @@ const repositoryFiles = new Set([
   '.github/CODEOWNERS',
   'CODEOWNERS',
   'LICENSE',
-  '.github/workflows/branch-name.yml',
   'scripts/branch-name.mjs',
   'scripts/branch-name.test.mjs',
   'scripts/issue-triage.mjs',

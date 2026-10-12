@@ -1,4 +1,3 @@
-import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { REPOSITORY, ghRest } from './issue-triage.mjs';
 
@@ -11,7 +10,6 @@ const ACTOR = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
 const CANONICAL = new RegExp(
   `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/${NUMBER}-(?!part-[0-9]+(?:-|$))[a-z0-9]+(?:-(?!part-[0-9]+(?:-|$))[a-z0-9]+)*(?:-part-(?:[2-9]|[1-9][0-9]+))?$`,
 );
-const EXEMPT = [/^release-please--/, /^dependabot\//];
 
 export function slugify(title) {
   const words = String(title)
@@ -44,10 +42,6 @@ export function isCanonicalBranch(name) {
   return typeof name === 'string' && CANONICAL.test(name);
 }
 
-export function isExemptBranch(name) {
-  return EXEMPT.some((pattern) => pattern.test(name));
-}
-
 export function branchName({ issue, title, actor = 'agent', layer = 1 }) {
   if (!POSITIVE_INTEGER.test(String(issue)))
     throw new Error('Issue must be a positive number');
@@ -61,69 +55,30 @@ export function branchName({ issue, title, actor = 'agent', layer = 1 }) {
 }
 
 export function parseArguments(argv) {
-  const options = {
-    actor: 'agent',
-    layer: 1,
-    check: false,
-    requireIssue: false,
-  };
+  const options = { actor: 'agent', layer: 1 };
   const positional = [];
-  let actorGiven = false;
-  let layerGiven = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
-    if (argument === '--check') options.check = true;
-    else if (argument === '--require-issue') options.requireIssue = true;
-    else if (argument === '--actor' || argument === '--layer') {
+    if (argument === '--actor' || argument === '--layer') {
       const value = argv[++index];
       if (value === undefined || value.startsWith('--'))
         throw new Error(`Option ${argument} requires a value`);
-      if (argument === '--actor') {
-        options.actor = value;
-        actorGiven = true;
-      } else {
+      if (argument === '--actor') options.actor = value;
+      else {
         if (!POSITIVE_INTEGER.test(value))
           throw new Error('--layer requires a positive integer');
         options.layer = Number(value);
-        layerGiven = true;
       }
     } else if (argument.startsWith('--'))
       throw new Error(`Unknown option ${argument}`);
     else positional.push(argument);
   }
   if (positional.length > 1) throw new Error('Too many arguments');
-  if (options.requireIssue && !options.check)
-    throw new Error('--require-issue needs --check');
-  if (options.check && (actorGiven || layerGiven))
-    throw new Error('--actor and --layer only apply when generating');
   options.value = positional[0];
   return options;
 }
 
-function currentBranch() {
-  let name;
-  try {
-    name = execFileSync('git', ['branch', '--show-current'], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch (cause) {
-    throw new Error('Not inside a git work tree', { cause });
-  }
-  if (!name)
-    throw new Error('No branch is checked out; pass a name to --check');
-  return name;
-}
-
-// Splits a canonical name into its issue number and slug, without the layer.
-export function parseBranch(name) {
-  const [, number, slug] = name
-    .slice(name.indexOf('/') + 1)
-    .match(new RegExp(`^(${NUMBER})-(.+?)(?:-part-[0-9]+)?$`));
-  return { number, slug };
-}
-
-// Returns an open issue with a title, or throws a readable error.
+// Returns an issue with a title, or throws a readable error.
 function lookupIssue(api, number) {
   let found;
   try {
@@ -137,34 +92,17 @@ function lookupIssue(api, number) {
     throw new Error(`Issue #${number} was not found`);
   if (found.pull_request)
     throw new Error(`#${number} is a pull request, not an issue`);
-  if (found.state !== 'open') throw new Error(`Issue #${number} is not open`);
   if (typeof found.title !== 'string' || !found.title.trim())
     throw new Error(`Issue #${number} has no title`);
   return found;
 }
 
-export function run(argv, { current = currentBranch, api = ghRest } = {}) {
+export function run(argv, { api = ghRest } = {}) {
   const options = parseArguments(argv);
-  if (options.check) {
-    const name = options.value ?? current();
-    if (isExemptBranch(name))
-      return `Skipping the branch name check for automation branch ${name}`;
-    if (!isCanonicalBranch(name))
-      throw new Error(
-        `Branch "${name}" must be <actor>/<issue>-<slug>[-part-N]; run: node scripts/branch-name.mjs <issue>`,
-      );
-    if (options.requireIssue) {
-      const { number, slug } = parseBranch(name);
-      const { title } = lookupIssue(api, number);
-      if (slug !== slugify(title))
-        throw new Error(
-          `Branch "${name}" does not match the title of issue #${number}; run: node scripts/branch-name.mjs ${number}`,
-        );
-    }
-    return `Branch ${name} is valid`;
-  }
   if (!options.value)
-    throw new Error('Usage: branch-name.mjs <issue> | --check [name]');
+    throw new Error(
+      'Usage: branch-name.mjs <issue> [--layer <n>] [--actor <login>]',
+    );
   if (!POSITIVE_INTEGER.test(options.value))
     throw new Error('Issue must be a positive number');
   const { title } = lookupIssue(api, options.value);

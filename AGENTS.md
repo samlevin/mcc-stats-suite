@@ -31,6 +31,15 @@ Issue tracker: GitHub Issues. This marker turns on the GitHub issue flows (`impl
 Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://github.com/users/samlevin/projects/1). Discover project field IDs with `gh`.
 
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
-- Branches are `<actor>/<issue>-<slug>`, actor `agent`. Run `node scripts/branch-name.mjs <issue>` (`--layer <n>` for stacked layers) and rename the worktree branch to its output before the first commit; never pick a name by hand. CI rejects other names. Branches opened before this rule fail the check on their next push; after that, rename the branch on GitHub with `gh api -X POST repos/<repo>/branches/<old>/rename -f new_name=<new>` so the PR survives, then close and reopen the PR to re-run the check, because a rename emits no pull_request event. Never push a new branch and delete the old one: that closes the PR for good.
 - Issue states: claim and move to `In progress` before coding; move to `In review` when the PR opens. Never mark issues `Done`.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
+
+## Branch names
+
+Every branch an agent pushes is named `agent/<issue>-<slug>`, and stacked layers after the first end in `-part-<n>`:
+
+- `<issue>` is the number of the leaf issue the PR closes, without `#`.
+- `<slug>` is that issue's title in lowercase, with accents dropped and every run of other characters turned into `-`. "Part N" in the title becomes `partN`. The slug is cut to 40 characters at a word boundary, and is `issue` when the title has no ASCII letters or digits.
+- Examples: `agent/48-generate-and-enforce-branch-names-from` for #48, and `agent/48-generate-and-enforce-branch-names-from-part-2` for its second stacked layer.
+
+Never type a branch name by hand. Print it with `node scripts/branch-name.mjs <issue>`, adding `--layer <n>` for layer 2 and up. Create the branch with that name, or run `git branch -m <name>` when your tool created the worktree branch under another name. Do this before the first commit. Once a branch is pushed, keep its name, even if the issue title changes later. Nothing in CI checks branch names, so following this rule is up to you.

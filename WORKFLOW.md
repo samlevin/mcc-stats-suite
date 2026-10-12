@@ -34,7 +34,7 @@ Without write access to the repository, you cannot assign yourself or change pro
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
-People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. CI checks the name, that the issue is open, and that the slug matches its current title. Branches opened before this rule fail the check on their next push; after that, rename the branch on GitHub with `gh api -X POST repos/<repo>/branches/<old>/rename -f new_name=<new>` so the PR survives, then close and reopen the PR to re-run the check, because a rename emits no pull_request event. Never push a new branch and delete the old one: that closes the PR for good.
+People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. AGENTS.md describes the slug rules.
 
 ## Pull requests and review
 
