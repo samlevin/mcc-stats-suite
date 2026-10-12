@@ -113,7 +113,7 @@ An `AccessDenied` that names `cdk-mcclocal1-cfn-exec-role` during a deploy, or `
 
 Use a disposable dev account and never run destructive denial probes against shared dev. Sign in with the local permission set and verify the identity, then:
 
-1. Deploy, diff, and destroy `match-to-csv-<name>` through the wrapper, once with a 20-character name so generated resource names keep the application prefix. Send a message to `submit+<name>@<domain>` and confirm the workflow runs.
+1. Deploy, diff, and destroy `match-to-csv-e-<name>` through the wrapper, once with a 20-character name so generated resource names keep the application prefix. Send a message to `submit+<name>@<domain>` and confirm the workflow runs.
 2. Run `cdk deploy` and `cdk destroy` targeting `admin-dev`, and `aws cloudformation update-stack` and `delete-stack` targeting every `<application>-dev`. Each write must return `AccessDenied`.
 3. In policy simulation, check that `ExecuteChangeSet` for `cdk-deploy-change-set` is denied. Also check the execution role: it must be denied passing the default execution role, removing a runtime boundary, creating a role outside `/mcc-local/` or without the local boundary, and putting an EventBridge target on a `*-dev*` resource.
 4. Run `cdk bootstrap --qualifier mcclocal1 --toolkit-stack-name CDKToolkitLocal` without `--template` and confirm the stack policy rejects the update.

@@ -1149,6 +1149,16 @@ async function synthesize(app, context) {
 }
 // The longest allowed name checks that generated names keep the application prefix.
 const longName = 'a'.repeat(20);
+const STACK_NAME_KEPT = 25;
+
+test('every application prefix survives CloudFormation name truncation', () => {
+  for (const app of APPLICATIONS) {
+    assert.ok(
+      `${app}-e-`.length <= STACK_NAME_KEPT,
+      `${app}-e- would be cut from generated names; shorten the application name`,
+    );
+  }
+});
 const synthesized = Promise.all([
   ...APPLICATIONS.map((app) =>
     synthesize(app, { environment: 'dev', ephemeral: longName }),
@@ -1227,9 +1237,17 @@ test('every match-to-csv ephemeral resource falls under the local execution poli
   const templates = await synthesized;
   const { stackName, template: synthesizedTemplate } =
     templates[APPLICATIONS.indexOf('match-to-csv')];
-  // CloudFormation names unnamed resources <stack>-<logical id>-<suffix>, up to 64 characters.
-  const generated = (logicalId) =>
-    `${stackName}-${logicalId}`.slice(0, 51) + '-ABCDEFGHIJKL';
+  // CloudFormation names unnamed resources <stack>-<logical id>-<suffix>, up to
+  // 64 characters. Its truncation is undocumented, so assume the worst observed:
+  // a long stack name keeps only its first STACK_NAME_KEPT characters.
+  const generated = (logicalId) => {
+    const full = `${stackName}-${logicalId}`;
+    const kept =
+      full.length <= 51
+        ? full
+        : `${stackName.slice(0, STACK_NAME_KEPT)}-${logicalId}`.slice(0, 51);
+    return `${kept}-ABCDEFGHIJKL`;
+  };
   const names = new Map(
     Object.entries(synthesizedTemplate.Resources)
       .filter(
