@@ -11,19 +11,20 @@ Give `prod` at least one required reviewer and disable administrator bypass. The
 
 ## Variables and secrets
 
-Every value comes from the bootstrap outputs or your own configuration. Store identifiers as variables. None of them is an AWS credential; Terrateam and GitHub Actions get short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
+Every value comes from the bootstrap outputs or your own configuration. Store identifiers as variables, except the inbound email domain, which is a secret: the Terrateam workflow prints its environment's variables in a public log, and GitHub masks secret values. None of them is an AWS credential; Terrateam and GitHub Actions get short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
 
 | Scope | Name | Kind | Value | Used by |
 | --- | --- | --- | --- | --- |
 | `dev` environment | `AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | application deploys |
 | `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | variable | dev `cdk_deploy_role_arn` | application deploys |
 | `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
-| `dev` environment | `MCC_EMAIL_DOMAIN` | variable | verified SES domain | `match-to-csv` deploys |
 | `infra/foundation-dev` environment | `DEV_TERRATEAM_ROLE_ARN` | variable | dev `terrateam_role_arn` | Terrateam |
 | `infra/foundation-dev` environment | `DEV_TOFU_STATE_BUCKET` | variable | dev `state_bucket_name` | Terrateam |
 | `infra/foundation-dev` environment | `DEV_AWS_REGION` | variable | workload Region | Terrateam |
-| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION`, `MCC_EMAIL_DOMAIN` | variables | prod equivalents of the dev values | application deploys |
+| `infra/foundation-dev` environment | `DEV_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives dev email, in lowercase | Terrateam, for the shared receipt rule |
+| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION` | variables | prod equivalents of the dev values | application deploys |
 | `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values | Terrateam |
+| `infra/foundation-prod` environment | `PROD_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives prod email, in lowercase | Terrateam, for the shared receipt rule |
 | repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | Turbo cache in `main` CI |
 | repository | `DEV_AWS_REGION` | variable | workload Region | Turbo cache in `main` CI |
 | repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, when the repository uses immutable OIDC subjects | Terrateam, for the Turbo cache role trust |

@@ -100,6 +100,10 @@ workflows:
       - type: env
         name: TF_VAR_github_oidc_subject_repository
         cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
+      - type: env
+        name: TF_VAR_email_domain
+        cmd: ['echo', '${DEV_MCC_EMAIL_DOMAIN}']
+        sensitive: true
       - type: plan
     apply:
       - type: oidc
@@ -115,6 +119,10 @@ workflows:
       - type: env
         name: TF_VAR_github_oidc_subject_repository
         cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
+      - type: env
+        name: TF_VAR_email_domain
+        cmd: ['echo', '${DEV_MCC_EMAIL_DOMAIN}']
+        sensitive: true
       - type: apply
 
   - tag_query: 'prod'
@@ -133,6 +141,10 @@ workflows:
       - type: env
         name: TF_VAR_github_oidc_subject_repository
         cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
+      - type: env
+        name: TF_VAR_email_domain
+        cmd: ['echo', '${PROD_MCC_EMAIL_DOMAIN}']
+        sensitive: true
       - type: plan
     apply:
       - type: oidc
@@ -148,4 +160,8 @@ workflows:
       - type: env
         name: TF_VAR_github_oidc_subject_repository
         cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
+      - type: env
+        name: TF_VAR_email_domain
+        cmd: ['echo', '${PROD_MCC_EMAIL_DOMAIN}']
+        sensitive: true
       - type: apply

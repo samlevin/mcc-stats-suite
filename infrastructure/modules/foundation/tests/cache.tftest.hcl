@@ -30,6 +30,10 @@ override_resource {
   values = { arn = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000" }
 }
 
+variables {
+  email_domain = "mail.example.com"
+}
+
 run "dev_secure_defaults" {
   command = plan
   plan_options { refresh = false }

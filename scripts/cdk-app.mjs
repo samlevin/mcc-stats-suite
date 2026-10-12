@@ -13,8 +13,10 @@ const actions = new Set(['synth', 'diff', 'deploy', 'destroy']);
 const [action, application, ...rawArguments] = process.argv.slice(2);
 if (!actions.has(action) || !applications.has(application)) {
   fail(
-    'Usage: npm run app:<synth|diff|deploy|destroy> -- <application> ' +
-      '[--environment <dev|prod>] [--ephemeral <name>] [--profile <profile>]',
+    'Usage: npm run app:<synth|diff|deploy> -- <application> ' +
+      '[--environment <dev|prod>] [--ephemeral <name>] [--profile <profile>]\n' +
+      '       npm run app:destroy -- <application> --environment dev ' +
+      '--ephemeral <name> [--profile <profile>]',
   );
 }
 
@@ -43,8 +45,12 @@ if (ephemeral) {
   const nameError = ephemeralNameError(ephemeral);
   if (nameError) fail(nameError);
 }
-if (environment === 'prod' && action === 'destroy') {
-  fail('Production destruction is not supported by this command');
+if (action === 'destroy' && !ephemeral) {
+  fail(
+    'Only ephemeral stacks can be destroyed. Stable stacks deploy from main ' +
+      'through GitHub Actions and have termination protection. ' +
+      'Pass --ephemeral <name>',
+  );
 }
 if (!ephemeral && action === 'deploy') {
   if (process.env.CI !== 'true' || process.env.GITHUB_ACTIONS !== 'true') {
@@ -69,10 +75,6 @@ if (ephemeral && action === 'deploy') {
 
 const accountVariable =
   environment === 'dev' ? 'MCC_DEV_ACCOUNT_ID' : 'MCC_PROD_ACCOUNT_ID';
-const emailDomain = process.env.MCC_EMAIL_DOMAIN;
-if (application === 'match-to-csv' && action === 'deploy' && !emailDomain) {
-  fail('Export MCC_EMAIL_DOMAIN before deploying match-to-csv');
-}
 let expectedAccount = process.env[accountVariable];
 let expectedAccountSource = accountVariable;
 const needsAws = action !== 'synth';
@@ -81,7 +83,7 @@ if (needsAws && !profile && process.env.GITHUB_ACTIONS !== 'true') {
   fail('Export AWS_PROFILE or pass --profile before using AWS');
 }
 if (needsAws && !expectedAccount && profile) {
-  expectedAccount = profileSsoAccount(profile);
+  expectedAccount = profileSsoAccount();
   expectedAccountSource = `AWS_PROFILE=${profile} sso_account_id`;
 }
 if (needsAws && !expectedAccount) {
@@ -111,11 +113,7 @@ if (needsAws) {
     '--output',
     'text',
   ];
-  if (profile) identityArguments.push('--profile', profile);
-  const identity = spawnSync('aws', identityArguments, {
-    encoding: 'utf8',
-    env: childEnvironment,
-  });
+  const identity = awsCli(identityArguments, childEnvironment);
   if (identity.status !== 0) {
     process.stderr.write(identity.stderr ?? '');
     fail('Unable to resolve the active AWS account');
@@ -142,16 +140,14 @@ const sharedBuild = spawnSync(
 );
 if (sharedBuild.status !== 0) process.exit(sharedBuild.status ?? 1);
 
-const npmArguments = cdkArguments({
-  action,
+const targetOptions = {
   application,
   environment,
   ephemeral,
   expectedAccount,
   profile,
-  emailDomain,
-  passthrough,
-});
+};
+const npmArguments = cdkArguments({ ...targetOptions, action, passthrough });
 
 const command = spawnSync('npm', npmArguments, {
   stdio: 'inherit',
@@ -192,11 +188,19 @@ function environmentFromProfile(profile) {
   return undefined;
 }
 
-function profileSsoAccount(profile) {
-  const configured = spawnSync(
-    'aws',
-    ['configure', 'get', 'sso_account_id', '--profile', profile],
-    { encoding: 'utf8', env: process.env },
+// Every AWS CLI call goes through here so the profile is applied one way.
+function awsCli(commandArguments, environmentVariables = childEnvironment) {
+  const profileArguments = profile ? ['--profile', profile] : [];
+  return spawnSync('aws', [...commandArguments, ...profileArguments], {
+    encoding: 'utf8',
+    env: environmentVariables,
+  });
+}
+
+function profileSsoAccount() {
+  const configured = awsCli(
+    ['configure', 'get', 'sso_account_id'],
+    process.env,
   );
   return configured.status === 0 ? configured.stdout.trim() : undefined;
 }

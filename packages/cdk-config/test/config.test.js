@@ -19,7 +19,7 @@ test('creates an isolated ephemeral deployment in dev', () => {
 
   assert.equal(deployment.stackName, 'match-to-csv-e-sam');
   assert.equal(deployment.objectPrefix, 'ephemeral/sam');
-  assert.equal(deployment.ingressEnabled, false);
+  assert.equal(deployment.terminationProtection, false);
   assert.equal(deployment.bootstrapQualifier, 'mcclocal1');
   assert.equal(
     deployment.workloadBoundaryName,
@@ -43,7 +43,7 @@ test('uses one dev-qualified deployment for integration and smoke tests', () => 
   );
   assert.equal(deployment.rolePath, undefined);
   assert.equal(deployment.isEphemeral, false);
-  assert.equal(deployment.ingressEnabled, true);
+  assert.equal(deployment.terminationProtection, true);
 });
 
 test('uses one production-qualified deployment', () => {
@@ -55,7 +55,6 @@ test('uses one production-qualified deployment', () => {
 
   assert.equal(deployment.stackName, 'player-prod');
   assert.equal(deployment.ephemeral, undefined);
-  assert.equal(deployment.ingressEnabled, true);
 });
 
 test('rejects production ephemeral deployments', () => {
@@ -67,6 +66,18 @@ test('rejects production ephemeral deployments', () => {
         {},
       ),
     /does not support/,
+  );
+});
+
+test('rejects prod as an ephemeral name', () => {
+  assert.throws(
+    () =>
+      resolveDeployment(
+        context({ environment: 'dev', ephemeral: 'prod' }),
+        'match-to-csv',
+        {},
+      ),
+    /would name a dev stack like the production stack/,
   );
 });
 

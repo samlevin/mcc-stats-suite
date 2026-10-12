@@ -3,7 +3,6 @@ import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
   Aspects,
   CfnOutput,
-  CfnParameter,
   Duration,
   Fn,
   Stack,
@@ -24,17 +23,18 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import * as customResources from 'aws-cdk-lib/custom-resources';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
+  /** Commit recorded in Lambda environments and OCR evidence. */
+  gitSha: string;
 }
 
 export class MatchToCsvStack extends Stack {
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
-    const { deployment } = props;
+    const { deployment, gitSha } = props;
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -62,7 +62,7 @@ export class MatchToCsvStack extends Stack {
       OBJECT_PREFIX: deployment.objectPrefix,
     };
     const buildEnvironment = {
-      GIT_SHA: process.env.GITHUB_SHA ?? process.env.GIT_SHA ?? 'local',
+      GIT_SHA: gitSha,
       DEPLOYMENT_ENVIRONMENT: deployment.environment.toUpperCase(),
     };
     const rawEmailBucket = s3.Bucket.fromBucketName(
@@ -279,75 +279,38 @@ export class MatchToCsvStack extends Stack {
       }),
     );
 
-    const emailDomain = new CfnParameter(this, 'EmailDomain', {
-      type: 'String',
-      description: 'Verified SES domain used for inbound match-to-CSV email',
-      allowedPattern: '^[A-Za-z0-9.-]+$',
-    });
-    const recipient = Fn.join('', [
-      !deployment.ephemeral ? 'submit@' : `submit+${deployment.ephemeral}@`,
-      emailDomain.valueAsString,
-    ]);
-    const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
-    let receiptRuleSet: ses.CfnReceiptRuleSet | undefined;
-    if (!deployment.isEphemeral) {
-      receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
-        ruleSetName: receiptRuleSetName,
-      });
-    }
-    const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
-      ruleSetName: receiptRuleSetName,
-      rule: {
-        name: deployment.resourcePrefix,
-        enabled: true,
-        recipients: [recipient],
-        scanEnabled: true,
-        tlsPolicy: 'Optional',
-        actions: [
-          {
-            s3Action: {
-              bucketName: rawEmailBucket.bucketName,
-              objectKeyPrefix: inboundPrefix,
-            },
-          },
-          { stopAction: { scope: 'RuleSet' } },
-        ],
-      },
-    });
-    if (receiptRuleSet) {
-      receiptRule.node.addDependency(receiptRuleSet);
-      const activateRules = new customResources.AwsCustomResource(
+    // The foundation owns the receipt rule set, its activation, and the shared
+    // submit@ rule. An ephemeral stack adds only its own plus-addressed rule.
+    if (deployment.ephemeral) {
+      // The foundation publishes the domain its shared rule serves, so the
+      // plus-addressed rule cannot drift from it.
+      const emailDomain = ssm.StringParameter.valueForStringParameter(
         this,
-        'ActivateReceiptRuleSet',
-        {
-          onCreate: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: { RuleSetName: receiptRuleSetName },
-            physicalResourceId:
-              customResources.PhysicalResourceId.of(receiptRuleSetName),
-          },
-          onUpdate: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: { RuleSetName: receiptRuleSetName },
-            physicalResourceId:
-              customResources.PhysicalResourceId.of(receiptRuleSetName),
-          },
-          onDelete: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: {},
-          },
-          policy: customResources.AwsCustomResourcePolicy.fromSdkCalls({
-            resources: customResources.AwsCustomResourcePolicy.ANY_RESOURCE,
-          }),
-        },
+        `${prefix}/email-domain`,
       );
-      activateRules.node.addDependency(receiptRule);
-
-      new CfnOutput(this, 'ReceiptRuleSetName', {
-        value: receiptRuleSetName,
+      new ses.CfnReceiptRule(this, 'StoreRawEmail', {
+        ruleSetName: ssm.StringParameter.valueForStringParameter(
+          this,
+          `${prefix}/receipt-rule-set-name`,
+        ),
+        rule: {
+          name: deployment.resourcePrefix,
+          enabled: true,
+          recipients: [
+            Fn.join('', [`submit+${deployment.ephemeral}@`, emailDomain]),
+          ],
+          scanEnabled: true,
+          tlsPolicy: 'Optional',
+          actions: [
+            {
+              s3Action: {
+                bucketName: rawEmailBucket.bucketName,
+                objectKeyPrefix: inboundPrefix,
+              },
+            },
+            { stopAction: { scope: 'RuleSet' } },
+          ],
+        },
       });
     }
 
@@ -394,7 +357,7 @@ export class MatchToCsvStack extends Stack {
         target: 'node22',
         nodeModules: includeSharp ? ['sharp'] : undefined,
         // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
-        forceDockerBundling: includeSharp && Stack.of(this).bundlingRequired,
+        forceDockerBundling: includeSharp && this.bundlingRequired,
       },
     });
   }

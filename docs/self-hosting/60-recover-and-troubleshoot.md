@@ -46,7 +46,7 @@ If an older release is known safe and compatible with current data, [roll back](
 
 ## Stale personal development stack
 
-Confirm the instance owner, then remove only that application stack:
+Confirm the instance owner, then remove only that ephemeral application stack. The shared `-dev` and `-prod` stacks deploy only from `main` through GitHub Actions, have termination protection, and cannot be destroyed with this command:
 
 ```console
 aws sso login --profile <dev-profile>

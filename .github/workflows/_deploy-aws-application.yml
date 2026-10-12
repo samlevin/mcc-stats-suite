@@ -69,7 +69,6 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && vars.AWS_ACCOUNT_ID || '' }}
       MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && vars.AWS_ACCOUNT_ID || '' }}
-      MCC_EMAIL_DOMAIN: ${{ vars.MCC_EMAIL_DOMAIN }}
     steps:
       - name: Validate deployment request
         env:
@@ -152,21 +151,35 @@ jobs:
           fi
       - name: Verify match-to-csv prerequisites
         if: inputs.application == 'match-to-csv'
+        env:
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
         run: |
-          if [ -z "${MCC_EMAIL_DOMAIN}" ]; then
-            echo "::error::The selected GitHub Environment has no inbound domain configured"
-            exit 1
-          fi
-          PARAMETER_COUNT="$(aws ssm get-parameters \
+          PARAMETERS="$(aws ssm get-parameters \
             --names \
               /cdk-bootstrap/hnb659fds/version \
-              "/mcc/${{ inputs.environment }}/match-to-csv/raw-email-bucket-name" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/evidence-bucket-name" \
-              "/mcc/${{ inputs.environment }}/match-to-csv/data-key-arn" \
-            --query 'length(Parameters)' \
-            --output text)"
-          if [ "${PARAMETER_COUNT}" != "4" ]; then
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/raw-email-bucket-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/evidence-bucket-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/data-key-arn" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/receipt-rule-set-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/email-domain" \
+            --output json)"
+          if [ "$(jq '.Parameters | length' <<<"${PARAMETERS}")" != "6" ]; then
             echo "::error::CDK bootstrap or match-to-csv foundation parameters are missing"
+            exit 1
+          fi
+          parameter() {
+            jq -r --arg name "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/$1" \
+              '.Parameters[] | select(.Name == $name) | .Value' <<<"${PARAMETERS}"
+          }
+          RULE_SET_NAME="$(parameter receipt-rule-set-name)"
+          MCC_EMAIL_DOMAIN="$(parameter email-domain)"
+          # The repository is public; keep the domain out of every later log line.
+          echo "::add-mask::${MCC_EMAIL_DOMAIN}"
+          ACTIVE_RULE_SET="$(aws ses describe-active-receipt-rule-set \
+            --query Metadata.Name \
+            --output text)"
+          if [ "${ACTIVE_RULE_SET}" != "${RULE_SET_NAME}" ]; then
+            echo "::error::The foundation receipt rule set ${RULE_SET_NAME} is not the active rule set"
             exit 1
           fi
           IDENTITY_STATUS="$(aws ses get-identity-verification-attributes \
@@ -174,12 +187,12 @@ jobs:
             --query 'VerificationAttributes.*.VerificationStatus | [0]' \
             --output text)"
           if [ "${IDENTITY_STATUS}" != "Success" ]; then
-            echo "::error::The configured SES identity is not verified in the deployment region"
+            echo "::error::The SES identity the foundation publishes is not verified in the deployment region"
             exit 1
           fi
           if ! dig +short MX "${MCC_EMAIL_DOMAIN}" | \
             grep -Fq "inbound-smtp.${AWS_REGION}.amazonaws.com."; then
-            echo "::error::The configured MX record does not target SES inbound receiving in the deployment region"
+            echo "::error::The MX record for the published domain does not target SES inbound receiving in the deployment region"
             exit 1
           fi
       - name: Synthesize

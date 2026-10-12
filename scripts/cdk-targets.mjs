@@ -74,7 +74,6 @@ export function cdkArguments({
   ephemeral,
   expectedAccount,
   profile,
-  emailDomain,
   passthrough,
 }) {
   const result = [
@@ -95,13 +94,6 @@ export function cdkArguments({
       LOCAL_TOOLKIT_STACK_NAME,
       ...localDeployArguments(passthrough),
     );
-  }
-  if (
-    application === 'match-to-csv' &&
-    (action === 'deploy' || action === 'diff') &&
-    emailDomain
-  ) {
-    result.push('--parameters', `EmailDomain=${emailDomain}`);
   }
   result.push(...passthrough);
   return result;

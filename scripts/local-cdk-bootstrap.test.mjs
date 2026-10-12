@@ -997,7 +997,6 @@ test('the wrapper adds local bootstrap options only to ephemeral deploys', () =>
     environment: 'dev',
     expectedAccount: ACCOUNT,
     profile: 'mcc-dev',
-    emailDomain: 'example.invalid',
     passthrough: [],
   };
   const local = (args) =>
@@ -1036,8 +1035,6 @@ test('the wrapper adds local bootstrap options only to ephemeral deploys', () =>
     'CDKToolkitLocal',
     '--change-set-name',
     LOCAL_CHANGE_SET_NAME,
-    '--parameters',
-    'EmailDomain=example.invalid',
     '--require-approval',
     'never',
   ]);

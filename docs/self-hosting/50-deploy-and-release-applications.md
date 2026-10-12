@@ -8,7 +8,9 @@ Each application owns a CDK stack per environment:
 <application>-prod      production stack, deployed by GitHub Actions
 ```
 
-`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, and refuses ephemeral deploys inside GitHub Actions. Ephemeral deploys use the local `mcclocal1` bootstrap, which deploys only through CloudFormation change sets named `mcclocal1-deploy`. The wrapper therefore rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`.
+`scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, refuses ephemeral deploys inside GitHub Actions, and refuses to destroy a stable stack. Ephemeral deploys use the local `mcclocal1` bootstrap, which deploys only through CloudFormation change sets named `mcclocal1-deploy`. The wrapper therefore rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`.
+
+Before a stable deploy, the wrapper synthesizes the release, deploys that same assembly, and compares it with the deployed template. It refuses to remove or replace a stateful resource that the deployed template does not retain, refuses to remove a custom resource whose delete handler would run, and refuses while the stack is still updating; see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure). Because the assembly is reused, stable deploys accept only `--require-approval`. When a stable stack's first create rolled back, the wrapper stops and lists what the rollback kept; see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure). The check runs from the revision being deployed, so a rollback to a release from before the check runs without it.
 
 ## Ephemeral stacks
 
@@ -22,7 +24,7 @@ npm run app:diff -- <application> --environment dev --ephemeral <name>
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
 
-For `match-to-csv`, set `MCC_EMAIL_DOMAIN` in your ignored `.envrc` and run `npm run verify:bundle --workspace @samlevin/match-to-csv` after synthesis. The shared `match-to-csv-dev` stack owns the SES receipt rule set, so it must exist before any ephemeral stack. Ephemeral stacks have no email ingress and keep their evidence under `ephemeral/<name>/`; start their workflows directly when testing.
+For `match-to-csv`, run `npm run verify:bundle --workspace @samlevin/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `submit+<name>@<your domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `submit@` rule alone.
 
 Remove the stack when you are done:
 

@@ -35,3 +35,7 @@ output "github_turbo_cache_role_arn" {
   description = "Dedicated cache workload role; never the CDK deployment role."
   value       = var.create_github_cache_role ? local.cache_role_arn : null
 }
+
+output "receipt_rule_set_name" {
+  value = aws_ses_receipt_rule_set.inbound.rule_set_name
+}
