@@ -18,7 +18,6 @@ export interface DeploymentConfig {
   /** IAM path for every role in an ephemeral stack; undefined for shared stacks. */
   rolePath?: string;
   isEphemeral: boolean;
-  ingressEnabled: boolean;
   /**
    * Stable stacks deploy only from main through GitHub Actions and are never
    * torn down; ephemeral stacks are destroyed from a developer shell.
@@ -73,6 +72,14 @@ export function resolveDeployment(
         'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources',
       );
     }
+    // Ephemeral stacks deploy only to dev, so prod would name a dev stack and
+    // its resources exactly like the production stack. The dev rule above
+    // already covers dev.
+    if (requestedEphemeral === 'prod') {
+      throw new Error(
+        'Ephemeral name prod is reserved because it would name a dev stack like the production stack; choose another name',
+      );
+    }
     ephemeral = requestedEphemeral;
   }
 
@@ -113,7 +120,6 @@ export function resolveDeployment(
     bootstrapQualifier: isEphemeral ? 'mcclocal1' : 'hnb659fds',
     rolePath: isEphemeral ? '/mcc-local/' : undefined,
     isEphemeral,
-    ingressEnabled: !isEphemeral,
     terminationProtection: !isEphemeral,
   };
 }

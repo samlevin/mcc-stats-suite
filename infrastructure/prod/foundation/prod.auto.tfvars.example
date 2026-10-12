@@ -1,2 +1,5 @@
 aws_region    = "us-east-1"
 force_destroy = false
+# Required. Terrateam supplies it from the PROD_MCC_EMAIL_DOMAIN secret. Never
+# commit it.
+email_domain = "REPLACE_WITH_VERIFIED_DOMAIN"

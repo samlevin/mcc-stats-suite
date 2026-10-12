@@ -5,7 +5,7 @@ OpenTofu owns account bootstrap and persistent resources shared by application r
 | Root | Owner | Purpose |
 |---|---|---|
 | `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
-| `<environment>/foundation` | Terrateam | KMS, durable evidence storage, and SSM resource contracts |
+| `<environment>/foundation` | Terrateam | KMS, durable evidence storage, the SES receipt rule set, and SSM resource contracts |
 | `<environment>/data-platform` | Terrateam when activated | Shared analytics and lakehouse resources |
 
 ## Bootstrap
@@ -47,6 +47,10 @@ Foundation code is not packaged or assigned a separate release ID. Terrateam pla
 Changes to `modules/foundation` or `.terrateam/config.yml` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
 
 Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and Terrateam for foundation changes.
+
+## Inbound email contract
+
+Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input, supplied by Terrateam from the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` secret. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
 
 ## Turborepo cache storage contract
 

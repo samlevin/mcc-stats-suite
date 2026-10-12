@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 
@@ -429,3 +438,125 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
     }
   }
 });
+
+// Runs the real step body under GitHub's default `bash -e` with stub `aws` and
+// `dig` commands, so the parameter, rule set, identity, and MX gates are
+// exercised rather than matched as text.
+function runPrerequisites(stub) {
+  const step = deployment.jobs.deploy.steps.find(
+    (candidate) => candidate.name === 'Verify match-to-csv prerequisites',
+  );
+  assert.equal(step.if, "inputs.application == 'match-to-csv'");
+  assert.equal(step.env.DEPLOYMENT_ENVIRONMENT, '${{ inputs.environment }}');
+  assert.ok(!step.run.includes('${{'), 'the step reads inputs only from env');
+  const directory = mkdtempSync(join(tmpdir(), 'prerequisites-'));
+  const bin = join(directory, 'bin');
+  mkdirSync(bin);
+  const names = [
+    '/cdk-bootstrap/hnb659fds/version',
+    '/mcc/dev/match-to-csv/raw-email-bucket-name',
+    '/mcc/dev/match-to-csv/evidence-bucket-name',
+    '/mcc/dev/match-to-csv/data-key-arn',
+    '/mcc/dev/match-to-csv/receipt-rule-set-name',
+    '/mcc/dev/match-to-csv/email-domain',
+  ].slice(0, stub.parameterCount ?? 6);
+  const values = {
+    '/mcc/dev/match-to-csv/receipt-rule-set-name': 'mcc-match-to-csv-dev',
+    '/mcc/dev/match-to-csv/email-domain': 'mail.example.com',
+  };
+  writeFileSync(
+    join(directory, 'parameters.json'),
+    JSON.stringify({
+      Parameters: names.map((Name) => ({ Name, Value: values[Name] ?? 'x' })),
+    }),
+  );
+  writeFileSync(
+    join(bin, 'aws'),
+    [
+      '#!/usr/bin/env bash',
+      `echo "aws $*" >> "${join(directory, 'calls.log')}"`,
+      'case "$1 $2" in',
+      `  "ssm get-parameters") cat "${join(directory, 'parameters.json')}" ;;`,
+      `  "ses describe-active-receipt-rule-set") echo "${stub.active ?? 'mcc-match-to-csv-dev'}" ;;`,
+      `  "ses get-identity-verification-attributes") echo "${stub.identity ?? 'Success'}" ;;`,
+      '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
+      'esac',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    join(bin, 'dig'),
+    `#!/usr/bin/env bash\necho "dig $*" >> "${join(directory, 'calls.log')}"\necho "${stub.mx ?? '10 inbound-smtp.us-east-2.amazonaws.com.'}"\n`,
+    { mode: 0o755 },
+  );
+  const githubEnv = join(directory, 'github-env');
+  writeFileSync(githubEnv, '');
+  const result = spawnSync('bash', ['-e', '-c', step.run], {
+    encoding: 'utf8',
+    env: {
+      PATH: `${bin}:${process.env.PATH}`,
+      DEPLOYMENT_ENVIRONMENT: 'dev',
+      AWS_REGION: 'us-east-2',
+      GITHUB_ENV: githubEnv,
+    },
+  });
+  const callsLog = join(directory, 'calls.log');
+  return {
+    ...result,
+    githubEnv: readFileSync(githubEnv, 'utf8'),
+    calls: existsSync(callsLog)
+      ? readFileSync(callsLog, 'utf8').trim().split('\n')
+      : [],
+  };
+}
+
+test('match-to-csv prerequisites pass and mask the published domain', () => {
+  const result = runPrerequisites({});
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  // Masked before any other use. Revisions that still read MCC_EMAIL_DOMAIN
+  // declare the receipt rules the foundation owns, so nothing exports it.
+  assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
+  assert.equal(result.githubEnv, '');
+  assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
+  // The step asks for exactly the six parameters and checks the published
+  // domain, not some other value, against SES and DNS.
+  assert.deepEqual(result.calls, [
+    'aws ssm get-parameters --names /cdk-bootstrap/hnb659fds/version ' +
+      '/mcc/dev/match-to-csv/raw-email-bucket-name ' +
+      '/mcc/dev/match-to-csv/evidence-bucket-name ' +
+      '/mcc/dev/match-to-csv/data-key-arn ' +
+      '/mcc/dev/match-to-csv/receipt-rule-set-name ' +
+      '/mcc/dev/match-to-csv/email-domain --output json',
+    'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
+    'aws ses get-identity-verification-attributes --identities mail.example.com ' +
+      '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
+    'dig +short MX mail.example.com',
+  ]);
+});
+
+for (const [name, stub, message] of [
+  [
+    'a foundation parameter is missing',
+    { parameterCount: 5 },
+    'parameters are missing',
+  ],
+  [
+    'another rule set is active',
+    { active: 'other' },
+    'is not the active rule set',
+  ],
+  ['no rule set is active', { active: 'None' }, 'is not the active rule set'],
+  ['the identity is unverified', { identity: 'Pending' }, 'is not verified'],
+  [
+    'the MX record targets another Region',
+    { mx: '10 inbound-smtp.us-west-2.amazonaws.com.' },
+    'MX record',
+  ],
+]) {
+  test(`match-to-csv prerequisites fail when ${name}`, () => {
+    const result = runPrerequisites(stub);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, new RegExp(`::error::.*${message}`));
+    assert.equal(result.githubEnv, '');
+  });
+}

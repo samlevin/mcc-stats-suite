@@ -2,95 +2,79 @@ import t from 'tap';
 import { Match } from 'aws-cdk-lib/assertions';
 import { synthesize } from './support/app';
 
-const stable = synthesize({ environment: 'dev' });
+type TemplateJson = {
+  Parameters?: Record<string, { Type?: string; Default?: string }>;
+  Outputs?: Record<string, unknown>;
+};
 
-t.test('stable stacks retain the receipt rule set and rule', (t) => {
-  // RetainExceptOnCreate: a rolled-back first create deletes them instead of
-  // stranding the names and failing every retry with AlreadyExists.
-  stable.hasResource('AWS::SES::ReceiptRuleSet', {
-    DeletionPolicy: 'RetainExceptOnCreate',
-    UpdateReplacePolicy: 'Retain',
-  });
-  stable.resourceCountIs('AWS::SES::ReceiptRule', 1);
-  // A replaced rule must not linger as an orphan in the shared rule set.
-  stable.hasResource('AWS::SES::ReceiptRule', {
-    DeletionPolicy: 'RetainExceptOnCreate',
-    UpdateReplacePolicy: Match.absent(),
-  });
-  t.end();
-});
+t.test('stable stacks leave inbound email to the foundation', (t) => {
+  for (const environment of ['dev', 'prod']) {
+    const template = synthesize({ environment });
 
-t.test(
-  'stable receipt resources keep the logical IDs the migration uses',
-  (t) => {
-    // Renaming either construct deletes the live resource under the deployed
-    // policy, and the next layer removes them by these IDs.
-    stable.templateMatches({
-      Resources: {
-        ReceiptRuleSet: Match.objectLike({
-          Type: 'AWS::SES::ReceiptRuleSet',
-          Properties: { RuleSetName: 'mcc-match-to-csv-dev' },
-        }),
-        StoreRawEmail: Match.objectLike({
-          Type: 'AWS::SES::ReceiptRule',
-          Properties: Match.objectLike({ RuleSetName: 'mcc-match-to-csv-dev' }),
-        }),
-      },
-    });
-    t.end();
-  },
-);
-
-t.test('stable activation never deactivates the rule set on delete', (t) => {
-  stable.resourceCountIs('Custom::AWS', 1);
-  // Removing Delete must update the resource in place. A new physical ID would
-  // make CloudFormation delete the old one, and a different rule set name would
-  // switch the account's active rule set.
-  stable.hasResourceProperties('Custom::AWS', {
-    Create: Match.serializedJson(
-      Match.objectLike({
-        action: 'setActiveReceiptRuleSet',
-        parameters: { RuleSetName: 'mcc-match-to-csv-dev' },
-      }),
-    ),
-    Delete: Match.absent(),
-    Update: Match.serializedJson(
-      Match.objectLike({
-        action: 'setActiveReceiptRuleSet',
-        parameters: { RuleSetName: 'mcc-match-to-csv-dev' },
-        physicalResourceId: { id: 'mcc-match-to-csv-dev' },
-      }),
-    ),
-  });
-  t.end();
-});
-
-t.test('stable activation is the last resource to be created', (t) => {
-  // Without a delete call, a rule set that is already active cannot be
-  // deleted during a create rollback. Activating last means a failed create
-  // never leaves the rule set active.
-  const resources = stable.toJSON().Resources as Record<
-    string,
-    { DependsOn?: string[] }
-  >;
-  const [activationId] = Object.keys(stable.findResources('Custom::AWS'));
-  const dependsOn = new Set(resources[activationId].DependsOn ?? []);
-  for (const logicalId of Object.keys(resources)) {
-    if (logicalId === activationId) continue;
-    t.ok(dependsOn.has(logicalId), `activation depends on ${logicalId}`);
+    template.resourceCountIs('AWS::SES::ReceiptRuleSet', 0);
+    template.resourceCountIs('AWS::SES::ReceiptRule', 0);
+    template.resourceCountIs('Custom::AWS', 0);
+    const json = template.toJSON() as TemplateJson;
+    const defaults = Object.values(json.Parameters ?? {}).map(
+      (parameter) => parameter.Default,
+    );
+    t.notOk(defaults.includes(`/mcc/${environment}/match-to-csv/email-domain`));
+    t.notOk(
+      defaults.includes(
+        `/mcc/${environment}/match-to-csv/receipt-rule-set-name`,
+      ),
+    );
+    // The deploy workflow no longer passes --parameters EmailDomain=, so a
+    // leftover parameter without a default would fail every stable deploy.
+    t.equal(json.Parameters?.EmailDomain, undefined);
+    t.equal(json.Outputs?.ReceiptRuleSetName, undefined);
   }
   t.end();
 });
 
-t.test('ephemeral stacks keep one unretained rule and no rule set', (t) => {
-  const template = synthesize({ environment: 'dev', ephemeral: 'test' });
+t.test('ephemeral stacks add one rule to the foundation rule set', (t) => {
+  const template = synthesize({ environment: 'dev', ephemeral: 'sam' });
+  const json = template.toJSON() as TemplateJson;
 
   template.resourceCountIs('AWS::SES::ReceiptRuleSet', 0);
   template.resourceCountIs('Custom::AWS', 0);
   template.resourceCountIs('AWS::SES::ReceiptRule', 1);
+  // Destroying an ephemeral stack must remove its rule.
   template.hasResource('AWS::SES::ReceiptRule', {
     DeletionPolicy: Match.absent(),
     UpdateReplacePolicy: Match.absent(),
   });
+
+  const [rule] = Object.values(template.findResources('AWS::SES::ReceiptRule'));
+  t.equal(rule.Properties.Rule.Name, 'match-to-csv-sam');
+  // The recipient domain comes from the foundation's SSM parameter, never from
+  // a local value, so it always matches the shared rule.
+  const [recipient] = rule.Properties.Rule.Recipients as [
+    { 'Fn::Join': [string, [string, { Ref: string }]] },
+  ];
+  const [localPart, domain] = recipient['Fn::Join'][1];
+  t.equal(localPart, 'submit+sam@');
+  t.equal(
+    json.Parameters?.[domain.Ref]?.Type,
+    'AWS::SSM::Parameter::Value<String>',
+  );
+  t.equal(
+    json.Parameters?.[domain.Ref]?.Default,
+    '/mcc/dev/match-to-csv/email-domain',
+  );
+  t.equal(json.Parameters?.EmailDomain, undefined);
+  t.equal(
+    rule.Properties.Rule.Actions[0].S3Action.ObjectKeyPrefix,
+    'incoming/sam/',
+  );
+  t.same(rule.Properties.Rule.Actions[1], {
+    StopAction: { Scope: 'RuleSet' },
+  });
+
+  const ruleSetRef = (rule.Properties.RuleSetName as { Ref: string }).Ref;
+  t.equal(
+    json.Parameters?.[ruleSetRef]?.Default,
+    '/mcc/dev/match-to-csv/receipt-rule-set-name',
+  );
   t.end();
 });
