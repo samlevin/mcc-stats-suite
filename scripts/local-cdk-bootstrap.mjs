@@ -199,7 +199,7 @@ export function localBootstrap(template) {
       ),
       deny(
         'ProtectSharedCompute',
-        ['lambda:*', 'states:*', 'sqs:*', 'events:*'],
+        ['lambda:*', 'states:*', 'sqs:*', 'events:*', 'logs:*'],
         stableResources,
       ),
       deny(

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -537,6 +537,15 @@ test('runtime roles cannot mutate compute, deploy stacks, or assume another role
     assert.equal(allowed(runtime, action, '*'), false, `${action} *`);
   }
   assert.equal(allowed(runtime, 'textract:AnalyzeDocument', '*'), true);
+  assert.equal(
+    allowed(
+      runtime,
+      'logs:PutLogEvents',
+      `arn:aws:logs:us-east-1:${ACCOUNT}:log-group:/aws/vendedlogs/states/match-to-csv-dev:log-stream:x`,
+    ),
+    false,
+    'shared dev log groups',
+  );
 });
 
 test('runtime uses its own ephemeral objects in this account only', () => {
@@ -998,7 +1007,10 @@ test('the wrapper rejects reserved names and unsupported options before any AWS 
 });
 
 // Synthesis needs the compiled cdk-config package.
-execFileSync('npm', ['run', 'build:shared', '--silent'], { stdio: 'ignore' });
+if (!existsSync('packages/cdk-config/dist/index.js'))
+  execFileSync('npm', ['run', 'build:shared', '--silent'], {
+    stdio: 'inherit',
+  });
 const require = createRequire(import.meta.url);
 const { resolveDeployment } = require('../packages/cdk-config/dist/index.js');
 
@@ -1019,6 +1031,8 @@ test('the wrapper and cdk-config apply the same ephemeral name rule', () => {
     '-sam',
     'a'.repeat(20),
     'a'.repeat(21),
+    'ephemeral',
+    'incoming',
   ]) {
     let error;
     try {

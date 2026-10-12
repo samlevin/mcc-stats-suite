@@ -115,6 +115,9 @@ export function ephemeralNameError(name) {
   if (!EPHEMERAL_NAME.test(name)) {
     return 'Ephemeral names must be 1-20 lowercase letters, numbers, or hyphens, starting with a letter or number';
   }
+  if (name === 'ephemeral' || name === 'incoming') {
+    return 'Ephemeral names cannot be "ephemeral" or "incoming"; those are object key prefixes';
+  }
   if (name.startsWith('dev') || name.includes('-dev')) {
     return 'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources';
   }

@@ -50,6 +50,14 @@ export function resolveDeployment(
         'Ephemeral names must be 1-20 lowercase letters, numbers, or hyphens, starting with a letter or number',
       );
     }
+    if (
+      requestedEphemeral === 'ephemeral' ||
+      requestedEphemeral === 'incoming'
+    ) {
+      throw new Error(
+        'Ephemeral names cannot be "ephemeral" or "incoming"; those are object key prefixes',
+      );
+    }
     // Shared dev resources own every <application>-dev* name, including names such as
     // player-admin-dev-* that an ephemeral name containing -dev would produce.
     if (
