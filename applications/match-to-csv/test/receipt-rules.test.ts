@@ -46,7 +46,7 @@ t.test('ephemeral stacks add one rule to the foundation rule set', (t) => {
   });
 
   const [rule] = Object.values(template.findResources('AWS::SES::ReceiptRule'));
-  t.equal(rule.Properties.Rule.Name, 'match-to-csv-sam');
+  t.equal(rule.Properties.Rule.Name, 'match-to-csv-e-sam');
   // The recipient domain comes from the foundation's SSM parameter, never from
   // a local value, so it always matches the shared rule.
   const [recipient] = rule.Properties.Rule.Recipients as [

@@ -110,8 +110,8 @@ export function ephemeralNameError(name) {
   if (name === 'ephemeral' || name === 'incoming') {
     return 'Ephemeral names cannot be "ephemeral" or "incoming"; those are object key prefixes';
   }
-  if (name.startsWith('dev') || name.includes('-dev')) {
-    return 'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources';
+  if (name === 'dev' || name === 'prod') {
+    return 'Ephemeral names "dev" and "prod" are reserved for the shared environments';
   }
   return undefined;
 }

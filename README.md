@@ -68,7 +68,7 @@ There are `dev` and `prod` environments. GitHub Actions deploys application stac
 
 ```text
 match-to-csv-dev         dev integration stack
-match-to-csv-<name>      local ephemeral stack in dev
+match-to-csv-e-<name>    local ephemeral stack in dev
 match-to-csv-prod        live stack
 ```
 

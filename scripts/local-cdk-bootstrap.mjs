@@ -69,34 +69,28 @@ export function localBootstrap(template) {
   }
 
   const stacks = applications.map((app) =>
-    arn('cloudformation', `stack/${app}-*/*`),
-  );
-  const sharedStacks = applications.map((app) =>
-    arn('cloudformation', `stack/${app}-dev*/*`),
+    arn('cloudformation', `stack/${app}-e-*/*`),
   );
   const roles = applications.map((app) =>
-    roleArn(`${LOCAL_ROLE_PATH.slice(1)}${app}-*`),
+    roleArn(`${LOCAL_ROLE_PATH.slice(1)}${app}-e-*`),
   );
-  const sharedRoles = applications.map((app) => roleArn(`*${app}-dev*`));
   // Name-anchored per service, so neither unrelated names such as sysadmin-* nor
   // aliases, executions, or streams of other resources match.
   const functions = applications.map((app) =>
-    arn('lambda', `function:${app}-*`),
+    arn('lambda', `function:${app}-e-*`),
   );
   const stateMachines = applications.map((app) =>
-    arn('states', `stateMachine:${app}-*`),
+    arn('states', `stateMachine:${app}-e-*`),
   );
-  const queues = applications.map((app) => arn('sqs', `${app}-*`));
+  const queues = applications.map((app) => arn('sqs', `${app}-e-*`));
   const computeResources = [
     ...functions,
     ...stateMachines,
-    ...applications.map((app) => arn('states', `execution:${app}-*`)),
+    ...applications.map((app) => arn('states', `execution:${app}-e-*`)),
     ...queues,
-    ...applications.map((app) => arn('logs', `log-group:/aws/*/${app}-*`)),
+    ...applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
   ];
-  const rules = applications.map((app) => arn('events', `rule/${app}-*`));
-  // Unanchored denies stay short and only over-match shared names.
-  const stableResources = applications.map((app) => arn('*', `*${app}-dev*`));
+  const rules = applications.map((app) => arn('events', `rule/${app}-e-*`));
   const deploymentParameters = [
     arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
     ...applications.map((app) => arn('ssm', `parameter/mcc/dev/${app}/*`)),
@@ -127,9 +121,6 @@ export function localBootstrap(template) {
         [
           'kms:DescribeKey',
           'textract:AnalyzeDocument',
-          'logs:CreateLogGroup',
-          'logs:CreateLogStream',
-          'logs:PutLogEvents',
           'logs:CreateLogDelivery',
           'logs:GetLogDelivery',
           'logs:UpdateLogDelivery',
@@ -144,6 +135,11 @@ export function localBootstrap(template) {
           'xray:GetSamplingTargets',
         ],
         '*',
+      ),
+      statement(
+        'WriteEphemeralLogs',
+        ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
+        applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
       ),
       // The app uses keys only for S3 server-side encryption.
       statement(
@@ -184,7 +180,7 @@ export function localBootstrap(template) {
           Null: { 's3:ResourceAccount': 'false' },
         },
       }),
-      deny('ProtectSharedInboundEmail', 's3:*', objects('incoming/dev*')),
+      deny('ProtectSharedInboundEmail', 's3:*', objects('incoming/dev/*')),
       statement(
         'UseEphemeralCompute',
         [
@@ -196,11 +192,6 @@ export function localBootstrap(template) {
           'sqs:SendMessage',
         ],
         computeResources,
-      ),
-      deny(
-        'ProtectSharedCompute',
-        ['lambda:*', 'states:*', 'sqs:*', 'events:*', 'logs:*'],
-        stableResources,
       ),
       deny(
         'NoDeploymentOrIdentityAdministration',
@@ -307,7 +298,6 @@ export function localBootstrap(template) {
             },
           },
         ),
-        deny('ProtectSharedStacks', 'cloudformation:*', sharedStacks),
         statement('PassLocalExecution', 'iam:PassRole', localExecution, {
           Condition: {
             StringEquals: {
@@ -392,11 +382,6 @@ export function localBootstrap(template) {
       ),
       // The AWS::Logs::LogGroup handler lists groups, which IAM checks against no group ARN.
       statement('DescribeLogGroups', 'logs:DescribeLogGroups', '*'),
-      deny(
-        'ProtectStableCompute',
-        [...computeServices.map((service) => `${service}:*`), 'events:*'],
-        stableResources,
-      ),
     ],
   );
 
@@ -433,13 +418,6 @@ export function localBootstrap(template) {
             'events:TargetArn': [...functions, ...stateMachines, ...queues],
           },
           Null: { 'events:TargetArn': 'false' },
-        },
-      }),
-      // The allow patterns above also match <app>-dev* names, and the shared-compute deny
-      // covers resources, not targets, so refuse any shared target explicitly.
-      deny('ProtectSharedTargets', 'events:PutTargets', '*', {
-        Condition: {
-          'ForAnyValue:ArnLike': { 'events:TargetArn': stableResources },
         },
       }),
     ],
@@ -528,7 +506,6 @@ export function localBootstrap(template) {
           },
         },
       }),
-      deny('ProtectStableRoles', 'iam:*', sharedRoles),
     ],
   );
   return result;

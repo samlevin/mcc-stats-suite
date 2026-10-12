@@ -62,22 +62,9 @@ export function resolveDeployment(
         'Ephemeral names cannot be "ephemeral" or "incoming"; those are object key prefixes',
       );
     }
-    // Shared dev resources own every <application>-dev* name, including names such as
-    // player-admin-dev-* that an ephemeral name containing -dev would produce.
-    if (
-      requestedEphemeral.startsWith('dev') ||
-      requestedEphemeral.includes('-dev')
-    ) {
+    if (requestedEphemeral === 'dev' || requestedEphemeral === 'prod') {
       throw new Error(
-        'Ephemeral names cannot begin with "dev" or contain "-dev"; those names are reserved for shared dev resources',
-      );
-    }
-    // Ephemeral stacks deploy only to dev, so prod would name a dev stack and
-    // its resources exactly like the production stack. The dev rule above
-    // already covers dev.
-    if (requestedEphemeral === 'prod') {
-      throw new Error(
-        'Ephemeral name prod is reserved because it would name a dev stack like the production stack; choose another name',
+        'Ephemeral names "dev" and "prod" are reserved for the shared environments',
       );
     }
     ephemeral = requestedEphemeral;
@@ -98,7 +85,7 @@ export function resolveDeployment(
     );
   }
 
-  const qualifier = ephemeral ?? environment;
+  const qualifier = ephemeral ? `e-${ephemeral}` : environment;
   const stackName = `${application}-${qualifier}`;
   const isEphemeral = ephemeral !== undefined;
 

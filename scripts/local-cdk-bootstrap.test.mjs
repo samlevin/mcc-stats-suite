@@ -192,7 +192,7 @@ test('local deployment allows ephemeral writes and denies all shared stack write
         allowed(
           deployment,
           `cloudformation:${action}`,
-          stack(`${app}-alice`),
+          stack(`${app}-e-alice`),
           context,
         ),
         true,
@@ -217,7 +217,7 @@ test('local deployment allows ephemeral writes and denies all shared stack write
     'RollbackStack',
   ]) {
     assert.equal(
-      allowed(deployment, `cloudformation:${action}`, stack('admin-alice')),
+      allowed(deployment, `cloudformation:${action}`, stack('admin-e-alice')),
       false,
       `${action} without the local execution role`,
     );
@@ -244,8 +244,61 @@ test('local deployment allows ephemeral writes and denies all shared stack write
   );
 });
 
-test('shared stack protection covers every reserved dev name', () => {
-  for (const name of ['admin-dev', 'match-to-csv-dev-replay']) {
+test('local policies contain no shared-name deny lists', () => {
+  for (const resource of Object.values(resources)) {
+    const documents = [
+      resource.Properties?.PolicyDocument,
+      ...(resource.Properties?.Policies ?? []).map(
+        (policy) => policy.PolicyDocument,
+      ),
+    ];
+    for (const document of documents.filter(Boolean)) {
+      for (const entry of document.Statement.filter(
+        (entry) => entry.Effect === 'Deny',
+      )) {
+        assert.ok(!JSON.stringify(entry).includes('-dev'), entry.Sid);
+      }
+    }
+  }
+});
+
+test('every application allows ephemeral roles and compute and excludes shared names', () => {
+  for (const app of APPLICATIONS) {
+    for (const suffix of ['e-alice', 'e-devin', 'dev', 'prod', 'alice']) {
+      const expected = suffix.startsWith('e-');
+      assert.equal(
+        executes('iam:CreateRole', localRole(`${app}-${suffix}-Role`), bounded),
+        expected,
+      );
+      assert.equal(
+        executes('lambda:CreateFunction', fn(`${app}-${suffix}-Function`)),
+        expected,
+      );
+      assert.equal(
+        executes('states:CreateStateMachine', machine(`${app}-${suffix}`)),
+        expected,
+      );
+      assert.equal(
+        executes('sqs:CreateQueue', queue(`${app}-${suffix}-Queue`)),
+        expected,
+      );
+      assert.equal(
+        executes('events:PutRule', rule(`${app}-${suffix}-Rule`), {
+          'events:source': ['aws.s3'],
+        }),
+        expected,
+      );
+    }
+  }
+});
+
+test('shared and legacy stacks are outside the ephemeral namespace', () => {
+  for (const name of [
+    'admin-dev',
+    'match-to-csv-dev-replay',
+    'admin-alice',
+    'admin-prod',
+  ]) {
     assert.equal(
       allowed(deployment, 'cloudformation:DeleteStack', stack(name)),
       false,
@@ -256,7 +309,7 @@ test('shared stack protection covers every reserved dev name', () => {
 
 test('deployment deletes failed ephemeral stacks without a role', () => {
   assert.equal(
-    allowed(deployment, 'cloudformation:DeleteStack', stack('admin-alice')),
+    allowed(deployment, 'cloudformation:DeleteStack', stack('admin-e-alice')),
     true,
   );
 });
@@ -266,7 +319,7 @@ test('deployment executes the local change set by name or ARN only', () => {
     allowed(
       deployment,
       'cloudformation:ExecuteChangeSet',
-      stack('admin-alice'),
+      stack('admin-e-alice'),
       { 'cloudformation:ChangeSetName': changeSet },
     );
   const changeSetArn = (name) =>
@@ -302,9 +355,9 @@ test('deployment and execution read only bootstrap and application parameters', 
 });
 
 test('execution creates and changes only bounded roles under the local path', () => {
-  const ephemeral = localRole('match-to-csv-alice-ServiceRole-hash');
+  const ephemeral = localRole('match-to-csv-e-alice-ServiceRole-hash');
   // Roles from before the local bootstrap, or made by hand, sit at path /.
-  const legacy = role('match-to-csv-alice-ServiceRole-hash');
+  const legacy = role('match-to-csv-e-alice-ServiceRole-hash');
   assert.equal(executes('iam:CreateRole', ephemeral), false);
   assert.equal(executes('iam:CreateRole', ephemeral, bounded), true);
   assert.equal(executes('iam:CreateRole', legacy, bounded), false);
@@ -350,7 +403,7 @@ test('execution creates and changes only bounded roles under the local path', ()
 });
 
 test('execution cannot escalate or reach deployment through a template', () => {
-  const ephemeral = localRole('match-to-csv-alice-ServiceRole-hash');
+  const ephemeral = localRole('match-to-csv-e-alice-ServiceRole-hash');
   for (const action of [
     'iam:DeleteRolePermissionsBoundary',
     'iam:CreatePolicy',
@@ -374,7 +427,7 @@ test('execution cannot escalate or reach deployment through a template', () => {
   }
   for (const action of ['UpdateStack', 'CreateStack', 'DeleteStack']) {
     assert.equal(
-      executes(`cloudformation:${action}`, stack('admin-alice')),
+      executes(`cloudformation:${action}`, stack('admin-e-alice')),
       false,
       action,
     );
@@ -387,16 +440,19 @@ test('execution manages only ephemeral compute, by name', () => {
     'lambda:UpdateFunctionCode',
     'lambda:DeleteFunction',
   ]) {
-    assert.equal(executes(action, fn('match-to-csv-alice-ProcessEmail')), true);
+    assert.equal(
+      executes(action, fn('match-to-csv-e-alice-ProcessEmail')),
+      true,
+    );
     assert.equal(executes(action, fn('match-to-csv-dev-ProcessEmail')), false);
   }
   for (const [action, resource] of [
-    ['sqs:CreateQueue', queue('match-to-csv-alice-events-dlq')],
+    ['sqs:CreateQueue', queue('match-to-csv-e-alice-events-dlq')],
     [
       'logs:CreateLogGroup',
-      `arn:aws:logs:us-east-1:${ACCOUNT}:log-group:/aws/vendedlogs/states/match-to-csv-alice`,
+      `arn:aws:logs:us-east-1:${ACCOUNT}:log-group:/aws/vendedlogs/states/match-to-csv-e-alice`,
     ],
-    ['states:CreateStateMachine', machine('match-to-csv-alice-replay')],
+    ['states:CreateStateMachine', machine('match-to-csv-e-alice-replay')],
     ['logs:DescribeLogGroups', '*'],
   ]) {
     assert.equal(executes(action, resource), true, resource);
@@ -426,7 +482,7 @@ test('execution manages only ephemeral compute, by name', () => {
 });
 
 test('execution rules match only S3 events and deliver only to ephemeral compute', () => {
-  const ephemeralRule = rule('match-to-csv-alice-RawEmailCreated');
+  const ephemeralRule = rule('match-to-csv-e-alice-RawEmailCreated');
   assert.equal(
     executes('events:PutRule', ephemeralRule, { 'events:source': ['aws.s3'] }),
     true,
@@ -442,16 +498,16 @@ test('execution rules match only S3 events and deliver only to ephemeral compute
     executes('events:PutTargets', ephemeralRule, {
       'events:TargetArn': targets,
     });
-  assert.equal(target([machine('match-to-csv-alice')]), true);
+  assert.equal(target([machine('match-to-csv-e-alice')]), true);
   assert.equal(
-    target([fn('match-to-csv-alice-X'), queue('match-to-csv-alice-q')]),
+    target([fn('match-to-csv-e-alice-X'), queue('match-to-csv-e-alice-q')]),
     true,
   );
   assert.equal(target([machine('match-to-csv-dev')]), false);
   assert.equal(target([machine('match-to-csv-dev-replay')]), false);
   assert.equal(target([queue('player-dev-events')]), false);
   assert.equal(
-    target([machine('match-to-csv-alice'), fn('other-function')]),
+    target([machine('match-to-csv-e-alice'), fn('other-function')]),
     false,
   );
   assert.equal(target(undefined), false);
@@ -522,15 +578,15 @@ test('execution boundary allows every identity grant and denies deployment', () 
 
 test('runtime roles cannot mutate compute, deploy stacks, or assume another role', () => {
   for (const [action, resource] of [
-    ['lambda:UpdateFunctionCode', fn('match-to-csv-alice-Process')],
-    ['lambda:CreateFunction', fn('match-to-csv-alice-New')],
-    ['iam:PutRolePolicy', localRole('match-to-csv-alice-Role')],
-    ['iam:PassRole', localRole('match-to-csv-alice-Role')],
+    ['lambda:UpdateFunctionCode', fn('match-to-csv-e-alice-Process')],
+    ['lambda:CreateFunction', fn('match-to-csv-e-alice-New')],
+    ['iam:PutRolePolicy', localRole('match-to-csv-e-alice-Role')],
+    ['iam:PassRole', localRole('match-to-csv-e-alice-Role')],
     [
       'sts:AssumeRole',
       role('cdk-mcclocal1-deploy-role-000000000000-us-east-1'),
     ],
-    ['cloudformation:UpdateStack', stack('match-to-csv-alice')],
+    ['cloudformation:UpdateStack', stack('match-to-csv-e-alice')],
     ['cloudformation:DeleteStack', stack('match-to-csv-dev')],
   ]) {
     assert.equal(allowed(runtime, action, resource), false, action);
@@ -599,14 +655,26 @@ test('runtime uses its own ephemeral objects in this account only', () => {
   );
 });
 
-test('runtime denies shared inbound email and stable bootstrap assets even when allowed', () => {
-  // Each case also matches an allow, so only the deny makes it false.
+test('runtime can read inbound email for names beginning with dev', () => {
   assert.equal(
     allowed(
       runtime,
       's3:GetObject',
       evidence('incoming/devin/message'),
       own('devin'),
+    ),
+    true,
+  );
+});
+
+test('runtime denies shared inbound email and stable bootstrap assets even when allowed', () => {
+  // Each case also matches an allow, so only the deny makes it false.
+  assert.equal(
+    allowed(
+      runtime,
+      's3:GetObject',
+      evidence('incoming/dev/message'),
+      own('dev'),
     ),
     false,
   );
@@ -665,7 +733,11 @@ test('runtime uses keys only through S3 and invokes only ephemeral compute', () 
     assert.equal(allowed(runtime, action, '*'), false, action);
   }
   assert.equal(
-    allowed(runtime, 'lambda:InvokeFunction', fn('match-to-csv-alice-Process')),
+    allowed(
+      runtime,
+      'lambda:InvokeFunction',
+      fn('match-to-csv-e-alice-Process'),
+    ),
     true,
   );
   for (const resource of [
@@ -680,7 +752,7 @@ test('runtime uses keys only through S3 and invokes only ephemeral compute', () 
   }
   for (const action of ['StartExecution', 'StopExecution']) {
     assert.equal(
-      allowed(runtime, `states:${action}`, machine('match-to-csv-alice')),
+      allowed(runtime, `states:${action}`, machine('match-to-csv-e-alice')),
       true,
       action,
     );
@@ -977,7 +1049,7 @@ test('the wrapper rejects reserved names and unsupported options before any AWS 
     });
   for (const [args, message] of [
     [
-      ['deploy', 'admin', '--environment', 'dev', '--ephemeral', 'devin'],
+      ['deploy', 'admin', '--environment', 'dev', '--ephemeral', 'dev'],
       /reserved/,
     ],
     [
@@ -1021,6 +1093,7 @@ test('the wrapper and cdk-config apply the same ephemeral name rule', () => {
     'adev',
     'sam-2',
     'dev',
+    'prod',
     'devin',
     'admin-dev',
     'sam-devtest',
@@ -1066,7 +1139,7 @@ async function synthesize(app, context) {
     },
   );
   const stackName = context.ephemeral
-    ? `${app}-${context.ephemeral}`
+    ? `${app}-e-${context.ephemeral}`
     : `${app}-${context.environment}`;
   return {
     stackName,
@@ -1077,6 +1150,16 @@ async function synthesize(app, context) {
 }
 // The longest allowed name checks that generated names keep the application prefix.
 const longName = 'a'.repeat(20);
+const STACK_NAME_KEPT = 25;
+
+test('every application prefix survives CloudFormation name truncation', () => {
+  for (const app of APPLICATIONS) {
+    assert.ok(
+      `${app}-e-`.length <= STACK_NAME_KEPT,
+      `${app}-e- would be cut from generated names; shorten the application name`,
+    );
+  }
+});
 const synthesized = Promise.all([
   ...APPLICATIONS.map((app) =>
     synthesize(app, { environment: 'dev', ephemeral: longName }),
@@ -1097,6 +1180,7 @@ test('every ephemeral application uses the local bootstrap and role path', async
       `/cdk-bootstrap/${LOCAL_QUALIFIER}/version`,
       stackName,
     );
+    assert.match(stackName, /-e-aaaaaaaaaaaaaaaaaaaa$/);
     const roles = Object.values(synthesizedTemplate.Resources ?? {}).filter(
       (resource) => resource.Type === 'AWS::IAM::Role',
     );
@@ -1121,13 +1205,50 @@ test('every ephemeral application uses the local bootstrap and role path', async
   }
 });
 
+test('ephemeral email and evidence routing retains the instance name', async () => {
+  const templates = await synthesized;
+  const { template } = templates[APPLICATIONS.indexOf('match-to-csv')];
+  const values = Object.values(template.Resources);
+  const receipt = values.find(
+    (resource) => resource.Type === 'AWS::SES::ReceiptRule',
+  ).Properties.Rule;
+  assert.equal(receipt.Name, `match-to-csv-e-${longName}`);
+  assert.ok(JSON.stringify(receipt.Recipients).includes(`submit+${longName}@`));
+  assert.equal(
+    receipt.Actions[0].S3Action.ObjectKeyPrefix,
+    `incoming/${longName}/`,
+  );
+  const rule = values.find((resource) => resource.Type === 'AWS::Events::Rule');
+  assert.deepEqual(rule.Properties.EventPattern.detail.object.key, [
+    { prefix: `incoming/${longName}/` },
+  ]);
+  const functions = values.filter(
+    (resource) => resource.Type === 'AWS::Lambda::Function',
+  );
+  assert.ok(
+    functions.some(
+      (resource) =>
+        resource.Properties.Environment?.Variables?.OBJECT_PREFIX ===
+        `ephemeral/${longName}`,
+    ),
+  );
+});
+
 test('every match-to-csv ephemeral resource falls under the local execution policy', async () => {
   const templates = await synthesized;
   const { stackName, template: synthesizedTemplate } =
     templates[APPLICATIONS.indexOf('match-to-csv')];
-  // CloudFormation names unnamed resources <stack>-<logical id>-<suffix>, up to 64 characters.
-  const generated = (logicalId) =>
-    `${stackName}-${logicalId}`.slice(0, 51) + '-ABCDEFGHIJKL';
+  // CloudFormation names unnamed resources <stack>-<logical id>-<suffix>, up to
+  // 64 characters. Its truncation is undocumented, so assume the worst observed:
+  // a long stack name keeps only its first STACK_NAME_KEPT characters.
+  const generated = (logicalId) => {
+    const full = `${stackName}-${logicalId}`;
+    const kept =
+      full.length <= 51
+        ? full
+        : `${stackName.slice(0, STACK_NAME_KEPT)}-${logicalId}`.slice(0, 51);
+    return `${kept}-ABCDEFGHIJKL`;
+  };
   const names = new Map(
     Object.entries(synthesizedTemplate.Resources)
       .filter(
