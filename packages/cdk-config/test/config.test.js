@@ -17,7 +17,7 @@ test('creates an isolated ephemeral deployment in dev', () => {
     },
   );
 
-  assert.equal(deployment.stackName, 'match-to-csv-sam');
+  assert.equal(deployment.stackName, 'match-to-csv-e-sam');
   assert.equal(deployment.objectPrefix, 'ephemeral/sam');
   assert.equal(deployment.ingressEnabled, false);
   assert.equal(deployment.bootstrapQualifier, 'mcclocal1');
@@ -86,29 +86,29 @@ test('rejects deployment to the wrong account', () => {
   );
 });
 
-test('rejects ephemeral names reserved for shared dev resources', () => {
+test('reserves the shared inbound email route', () => {
+  assert.throws(
+    () =>
+      resolveDeployment(
+        context({ environment: 'dev', ephemeral: 'dev' }),
+        'admin',
+        {},
+      ),
+    /shared inbound email/,
+  );
+});
+
+test('accepts ephemeral names that only resemble reserved names', () => {
   for (const ephemeral of [
-    'dev',
+    'sam',
+    'kevin',
+    'sam-2',
+    'adev',
     'devin',
     'dev-2',
     'admin-dev',
     'sam-devtest',
   ]) {
-    assert.throws(
-      () =>
-        resolveDeployment(
-          context({ environment: 'dev', ephemeral }),
-          'admin',
-          {},
-        ),
-      /reserved for shared dev/,
-      ephemeral,
-    );
-  }
-});
-
-test('accepts ephemeral names that only resemble reserved names', () => {
-  for (const ephemeral of ['sam', 'kevin', 'sam-2', 'adev']) {
     assert.equal(
       resolveDeployment(context({ environment: 'dev', ephemeral }), 'admin', {})
         .ephemeral,

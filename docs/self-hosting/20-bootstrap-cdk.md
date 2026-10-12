@@ -47,15 +47,15 @@ The [stack policy](policies/local-cdk-toolkit-stack-policy.json) stops any updat
 
 Ephemeral synthesis selects this bootstrap, its runtime boundary, and the IAM role path `/mcc-local/` automatically.
 
-- **Deployment role.** It changes only stacks named after the five applications and denies every `<application>-dev*` stack. Stack creates and updates must pass the local execution role, and it executes only change sets named `mcclocal1-deploy`, so change sets created under the old administrator bootstrap cannot run. It reads only the bootstrap version and `/mcc/dev/<application>/*` parameters.
-- **Execution role.** Its scoped grants are split across three identity policies, and a boundary caps it at those services while denying CloudFormation, STS, and identity administration. It manages Lambda functions, state machines, queues, log groups, and EventBridge rules only by name under the application prefixes. Rules may match only S3 events and may target only ephemeral compute. It creates roles only under `/mcc-local/` and only with the local runtime boundary, and it changes or passes only roles under that path. A role's path cannot change, so roles from before the local bootstrap, or made by hand, stay out of reach.
+- **Deployment role.** It changes only stacks named `<application>-e-<name>`. Shared stacks and stacks using the old ephemeral names are outside its grants. Stack creates and updates must pass the local execution role, and it executes only change sets named `mcclocal1-deploy`, so change sets created under the old administrator bootstrap cannot run. It reads only the bootstrap version and `/mcc/dev/<application>/*` parameters.
+- **Execution role.** Its scoped grants are split across three identity policies, and a boundary caps it at those services while denying CloudFormation, STS, and identity administration. It manages Lambda functions, state machines, queues, log groups, and EventBridge rules only by name under the `<application>-e-` prefixes. Rules may match only S3 events and may target only ephemeral compute. It creates roles only under `/mcc-local/` and only with the local runtime boundary, and it changes or passes only roles under that path. A role's path cannot change, so roles from before the local bootstrap, or made by hand, stay out of reach.
 - **Runtime boundary.** It denies deployment and identity administration. It allows S3 writes and listing only under `ephemeral/<name>/`, and reads only under `ephemeral/<name>/` and `incoming/<name>/`, in buckets of this account. `<name>` is the `Ephemeral` tag CDK applies to the stack's roles. It allows invoking or starting only ephemeral application compute, and using KMS keys only through S3.
 - **Lookup role.** It has no AWS managed policy and reads only stack metadata and the bootstrap version, because this repository makes no context lookups.
 - **Trust.** Only principals of this account can assume the local roles, even if the bootstrap is run with `--trust`.
 
 For ephemeral deploys, `scripts/cdk-app.mjs` passes `--change-set-name mcclocal1-deploy` and `--toolkit-stack-name CDKToolkitLocal`. It rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`. These checks only fail early; IAM refuses each of them anyway.
 
-Names beginning `<application>-dev` are reserved for shared resources, so ephemeral names cannot begin with `dev` or contain `-dev`. This policy covers the currently implemented resources. Review and extend it when an application introduces a new AWS resource type, and never replace it with `AdministratorAccess`.
+Ephemeral stacks and resources use `<application>-e-<name>`; shared stacks keep `<application>-dev`. Names such as `devin` and `sam-devtest` are allowed. The exact name `dev` remains reserved for the shared `incoming/dev/` email route. This policy covers the currently implemented resources. Review and extend it when an application introduces a new AWS resource type, and never replace it with `AdministratorAccess`.
 
 ### Known limits
 
@@ -75,8 +75,8 @@ After a CDK upgrade, always regenerate the template through `scripts/local-cdk-b
 1. Create and protect `CDKToolkitLocal` as above.
 2. Replace and reprovision the local permission set below.
 3. Revoke active sessions on the `MccStatsSuiteLocalCdkDeploy` permission set and on the `cdk-hnb659fds-*` roles (IAM console, **Revoke active sessions**), or wait one hour. Revoking the `hnb659fds` sessions briefly interrupts in-flight GitHub Actions deploys.
-4. Destroy every existing ephemeral stack and delete its change sets. Old stacks and change sets can keep the administrator execution role. This includes stacks whose ephemeral name begins with `dev` or contains `-dev`, such as `admin-devin`, which only an administrator can delete because the local bootstrap denies every `<application>-dev*` stack.
-5. Developers recreate their stacks with the local bootstrap.
+4. Destroy every existing ephemeral stack and delete its change sets. Old stacks and change sets can keep the administrator execution role. Use the operator role to destroy stacks under the old `<application>-<name>` names, including `admin-devin`; the local bootstrap cannot manage them.
+5. Developers redeploy their stacks with the local bootstrap under `<application>-e-<name>`, for example `admin-e-alice`. This is a destroy-and-redeploy migration, not a stack rename. Email recipients and the `incoming/<name>/` and `ephemeral/<name>/` object prefixes keep the same name.
 
 Do not create administrator-backed stacks under the ephemeral application prefixes after enabling local access.
 

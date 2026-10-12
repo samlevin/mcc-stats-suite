@@ -4,7 +4,7 @@ Each application owns a CDK stack per environment:
 
 ```text
 <application>-dev       shared dev stack, deployed by GitHub Actions
-<application>-<name>    ephemeral stack in dev, deployed from a local shell
+<application>-e-<name>  ephemeral stack in dev, deployed from a local shell
 <application>-prod      production stack, deployed by GitHub Actions
 ```
 
@@ -12,7 +12,7 @@ Each application owns a CDK stack per environment:
 
 ## Ephemeral stacks
 
-Test application changes in an ephemeral stack before opening a pull request. Use the `mcc-dev` profile and a name of 1 to 20 lowercase letters, numbers, or hyphens that starts with a letter or number. Names that begin with `dev` or contain `-dev` are reserved for shared resources:
+Test application changes in an ephemeral stack before opening a pull request. Use the `mcc-dev` profile and a name of 1 to 20 lowercase letters, numbers, or hyphens that starts with a letter or number. Names such as `devin` and `sam-devtest` are allowed. The exact name `dev` is reserved for shared inbound email, and `incoming` and `ephemeral` are reserved object prefixes:
 
 ```console
 aws sso login --profile "$AWS_PROFILE"
