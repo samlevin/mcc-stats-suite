@@ -86,24 +86,32 @@ export function stackStatusAction(status) {
 /**
  * Builds the refusal for a stable stack whose first create rolled back. It
  * names the resources the rollback kept, from `describe-stack-resources`, and
- * the commands that clear the way for a fresh create.
+ * the commands that clear the way for a fresh create. `stackResources` is
+ * undefined when they could not be listed.
  */
-export function rolledBackMessage(stackName, stackResources) {
+export function rolledBackMessage(stackName, stackResources, profile) {
   const kept = (stackResources ?? []).filter(
     (resource) => resource.ResourceStatus === 'DELETE_SKIPPED',
   );
+  const profileArgument = profile ? ` --profile ${profile}` : '';
+  let keptSummary = 'The rollback kept no retained resources.';
+  if (stackResources === undefined) {
+    keptSummary =
+      'The resources the rollback kept could not be listed; check the stack for DELETE_SKIPPED resources and delete them first.';
+  } else if (kept.length > 0) {
+    keptSummary =
+      'The rollback kept these retained resources; delete them first, or the next create fails with AlreadyExists:';
+  }
   return [
     `${stackName} is ROLLBACK_COMPLETE after a failed first create.`,
-    kept.length > 0
-      ? 'The rollback kept these retained resources; delete them first, or the next create fails with AlreadyExists:'
-      : 'The rollback kept no retained resources.',
+    keptSummary,
     ...kept.map(
       (resource) =>
         `  - ${resource.LogicalResourceId} (${resource.ResourceType}): ${resource.PhysicalResourceId}`,
     ),
     'Then remove the stack and redeploy:',
-    `  aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name ${stackName}`,
-    `  aws cloudformation delete-stack --stack-name ${stackName}`,
+    `  aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name ${stackName}${profileArgument}`,
+    `  aws cloudformation delete-stack --stack-name ${stackName}${profileArgument}`,
   ].join('\n');
 }
 

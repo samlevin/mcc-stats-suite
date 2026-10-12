@@ -35,7 +35,12 @@ test('a rolled-back first create names what it kept and how to recover', () => {
     /--no-enable-termination-protection --stack-name match-to-csv-dev/,
   );
   assert.match(message, /delete-stack --stack-name match-to-csv-dev$/);
-  assert.match(rolledBackMessage('s', undefined), /kept no retained resources/);
+  assert.match(rolledBackMessage('s', []), /kept no retained resources/);
+  assert.match(rolledBackMessage('s', undefined), /could not be listed/);
+  assert.match(
+    rolledBackMessage('s', [], 'dev'),
+    /delete-stack --stack-name s --profile dev$/,
+  );
 });
 
 test('queues, log groups, and the extra replacement properties are guarded', () => {

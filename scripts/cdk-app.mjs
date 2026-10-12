@@ -261,7 +261,9 @@ function deployedTemplate(stackName) {
   if (statusAction === 'rolled-back') refuseRolledBack(stackName);
   if (statusAction === 'refuse') {
     guardFail(
-      `${stackName} is ${stackStatus}; wait for it to settle, then redeploy`,
+      stackStatus.endsWith('_FAILED')
+        ? `${stackName} is ${stackStatus}; recover it in CloudFormation, then redeploy`
+        : `${stackName} is ${stackStatus}; wait for it to settle, then redeploy`,
     );
   }
   const template = awsCli([
@@ -296,17 +298,17 @@ function refuseRolledBack(stackName) {
     '--output',
     'json',
   ]);
-  let stackResources = [];
+  let stackResources;
   if (resources.status === 0) {
     try {
       stackResources = JSON.parse(resources.stdout).StackResources;
     } catch {
-      stackResources = [];
+      stackResources = undefined;
     }
   } else {
     process.stderr.write(resources.stderr ?? '');
   }
-  guardFail(rolledBackMessage(stackName, stackResources));
+  guardFail(rolledBackMessage(stackName, stackResources, profile));
 }
 
 // Synthesizes the stack the deploy targets and reads its name and template
