@@ -36,20 +36,9 @@ export function checks({ full, repository, mode }) {
     commands.push(
       ['npx', ['eslint', '.', '--max-warnings', '0']],
       ['npm', ['run', 'release:check']],
-      [
-        'node',
-        [
-          '--test',
-          'scripts/issue-triage.test.mjs',
-          'scripts/issue-pr-metadata.test.mjs',
-          'scripts/issue-pr-status.test.mjs',
-          'scripts/ci-checks.test.mjs',
-          'scripts/publish-packages.test.mjs',
-          'scripts/deployment-workflows.test.mjs',
-          'scripts/local-cdk-bootstrap.test.mjs',
-          'scripts/stack-migration-guard.test.mjs',
-        ],
-      ],
+      // Node expands the glob itself, so every scripts/*.test.mjs runs without
+      // a hand-maintained list here or in package.json.
+      ['node', ['--test', 'scripts/*.test.mjs']],
       ['npm', ['run', 'tofu:fmt:check']],
       ['npx', workspaceArguments(mode)],
     );

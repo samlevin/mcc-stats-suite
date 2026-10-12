@@ -1,17 +1,12 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
-  AspectPriority,
   Aspects,
   CfnOutput,
-  CfnResource,
-  CfnParameter,
   Duration,
   Fn,
-  RemovalPolicy,
   Stack,
   Tags,
-  Validations,
   type StackProps,
 } from 'aws-cdk-lib';
 import type { Construct, IConstruct } from 'constructs';
@@ -28,7 +23,6 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
-import * as customResources from 'aws-cdk-lib/custom-resources';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -285,105 +279,38 @@ export class MatchToCsvStack extends Stack {
       }),
     );
 
-    const emailDomain = new CfnParameter(this, 'EmailDomain', {
-      type: 'String',
-      description: 'Verified SES domain used for inbound match-to-CSV email',
-      allowedPattern: '^[A-Za-z0-9.-]+$',
-    });
-    const recipient = Fn.join('', [
-      !deployment.ephemeral ? 'submit@' : `submit+${deployment.ephemeral}@`,
-      emailDomain.valueAsString,
-    ]);
-    const receiptRuleSetName = `mcc-match-to-csv-${deployment.environment}`;
-    const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
-      ruleSetName: receiptRuleSetName,
-      rule: {
-        name: deployment.resourcePrefix,
-        enabled: true,
-        recipients: [recipient],
-        scanEnabled: true,
-        tlsPolicy: 'Optional',
-        actions: [
-          {
-            s3Action: {
-              bucketName: rawEmailBucket.bucketName,
-              objectKeyPrefix: inboundPrefix,
-            },
-          },
-          { stopAction: { scope: 'RuleSet' } },
-        ],
-      },
-    });
-    if (!deployment.isEphemeral) {
-      const receiptRuleSet = new ses.CfnReceiptRuleSet(this, 'ReceiptRuleSet', {
-        ruleSetName: receiptRuleSetName,
-      });
-      // Migration step 1: keep the live rule set and rule when later releases
-      // stop declaring them, because OpenTofu takes ownership (issue #45).
-      // RetainExceptOnCreate deletes them when a first create rolls back, so
-      // the names are not stranded and a retry does not fail AlreadyExists.
-      receiptRuleSet.applyRemovalPolicy(
-        RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
-      );
-      // Retain only on deletion. A replaced rule must not linger as an orphan
-      // in the shared rule set.
-      receiptRule.applyRemovalPolicy(RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE, {
-        applyToUpdateReplacePolicy: false,
-      });
-      Validations.of(receiptRule).acknowledge({
-        id: 'CloudFormation-Validate::W3011',
-        reason: 'Only deletion is retained; a replaced rule must be removed',
-      });
-      receiptRule.node.addDependency(receiptRuleSet);
-      const activateRules = new customResources.AwsCustomResource(
+    // The foundation owns the receipt rule set, its activation, and the shared
+    // submit@ rule. An ephemeral stack adds only its own plus-addressed rule.
+    if (deployment.ephemeral) {
+      // The foundation publishes the domain its shared rule serves, so the
+      // plus-addressed rule cannot drift from it.
+      const emailDomain = ssm.StringParameter.valueForStringParameter(
         this,
-        'ActivateReceiptRuleSet',
-        {
-          onCreate: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: { RuleSetName: receiptRuleSetName },
-            physicalResourceId:
-              customResources.PhysicalResourceId.of(receiptRuleSetName),
-          },
-          onUpdate: {
-            service: 'SES',
-            action: 'setActiveReceiptRuleSet',
-            parameters: { RuleSetName: receiptRuleSetName },
-            physicalResourceId:
-              customResources.PhysicalResourceId.of(receiptRuleSetName),
-          },
-          // No onDelete: removing this resource must never deactivate the
-          // account's active rule set.
-          policy: customResources.AwsCustomResourcePolicy.fromSdkCalls({
-            resources: customResources.AwsCustomResourcePolicy.ANY_RESOURCE,
-          }),
-        },
+        `${prefix}/email-domain`,
       );
-      activateRules.node.addDependency(receiptRule);
-      // Activate last. The activation has no delete call and an active rule
-      // set cannot be deleted, so a create that failed after activation could
-      // not roll back. This aspect runs at synthesis with READONLY priority,
-      // after the constructor and after every lower-priority aspect that could
-      // add resources, so the activation depends on every resource in the
-      // stack wherever it is defined, and a failed create never reaches it.
-      Aspects.of(this).add(
-        {
-          visit(node: IConstruct) {
-            if (
-              node instanceof CfnResource &&
-              node.cfnResourceType !== 'AWS::CDK::Metadata' &&
-              !node.node.scopes.includes(activateRules)
-            ) {
-              activateRules.node.addDependency(node);
-            }
-          },
+      new ses.CfnReceiptRule(this, 'StoreRawEmail', {
+        ruleSetName: ssm.StringParameter.valueForStringParameter(
+          this,
+          `${prefix}/receipt-rule-set-name`,
+        ),
+        rule: {
+          name: deployment.resourcePrefix,
+          enabled: true,
+          recipients: [
+            Fn.join('', [`submit+${deployment.ephemeral}@`, emailDomain]),
+          ],
+          scanEnabled: true,
+          tlsPolicy: 'Optional',
+          actions: [
+            {
+              s3Action: {
+                bucketName: rawEmailBucket.bucketName,
+                objectKeyPrefix: inboundPrefix,
+              },
+            },
+            { stopAction: { scope: 'RuleSet' } },
+          ],
         },
-        { priority: AspectPriority.READONLY },
-      );
-
-      new CfnOutput(this, 'ReceiptRuleSetName', {
-        value: receiptRuleSetName,
       });
     }
 

@@ -20,7 +20,7 @@ cp .envrc.example .envrc
 direnv allow
 ```
 
-The root `.envrc` sets the workload Region, your GitHub owner and repository, the dev profile and account ID, and the `match-to-csv` email domain. Repositories created recently use immutable OIDC subjects. If yours does, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`. A rename or transfer changes the subject and needs a bootstrap update.
+The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is not local configuration, except in a disposable sandbox account (see below): Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` and `PROD_MCC_EMAIL_DOMAIN` secrets described in [Configure GitHub](30-configure-github.md), and the foundation publishes it in SSM for CDK. Repositories created recently use immutable OIDC subjects. If yours does, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`. A rename or transfer changes the subject and needs a bootstrap update.
 
 ## Bootstrap dev
 
@@ -88,7 +88,7 @@ create_terrateam_role  = false
 create_cdk_deploy_role = false
 ```
 
-The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. Do not add the account to Terrateam or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
+The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain`: set it in the ignored `dev.auto.tfvars` or export `TF_VAR_email_domain`, using a lowercase domain verified for SES in that account. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to Terrateam or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
 
 ## Keep local files untracked
 
