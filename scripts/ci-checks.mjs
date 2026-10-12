@@ -47,6 +47,7 @@ export function checks({ full, repository, mode }) {
           'scripts/publish-packages.test.mjs',
           'scripts/deployment-workflows.test.mjs',
           'scripts/local-cdk-bootstrap.test.mjs',
+          'scripts/stack-migration-guard.test.mjs',
         ],
       ],
       ['npm', ['run', 'tofu:fmt:check']],
