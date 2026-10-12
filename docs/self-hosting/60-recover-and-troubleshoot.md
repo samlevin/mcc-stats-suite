@@ -40,7 +40,9 @@ Do not enable unattended reconciliation to silence drift, and do not edit state 
 
 Inspect the CloudFormation stack events, fix the application or configuration, and redeploy. Do not recreate stack-owned resources by hand.
 
-If the deploy stops with `Refusing deploy: <stack> would lose resources that its deployed template does not retain`, the new release removes or replaces a stateful resource (a bucket, table, key, SES receipt rule set or rule, or SSM parameter), or removes a custom resource whose delete handler would run, and the deployed template does not retain it. CloudFormation applies the deployed template's policy, not the new one. Retain the resource, or drop its delete call, in a release that keeps its logical ID and properties, deploy that release, and remove or replace the resource in the next one.
+If the deploy stops with `Refusing deploy: <stack> would lose resources that its deployed template does not retain`, the new release removes or replaces a stateful resource (a bucket, table, key, log group, queue, SES receipt rule set or rule, or SSM parameter), or removes a custom resource whose delete handler would run, and the deployed template does not retain it. CloudFormation applies the deployed template's policy, not the new one. Retain the resource, or drop its delete call, in a release that keeps its logical ID and properties, deploy that release, and remove or replace the resource in the next one.
+
+If the deploy stops with `<stack> is ROLLBACK_COMPLETE after a failed first create`, the stack's first create failed. Resources with `DeletionPolicy: Retain`, such as a named log group, survive the rollback, and the stack's termination protection blocks the delete that a fresh create needs. Delete each resource the message lists, then run the two commands it prints to lift protection and delete the stack, and redeploy.
 
 ## Application incident after a production deployment
 

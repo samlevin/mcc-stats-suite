@@ -3,10 +3,66 @@ import { test } from 'node:test';
 import {
   findUnsafeRemovals,
   parseTemplateBody,
+  rolledBackMessage,
   stableDeployOptionsError,
   stackArtifact,
   stackStatusAction,
 } from './stack-migration-guard.mjs';
+
+test('a rolled-back first create names what it kept and how to recover', () => {
+  const message = rolledBackMessage('match-to-csv-dev', [
+    {
+      LogicalResourceId: 'WorkflowLogs',
+      ResourceType: 'AWS::Logs::LogGroup',
+      PhysicalResourceId: '/aws/vendedlogs/states/match-to-csv-dev',
+      ResourceStatus: 'DELETE_SKIPPED',
+    },
+    {
+      LogicalResourceId: 'Workflow',
+      ResourceType: 'AWS::StepFunctions::StateMachine',
+      PhysicalResourceId: 'arn',
+      ResourceStatus: 'DELETE_COMPLETE',
+    },
+  ]);
+  assert.match(message, /^match-to-csv-dev is ROLLBACK_COMPLETE/);
+  assert.match(
+    message,
+    /WorkflowLogs \(AWS::Logs::LogGroup\): \/aws\/vendedlogs\/states\/match-to-csv-dev/,
+  );
+  assert.doesNotMatch(message, /StateMachine/);
+  assert.match(
+    message,
+    /--no-enable-termination-protection --stack-name match-to-csv-dev/,
+  );
+  assert.match(message, /delete-stack --stack-name match-to-csv-dev$/);
+  assert.match(rolledBackMessage('s', undefined), /kept no retained resources/);
+});
+
+test('queues, log groups, and the extra replacement properties are guarded', () => {
+  const live = template({
+    Dlq: { Type: 'AWS::SQS::Queue', Properties: { QueueName: 'a' } },
+    Logs: { Type: 'AWS::Logs::LogGroup', Properties: {} },
+  });
+  assert.equal(findUnsafeRemovals(live, template({})).length, 2);
+  const changed = [
+    ['AWS::SQS::Queue', { QueueName: 'a' }, { QueueName: 'b' }],
+    ['AWS::Logs::LogGroup', { LogGroupName: 'a' }, { LogGroupName: 'b' }],
+    [
+      'AWS::DynamoDB::Table',
+      { LocalSecondaryIndexes: [{ IndexName: 'a' }] },
+      { LocalSecondaryIndexes: [{ IndexName: 'b' }] },
+    ],
+    ['AWS::KMS::Key', { MultiRegion: false }, { MultiRegion: true }],
+    ['AWS::KMS::Key', { Origin: 'AWS_KMS' }, { Origin: 'EXTERNAL' }],
+  ];
+  for (const [type, before, after] of changed) {
+    const problems = findUnsafeRemovals(
+      template({ R: { Type: type, Properties: before } }),
+      template({ R: { Type: type, Properties: after } }),
+    );
+    assert.equal(problems.length, 1, `${type} ${JSON.stringify(after)}`);
+  }
+});
 
 test('the stack comes from the cloud assembly manifest', () => {
   const artifacts = {
@@ -222,7 +278,7 @@ test('only settled stacks are compared', () => {
   ]) {
     assert.equal(stackStatusAction(status), 'compare', status);
   }
-  assert.equal(stackStatusAction('ROLLBACK_COMPLETE'), 'skip');
+  assert.equal(stackStatusAction('ROLLBACK_COMPLETE'), 'rolled-back');
   assert.equal(stackStatusAction('REVIEW_IN_PROGRESS'), 'skip');
   for (const status of [
     'UPDATE_IN_PROGRESS',

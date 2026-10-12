@@ -20,6 +20,7 @@ test('creates an isolated ephemeral deployment in dev', () => {
   assert.equal(deployment.stackName, 'match-to-csv-sam');
   assert.equal(deployment.objectPrefix, 'ephemeral/sam');
   assert.equal(deployment.ingressEnabled, false);
+  assert.equal(deployment.terminationProtection, false);
   assert.equal(deployment.bootstrapQualifier, 'mcclocal1');
   assert.equal(
     deployment.workloadBoundaryName,
@@ -44,6 +45,7 @@ test('uses one dev-qualified deployment for integration and smoke tests', () => 
   assert.equal(deployment.rolePath, undefined);
   assert.equal(deployment.isEphemeral, false);
   assert.equal(deployment.ingressEnabled, true);
+  assert.equal(deployment.terminationProtection, true);
 });
 
 test('uses one production-qualified deployment', () => {

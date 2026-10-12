@@ -6,9 +6,11 @@
 const STATEFUL_TYPES = new Set([
   'AWS::DynamoDB::Table',
   'AWS::KMS::Key',
+  'AWS::Logs::LogGroup',
   'AWS::S3::Bucket',
   'AWS::SES::ReceiptRule',
   'AWS::SES::ReceiptRuleSet',
+  'AWS::SQS::Queue',
   'AWS::SSM::Parameter',
 ]);
 const RETAINING_POLICIES = new Set(['Retain', 'RetainExceptOnCreate']);
@@ -22,9 +24,9 @@ const SETTLED_STATUSES = new Set([
   'IMPORT_COMPLETE',
   'IMPORT_ROLLBACK_COMPLETE',
 ]);
-// A rolled-back first create or a review-only stack owns no resources, and
-// cdk deploy replaces it, so its template protects nothing.
-const EMPTY_STATUSES = new Set(['ROLLBACK_COMPLETE', 'REVIEW_IN_PROGRESS']);
+// A review-only stack has never created anything, and cdk deploy replaces it.
+// ROLLBACK_COMPLETE is not empty: resources with DeletionPolicy Retain survive
+// the rollback, so cdk deploy's replacement would fail with AlreadyExists.
 
 /**
  * Returns the stack name and template file of the single stack in a CDK cloud
@@ -76,8 +78,33 @@ export function stableDeployOptionsError(passthrough) {
  */
 export function stackStatusAction(status) {
   if (SETTLED_STATUSES.has(status)) return 'compare';
-  if (EMPTY_STATUSES.has(status)) return 'skip';
+  if (status === 'REVIEW_IN_PROGRESS') return 'skip';
+  if (status === 'ROLLBACK_COMPLETE') return 'rolled-back';
   return 'refuse';
+}
+
+/**
+ * Builds the refusal for a stable stack whose first create rolled back. It
+ * names the resources the rollback kept, from `describe-stack-resources`, and
+ * the commands that clear the way for a fresh create.
+ */
+export function rolledBackMessage(stackName, stackResources) {
+  const kept = (stackResources ?? []).filter(
+    (resource) => resource.ResourceStatus === 'DELETE_SKIPPED',
+  );
+  return [
+    `${stackName} is ROLLBACK_COMPLETE after a failed first create.`,
+    kept.length > 0
+      ? 'The rollback kept these retained resources; delete them first, or the next create fails with AlreadyExists:'
+      : 'The rollback kept no retained resources.',
+    ...kept.map(
+      (resource) =>
+        `  - ${resource.LogicalResourceId} (${resource.ResourceType}): ${resource.PhysicalResourceId}`,
+    ),
+    'Then remove the stack and redeploy:',
+    `  aws cloudformation update-termination-protection --no-enable-termination-protection --stack-name ${stackName}`,
+    `  aws cloudformation delete-stack --stack-name ${stackName}`,
+  ].join('\n');
 }
 
 /**
@@ -101,11 +128,13 @@ export function parseTemplateBody(body) {
 // the resource, deleting the old one unless UpdateReplacePolicy is Retain.
 // CloudFormation rejects a Type change under the same logical ID on its own.
 const REPLACING_PROPERTIES = {
-  'AWS::DynamoDB::Table': ['TableName', 'KeySchema'],
-  'AWS::KMS::Key': ['KeySpec', 'KeyUsage'],
+  'AWS::DynamoDB::Table': ['TableName', 'KeySchema', 'LocalSecondaryIndexes'],
+  'AWS::KMS::Key': ['KeySpec', 'KeyUsage', 'MultiRegion', 'Origin'],
+  'AWS::Logs::LogGroup': ['LogGroupName'],
   'AWS::S3::Bucket': ['BucketName'],
   'AWS::SES::ReceiptRule': ['RuleSetName'],
   'AWS::SES::ReceiptRuleSet': ['RuleSetName'],
+  'AWS::SQS::Queue': ['QueueName', 'FifoQueue'],
   'AWS::SSM::Parameter': ['Name'],
 };
 

@@ -11,6 +11,7 @@ import {
 import {
   findUnsafeRemovals,
   parseTemplateBody,
+  rolledBackMessage,
   stableDeployOptionsError,
   stackArtifact,
   stackStatusAction,
@@ -256,10 +257,8 @@ function deployedTemplate(stackName) {
   }
   const stackStatus = status.stdout.trim();
   const statusAction = stackStatusAction(stackStatus);
-  if (statusAction === 'skip') {
-    if (stackStatus === 'ROLLBACK_COMPLETE') allowReplacement(stackName);
-    return undefined;
-  }
+  if (statusAction === 'skip') return undefined;
+  if (statusAction === 'rolled-back') refuseRolledBack(stackName);
   if (statusAction === 'refuse') {
     guardFail(
       `${stackName} is ${stackStatus}; wait for it to settle, then redeploy`,
@@ -284,26 +283,30 @@ function deployedTemplate(stackName) {
   }
 }
 
-// A first create that rolled back owns no resources, and cdk deploy deletes it
-// before creating it again. Stable stacks are created with termination
-// protection, which would block that delete, so lift it on this stack only.
-function allowReplacement(stackName) {
-  const result = awsCli([
+// A stable first create that rolled back can keep resources with
+// DeletionPolicy Retain, and its termination protection blocks the delete
+// cdk deploy would do before creating it again. Recovery needs an operator, so
+// name what survived and stop.
+function refuseRolledBack(stackName) {
+  const resources = awsCli([
     'cloudformation',
-    'update-termination-protection',
-    '--no-enable-termination-protection',
+    'describe-stack-resources',
     '--stack-name',
     stackName,
+    '--output',
+    'json',
   ]);
-  if (result.status !== 0) {
-    process.stderr.write(result.stderr ?? '');
-    guardFail(
-      `unable to lift termination protection on rolled-back ${stackName}`,
-    );
+  let stackResources = [];
+  if (resources.status === 0) {
+    try {
+      stackResources = JSON.parse(resources.stdout).StackResources;
+    } catch {
+      stackResources = [];
+    }
+  } else {
+    process.stderr.write(resources.stderr ?? '');
   }
-  process.stdout.write(
-    `${stackName} is ROLLBACK_COMPLETE; lifted its termination protection so the deploy can replace it\n`,
-  );
+  guardFail(rolledBackMessage(stackName, stackResources));
 }
 
 // Synthesizes the stack the deploy targets and reads its name and template

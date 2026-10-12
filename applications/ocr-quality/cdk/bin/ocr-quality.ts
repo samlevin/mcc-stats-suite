@@ -15,5 +15,5 @@ new OcrQualityStack(app, deployment.stackName, {
     account: deployment.account,
     region: deployment.region,
   },
-  terminationProtection: !deployment.isEphemeral,
+  terminationProtection: deployment.terminationProtection,
 });

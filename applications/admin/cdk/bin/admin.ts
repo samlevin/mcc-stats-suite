@@ -12,5 +12,5 @@ new AdminStack(app, deployment.stackName, {
     qualifier: deployment.bootstrapQualifier,
   }),
   env: { account: deployment.account, region: deployment.region },
-  terminationProtection: !deployment.isEphemeral,
+  terminationProtection: deployment.terminationProtection,
 });

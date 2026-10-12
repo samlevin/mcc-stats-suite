@@ -19,6 +19,11 @@ export interface DeploymentConfig {
   rolePath?: string;
   isEphemeral: boolean;
   ingressEnabled: boolean;
+  /**
+   * Stable stacks deploy only from main through GitHub Actions and are never
+   * torn down; ephemeral stacks are destroyed from a developer shell.
+   */
+  terminationProtection: boolean;
 }
 
 const INSTANCE_PATTERN = /^[a-z0-9][a-z0-9-]{0,19}$/;
@@ -109,6 +114,7 @@ export function resolveDeployment(
     rolePath: isEphemeral ? '/mcc-local/' : undefined,
     isEphemeral,
     ingressEnabled: !isEphemeral,
+    terminationProtection: !isEphemeral,
   };
 }
 

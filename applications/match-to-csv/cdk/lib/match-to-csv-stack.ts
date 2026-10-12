@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
+  AspectPriority,
   Aspects,
   CfnOutput,
   CfnResource,
@@ -362,20 +363,24 @@ export class MatchToCsvStack extends Stack {
       activateRules.node.addDependency(receiptRule);
       // Activate last. The activation has no delete call and an active rule
       // set cannot be deleted, so a create that failed after activation could
-      // not roll back. An aspect runs at synthesis, after the constructor and
-      // any other aspect, so the activation depends on every resource in the
+      // not roll back. This aspect runs at synthesis with READONLY priority,
+      // after the constructor and after every lower-priority aspect that could
+      // add resources, so the activation depends on every resource in the
       // stack wherever it is defined, and a failed create never reaches it.
-      Aspects.of(this).add({
-        visit(node: IConstruct) {
-          if (
-            node instanceof CfnResource &&
-            node.cfnResourceType !== 'AWS::CDK::Metadata' &&
-            !node.node.scopes.includes(activateRules)
-          ) {
-            activateRules.node.addDependency(node);
-          }
+      Aspects.of(this).add(
+        {
+          visit(node: IConstruct) {
+            if (
+              node instanceof CfnResource &&
+              node.cfnResourceType !== 'AWS::CDK::Metadata' &&
+              !node.node.scopes.includes(activateRules)
+            ) {
+              activateRules.node.addDependency(node);
+            }
+          },
         },
-      });
+        { priority: AspectPriority.READONLY },
+      );
 
       new CfnOutput(this, 'ReceiptRuleSetName', {
         value: receiptRuleSetName,

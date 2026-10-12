@@ -33,8 +33,6 @@ export function createMatchToCsvApp(
       account: deployment.account,
       region: deployment.region,
     },
-    // Stable stacks deploy only from main through GitHub Actions and are
-    // never torn down; ephemeral stacks are destroyed from a developer shell.
-    terminationProtection: !deployment.isEphemeral,
+    terminationProtection: deployment.terminationProtection,
   });
 }
