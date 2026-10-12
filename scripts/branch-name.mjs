@@ -1,10 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { REPOSITORY } from './issue-triage.mjs';
+import { REPOSITORY, ghRest } from './issue-triage.mjs';
 
 const MAX_SLUG = 40;
-const CANONICAL =
-  /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\/[1-9][0-9]*-(?!part-[0-9]+(?:-|$))[a-z0-9]+(?:-(?!part-[0-9]+(?:-|$))[a-z0-9]+)*(?:-part-(?:[2-9]|[1-9][0-9]+))?$/;
+// Titles with no ASCII letters or digits still need a usable slug.
+const FALLBACK_SLUG = 'issue';
+const NUMBER = '[1-9][0-9]*';
+const POSITIVE_INTEGER = new RegExp(`^${NUMBER}$`);
+const ACTOR = /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/;
+const CANONICAL = new RegExp(
+  `^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/${NUMBER}-(?!part-[0-9]+(?:-|$))[a-z0-9]+(?:-(?!part-[0-9]+(?:-|$))[a-z0-9]+)*(?:-part-(?:[2-9]|[1-9][0-9]+))?$`,
+);
 const EXEMPT = [/^release-please--/, /^dependabot\//];
 
 export function slugify(title) {
@@ -14,8 +20,15 @@ export function slugify(title) {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
+  // Join "part N" into "partN" so a title never reads as a stack layer suffix.
+  const joined = [];
+  for (let index = 0; index < words.length; index += 1) {
+    if (words[index] === 'part' && /^[0-9]+$/.test(words[index + 1] ?? ''))
+      joined.push(`part${words[++index]}`);
+    else joined.push(words[index]);
+  }
   let slug = '';
-  for (const word of words) {
+  for (const word of joined) {
     const next = slug ? `${slug}-${word}` : word;
     if (next.length > MAX_SLUG) {
       // Never split a word, unless the first word alone is too long.
@@ -24,7 +37,7 @@ export function slugify(title) {
     }
     slug = next;
   }
-  return slug;
+  return slug || FALLBACK_SLUG;
 }
 
 export function isCanonicalBranch(name) {
@@ -36,16 +49,13 @@ export function isExemptBranch(name) {
 }
 
 export function branchName({ issue, title, actor = 'agent', layer = 1 }) {
-  if (!/^[1-9][0-9]*$/.test(String(issue)))
+  if (!POSITIVE_INTEGER.test(String(issue)))
     throw new Error('Issue must be a positive number');
-  if (!/^[A-Za-z0-9][A-Za-z0-9-]*$/.test(actor))
-    throw new Error('Actor must be a GitHub login');
+  if (!ACTOR.test(actor)) throw new Error('Actor must be a GitHub login');
   if (!Number.isInteger(layer) || layer < 1)
     throw new Error('Layer must be a positive integer');
-  const slug = slugify(title);
-  if (!slug) throw new Error('Issue title has no usable characters');
   const suffix = layer > 1 ? `-part-${layer}` : '';
-  const name = `${actor.toLowerCase()}/${issue}-${slug}${suffix}`;
+  const name = `${actor.toLowerCase()}/${issue}-${slugify(title)}${suffix}`;
   if (!isCanonicalBranch(name)) throw new Error(`Not a valid branch: ${name}`);
   return name;
 }
@@ -72,7 +82,7 @@ export function parseArguments(argv) {
         options.actor = value;
         actorGiven = true;
       } else {
-        if (!/^[1-9][0-9]*$/.test(value))
+        if (!POSITIVE_INTEGER.test(value))
           throw new Error('--layer requires a positive integer');
         options.layer = Number(value);
         layerGiven = true;
@@ -91,46 +101,49 @@ export function parseArguments(argv) {
 }
 
 function currentBranch() {
+  let name;
   try {
-    return execFileSync('git', ['branch', '--show-current'], {
+    name = execFileSync('git', ['branch', '--show-current'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch (cause) {
     throw new Error('Not inside a git work tree', { cause });
   }
+  if (!name)
+    throw new Error('No branch is checked out; pass a name to --check');
+  return name;
 }
 
-export function issueNumber(name) {
-  return name.slice(name.indexOf('/') + 1).match(/^[1-9][0-9]*/)[0];
+// Splits a canonical name into its issue number and slug, without the layer.
+export function parseBranch(name) {
+  const [, number, slug] = name
+    .slice(name.indexOf('/') + 1)
+    .match(new RegExp(`^(${NUMBER})-(.+?)(?:-part-[0-9]+)?$`));
+  return { number, slug };
 }
 
-// Errors carry the HTTP status when gh reports one and never expose stderr.
-function ghApi(args) {
-  try {
-    return execFileSync('gh', ['api', ...args], {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-  } catch (cause) {
-    const error = new Error('GitHub request failed', { cause });
-    const match = /HTTP (\d{3})/.exec(String(cause?.stderr ?? ''));
-    if (match) error.httpStatus = Number(match[1]);
-    throw error;
-  }
-}
-
+// Returns an open issue with a title, or throws a readable error.
 function lookupIssue(api, number) {
+  let found;
   try {
-    return JSON.parse(api([`repos/${REPOSITORY}/issues/${number}`]));
+    found = JSON.parse(api([`repos/${REPOSITORY}/issues/${number}`]));
   } catch (error) {
     if (error?.httpStatus === 404)
       throw new Error(`Issue #${number} was not found`, { cause: error });
     throw error;
   }
+  if (!found || typeof found !== 'object')
+    throw new Error(`Issue #${number} was not found`);
+  if (found.pull_request)
+    throw new Error(`#${number} is a pull request, not an issue`);
+  if (found.state !== 'open') throw new Error(`Issue #${number} is not open`);
+  if (typeof found.title !== 'string' || !found.title.trim())
+    throw new Error(`Issue #${number} has no title`);
+  return found;
 }
 
-export function run(argv, { current = currentBranch, api = ghApi } = {}) {
+export function run(argv, { current = currentBranch, api = ghRest } = {}) {
   const options = parseArguments(argv);
   if (options.check) {
     const name = options.value ?? current();
@@ -141,25 +154,20 @@ export function run(argv, { current = currentBranch, api = ghApi } = {}) {
         `Branch "${name}" must be <actor>/<issue>-<slug>[-part-N]; run: node scripts/branch-name.mjs <issue>`,
       );
     if (options.requireIssue) {
-      const number = issueNumber(name);
-      const found = lookupIssue(api, number);
-      if (!found || typeof found !== 'object')
-        throw new Error(`Issue #${number} was not found`);
-      if ('pull_request' in found)
-        throw new Error(`#${number} is a pull request, not an issue`);
+      const { number, slug } = parseBranch(name);
+      const { title } = lookupIssue(api, number);
+      if (slug !== slugify(title))
+        throw new Error(
+          `Branch "${name}" does not match the title of issue #${number}; run: node scripts/branch-name.mjs ${number}`,
+        );
     }
     return `Branch ${name} is valid`;
   }
   if (!options.value)
     throw new Error('Usage: branch-name.mjs <issue> | --check [name]');
-  if (!/^[1-9][0-9]*$/.test(options.value))
+  if (!POSITIVE_INTEGER.test(options.value))
     throw new Error('Issue must be a positive number');
-  const found = lookupIssue(api, options.value);
-  if (found?.pull_request)
-    throw new Error(`Issue #${options.value} is a pull request`);
-  const title = found?.title;
-  if (typeof title !== 'string' || !title.trim())
-    throw new Error(`Issue #${options.value} has no title`);
+  const { title } = lookupIssue(api, options.value);
   return branchName({
     issue: options.value,
     title,

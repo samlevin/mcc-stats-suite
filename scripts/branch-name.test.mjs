@@ -1,17 +1,22 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 import {
   branchName,
   isCanonicalBranch,
   isExemptBranch,
+  parseBranch,
   run,
   slugify,
 } from './branch-name.mjs';
 
-// Adapts a number-to-issue stub to the ghApi call shape.
+// Adapts a number-to-issue stub to the ghRest call shape.
 const asApi = (fetch) => (args) =>
   JSON.stringify(fetch(args[0].split('/').pop()));
+const openIssue = (title) => () => ({ title, state: 'open' });
 
 test('slugify lowercases and collapses punctuation', () => {
   assert.equal(slugify('Fix: the  API (v2)!'), 'fix-the-api-v2');
@@ -31,7 +36,8 @@ test('slugify cuts at 40 characters on a word boundary', () => {
 test('slugify is stable for numbers and Unicode', () => {
   assert.equal(slugify('Café résumé 2024'), 'cafe-resume-2024');
   assert.equal(slugify('日本語 only'), 'only');
-  assert.equal(slugify('日本語'), '');
+  assert.equal(slugify('日本語'), 'issue');
+  assert.equal(slugify('!!!'), 'issue');
   assert.equal(slugify('Add 3 retries'), 'add-3-retries');
 });
 
@@ -83,13 +89,18 @@ test('branchName applies actor and layer', () => {
     'agent/48-do-a-thing',
   );
   assert.throws(() => branchName({ issue: 'x', title: 'a' }));
-  assert.throws(() => branchName({ issue: 1, title: '日本語' }));
-  assert.throws(() => branchName({ issue: 1, title: 'a', actor: 'a/b' }));
+  assert.equal(branchName({ issue: 1, title: '日本語' }), 'agent/1-issue');
+  for (const actor of ['a/b', 'foo-', '-foo'])
+    assert.throws(
+      () => branchName({ issue: 1, title: 'a', actor }),
+      /Actor must be a GitHub login/,
+      actor,
+    );
   assert.throws(() => branchName({ issue: 1, title: 'a', layer: 0 }));
 });
 
 test('run generates and checks without calling GitHub', () => {
-  const issue = () => ({ title: 'Do a Thing' });
+  const issue = openIssue('Do a Thing');
   assert.equal(run(['5'], { api: asApi(issue) }), 'agent/5-do-a-thing');
   assert.equal(
     run(['5', '--actor', 'sam', '--layer', '2'], { api: asApi(issue) }),
@@ -137,16 +148,47 @@ test('options that need a value reject a missing one', () => {
   );
 });
 
-test('--require-issue accepts an existing issue', () => {
+test('--require-issue accepts an open issue whose title matches', () => {
   const seen = [];
   const message = run(['--check', 'agent/48-foo', '--require-issue'], {
     api: asApi((number) => {
       seen.push(number);
-      return { number: 48 };
+      return { number: 48, title: 'Foo', state: 'open' };
     }),
   });
   assert.equal(message, 'Branch agent/48-foo is valid');
   assert.deepEqual(seen, ['48']);
+  assert.match(
+    run(['--check', 'sam/48-foo-part-3', '--require-issue'], {
+      api: asApi(openIssue('Foo')),
+    }),
+    /valid/,
+  );
+});
+
+test('--require-issue rejects a slug that does not match the title', () => {
+  assert.throws(
+    () =>
+      run(['--check', 'agent/1-whatever', '--require-issue'], {
+        api: asApi(openIssue('Do a Thing')),
+      }),
+    /does not match the title of issue #1; run: node scripts\/branch-name.mjs 1/,
+  );
+});
+
+test('--require-issue and generation reject a closed issue', () => {
+  const closed = () => ({ title: 'Foo', state: 'closed' });
+  assert.throws(
+    () =>
+      run(['--check', 'agent/1-foo', '--require-issue'], {
+        api: asApi(closed),
+      }),
+    /Issue #1 is not open/,
+  );
+  assert.throws(
+    () => run(['1'], { api: asApi(closed) }),
+    /Issue #1 is not open/,
+  );
 });
 
 test('--require-issue rejects a pull request number', () => {
@@ -198,19 +240,28 @@ test('--require-issue reports other GitHub failures without stderr', () => {
   );
 });
 
-test('generation rejects a pull request number', () => {
-  assert.throws(
-    () => run(['52'], { api: asApi(() => ({ title: 'x', pull_request: {} })) }),
-    /Issue #52 is a pull request/,
-  );
+test('generation rejects a pull request number like --require-issue', () => {
+  for (const pull_request of [{}, { url: 'x' }])
+    assert.throws(
+      () =>
+        run(['52'], {
+          api: asApi(() => ({ title: 'x', state: 'open', pull_request })),
+        }),
+      /#52 is a pull request, not an issue/,
+    );
 });
 
-test('generation rejects a missing or blank title', () => {
-  for (const found of [{}, { title: '   ' }, { title: 5 }, null])
+test('generation rejects a missing issue or blank title', () => {
+  for (const found of [
+    { state: 'open' },
+    { title: '   ', state: 'open' },
+    { title: 5, state: 'open' },
+  ])
     assert.throws(
       () => run(['7'], { api: asApi(() => found) }),
       /has no title/,
     );
+  assert.throws(() => run(['7'], { api: asApi(() => null) }), /not found/);
 });
 
 test('--require-issue skips exempt branches and needs --check', () => {
@@ -263,15 +314,37 @@ test('generation maps 404 and other failures like --require-issue', () => {
   );
 });
 
-test('a title that slugs to only part-N cannot be a branch', () => {
-  assert.throws(
-    () => branchName({ issue: 1, title: 'Part 2' }),
-    /Not a valid branch/,
+test('titles that mention "part N" never read as a layer suffix', () => {
+  assert.equal(branchName({ issue: 1, title: 'Part 2' }), 'agent/1-part2');
+  assert.equal(
+    branchName({ issue: 5, title: 'Support part 2 of the spec' }),
+    'agent/5-support-part2-of-the-spec',
   );
+  assert.equal(
+    branchName({ issue: 5, title: 'Handle invoice part 1' }),
+    'agent/5-handle-invoice-part1',
+  );
+  assert.equal(
+    branchName({ issue: 5, title: 'Handle invoice part 3' }),
+    'agent/5-handle-invoice-part3',
+  );
+  assert.equal(
+    branchName({ issue: 5, title: 'Handle invoice part 3', layer: 2 }),
+    'agent/5-handle-invoice-part3-part-2',
+  );
+  assert.equal(slugify('A part of the plan'), 'a-part-of-the-plan');
+});
+
+test('parseBranch splits the issue, slug, and layer', () => {
+  assert.deepEqual(parseBranch('agent/5-handle-invoice-part3-part-2'), {
+    number: '5',
+    slug: 'handle-invoice-part3',
+  });
+  assert.deepEqual(parseBranch('sam/48-foo'), { number: '48', slug: 'foo' });
 });
 
 test('--layer accepts only canonical positive integers', () => {
-  const api = asApi(() => ({ title: 'x' }));
+  const api = asApi(openIssue('x'));
   for (const value of ['0x10', '1e1', ' 2 ', '01', '0', '-1', '1.5', 'abc'])
     assert.throws(
       () => run(['5', '--layer', value], { api }),
@@ -286,6 +359,34 @@ test('a git failure reads as not inside a work tree', () => {
   process.chdir(tmpdir());
   try {
     assert.throws(() => run(['--check']), /Not inside a git work tree/);
+  } finally {
+    process.chdir(original);
+  }
+});
+
+test('a detached HEAD reads as no branch checked out', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'branch-name-'));
+  const git = (...args) =>
+    execFileSync('git', ['-C', directory, ...args], { stdio: 'ignore' });
+  git('init', '-q');
+  git(
+    '-c',
+    'user.name=test',
+    '-c',
+    'user.email=test@example.invalid',
+    '-c',
+    'commit.gpgsign=false',
+    'commit',
+    '-q',
+    '--allow-empty',
+    '-m',
+    'init',
+  );
+  git('checkout', '-q', '--detach');
+  const original = process.cwd();
+  process.chdir(directory);
+  try {
+    assert.throws(() => run(['--check']), /No branch is checked out/);
   } finally {
     process.chdir(original);
   }
