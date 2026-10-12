@@ -4,7 +4,7 @@ on:
   issues:
     types: [opened]
   pull_request_target:
-    types: [opened]
+    types: [opened, ready_for_review]
 
 permissions:
   issues: write
@@ -14,7 +14,12 @@ jobs:
   assign:
     # The owner's identity is what the agents use. Nothing is checked out, so
     # pull_request_target never runs pull request code.
-    if: github.event.sender.login == github.repository_owner
+    # Pull requests also need the owner as author, so marking someone else's
+    # pull request ready does not assign it to the owner.
+    if: >-
+      github.event.sender.login == github.repository_owner &&
+      (github.event_name == 'issues' ||
+      github.event.pull_request.user.login == github.repository_owner)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
