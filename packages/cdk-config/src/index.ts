@@ -62,17 +62,9 @@ export function resolveDeployment(
         'Ephemeral names cannot be "ephemeral" or "incoming"; those are object key prefixes',
       );
     }
-    if (requestedEphemeral === 'dev') {
+    if (requestedEphemeral === 'dev' || requestedEphemeral === 'prod') {
       throw new Error(
-        'Ephemeral name "dev" is reserved for shared inbound email',
-      );
-    }
-    // Ephemeral stacks deploy only to dev, so prod would name a dev stack and
-    // its resources exactly like the production stack. The dev rule above
-    // already covers dev.
-    if (requestedEphemeral === 'prod') {
-      throw new Error(
-        'Ephemeral name prod is reserved because it would name a dev stack like the production stack; choose another name',
+        'Ephemeral names "dev" and "prod" are reserved for the shared environments',
       );
     }
     ephemeral = requestedEphemeral;

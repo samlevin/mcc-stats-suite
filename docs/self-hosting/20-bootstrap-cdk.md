@@ -55,7 +55,7 @@ Ephemeral synthesis selects this bootstrap, its runtime boundary, and the IAM ro
 
 For ephemeral deploys, `scripts/cdk-app.mjs` passes `--change-set-name mcclocal1-deploy` and `--toolkit-stack-name CDKToolkitLocal`. It rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`. These checks only fail early; IAM refuses each of them anyway.
 
-Ephemeral stacks and resources use `<application>-e-<name>`; shared stacks keep `<application>-dev`. Names such as `devin` and `sam-devtest` are allowed. The exact name `dev` remains reserved for the shared `incoming/dev/` email route. This policy covers the currently implemented resources. Review and extend it when an application introduces a new AWS resource type, and never replace it with `AdministratorAccess`.
+Ephemeral stacks and resources use `<application>-e-<name>`; shared stacks keep `<application>-dev`. Names such as `devin` and `sam-devtest` are allowed. The exact names `dev` and `prod` are reserved for the shared environments. This policy covers the currently implemented resources. Review and extend it when an application introduces a new AWS resource type, and never replace it with `AdministratorAccess`.
 
 ### Known limits
 

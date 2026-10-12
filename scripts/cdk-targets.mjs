@@ -110,8 +110,8 @@ export function ephemeralNameError(name) {
   if (name === 'ephemeral' || name === 'incoming') {
     return 'Ephemeral names cannot be "ephemeral" or "incoming"; those are object key prefixes';
   }
-  if (name === 'dev') {
-    return 'Ephemeral name "dev" is reserved for shared inbound email';
+  if (name === 'dev' || name === 'prod') {
+    return 'Ephemeral names "dev" and "prod" are reserved for the shared environments';
   }
   return undefined;
 }

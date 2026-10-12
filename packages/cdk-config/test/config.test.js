@@ -77,7 +77,7 @@ test('rejects prod as an ephemeral name', () => {
         'match-to-csv',
         {},
       ),
-    /would name a dev stack like the production stack/,
+    /reserved for the shared environments/,
   );
 });
 
@@ -97,7 +97,7 @@ test('rejects deployment to the wrong account', () => {
   );
 });
 
-test('reserves the shared inbound email route', () => {
+test('reserves dev for the shared environment', () => {
   assert.throws(
     () =>
       resolveDeployment(
@@ -105,7 +105,7 @@ test('reserves the shared inbound email route', () => {
         'admin',
         {},
       ),
-    /shared inbound email/,
+    /reserved for the shared environments/,
   );
 });
 

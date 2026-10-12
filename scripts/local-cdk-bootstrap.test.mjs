@@ -1093,6 +1093,7 @@ test('the wrapper and cdk-config apply the same ephemeral name rule', () => {
     'adev',
     'sam-2',
     'dev',
+    'prod',
     'devin',
     'admin-dev',
     'sam-devtest',
