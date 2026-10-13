@@ -599,8 +599,12 @@ test('classifier selects independent infrastructure and application gates', () =
   });
   // Classification needs no checkout; the compare API serves pushes and PRs.
   assert.deepEqual(
-    ciWorkflow.jobs.scope.steps.map((step) => step.uses),
-    ['actions/github-script@v9'],
+    ciWorkflow.jobs.scope.steps.map((step) => step.uses?.split('@')[0]),
+    ['actions/github-script'],
+  );
+  assert.match(
+    ciWorkflow.jobs.scope.steps[0].uses,
+    /^actions\/github-script@[a-f0-9]{40}$/,
   );
 });
 
