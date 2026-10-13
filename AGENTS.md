@@ -9,7 +9,7 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 | Changed | Run |
 | --- | --- |
 | Docs only | `npm run format:check` |
-| `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs` |
+| `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs` |
 | A workspace | iterate with `npm test --workspace @samlevin/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:fmt:check` |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev`; `npm run verify:bundle --workspace @samlevin/match-to-csv` |
@@ -33,3 +33,13 @@ Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://gi
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
 - Issue states: claim and move to `In progress` before coding; move to `In review` when the PR opens. Never mark issues `Done`.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
+
+## Branch names
+
+Every branch an agent pushes is named `agent/<issue>-<slug>`, and stacked layers after the first end in `-part-<n>`:
+
+- `<issue>` is the number of the leaf issue the PR closes, without `#`.
+- `<slug>` is that issue's title in lowercase, with accents dropped and every run of other characters turned into `-`. "Part N" in the title becomes `partN`. The slug is cut to 40 characters at a word boundary, and is `issue` when the title has no ASCII letters or digits.
+- Examples: `agent/48-generate-and-enforce-branch-names-from` for #48, and `agent/48-generate-and-enforce-branch-names-from-part-2` for its second stacked layer.
+
+Never type a branch name by hand. Print it with `node scripts/branch-name.mjs <issue>`, adding `--layer <n>` for layer 2 and up. Create the branch with that name, or run `git branch -m <name>` when your tool created the worktree branch under another name. Do this before the first commit. Once a branch is pushed, keep its name, even if the issue title changes later. Nothing in CI checks branch names, so following this rule is up to you.

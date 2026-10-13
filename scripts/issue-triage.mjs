@@ -56,6 +56,21 @@ export function ghGraphql(query, variables) {
   return result.data;
 }
 
+// Errors carry the HTTP status when gh reports one and never expose stderr.
+export function ghRest(args) {
+  try {
+    return execFileSync('gh', ['api', ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+  } catch (cause) {
+    const error = new Error('GitHub request failed', { cause });
+    const match = /HTTP (\d{3})/.exec(String(cause?.stderr ?? ''));
+    if (match) error.httpStatus = Number(match[1]);
+    throw error;
+  }
+}
+
 export async function discover(
   api,
   required = { Status: ['Inbox', 'Ready'], Priority: PRIORITIES, Size: SIZES },

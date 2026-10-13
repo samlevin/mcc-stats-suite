@@ -52,11 +52,20 @@ export function checks({ full, repository, mode }) {
           'scripts/issue-triage.mjs',
           'scripts/issue-containers.mjs',
           'scripts/issue-triage.test.mjs',
+          'scripts/branch-name.mjs',
+          'scripts/branch-name.test.mjs',
           '--max-warnings',
           '0',
         ],
       ],
-      ['node', ['--test', 'scripts/issue-triage.test.mjs']],
+      [
+        'node',
+        [
+          '--test',
+          'scripts/issue-triage.test.mjs',
+          'scripts/branch-name.test.mjs',
+        ],
+      ],
     );
   return commands;
 }
