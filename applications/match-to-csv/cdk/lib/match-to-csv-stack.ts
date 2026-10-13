@@ -1,4 +1,5 @@
 import * as path from 'path';
+import { version as esbuildVersion } from 'esbuild/package.json';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
   Aspects,
@@ -356,6 +357,8 @@ export class MatchToCsvStack extends Stack {
         sourceMap: true,
         target: 'node22',
         nodeModules: includeSharp ? ['sharp'] : undefined,
+        // Docker bundling installs esbuild in CDK's image; use the locked version.
+        esbuildVersion,
         // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
         forceDockerBundling: includeSharp && this.bundlingRequired,
       },
