@@ -5,7 +5,7 @@ The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/f
 ## Plan
 
 1. Put reusable behavior in `infrastructure/modules/foundation` and environment-only values in the environment root.
-2. Run `npm run tofu:fmt:check` and `npm run check`.
+2. Run the full infrastructure formatting, validation, and module-test loop in [TESTING.md](../../TESTING.md), along with `npm run check`.
 3. Open a pull request. Terrateam plans each affected root: a module change or a `.terrateam/config.yml` change plans dev and prod, and a change to one environment root plans only that root. If a plan is missing or stale, comment `terrateam plan`.
 4. Read every planned action. Reject unexpected replacements, deletions, policy changes, a plan for the wrong account, or creation of a named resource that already exists.
 
