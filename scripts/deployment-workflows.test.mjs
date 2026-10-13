@@ -78,8 +78,10 @@ test('artifact belongs to qualifying CI run and deployment uses that CI SHA', ()
     assert.equal(job.with.application, '${{ inputs.application }}');
   }
   const checkout = deployment.jobs.deploy.steps.find(
-    (step) => step.uses === 'actions/checkout@v4',
+    (step) => step.uses?.split('@')[0] === 'actions/checkout',
   );
+  assert.ok(checkout, 'deployment must check out the qualifying CI revision');
+  assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
   assert.equal(checkout.with.ref, '${{ inputs.sha }}');
 });
 

@@ -409,7 +409,10 @@ test('cache uses dedicated session credentials and environment contracts without
     new URL('../.github/actions/turbo-s3-cache/action.yml', import.meta.url),
     'utf8',
   );
-  assert.match(action, /rharkor\/caching-for-turbo@v2\.5\.1/);
+  assert.match(
+    action,
+    /uses: rharkor\/caching-for-turbo@[a-f0-9]{40} # v2\.5\.1\s*$/m,
+  );
   assert.match(action, /provider: s3/);
   for (const [input, output] of [
     ['s3-access-key-id', 'aws-access-key-id'],
