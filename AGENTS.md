@@ -1,5 +1,7 @@
 # Agent rules
 
+These repository instructions apply to all coding agents, including Claude and Codex. Keep tool-specific settings and runtime instructions in each tool's personal configuration.
+
 TypeScript NPM/Turbo monorepo that turns Halo MCC screenshots, received by email, into OCR evidence. Only `applications/match-to-csv` is implemented; `admin`, `ocr-quality`, `data-pipeline`, and `player` are placeholder stacks, and `specs/` are plans. Shared code lives in `packages/contracts` and `packages/cdk-config`; OpenTofu lives in `infrastructure/`. Do not read CONTRIBUTING.md, README.md, or other guides unless the task changes them.
 
 ## Checks
@@ -19,13 +21,12 @@ Pipe long output through `tail -n 60`. Tests never call AWS.
 ## Autonomous delivery
 
 - A delivery request authorizes issue claims, project moves, commits, pushes, and ready-for-review PRs. Merges, deployments, infrastructure applies, destructive operations, and settings changes require explicit user authorization.
-- Create owned worktrees from fresh `origin/main` under `/private/tmp/codex-mcc-stats-suite-<task>`. Never edit, install, build, or switch branches in the human checkout. Use `exec_command.workdir` for commands.
-- Run with default permissions first. Network access depends on the active parent session; escalate only after a concrete sandbox denial or for a known protected Git metadata write. Reuse existing command rules. Put `--repo` after the GitHub subcommand and prefer subcommands over reviewed `gh api` calls.
+- Each writer owns an isolated worktree created from fresh `origin/main` under `/private/tmp/agent-mcc-stats-suite-<task>`. Never edit, install, build, or switch branches in the human checkout. Install dependencies in the owned worktree; never symlink the human checkout's `node_modules`. Preserve other agents' edits.
 - Infer missing Size or Priority from the requested outcome. Missing tracker metadata alone does not block delivery. Stop for a concrete unmet prerequisite or missing acceptance criteria.
 - Use stacked PRs for prerequisite dependencies or independently reviewable layers. Line count alone does not require a stack. An explicitly authorized stack may create a worktree from fresh trunk and then base its branch on the prerequisite ref; record that SHA for review.
-- Pass `fork_turns: "none"`, acceptance criteria, verified prerequisites, repo, branch, exact base/head SHAs, and worktree path in concise handoffs. Reviewers use supplied criteria and inspect the diff and relevant callers; rework reviews include the existing PR URL.
-- Use independent code review for shared contracts, security boundaries, and other substantial behavior changes. Reviewers never edit or execute project code, even when parent permission overrides grant write access.
-- Keep the main thread idle between concise progress updates. Wait up to 60 seconds per call; never poll agent lists or remote CI. Report current CI status once and hand off.
+- Include acceptance criteria, verified prerequisites, repo, branch, exact base/head SHAs, and worktree path in concise handoffs. Reviewers use supplied criteria and inspect the diff and relevant callers; rework reviews include the existing PR URL.
+- Use independent code review for changes across components, shared contracts, security boundaries, and other substantial behavior changes. Skip independent review for localized low-risk changes, documentation, and mechanical edits. Reviewers remain read-only and never edit or execute project code.
+- Report what changed, the PR URL, checks and results, and any concrete blocker. Report current CI status without waiting for, polling, or rerunning remote CI.
 
 ## Hard rules
 
