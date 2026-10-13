@@ -12,13 +12,15 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { createRequire } from 'node:module';
 import ts from 'typescript';
+import { classify, selectScopes, workspaceMode } from './ci-scope.mjs';
 import {
-  checks,
-  runChecks,
-  workspaceMode,
-  workspaceArguments,
-} from './ci-checks.mjs';
+  evaluate,
+  runScript,
+  workflow as loadWorkflow,
+} from './workflow-test-helpers.mjs';
+import { checks, runChecks, workspaceArguments } from './ci-checks.mjs';
 
 const root = new URL('../', import.meta.url);
 const turbo = new URL('../node_modules/.bin/turbo', import.meta.url).pathname;
@@ -29,6 +31,7 @@ const applicationNames = [
   'ocr-quality',
   'player',
 ];
+const require = createRequire(import.meta.url);
 
 for (const name of [
   ...applicationNames.map((name) => `applications/${name}`),
@@ -44,13 +47,13 @@ for (const name of [
   });
 }
 
-test('root, infrastructure, unknown, and empty changes require every workspace', () => {
+test('root, unknown, and empty changes require every workspace', () => {
   for (const path of [
     'turbo.json',
     'package-lock.json',
     '.github/workflows/ci.yml',
     'scripts/ci-checks.mjs',
-    'infrastructure/dev/foundation/main.tf',
+    'infrastructure/.tool-versions',
     'unexpected/file',
     'applications/unknown/src/file.ts',
     'packages/unknown/src/file.ts',
@@ -65,6 +68,20 @@ test('root, infrastructure, unknown, and empty changes require every workspace',
     );
   }
   assert.equal(workspaceMode([], 'pull_request'), 'all');
+});
+
+test('infrastructure and documentation paths keep affected workspace mode', () => {
+  for (const path of [
+    'infrastructure/dev/foundation/main.tf',
+    'infrastructure/dev/backend.tfvars.example',
+    'TESTING.md',
+  ]) {
+    assert.equal(
+      workspaceMode(['packages/contracts/src/index.ts', path], 'pull_request'),
+      'affected',
+    );
+    assert.equal(workspaceMode([path], 'pull_request'), 'all');
+  }
 });
 
 test('documentation and recognized repository scopes avoid workspace and infrastructure commands', () => {
@@ -85,10 +102,10 @@ test('full gate contains repository checks and the dependency-aware workspace ga
     'eslint',
     'release:check',
     'scripts/*.test.mjs',
-    'tofu:fmt:check',
   ]) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
+  assert.ok(!JSON.stringify(commands).includes('tofu'));
   assert.ok(!workspaceArguments('all').includes('--affected'));
   assert.ok(workspaceArguments('affected').includes('--affected'));
 });
@@ -326,6 +343,7 @@ test('CI cdk-config tests cannot invoke another compiler or modify built declara
 });
 
 test('workflow isolates cache namespaces and deploys dev and prod after CI', () => {
+  const parsedWorkflow = loadWorkflow('ci');
   const workflow = readFileSync(
     new URL('../.github/workflows/ci.yml', import.meta.url),
     'utf8',
@@ -340,9 +358,25 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
     workflow,
     /Start trusted dev Turbo cache\n[ ]+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
   );
-  assert.ok(!workflow.includes('actions/cache/'));
-  assert.match(workflow, /git show "\$BASE:scripts\/ci-scope\.mjs"/);
-  assert.match(workflow, /Save affected applications for dev deployment/);
+  // Only the infrastructure job restores a generic cache, keyed to its own
+  // provider binaries; every other job uses isolated caches.
+  for (const [name, job] of Object.entries(parsedWorkflow.jobs)) {
+    const caches = job.steps.filter((step) =>
+      step.uses?.startsWith('actions/cache'),
+    );
+    assert.equal(caches.length, name === 'infrastructure' ? 1 : 0, name);
+  }
+  const [providerCache] = parsedWorkflow.jobs.infrastructure.steps.filter(
+    (step) => step.uses?.startsWith('actions/cache'),
+  );
+  assert.match(providerCache.with.key, /runner\.os.*runner\.arch/);
+  assert.match(providerCache.with['restore-keys'], /runner\.os.*runner\.arch/);
+  assert.deepEqual(parsedWorkflow.jobs.check.needs, [
+    'scope',
+    'infrastructure',
+    'application-checks',
+  ]);
+  assert.equal(parsedWorkflow.jobs.check.if, '${{ !cancelled() }}');
   const dev = readFileSync(
     new URL('../.github/workflows/deploy-dev.yml', import.meta.url),
     'utf8',
@@ -431,4 +465,428 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
   const prod = plan('prod');
   assert.notEqual(dev.tasks[0].hash, prod.tasks[0].hash);
   assert.equal(dev.tasks[0].hash, plan('dev').tasks[0].hash);
+});
+
+test('classifier selects independent infrastructure and application gates', () => {
+  const ciWorkflow = loadWorkflow('ci');
+  for (const key of [
+    'full',
+    'repository',
+    'infrastructure',
+    'check',
+    'mode',
+    'base',
+    'head',
+  ]) {
+    assert.equal(
+      ciWorkflow.jobs.scope.outputs[key],
+      '${{ steps.scope.outputs.' + key + ' }}',
+    );
+  }
+  for (const [paths, expected] of [
+    [
+      ['infrastructure/dev/foundation/main.tf'],
+      { full: false, repository: false, infrastructure: true, check: false },
+    ],
+    [
+      // Prettier formats the Terrateam config, so it keeps the full gate too.
+      ['.terrateam/config.yml'],
+      { full: true, repository: false, infrastructure: true, check: true },
+    ],
+    [
+      ['infrastructure/dev/foundation/backend.tfvars'],
+      {
+        full: false,
+        repository: false,
+        infrastructure: true,
+        check: false,
+      },
+    ],
+    [
+      ['applications/match-to-csv/src/index.ts'],
+      {
+        full: true,
+        repository: false,
+        infrastructure: false,
+        check: true,
+      },
+    ],
+    [
+      [
+        'infrastructure/prod/bootstrap/main.tf',
+        'packages/contracts/src/index.ts',
+      ],
+      {
+        full: true,
+        repository: false,
+        infrastructure: true,
+        check: true,
+      },
+    ],
+    [
+      ['infrastructure/README.md'],
+      {
+        full: false,
+        repository: false,
+        infrastructure: false,
+        check: true,
+      },
+    ],
+    [
+      [
+        'infrastructure/.envrc.example',
+        'infrastructure/dev/backend.tfvars.example',
+      ],
+      {
+        full: false,
+        repository: false,
+        infrastructure: false,
+        check: true,
+      },
+    ],
+    [
+      [],
+      {
+        full: true,
+        repository: false,
+        infrastructure: true,
+        check: true,
+      },
+    ],
+  ]) {
+    const { mode, ...gates } = selectScopes(paths, 'pull_request');
+    assert.deepEqual(gates, expected);
+    assert.equal(mode, workspaceMode(paths, 'pull_request'));
+    const needs = {
+      scope: {
+        outputs: Object.fromEntries(
+          Object.entries(expected).map(([key, value]) => [key, String(value)]),
+        ),
+      },
+    };
+    assert.equal(
+      evaluate(ciWorkflow.jobs['application-checks'].if, { needs }),
+      expected.check,
+    );
+    assert.equal(
+      evaluate(ciWorkflow.jobs.infrastructure.if, { needs }),
+      expected.infrastructure,
+    );
+  }
+  assert.equal(
+    classify('infrastructure/modules/foundation/tests/cache.tftest.hcl'),
+    'infrastructure',
+  );
+  assert.equal(classify('infrastructure/.envrc.example'), 'documentation');
+  assert.equal(classify('infrastructure/.tool-versions'), 'full');
+  assert.equal(
+    classify('infrastructure/dev/backend.tfvars.example'),
+    'documentation',
+  );
+  assert.equal(classify('.terrateam/config.yml'), 'full');
+  assert.equal(classify('.terrateam/other.yml'), 'full');
+  assert.equal(
+    classify('applications/match-to-csv/src/index.ts'),
+    'application',
+  );
+  assert.equal(classify('applications/unknown-app/src/index.ts'), 'full');
+  assert.deepEqual(ciWorkflow.on, {
+    pull_request: null,
+    push: { branches: ['main'] },
+  });
+  // Classification needs no checkout; the compare API serves pushes and PRs.
+  assert.deepEqual(
+    ciWorkflow.jobs.scope.steps.map((step) => step.uses),
+    ['actions/github-script@v9'],
+  );
+});
+
+test('check aggregator requires exactly the selected gates', () => {
+  const aggregator = loadWorkflow('ci').jobs.check.steps[0].run;
+  const passes = (env) => {
+    try {
+      execFileSync('bash', ['-euo', 'pipefail', '-c', aggregator], {
+        env: { ...process.env, ...env },
+        stdio: 'ignore',
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (const scope of ['success', 'failure'])
+    for (const infrastructure of ['true', 'false'])
+      for (const applications of ['true', 'false'])
+        for (const infrastructureResult of ['success', 'failure', 'skipped'])
+          for (const applicationsResult of ['success', 'failure', 'skipped'])
+            assert.equal(
+              passes({
+                SCOPE_RESULT: scope,
+                SCOPE_INFRASTRUCTURE: infrastructure,
+                SCOPE_APPLICATIONS: applications,
+                INFRASTRUCTURE_RESULT: infrastructureResult,
+                APPLICATIONS_RESULT: applicationsResult,
+              }),
+              scope === 'success' &&
+                (infrastructure === 'false' ||
+                  infrastructureResult === 'success') &&
+                (applications === 'false' || applicationsResult === 'success'),
+            );
+});
+
+test('workflow executes gate selection for push, PR, retired baseline, and API failure', async () => {
+  const ciWorkflow = loadWorkflow('ci');
+  const script = ciWorkflow.jobs.scope.steps[0].with.script;
+  const currentClassifier = readFileSync(
+    new URL('./ci-scope.mjs', import.meta.url),
+  );
+  const oldRunnerTemp = process.env.RUNNER_TEMP;
+  const run = async ({
+    event = 'pull_request',
+    paths = [],
+    baseline = currentClassifier,
+    apiError = false,
+    fileCount,
+  }) => {
+    const directory = mkdtempSync(join(tmpdir(), 'mcc-scope-script-'));
+    process.env.RUNNER_TEMP = directory;
+    const outputs = {};
+    const warnings = [];
+    const github = {
+      rest: {
+        repos: {
+          compareCommitsWithBasehead: async () => {
+            if (apiError) throw new Error('comparison unavailable');
+            const files = fileCount
+              ? Array.from({ length: fileCount }, (_, index) => ({
+                  filename: `docs/${index}.md`,
+                }))
+              : paths.map((filename) => ({ filename }));
+            return {
+              data: { files, merge_base_commit: { sha: 'c'.repeat(40) } },
+            };
+          },
+          getContent: async () => ({
+            data: { content: Buffer.from(baseline).toString('base64') },
+          }),
+        },
+      },
+    };
+    const mockedRequire = (name) => {
+      assert.notEqual(name, 'child_process');
+      return require(name);
+    };
+    const context = {
+      eventName: event,
+      repo: { owner: 'owner', repo: 'repo' },
+      sha: 'b'.repeat(40),
+      payload: {
+        before: 'a'.repeat(40),
+        pull_request: {
+          base: { sha: 'a'.repeat(40) },
+          head: { sha: 'b'.repeat(40) },
+        },
+      },
+    };
+    try {
+      await runScript(script, {
+        require: mockedRequire,
+        context,
+        github,
+        core: {
+          setOutput: (name, value) => {
+            outputs[name] = value;
+          },
+          warning: (message) => warnings.push(message),
+        },
+      });
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+      if (oldRunnerTemp === undefined) delete process.env.RUNNER_TEMP;
+      else process.env.RUNNER_TEMP = oldRunnerTemp;
+    }
+    return { outputs, warnings };
+  };
+
+  const infra = await run({ paths: ['infrastructure/dev/foundation/main.tf'] });
+  assert.deepEqual(
+    [
+      infra.outputs.full,
+      infra.outputs.repository,
+      infra.outputs.infrastructure,
+      infra.outputs.check,
+    ],
+    [false, false, true, false],
+  );
+  assert.equal(infra.outputs.base, 'c'.repeat(40));
+  const affected = await run({
+    paths: ['packages/contracts/src/index.ts', 'TESTING.md'],
+  });
+  assert.equal(affected.outputs.mode, 'affected');
+  assert.equal(affected.outputs.base, 'c'.repeat(40));
+  const pushAffected = await run({
+    event: 'push',
+    paths: ['packages/contracts/src/index.ts'],
+  });
+  assert.equal(pushAffected.outputs.mode, 'all');
+  const truncated = await run({ fileCount: 300 });
+  assert.equal(truncated.outputs.full, true);
+  assert.equal(truncated.outputs.check, true);
+  assert.equal(truncated.outputs.mode, 'all');
+  assert.equal(truncated.outputs.base, 'b'.repeat(40));
+  assert.match(truncated.warnings.join('\n'), /file list limit/);
+  const push = await run({ event: 'push', paths: ['scripts/ci-scope.mjs'] });
+  assert.deepEqual(
+    [
+      push.outputs.full,
+      push.outputs.repository,
+      push.outputs.infrastructure,
+      push.outputs.check,
+    ],
+    [true, false, true, true],
+  );
+  const retired = await run({ baseline: 'export function classify() {}' });
+  assert.deepEqual(
+    [
+      retired.outputs.full,
+      retired.outputs.repository,
+      retired.outputs.infrastructure,
+      retired.outputs.check,
+    ],
+    [true, true, true, true],
+  );
+  assert.match(retired.warnings.join('\n'), /supported entry point/);
+  const constExport = await run({
+    paths: ['infrastructure/dev/foundation/main.tf'],
+    baseline: String(currentClassifier).replace(
+      'export function selectScopes(paths, event) {',
+      'export const selectScopes = function (paths, event) {',
+    ),
+  });
+  assert.equal(constExport.outputs.check, false);
+  assert.equal(constExport.outputs.infrastructure, true);
+  const failed = await run({ apiError: true });
+  assert.deepEqual(
+    [
+      failed.outputs.full,
+      failed.outputs.repository,
+      failed.outputs.infrastructure,
+      failed.outputs.check,
+    ],
+    [true, true, true, true],
+  );
+  assert.match(failed.warnings.join('\n'), /comparison unavailable/);
+  assert.equal(failed.outputs.mode, 'all');
+  assert.equal(failed.outputs.base, 'b'.repeat(40));
+  const failedPush = await run({ event: 'push', apiError: true });
+  assert.equal(failedPush.outputs.base, 'b'.repeat(40));
+  assert.equal(failedPush.outputs.infrastructure, true);
+  assert.equal(failedPush.outputs.check, true);
+});
+
+test('standalone infrastructure gate runs without credentials', () => {
+  const job = loadWorkflow('ci').jobs.infrastructure;
+  assert.ok(job.steps.some((step) => step.run === './scripts/tofu-checks.sh'));
+  assert.ok(
+    job.steps.some((step) =>
+      step.run?.includes('tofu-checks.sh --pinned-version'),
+    ),
+  );
+  assert.equal(
+    job.env.TF_PLUGIN_CACHE_DIR,
+    '${{ github.workspace }}/.tofu-plugin-cache',
+  );
+  assert.ok(
+    !JSON.stringify(job).match(
+      /id-token|configure-aws|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|secrets\./,
+    ),
+  );
+  assert.equal(job.env.AWS_EC2_METADATA_DISABLED, 'true');
+});
+
+test('tofu checks discover every root and module suite and require agreeing pins', () => {
+  const script = new URL('./tofu-checks.sh', import.meta.url).pathname;
+  const setup = ({
+    pins = ['1.2.3', '1.2.3', '1.2.3'],
+    orphan = false,
+  } = {}) => {
+    const directory = mkdtempSync(join(tmpdir(), 'mcc-tofu-checks-'));
+    const write = (path, content) => {
+      mkdirSync(join(directory, path, '..'), { recursive: true });
+      writeFileSync(join(directory, path), content);
+    };
+    write('.tool-versions', `nodejs 22.16.0\nopentofu ${pins[0]}\n`);
+    write('infrastructure/.tool-versions', `opentofu ${pins[1]}\n`);
+    write(
+      '.terrateam/config.yml',
+      `engine:\n  name: tofu\n  version: ${pins[2]}\n\nother:\n  version: 9.9.9\n`,
+    );
+    for (const environment of ['dev', 'prod', 'qa'])
+      for (const module of ['alpha', 'beta'])
+        write(`infrastructure/${environment}/${module}/main.tf`, '');
+    write('infrastructure/modules/alpha/tests/a.tftest.hcl', '');
+    write('infrastructure/modules/beta/main.tf', '');
+    if (orphan) write('infrastructure/modules/gamma/tests/g.tftest.hcl', '');
+    write('bin/tofu', '#!/usr/bin/env bash\necho "$*" >> "$TOFU_LOG"\n');
+    execFileSync('chmod', ['+x', join(directory, 'bin/tofu')]);
+    return directory;
+  };
+  const run = (directory, args = []) =>
+    execFileSync('bash', [script, ...args], {
+      cwd: directory,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PATH: `${join(directory, 'bin')}:${process.env.PATH}`,
+        TOFU_LOG: join(directory, 'tofu.log'),
+        TF_PLUGIN_CACHE_DIR: join(directory, 'plugins'),
+      },
+    });
+
+  const directory = setup();
+  try {
+    assert.equal(run(directory, ['--pinned-version']).trim(), '1.2.3');
+    run(directory);
+    const calls = readFileSync(join(directory, 'tofu.log'), 'utf8')
+      .trim()
+      .split('\n');
+    assert.equal(calls[0], 'fmt -check -recursive infrastructure');
+    for (const environment of ['dev', 'prod', 'qa'])
+      for (const module of ['alpha', 'beta']) {
+        const root = `-chdir=infrastructure/${environment}/${module}`;
+        const suite =
+          environment === 'dev' && module === 'alpha'
+            ? ' -test-directory=../../modules/alpha/tests'
+            : '';
+        assert.ok(
+          calls.includes(
+            `${root} init -backend=false -input=false -lockfile=readonly${suite}`,
+          ),
+        );
+        assert.ok(calls.includes(`${root} validate`));
+      }
+    assert.deepEqual(
+      calls.filter((call) => call.includes(' test ')),
+      [
+        '-chdir=infrastructure/dev/alpha test -test-directory=../../modules/alpha/tests',
+      ],
+    );
+    assert.ok(!calls.some((call) => call.includes('infrastructure/modules/')));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+
+  for (const options of [
+    { pins: ['1.2.3', '1.2.4', '1.2.3'] },
+    { pins: ['1.2.3', '1.2.3', '1.2.4'] },
+    { orphan: true },
+  ]) {
+    const failing = setup(options);
+    try {
+      assert.throws(() => run(failing));
+    } finally {
+      rmSync(failing, { recursive: true, force: true });
+    }
+  }
 });

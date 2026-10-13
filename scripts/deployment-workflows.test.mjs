@@ -10,32 +10,11 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { parse } from 'yaml';
-
-const workflow = (name) =>
-  parse(
-    readFileSync(
-      new URL(`../.github/workflows/${name}.yml`, import.meta.url),
-      'utf8',
-    ),
-  );
+import { evaluate, runScript, workflow } from './workflow-test-helpers.mjs';
 const ci = workflow('ci');
 const orchestration = workflow('deploy-dev');
 const delivery = workflow('_deliver-aws-application');
 const deployment = workflow('_deploy-aws-application');
-
-// Execute the workflow's actual expression with GitHub's documented result values.
-const evaluate = (expression, values) =>
-  Function(
-    ...Object.keys(values),
-    `return (${expression});`,
-  )(...Object.values(values));
-
-const runScript = (script, globals) =>
-  new (Object.getPrototypeOf(async function () {}).constructor)(
-    ...Object.keys(globals),
-    script,
-  )(...Object.values(globals));
 
 test('only successful trusted main push CI qualifies stable delivery', () => {
   assert.deepEqual(orchestration.on.workflow_run, {
@@ -560,3 +539,62 @@ for (const [name, stub, message] of [
     assert.equal(result.githubEnv, '');
   });
 }
+
+test('one deployment selector publishes the application selection after the required gate', () => {
+  const select = ci.jobs['select-deployment'];
+  const save = select.steps.find(
+    (step) => step.name === 'Save application selection',
+  );
+  const uploads = Object.values(ci.jobs).flatMap((job) =>
+    job.steps.filter((step) =>
+      step.uses?.startsWith('actions/upload-artifact'),
+    ),
+  );
+  assert.equal(uploads.length, 1);
+  assert.equal(select.needs, 'check');
+  // A skipped gate upstream of check must not suppress the selection.
+  const selectIf = select.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  assert.match(
+    selectIf,
+    /^!cancelled\(\) && needs\.check\.result == 'success'/,
+  );
+  assert.match(
+    save.env.APPLICATIONS,
+    /needs\.check\.outputs\.applications \|\| '\[\]'/,
+  );
+  assert.equal(
+    ci.jobs.check.outputs.applications,
+    '${{ needs.application-checks.outputs.applications }}',
+  );
+  assert.match(ci.jobs.check.steps[0].run, /INFRASTRUCTURE_RESULT/);
+  assert.match(ci.jobs.check.steps[0].run, /APPLICATIONS_RESULT/);
+  for (const event_name of ['push', 'pull_request']) {
+    for (const result of ['success', 'failure', 'skipped']) {
+      const values = {
+        cancelled: () => false,
+        github: { event_name, ref: 'refs/heads/main' },
+        needs: { check: { result } },
+      };
+      assert.equal(
+        evaluate(selectIf, values),
+        event_name === 'push' && result === 'success',
+      );
+    }
+  }
+  assert.match(save.run, /printf '%s\\n'/);
+  assert.match(save.run, /deploy-selection\/applications\.json/);
+  assert.equal(
+    uploads[0].with.name,
+    'deploy-applications-${{ github.run_id }}',
+  );
+  assert.equal(
+    uploads[0].with.path,
+    '${{ runner.temp }}/deploy-selection/applications.json',
+  );
+  assert.equal(
+    evaluate(orchestration.jobs.deploy.if, {
+      needs: { qualify: { outputs: { applications: '[]' } } },
+    }),
+    false,
+  );
+});
