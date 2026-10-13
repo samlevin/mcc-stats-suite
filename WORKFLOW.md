@@ -34,11 +34,13 @@ Without write access to the repository, you cannot assign yourself or change pro
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
+People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. AGENTS.md describes the slug rules.
+
 ## Pull requests and review
 
 People open their PR directly. Agents push the branch and get an `APPROVE` from `code-reviewer` before opening the PR. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over.
 
-The final PR for a leaf closes it with `Closes #N` and references its parent. Titles follow the Conventional Commits rules in [CONTRIBUTING.md](CONTRIBUTING.md). Move the issue to In review when the PR opens. Issues reach Done on merge, not when an agent hands off.
+The final PR for a leaf closes it with `Closes #N` and references its parent. Titles follow the Conventional Commits rules in [CONTRIBUTING.md](CONTRIBUTING.md). When the PR opens, `pr-issue-status.yml` moves each closing issue to In review: from In progress for any author, and also from Ready for the owner and collaborators. Its run logs every skip with the reason; move the issue yourself only if it was skipped. Issues reach Done on merge, not when an agent hands off.
 
 Security review by `security-reviewer` happens only when a person asks for it.
 

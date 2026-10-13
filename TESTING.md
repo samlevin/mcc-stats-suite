@@ -13,7 +13,7 @@ The AWS-free issue automation tests cover triage eligibility, pagination, idempo
 node --test scripts/issue-*.test.mjs
 ```
 
-These tests use metadata mocks and never call GitHub. When a non-draft PR opens or becomes ready for review, the separate `pr-issue-status` workflow moves open issues named by closing keywords from `In progress` to `In review` in MCC delivery. Other statuses and ordinary issue mentions are skipped. Status lookup failures do not block the metadata workflow. Preview with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs` or `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`; both default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
+These tests use metadata mocks and never call GitHub. When a non-draft PR is opened, edited, reopened, or marked ready for review, the separate `pr-issue-status` workflow moves open issues named by closing keywords to `In review` in MCC delivery: from `In progress` for any author, and also from `Ready` for the owner and collaborators. Other statuses and ordinary issue mentions are skipped, and each skip is logged with its reason. Status lookup failures do not block the metadata workflow. Preview with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs` or `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`; both default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
 
 The full local quality gate is:
 

@@ -2,7 +2,7 @@ name: Move closing issues to review
 
 on:
   pull_request_target:
-    types: [opened, ready_for_review]
+    types: [opened, edited, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.16.0'
-      - name: Move claimed closing issues to In review
+      - name: Move closing issues to In review
         env:
           MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
