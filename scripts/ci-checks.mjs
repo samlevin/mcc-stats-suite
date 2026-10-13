@@ -1,16 +1,18 @@
 import { spawn, execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { classify, isApplicationPath } from './ci-scope.mjs';
 
 export function workspaceMode(paths, event) {
-  // Root configuration, infrastructure and unknown paths require every workspace.
+  // Infrastructure and documentation have their own gates and are not
+  // workspace inputs. Root configuration and unknown paths require every
+  // workspace.
+  const inputs = paths.filter(
+    (path) => !['infrastructure', 'documentation'].includes(classify(path)),
+  );
   return event === 'pull_request' &&
-    paths.length > 0 &&
-    paths.every((path) =>
-      /^(applications\/(admin|data-pipeline|match-to-csv|ocr-quality|player)|packages\/(contracts|cdk-config))\//.test(
-        path,
-      ),
-    )
+    inputs.length > 0 &&
+    inputs.every(isApplicationPath)
     ? 'affected'
     : 'all';
 }
@@ -39,7 +41,6 @@ export function checks({ full, repository, mode }) {
       // Node expands the glob itself, so every scripts/*.test.mjs runs without
       // a hand-maintained list here or in package.json.
       ['node', ['--test', 'scripts/*.test.mjs']],
-      ['npm', ['run', 'tofu:fmt:check']],
       ['npx', workspaceArguments(mode)],
     );
   else if (repository)

@@ -31,16 +31,17 @@ npm ci
 
 Workspaces use the `@samlevin` scope and install from the local workspaces. Third-party dependencies come from npmjs.org.
 
-For application, package, infrastructure, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
+For application, package, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
 
 ```console
 npm run check
-npm run tofu:fmt:check
 ```
+
+OpenTofu source and configuration files under `infrastructure/` select the separate AWS-free `infrastructure` job on PRs and main pushes. Unknown paths and `.terrateam/config.yml` run it alongside the application gate; application and package changes do not run it. It checks OpenTofu formatting, validates all six dev/prod roots without backends or inputs (including the inactive data-platform roots), and runs the bootstrap and foundation module tests. Infrastructure-only changes skip `application-checks`. The required `check` job aggregates the selected gates. Run the infrastructure commands in [TESTING.md](TESTING.md) locally.
 
 For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs --max-warnings 0` and `node --test scripts/issue-*.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
 
-The first command checks formatting, lint rules, release metadata, types, tests, and builds. Neither command calls AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
+`npm run check` checks formatting, lint rules, release metadata, types, tests, and builds without AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
 
 Useful focused commands follow the workspace dependency graph:
 
@@ -68,7 +69,7 @@ chore: update development tooling
 
 Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, milestone, and project membership are copied from the linked issue automatically.
 
-Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. CI runs independent repository checks and workspace tasks concurrently in one ARM64 job. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. CI retains CDK synthesis, native bundle verification, and OpenTofu formatting. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
+Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. The ARM64 `application-checks` job runs repository checks and workspace tasks concurrently; the required `check` job aggregates selected results. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. The application gate retains CDK synthesis and native bundle verification. Infrastructure-only main pushes save an empty deployment selection and deploy no applications. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
 
 ## What happens after merge
 
