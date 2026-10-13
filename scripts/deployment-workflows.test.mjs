@@ -551,7 +551,7 @@ test('one deployment selector publishes the application selection after the requ
     ),
   );
   assert.equal(uploads.length, 1);
-  assert.deepEqual(select.needs, ['scope', 'check']);
+  assert.equal(select.needs, 'check');
   // A skipped gate upstream of check must not suppress the selection.
   const selectIf = select.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
   assert.match(
@@ -573,7 +573,7 @@ test('one deployment selector publishes the application selection after the requ
       const values = {
         cancelled: () => false,
         github: { event_name, ref: 'refs/heads/main' },
-        needs: { scope: { result: 'success' }, check: { result } },
+        needs: { check: { result } },
       };
       assert.equal(
         evaluate(selectIf, values),

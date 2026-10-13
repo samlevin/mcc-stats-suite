@@ -45,9 +45,9 @@ The scope job reads the baseline classifier before either gate runs. The require
 
 For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, mixed infrastructure/application changes, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. Unknown paths also run OpenTofu checks; application and package changes do not. The baseline classifier controls documentation and recognized repository checks. Deployment requires successful CI and remains limited to pushes to `main`. Infrastructure-only pushes publish an empty application selection, so `deploy-applications` completes without deploying.
 
-The AWS-free `infrastructure` job runs `tofu fmt -check -recursive infrastructure`, then initializes and validates bootstrap, foundation, and data-platform roots in dev and prod. The inactive data-platform roots are included because they validate without inputs. It runs the bootstrap and foundation test modules through the already initialized dev roots. Those suites use fake credentials and overrides; CI never assumes an AWS role for this job. CI caches provider downloads using the OpenTofu lock files.
+The AWS-free `infrastructure` job runs `tofu fmt -check -recursive infrastructure`, then initializes and validates every root under `infrastructure/<environment>/`, currently bootstrap, foundation, and data-platform in dev and prod. The inactive data-platform roots are included because they validate without inputs. It runs each `infrastructure/modules/<module>/tests` suite through the already initialized dev root of the same name, and fails if a suite has no such root. Those suites use fake credentials and overrides; CI never assumes an AWS role for this job. CI caches provider downloads by runner OS, architecture, and the OpenTofu lock files.
 
-Run the same infrastructure checks locally with OpenTofu 1.12.1:
+Run the same infrastructure checks locally with the OpenTofu version pinned in `.tool-versions`. The script fails when that pin, `infrastructure/.tool-versions`, and `.terrateam/config.yml` disagree:
 
 ```sh
 npm run tofu:check

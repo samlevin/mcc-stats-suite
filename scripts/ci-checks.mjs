@@ -1,21 +1,6 @@
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { classify, isApplicationPath } from './ci-scope.mjs';
-
-export function workspaceMode(paths, event) {
-  // Infrastructure and documentation have their own gates and are not
-  // workspace inputs. Root configuration and unknown paths require every
-  // workspace.
-  const inputs = paths.filter(
-    (path) => !['infrastructure', 'documentation'].includes(classify(path)),
-  );
-  return event === 'pull_request' &&
-    inputs.length > 0 &&
-    inputs.every(isApplicationPath)
-    ? 'affected'
-    : 'all';
-}
 
 export function workspaceArguments(mode) {
   return [
@@ -93,13 +78,9 @@ function runCommand(command, args) {
 }
 
 async function main() {
-  const { CI_BASE: base, CI_HEAD: head, CI_EVENT: event } = process.env;
-  if (
-    !/^[0-9a-f]{40}$/.test(base ?? '') ||
-    !/^[0-9a-f]{40}$/.test(head ?? '') ||
-    !['pull_request', 'push'].includes(event)
-  )
-    throw new Error('Expected committed CI base/head and event');
+  const { CI_BASE: base, CI_HEAD: head } = process.env;
+  if (!/^[0-9a-f]{40}$/.test(base ?? '') || !/^[0-9a-f]{40}$/.test(head ?? ''))
+    throw new Error('Expected committed CI base/head');
   if (
     ![process.env.CI_FULL, process.env.CI_REPOSITORY].every((value) =>
       ['true', 'false'].includes(value),
@@ -108,21 +89,11 @@ async function main() {
     throw new Error('Expected explicit baseline scope flags');
   const full = process.env.CI_FULL === 'true';
   const repository = process.env.CI_REPOSITORY === 'true';
-  const diffBase =
-    event === 'pull_request'
-      ? execFileSync('git', ['merge-base', base, head], {
-          encoding: 'utf8',
-        }).trim()
-      : base;
-  const paths = execFileSync(
-    'git',
-    ['diff', '--name-only', '--no-renames', '-z', diffBase, head],
-    { encoding: 'utf8' },
-  )
-    .split('\0')
-    .filter(Boolean);
-  const mode = workspaceMode(paths, event);
-  process.env.TURBO_SCM_BASE = diffBase;
+  // The scope job diffs once and decides the mode with the baseline classifier.
+  const mode = process.env.CI_MODE;
+  if (!['affected', 'all'].includes(mode))
+    throw new Error('Expected an explicit workspace mode');
+  process.env.TURBO_SCM_BASE = base;
   process.env.TURBO_SCM_HEAD = head;
   console.log(`Workspace validation: ${full ? mode : 'none'}`);
   if (full) {

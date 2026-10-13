@@ -41,9 +41,23 @@ export function classify(path) {
   return 'full';
 }
 
-export function selectScopes(paths) {
+// Infrastructure and documentation have their own gates and are not workspace
+// inputs. Root configuration and unknown paths require every workspace.
+export function workspaceMode(paths, event) {
+  const inputs = paths.filter(
+    (path) => !['infrastructure', 'documentation'].includes(classify(path)),
+  );
+  return event === 'pull_request' &&
+    inputs.length > 0 &&
+    inputs.every(isApplicationPath)
+    ? 'affected'
+    : 'all';
+}
+
+export function selectScopes(paths, event) {
   const scopes = paths.map(classify);
   return {
+    mode: workspaceMode(paths, event),
     full:
       !scopes.length ||
       scopes.includes('full') ||
