@@ -16,6 +16,17 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 
 Pipe long output through `tail -n 60`. Tests never call AWS.
 
+## Autonomous delivery
+
+- A delivery request authorizes issue claims, project moves, commits, pushes, and ready-for-review PRs. Merges, deployments, infrastructure applies, destructive operations, and settings changes require explicit user authorization.
+- Create owned worktrees from fresh `origin/main` under `/private/tmp/codex-mcc-stats-suite-<task>`. Never edit, install, build, or switch branches in the human checkout. Use `exec_command.workdir` for commands.
+- Run with default permissions first. Network access depends on the active parent session; escalate only after a concrete sandbox denial or for a known protected Git metadata write. Reuse existing command rules. Put `--repo` after the GitHub subcommand and prefer subcommands over reviewed `gh api` calls.
+- Infer missing Size or Priority from the requested outcome. Missing tracker metadata alone does not block delivery. Stop for a concrete unmet prerequisite or missing acceptance criteria.
+- Use stacked PRs for prerequisite dependencies or independently reviewable layers. Line count alone does not require a stack. An explicitly authorized stack may create a worktree from fresh trunk and then base its branch on the prerequisite ref; record that SHA for review.
+- Pass `fork_turns: "none"`, acceptance criteria, verified prerequisites, repo, branch, exact base/head SHAs, and worktree path in concise handoffs. Reviewers use supplied criteria and inspect the diff and relevant callers; rework reviews include the existing PR URL.
+- Use independent code review for shared contracts, security boundaries, and other substantial behavior changes. Reviewers never edit or execute project code, even when parent permission overrides grant write access.
+- Keep the main thread idle between concise progress updates. Wait up to 60 seconds per call; never poll agent lists or remote CI. Report current CI status once and hand off.
+
 ## Hard rules
 
 - Public repo: never commit credentials, account IDs, emails, domains, state, plans, or populated env files.
