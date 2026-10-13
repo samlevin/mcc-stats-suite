@@ -552,9 +552,11 @@ test('one deployment selector publishes the application selection after the requ
   );
   assert.equal(uploads.length, 1);
   assert.deepEqual(select.needs, ['scope', 'check']);
-  assert.equal(
-    select.if,
-    "github.event_name == 'push' && github.ref == 'refs/heads/main'",
+  // A skipped gate upstream of check must not suppress the selection.
+  const selectIf = select.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  assert.match(
+    selectIf,
+    /^!cancelled\(\) && needs\.check\.result == 'success'/,
   );
   assert.match(
     save.env.APPLICATIONS,
@@ -567,11 +569,17 @@ test('one deployment selector publishes the application selection after the requ
   assert.match(ci.jobs.check.steps[0].run, /INFRASTRUCTURE_RESULT/);
   assert.match(ci.jobs.check.steps[0].run, /APPLICATIONS_RESULT/);
   for (const event_name of ['push', 'pull_request']) {
-    const values = {
-      github: { event_name, ref: 'refs/heads/main' },
-      needs: { scope: { result: 'success' }, check: { result: 'success' } },
-    };
-    assert.equal(evaluate(select.if, values), event_name === 'push');
+    for (const result of ['success', 'failure', 'skipped']) {
+      const values = {
+        cancelled: () => false,
+        github: { event_name, ref: 'refs/heads/main' },
+        needs: { scope: { result: 'success' }, check: { result } },
+      };
+      assert.equal(
+        evaluate(selectIf, values),
+        event_name === 'push' && result === 'success',
+      );
+    }
   }
   assert.match(save.run, /printf '%s\\n'/);
   assert.match(save.run, /deploy-selection\/applications\.json/);
