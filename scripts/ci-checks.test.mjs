@@ -409,7 +409,10 @@ test('cache uses dedicated session credentials and environment contracts without
     new URL('../.github/actions/turbo-s3-cache/action.yml', import.meta.url),
     'utf8',
   );
-  assert.match(action, /rharkor\/caching-for-turbo@v2\.5\.1/);
+  assert.match(
+    action,
+    /uses: rharkor\/caching-for-turbo@[a-f0-9]{40} # v2\.5\.1\s*$/m,
+  );
   assert.match(action, /provider: s3/);
   for (const [input, output] of [
     ['s3-access-key-id', 'aws-access-key-id'],
@@ -596,8 +599,12 @@ test('classifier selects independent infrastructure and application gates', () =
   });
   // Classification needs no checkout; the compare API serves pushes and PRs.
   assert.deepEqual(
-    ciWorkflow.jobs.scope.steps.map((step) => step.uses),
-    ['actions/github-script@v9'],
+    ciWorkflow.jobs.scope.steps.map((step) => step.uses?.split('@')[0]),
+    ['actions/github-script'],
+  );
+  assert.match(
+    ciWorkflow.jobs.scope.steps[0].uses,
+    /^actions\/github-script@[a-f0-9]{40}$/,
   );
 });
 
