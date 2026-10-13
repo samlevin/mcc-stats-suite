@@ -28,7 +28,9 @@ function fixture({
   draft = false,
   prState = 'OPEN',
   member = true,
+  association = 'OWNER',
   changed = false,
+  changedAssociation = false,
   unknown = false,
 } = {}) {
   const writes = [];
@@ -56,6 +58,8 @@ function fixture({
             body: changed && prReads > 1 ? 'Closes #2' : 'Closes #1. Also #99',
             state: prState,
             isDraft: draft,
+            authorAssociation:
+              changedAssociation && prReads > 1 ? 'CONTRIBUTOR' : association,
           },
         },
       };
@@ -134,7 +138,8 @@ function fixture({
       };
     throw new Error(`Unexpected query ${query}`);
   };
-  return { api, writes, calls, log: () => {} };
+  const logs = [];
+  return { api, writes, calls, logs, log: (line) => logs.push(line) };
 }
 
 test('only claimed closing issues move, with paginated item and field reads', async () => {
@@ -158,6 +163,46 @@ test('only claimed closing issues move, with paginated item and field reads', as
   );
 });
 
+test('trusted authors also move Ready issues; others move only In progress', async () => {
+  for (const association of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
+    const f = fixture({ status: 'Ready', association });
+    await moveIssuesToReview({ ...f, number: 10, dryRun: false });
+    assert.equal(f.writes.length, 1, association);
+    assert.deepEqual(f.logs, ['Issue #1: Ready -> In review.']);
+  }
+  for (const association of ['CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'NONE']) {
+    const ready = fixture({ status: 'Ready', association });
+    await moveIssuesToReview({ ...ready, number: 10, dryRun: false });
+    assert.deepEqual(ready.writes, [], association);
+    assert.deepEqual(ready.logs, [
+      `Issue #1: skipped, Ready, and ${association} authors move only In progress issues.`,
+    ]);
+    const claimed = fixture({ association });
+    await moveIssuesToReview({ ...claimed, number: 10, dryRun: false });
+    assert.equal(claimed.writes.length, 1, association);
+  }
+});
+
+test('every skip is logged with its reason', async () => {
+  for (const [options, line] of [
+    [{ draft: true }, 'Pull request #10 is a draft.'],
+    [{ prState: 'CLOSED' }, 'Pull request #10 is not open.'],
+    [{ member: false }, 'Issue #1: skipped, not in MCC delivery.'],
+    [{ state: 'CLOSED' }, 'Issue #1: skipped, closed.'],
+    [{ status: 'Inbox' }, 'Issue #1: skipped, status is Inbox.'],
+    [{ status: 'In review' }, 'Issue #1: skipped, status is In review.'],
+    [{ unknown: true }, 'Issue #1: skipped, status is unset.'],
+    [
+      { freshStatus: 'Done' },
+      'Issue #1: skipped after re-read, status is Done.',
+    ],
+  ]) {
+    const f = fixture(options);
+    await moveIssuesToReview({ ...f, number: 10, dryRun: false });
+    assert.deepEqual(f.logs, [line], JSON.stringify(options));
+  }
+});
+
 test('draft, closed, unclaimed, unknown, missing and finished work stays put', async () => {
   for (const options of [
     { draft: true },
@@ -165,9 +210,10 @@ test('draft, closed, unclaimed, unknown, missing and finished work stays put', a
     { state: 'CLOSED' },
     { member: false },
     { unknown: true },
-    ...['Inbox', 'Ready', 'In review', 'Done', undefined].map((status) => ({
+    ...['Inbox', 'In review', 'Done', undefined].map((status) => ({
       status: status ?? null,
     })),
+    { status: 'Ready', association: 'CONTRIBUTOR' },
   ]) {
     const f = fixture(options);
     await moveIssuesToReview({ ...f, number: 10, dryRun: false });
@@ -178,7 +224,7 @@ test('draft, closed, unclaimed, unknown, missing and finished work stays put', a
 test('concurrent status or issue changes cannot be overwritten', async () => {
   for (const options of [
     { freshStatus: 'Done' },
-    { freshStatus: 'Ready' },
+    { freshStatus: 'Inbox' },
     { freshStatus: null },
     { freshState: 'CLOSED' },
   ]) {
@@ -188,16 +234,21 @@ test('concurrent status or issue changes cannot be overwritten', async () => {
   }
 });
 
-test('dry runs make no writes and changed PR descriptions abort writes', async () => {
+test('dry runs make no writes and changed PR descriptions or authors abort writes', async () => {
   const f = fixture();
   await moveIssuesToReview({ ...f, number: 10 });
   assert.deepEqual(f.writes, []);
-  const changed = fixture({ changed: true });
-  await assert.rejects(
-    moveIssuesToReview({ ...changed, number: 10, dryRun: false }),
-    /changed during discovery/,
-  );
-  assert.deepEqual(changed.writes, []);
+  for (const options of [
+    { changed: true },
+    { status: 'Ready', changedAssociation: true },
+  ]) {
+    const changed = fixture(options);
+    await assert.rejects(
+      moveIssuesToReview({ ...changed, number: 10, dryRun: false }),
+      /changed during discovery/,
+    );
+    assert.deepEqual(changed.writes, []);
+  }
 });
 
 test('status events are limited and isolated from metadata reconciliation', () => {
@@ -205,7 +256,7 @@ test('status events are limited and isolated from metadata reconciliation', () =
     new URL('../.github/workflows/pr-issue-status.yml', import.meta.url),
     'utf8',
   );
-  assert.match(status, /types: \[opened, ready_for_review\]/);
+  assert.match(status, /types: \[opened, edited, reopened, ready_for_review\]/);
   assert.match(
     status,
     /ref: \$\{\{ github.event.repository.default_branch \}\}/,
