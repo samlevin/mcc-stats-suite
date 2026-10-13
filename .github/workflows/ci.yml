@@ -26,7 +26,7 @@ jobs:
       head: ${{ steps.scope.outputs.head }}
     steps:
       - name: Classify changed files
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         id: scope
         with:
           script: |
@@ -93,16 +93,16 @@ jobs:
       AWS_EC2_METADATA_DISABLED: 'true'
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Read pinned OpenTofu version
         id: tofu-version
         run: |
           version="$(./scripts/tofu-checks.sh --pinned-version)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: opentofu/setup-opentofu@v1
+      - uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
         with:
           tofu_version: ${{ steps.tofu-version.outputs.version }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ github.workspace }}/.tofu-plugin-cache
           key: tofu-provider-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infrastructure/**/.terraform.lock.hcl') }}
@@ -125,10 +125,10 @@ jobs:
     outputs:
       applications: ${{ steps.affected.outputs.applications }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.16.0'
           cache: npm
@@ -207,7 +207,7 @@ jobs:
         run: |
           mkdir -p "${RUNNER_TEMP}/deploy-selection"
           printf '%s\n' "${APPLICATIONS}" > "${RUNNER_TEMP}/deploy-selection/applications.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: deploy-applications-${{ github.run_id }}
           path: ${{ runner.temp }}/deploy-selection/applications.json

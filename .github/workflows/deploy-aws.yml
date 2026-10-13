@@ -42,12 +42,12 @@ jobs:
     steps:
       - name: Require main workflow definition
         run: test "${GITHUB_REF}" = "refs/heads/main"
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Validate release
         id: release
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           APPLICATION: ${{ inputs.application }}
           RELEASE_TAG: ${{ inputs.release-tag }}
@@ -98,7 +98,7 @@ jobs:
             exit 1
           fi
       - name: Verify prior qualification
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           APPLICATION: ${{ inputs.application }}
           OPERATION: ${{ inputs.operation }}
