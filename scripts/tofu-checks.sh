@@ -5,6 +5,9 @@ set -euo pipefail
 # operator's initialized roots, and enforce the committed lock files.
 data_root="$(mktemp -d)"
 trap 'rm -rf "$data_root"' EXIT
+# Reuse provider downloads across roots and runs. CI sets its own directory.
+export TF_PLUGIN_CACHE_DIR="${TF_PLUGIN_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/opentofu/plugin-cache}"
+mkdir -p "$TF_PLUGIN_CACHE_DIR"
 
 tofu fmt -check -recursive infrastructure
 for environment in dev prod; do

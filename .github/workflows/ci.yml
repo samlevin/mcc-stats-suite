@@ -118,8 +118,6 @@ jobs:
           path: ${{ github.workspace }}/.tofu-plugin-cache
           key: tofu-provider-${{ runner.os }}-${{ hashFiles('infrastructure/**/.terraform.lock.hcl') }}
           restore-keys: tofu-provider-${{ runner.os }}-
-      - name: Create OpenTofu plugin cache
-        run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
       - name: Check OpenTofu roots
         run: ./scripts/tofu-checks.sh
 
