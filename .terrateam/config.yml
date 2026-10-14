@@ -16,13 +16,16 @@ drift:
       tag_query: 'foundation'
       schedule: weekly
 
-# Foundation changes are applied from the pull request, dev before prod. Nothing
-# applies from main. A root stays locked from its first apply until the pull
-# request merges, and Terrateam merges it once every planned root has applied.
+# Foundation changes are applied from the pull request. Dev plans when the pull
+# request opens or changes and is applied by comment. Prod plans only after the
+# dev apply succeeds and is also applied by comment. Nothing applies from main.
+# A root stays locked from its first apply until the pull request merges, and
+# Terrateam merges it only after the prod apply succeeds.
 lock_policy: strict
 
 automerge:
   enabled: true
+  require_explicit_apply: true
   merge_strategy: squash
   retain_pr_title: true
 
@@ -59,6 +62,26 @@ dirs:
       autoapply: false
       file_patterns: ['!**/*']
 
+  # Modules are not roots. Without these entries Terrateam would plan them with its
+  # default workflow, and access control would reject them as untagged.
+  infrastructure/modules/bootstrap:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/modules/data-platform:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/modules/foundation:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
   # Data platform roots stay out of Terrateam until they are activated.
   infrastructure/dev/data-platform:
     when_modified:
@@ -89,7 +112,6 @@ dirs:
       autoapply: false
       depends_on:
         tag_query: 'dir:infrastructure/dev/foundation'
-        prune_on_no_change: true
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
