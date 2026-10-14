@@ -5,8 +5,9 @@ engine:
 destination_branches:
   - main
 
+# Module dependencies are mapped by hand in each root's file_patterns. See AGENTS.md.
 indexer:
-  enabled: true
+  enabled: false
 
 drift:
   enabled: true
@@ -45,7 +46,7 @@ access_control:
 
 dirs:
   # Foundation roots also watch this file because it sets their backend and inputs.
-  # Bootstrap stays manual; exclusions also block indexer-added module patterns.
+  # Bootstrap stays manual.
   infrastructure/dev/bootstrap:
     when_modified:
       autoplan: false
