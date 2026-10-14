@@ -1,5 +1,0 @@
-aws_region    = "us-east-1"
-force_destroy = false
-# Required. Set it here or export TF_VAR_email_domain; CI/CD should read it
-# from a secret. Never commit it.
-email_domain = "REPLACE_WITH_VERIFIED_DOMAIN"

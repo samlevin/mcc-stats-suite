@@ -2,30 +2,26 @@
 
 ## Environments
 
-Create two GitHub Environments, `dev` and `prod`, for application deployments. The CDK entry roles trust only the deployment workflow on `main` in the matching environment, so a deployment from any other branch fails at role assumption.
+Create two GitHub Environments, `dev` and `prod`, for application deployments. They gate deployments and hold no variables or secrets. The CDK entry roles trust only the deployment workflow on `main` in the matching environment, so a deployment from any other branch fails at role assumption.
 
 Give `prod` at least one required reviewer and disable administrator bypass. The deployment workflow checks both before every production job and fails if either is missing. As the only reviewer, leave **Prevent self-review** off so you can approve your own deployments. This gate covers application deployments and rollbacks only. Foundation applies are gated by whoever can run OpenTofu against prod; see [Apply and change the foundation](40-change-foundation.md).
 
 ## Variables and secrets
 
-Every value comes from the bootstrap outputs or your own configuration. Store account IDs, role ARNs, and the release app key as secrets: the repository is public, variables print unmasked in workflow logs, and GitHub masks secret values. Store Regions and other non-identifying values as variables. None of them is an AWS credential; GitHub Actions gets short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
+GitHub holds only the values nobody can derive: for each environment, the AWS account ID, the workload Region, and the email domain. Store them at repository level. The repository is public and variables print unmasked in workflow logs, so the account IDs and domains are secrets, which GitHub masks everywhere, including inside role ARNs built from them. The deployment workflow builds the CDK entry role ARN, `arn:aws:iam::<account>:role/mcc-stats-suite-<environment>-github-cdk-deploy`, from the account ID, and picks the `DEV_` or `PROD_` names by the environment it deploys. None of these values is an AWS credential; GitHub Actions gets short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
 
 | Scope | Name | Kind | Value | Used by |
 | --- | --- | --- | --- | --- |
-| `dev` environment | `AWS_ACCOUNT_ID` | secret | dev `aws_account_id` | application deploys |
-| `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | secret | dev `cdk_deploy_role_arn` | application deploys |
-| `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
-| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN` | secrets | prod equivalents of the dev values | application deploys |
-| `prod` environment | `AWS_REGION` | variable | workload Region | application deploys |
+| repository | `DEV_AWS_ACCOUNT_ID`, `PROD_AWS_ACCOUNT_ID` | secrets | each bootstrap's `aws_account_id` | application deploys, Turbo cache in `main` CI |
+| repository | `DEV_AWS_REGION`, `PROD_AWS_REGION` | variables | workload Region of each account | application deploys, Turbo cache in `main` CI |
+| repository | `DEV_MCC_EMAIL_DOMAIN`, `PROD_MCC_EMAIL_DOMAIN` | secrets | verified SES domain that receives each environment's email, in lowercase | [Terrateam](70-optional-terrateam.md) only |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
 | repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in `main` CI and deploys |
-| repository | `DEV_AWS_ACCOUNT_ID` | secret | dev `aws_account_id` (only with the cache) | Turbo cache in `main` CI |
-| repository | `DEV_AWS_REGION` | variable | workload Region (only with the cache or [Terrateam](70-optional-terrateam.md)) | Turbo cache in `main` CI, Terrateam dev plans |
 
 ### Turbo cache
 
-The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Then set the `DEV_AWS_ACCOUNT_ID` secret and the `DEV_AWS_REGION` variable, and set `MCC_TURBO_CACHE` to `true` last. Deploys use the `dev` and `prod` environment settings above. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
+The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Set `MCC_TURBO_CACHE` to `true` after the account and Region settings above. `main` CI uses the dev account and Region, and each deploy uses those of the environment it deploys. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
 
 The foundation's inputs, including the email domain, are not GitHub settings unless your infrastructure CI/CD runs in GitHub Actions. [Apply and change the foundation](40-change-foundation.md#inputs) lists them.
 

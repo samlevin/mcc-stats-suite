@@ -531,9 +531,10 @@ test('cache uses dedicated session credentials and environment contracts without
   );
   assert.match(workflow, /ref: \$\{\{ github.workflow_sha \}\}/);
   assert.match(workflow, /npx turbo run build --filter=/);
+  assert.ok(workflow.includes('role-to-assume: arn:aws:iam::'));
   assert.ok(
     workflow.indexOf('Start environment Turbo cache') <
-      workflow.indexOf('AWS_CDK_DEPLOY_ROLE_ARN'),
+      workflow.indexOf('role-to-assume: arn:aws:iam::'),
   );
 });
 

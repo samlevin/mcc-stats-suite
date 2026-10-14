@@ -11,16 +11,15 @@ Whatever runs OpenTofu, keep these rules:
 
 ## Inputs
 
-Each root reads:
+Each root's ignored `.envrc`, created from the `.envrc.example` in that directory, supplies every input, so `tofu init`, `plan`, and `apply` need nothing else. [Configure local inputs](10-bootstrap-accounts.md#configure-local-inputs) explains its layout.
 
 | Input | Where it comes from | Notes |
 | --- | --- | --- |
-| Backend `bucket` | the bootstrap's `state_bucket_name` output | Copy `backend.hcl.example` to the ignored `backend.hcl` and replace the placeholder, or pass `-backend-config=bucket=<name>`. The key is `operational/foundation.tfstate`. |
-| Backend `region` | workload Region | In `backend.hcl`, or `-backend-config=region=<region>`. The example defaults to `us-east-1`. |
-| `aws_region` | workload Region | Set it in `<environment>.auto.tfvars`. The example defaults to `us-east-1`, and its value overrides the `TF_VAR_aws_region` the root `.envrc` exports. |
-| `email_domain` | verified SES domain for that environment, in lowercase | Required and sensitive. Set it in the ignored `<environment>.auto.tfvars` or export `TF_VAR_email_domain`, for example from the root's ignored `.envrc`, copied from `.envrc.example`. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
-| `github_oidc_subject_repository` | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects | Matches the bootstrap. The Turbo cache role trusts only this repository, and a root without it creates no cache role. The root `.envrc` exports it as `TF_VAR_github_oidc_subject_repository`. |
-| `force_destroy` | `<environment>.auto.tfvars` | `true` in the dev example, `false` in prod. |
+| Backend `bucket` and `region` | `TF_CLI_ARGS_init`, derived from the profile | `mcc-stats-suite-tofu-state-<account>-<region>`, the bucket the bootstrap created. The key, `operational/foundation.tfstate`, is in `versions.tf`. |
+| `aws_region` | `TF_VAR_aws_region`, derived from the profile | The profile's Region, or `AWS_REGION` when the profile has none. |
+| `email_domain` | `TF_VAR_email_domain`, which you edit | Verified SES domain for that environment, in lowercase. Required and sensitive. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
+| `github_oidc_subject_repository` | `TF_VAR_github_oidc_subject_repository`, which you edit | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects, matching the bootstrap. The Turbo cache role trusts only this repository, and a root without it creates no cache role. |
+| `force_destroy` | variable default | `true` in dev, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
 
 The identity that applies the foundation needs to manage KMS, S3, SES receipt rules, SSM parameters, and the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, plus read and write access to the state bucket. The administrator permission sets from [prerequisites](00-prerequisites.md) are enough. For a CI/CD identity, see [CI roles for the foundation](10-bootstrap-accounts.md#ci-roles-for-the-foundation). To use Terrateam, as the upstream repository does, follow [Apply the foundation with Terrateam](70-optional-terrateam.md).
@@ -31,17 +30,21 @@ From the repository root, with the dev administrator profile:
 
 ```console
 cd infrastructure/dev/foundation
-cp backend.hcl.example backend.hcl
-cp dev.auto.tfvars.example dev.auto.tfvars
-export AWS_PROFILE=mcc-dev-admin
+cp .envrc.example .envrc
+```
+
+Edit the first section of `.envrc`, then load it and sign in:
+
+```console
+direnv allow
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. Fill in `backend.hcl` and `dev.auto.tfvars`, then plan and apply:
+Stop unless STS reports the dev account. Then plan and apply:
 
 ```console
-tofu init -backend-config=backend.hcl
+tofu init
 tofu plan -out=foundation.tfplan
 tofu apply foundation.tfplan
 ```
@@ -54,14 +57,10 @@ Repeat at the same commit from `infrastructure/prod/foundation`:
 
 ```console
 cd infrastructure/prod/foundation
-cp backend.hcl.example backend.hcl
-cp prod.auto.tfvars.example prod.auto.tfvars
-export AWS_PROFILE=mcc-prod-admin
-aws sso login --profile "$AWS_PROFILE"
-aws sts get-caller-identity --profile "$AWS_PROFILE"
+cp .envrc.example .envrc
 ```
 
-Stop unless STS reports the prod account. Never reuse the dev backend file or bucket. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values, before applying.
+Edit the first section of `.envrc`, then run `direnv allow`, sign in, and check the identity as for dev. Stop unless STS reports the prod account. Never reuse the dev `.envrc` or bucket. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values, before applying.
 
 Each environment's foundation must exist before anything deploys there, including ephemeral stacks in dev. The `infrastructure/<environment>/data-platform` roots are inactive; skip them. See [Configure GitHub](30-configure-github.md#variables-and-secrets).
 

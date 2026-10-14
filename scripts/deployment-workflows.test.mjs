@@ -694,20 +694,30 @@ test('CDK entry role trusts exactly the workflows that deploy', () => {
   }
 });
 
-// Names that identify an AWS account, a role, a state bucket, or the email
-// domain. The repository is public and variables print unmasked, so each is a
-// secret.
-const SECRET_NAMES = [
-  'AWS_ACCOUNT_ID',
-  'AWS_CDK_DEPLOY_ROLE_ARN',
+// GitHub holds only these names at repository level. The account IDs and
+// domains are secrets because the repository is public and variables print
+// unmasked; everything else is derived from them.
+const ALLOWED_VARIABLES = [
+  'DEV_AWS_REGION',
+  'MCC_TURBO_CACHE',
+  'PROD_AWS_REGION',
+  'RELEASE_PLEASE_APP_ID',
+];
+const ALLOWED_SECRETS = [
   'DEV_AWS_ACCOUNT_ID',
+  'GITHUB_TOKEN',
+  'MCC_PROJECT_TOKEN',
+  'PROD_AWS_ACCOUNT_ID',
+  'RELEASE_PLEASE_APP_PRIVATE_KEY',
+];
+// Retired names that no workflow or Terrateam step may read again.
+const RETIRED_NAMES = [
+  'AWS_CDK_DEPLOY_ROLE_ARN',
   'DEV_TERRATEAM_ROLE_ARN',
   'DEV_TOFU_STATE_BUCKET',
-  'DEV_MCC_EMAIL_DOMAIN',
+  'MCC_GITHUB_OIDC_SUBJECT_REPOSITORY',
   'PROD_TERRATEAM_ROLE_ARN',
   'PROD_TOFU_STATE_BUCKET',
-  'PROD_MCC_EMAIL_DOMAIN',
-  'MCC_EMAIL_DOMAIN',
 ];
 
 const workflowFiles = () => {
@@ -720,7 +730,16 @@ const workflowFiles = () => {
     }));
 };
 
-test('account IDs, role ARNs, buckets, and domains are never read as variables', () => {
+const referenced = (text, context) =>
+  [
+    ...text.matchAll(
+      new RegExp(`\\b${context}\\.([A-Za-z_][A-Za-z0-9_]*)`, 'g'),
+    ),
+  ].map(([, name]) => name);
+
+const expression = (value) => value.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+
+test('workflows read only the repository account, Region, and release names', () => {
   const files = [
     ...workflowFiles(),
     {
@@ -729,31 +748,22 @@ test('account IDs, role ARNs, buckets, and domains are never read as variables',
     },
   ];
   for (const { name, text } of files) {
-    for (const secret of SECRET_NAMES) {
-      assert.doesNotMatch(
-        text,
-        new RegExp(`vars\\.${secret}\\b`),
-        `${name} reads ${secret} as a variable`,
+    for (const variable of referenced(text, 'vars')) {
+      assert.ok(
+        ALLOWED_VARIABLES.includes(variable),
+        `${name} reads vars.${variable}`,
       );
     }
+    for (const secret of referenced(text, 'secrets')) {
+      assert.ok(
+        ALLOWED_SECRETS.includes(secret),
+        `${name} reads secrets.${secret}`,
+      );
+    }
+    for (const retired of RETIRED_NAMES) {
+      assert.ok(!text.includes(retired), `${name} names ${retired}`);
+    }
   }
-  const deploy = deployment.jobs.deploy;
-  assert.equal(
-    deploy.env.MCC_DEV_ACCOUNT_ID,
-    "${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID || '' }}",
-  );
-  assert.equal(
-    deploy.env.MCC_PROD_ACCOUNT_ID,
-    "${{ inputs.environment == 'prod' && secrets.AWS_ACCOUNT_ID || '' }}",
-  );
-  const withInput = (input) =>
-    deploy.steps
-      .filter((step) => step.with?.[input])
-      .map((step) => step.with[input]);
-  assert.deepEqual(withInput('account-id'), ['${{ secrets.AWS_ACCOUNT_ID }}']);
-  assert.deepEqual(withInput('role-to-assume'), [
-    '${{ secrets.AWS_CDK_DEPLOY_ROLE_ARN }}',
-  ]);
   for (const job of ['application-checks', 'application-bundles']) {
     const cache = ci.jobs[job].steps.find((step) =>
       step.uses?.endsWith('/actions/turbo-s3-cache'),
@@ -763,7 +773,105 @@ test('account IDs, role ARNs, buckets, and domains are never read as variables',
       '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
       job,
     );
+    assert.equal(
+      cache.with.region,
+      "${{ vars.DEV_AWS_REGION || 'us-east-1' }}",
+      job,
+    );
   }
+});
+
+test('deployment selects the account and Region by environment and builds the role ARN', () => {
+  const deploy = deployment.jobs.deploy;
+  assert.deepEqual(Object.keys(deployment.on.workflow_call.secrets).sort(), [
+    'DEV_AWS_ACCOUNT_ID',
+    'PROD_AWS_ACCOUNT_ID',
+  ]);
+  const vars = {
+    DEV_AWS_REGION: 'dev-region-1',
+    PROD_AWS_REGION: 'prod-region-1',
+  };
+  const secrets = {
+    DEV_AWS_ACCOUNT_ID: '111111111111',
+    PROD_AWS_ACCOUNT_ID: '222222222222',
+  };
+  const resolve = (environment, values = { vars, secrets }) => {
+    const inputs = { environment };
+    const env = Object.fromEntries(
+      ['AWS_REGION', 'MCC_DEV_ACCOUNT_ID', 'MCC_PROD_ACCOUNT_ID'].map(
+        (name) => [
+          name,
+          evaluate(expression(deploy.env[name]), { inputs, ...values }),
+        ],
+      ),
+    );
+    const step = (name) =>
+      deploy.steps.find((candidate) => candidate.name === name);
+    const role = deploy.steps.find(
+      (candidate) => candidate.with?.['role-to-assume'],
+    ).with['role-to-assume'];
+    return {
+      env,
+      cacheAccount: evaluate(
+        expression(step('Start environment Turbo cache').with['account-id']),
+        { env },
+      ),
+      expectedAccount: evaluate(
+        expression(step('Verify target account').env.EXPECTED_ACCOUNT),
+        { env },
+      ),
+      role: role.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, inner) =>
+        evaluate(inner, { env, inputs }),
+      ),
+    };
+  };
+  const dev = resolve('dev');
+  assert.deepEqual(dev.env, {
+    AWS_REGION: 'dev-region-1',
+    MCC_DEV_ACCOUNT_ID: '111111111111',
+    MCC_PROD_ACCOUNT_ID: '',
+  });
+  assert.equal(dev.cacheAccount, '111111111111');
+  assert.equal(dev.expectedAccount, '111111111111');
+  assert.equal(
+    dev.role,
+    'arn:aws:iam::111111111111:role/mcc-stats-suite-dev-github-cdk-deploy',
+  );
+  const prod = resolve('prod');
+  assert.deepEqual(prod.env, {
+    AWS_REGION: 'prod-region-1',
+    MCC_DEV_ACCOUNT_ID: '',
+    MCC_PROD_ACCOUNT_ID: '222222222222',
+  });
+  assert.equal(prod.cacheAccount, '222222222222');
+  assert.equal(prod.expectedAccount, '222222222222');
+  assert.equal(
+    prod.role,
+    'arn:aws:iam::222222222222:role/mcc-stats-suite-prod-github-cdk-deploy',
+  );
+  // A missing prod value never falls back to the dev one.
+  const missing = resolve('prod', {
+    vars: { DEV_AWS_REGION: 'dev-region-1' },
+    secrets: { DEV_AWS_ACCOUNT_ID: '111111111111' },
+  });
+  assert.equal(missing.env.AWS_REGION, 'us-east-1');
+  assert.equal(missing.expectedAccount, '');
+});
+
+test('each deployment caller passes only the account secrets it deploys to', () => {
+  assert.deepEqual(delivery.jobs.dev.secrets, {
+    DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
+  });
+  assert.deepEqual(delivery.jobs.prod.secrets, {
+    PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+  });
+  assert.deepEqual(orchestration.jobs.deploy.secrets, {
+    DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
+    PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+  });
+  assert.deepEqual(workflow('deploy-aws').jobs['deploy-prod'].secrets, {
+    PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+  });
 });
 
 test('no condition, job output, or deployment URL depends on a masked value', () => {
@@ -803,11 +911,39 @@ test('no condition, job output, or deployment URL depends on a masked value', ()
   }
 });
 
+test('deployment rejects a missing account secret before any work', () => {
+  const step = deployment.jobs.deploy.steps.find(
+    (candidate) => candidate.name === 'Validate deployment request',
+  );
+  const run = (env) =>
+    spawnSync('bash', ['-e', '-c', step.run], {
+      encoding: 'utf8',
+      env: {
+        PATH: process.env.PATH,
+        APPLICATION: 'match-to-csv',
+        DEPLOYMENT_ENVIRONMENT: 'prod',
+        TARGET_SHA: 'a'.repeat(40),
+        MCC_DEV_ACCOUNT_ID: '',
+        MCC_PROD_ACCOUNT_ID: '',
+        ...env,
+      },
+    });
+  assert.equal(run({ MCC_PROD_ACCOUNT_ID: '222222222222' }).status, 0);
+  for (const account of ['', '22222222222', 'not-an-account']) {
+    const result = run({ MCC_PROD_ACCOUNT_ID: account });
+    assert.equal(result.status, 1, account);
+    assert.match(result.stdout, /prod account ID repository secret/);
+  }
+});
+
 test('deployment checks the caller account against the account secret', () => {
   const step = deployment.jobs.deploy.steps.find(
     (candidate) => candidate.name === 'Verify target account',
   );
-  assert.equal(step.env.EXPECTED_ACCOUNT, '${{ secrets.AWS_ACCOUNT_ID }}');
+  assert.equal(
+    step.env.EXPECTED_ACCOUNT,
+    '${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}',
+  );
   // The secret reaches the shell through the environment, never inline.
   assert.doesNotMatch(step.run, /\$\{\{/);
   const directory = mkdtempSync(join(tmpdir(), 'mcc-account-check-'));
@@ -829,5 +965,225 @@ test('deployment checks the caller account against the account secret', () => {
     const result = run(expected);
     assert.equal(result.status, 1, expected);
     assert.match(result.stdout, /wrong account/);
+  }
+});
+
+// The Terrateam runner applies Python's string.Template to role_arn (once) and
+// to every extra_args and cmd element (until the text stops changing). $$ is
+// an escape, $NAME and ${NAME} substitute, an undefined name fails the step,
+// and any other $ is an invalid placeholder.
+const terrateamSubstitute = (text, env, { recursive }) => {
+  const result = text.replace(
+    /\$(?:(\$)|([_a-zA-Z][_a-zA-Z0-9]*)|\{([_a-zA-Z][_a-zA-Z0-9]*)\}|())/g,
+    (match, escaped, named, braced, invalid) => {
+      if (escaped) return '$';
+      if (invalid !== undefined)
+        throw new Error(`invalid placeholder in ${text}`);
+      const name = named ?? braced;
+      if (!(name in env)) throw new Error(`missing ${name}`);
+      return env[name];
+    },
+  );
+  return recursive && result !== text
+    ? terrateamSubstitute(result, env, { recursive })
+    : result;
+};
+
+test('Terrateam builds the role, backend, and OIDC subject from the repository names', () => {
+  const config = parse(repositoryFile('.terrateam/config.yml'));
+  const names = new Set(
+    [
+      ...JSON.stringify(config.definitions).matchAll(
+        /\$\{?([_a-zA-Z][_a-zA-Z0-9]*)/g,
+      ),
+    ].map(([, name]) => name),
+  );
+  assert.deepEqual([...names].sort(), [
+    'DEV_AWS_ACCOUNT_ID',
+    'DEV_AWS_REGION',
+    'DEV_MCC_EMAIL_DOMAIN',
+    'GITHUB_REPOSITORY',
+    'GITHUB_REPOSITORY_ID',
+    'GITHUB_REPOSITORY_OWNER',
+    'GITHUB_REPOSITORY_OWNER_ID',
+    'PROD_AWS_ACCOUNT_ID',
+    'PROD_AWS_REGION',
+    'PROD_MCC_EMAIL_DOMAIN',
+  ]);
+  const env = {
+    DEV_AWS_ACCOUNT_ID: '111111111111',
+    PROD_AWS_ACCOUNT_ID: '222222222222',
+    DEV_AWS_REGION: 'dev-region-1',
+    PROD_AWS_REGION: 'prod-region-1',
+    DEV_MCC_EMAIL_DOMAIN: 'dev.example.com',
+    PROD_MCC_EMAIL_DOMAIN: 'prod.example.com',
+    GITHUB_REPOSITORY_OWNER: 'Owner-1',
+    GITHUB_REPOSITORY_OWNER_ID: '123',
+    GITHUB_REPOSITORY: 'Owner-1/repo.name',
+    GITHUB_REPOSITORY_ID: '456',
+  };
+  const expected = {
+    'infra/foundation-dev': [
+      'dev',
+      '111111111111',
+      'dev-region-1',
+      'dev.example.com',
+    ],
+    'infra/foundation-prod': [
+      'prod',
+      '222222222222',
+      'prod-region-1',
+      'prod.example.com',
+    ],
+  };
+  assert.deepEqual(
+    config.workflows.map((entry) => entry.environment),
+    Object.keys(expected),
+  );
+  for (const entry of config.workflows) {
+    const [environment, account, region, domain] = expected[entry.environment];
+    assert.equal(entry.tag_query, environment);
+    for (const steps of [entry.plan, entry.apply]) {
+      const oidc = steps.find((step) => step.type === 'oidc');
+      assert.equal(
+        terrateamSubstitute(oidc.role_arn, env, { recursive: false }),
+        `arn:aws:iam::${account}:role/mcc-stats-suite-${environment}-terrateam`,
+      );
+      const init = steps.find((step) => step.type === 'init');
+      assert.deepEqual(
+        init.extra_args.map((arg) =>
+          terrateamSubstitute(arg, env, { recursive: true }),
+        ),
+        [
+          '-lockfile=readonly',
+          `-backend-config=bucket=mcc-stats-suite-tofu-state-${account}-${region}`,
+          `-backend-config=region=${region}`,
+        ],
+      );
+      const outputs = Object.fromEntries(
+        steps
+          .filter((step) => step.type === 'env')
+          .map((step) => {
+            const cmd = step.cmd.map((part) =>
+              terrateamSubstitute(part, env, { recursive: true }),
+            );
+            const result = spawnSync(cmd[0], cmd.slice(1), {
+              encoding: 'utf8',
+              env: { PATH: process.env.PATH },
+            });
+            assert.equal(result.status, 0, result.stderr);
+            return [
+              step.name,
+              { value: result.stdout.trim(), sensitive: step.sensitive },
+            ];
+          }),
+      );
+      assert.deepEqual(outputs, {
+        TF_VAR_aws_region: { value: region, sensitive: undefined },
+        TF_VAR_email_domain: { value: domain, sensitive: true },
+        TF_VAR_github_oidc_subject_repository: {
+          value: 'Owner-1@123/repo.name@456',
+          sensitive: undefined,
+        },
+      });
+    }
+  }
+});
+
+test('every OpenTofu root has a self-contained .envrc example and no backend file', () => {
+  const editable = {
+    bootstrap: [
+      'AWS_PROFILE',
+      'TF_VAR_github_organization',
+      'TF_VAR_github_oidc_subject_repository',
+    ],
+    foundation: [
+      'AWS_PROFILE',
+      'TF_VAR_email_domain',
+      'TF_VAR_github_oidc_subject_repository',
+    ],
+    'data-platform': ['AWS_PROFILE'],
+  };
+  const exported = (text) =>
+    [...text.matchAll(/^export ([A-Za-z_][A-Za-z0-9_]*)=/gm)].map(
+      ([, name]) => name,
+    );
+  assert.deepEqual(exported(repositoryFile('.envrc.example')), ['AWS_PROFILE']);
+  const bin = mkdtempSync(join(tmpdir(), 'mcc-envrc-'));
+  writeFileSync(
+    join(bin, 'aws'),
+    [
+      '#!/usr/bin/env bash',
+      'case "$*" in',
+      '  "configure get sso_account_id") echo "${STUB_ACCOUNT}" ;;',
+      '  "configure get region") echo "${STUB_REGION}" ;;',
+      '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
+      'esac',
+    ].join('\n'),
+    { mode: 0o755 },
+  );
+  for (const environment of ['dev', 'prod']) {
+    for (const [root, names] of Object.entries(editable)) {
+      const directory = `infrastructure/${environment}/${root}`;
+      const text = repositoryFile(`${directory}/.envrc.example`);
+      assert.doesNotMatch(text, /source_up|source_env/, directory);
+      assert.deepEqual(
+        exported(text),
+        [...names, 'TF_VAR_aws_region', 'TF_CLI_ARGS_init'],
+        directory,
+      );
+      assert.ok(
+        !existsSync(
+          new URL(`../${directory}/backend.hcl.example`, import.meta.url),
+        ),
+        directory,
+      );
+      const load = (env) =>
+        spawnSync(
+          'bash',
+          [
+            '-euo',
+            'pipefail',
+            '-c',
+            `source "$1"; printf '%s\\n' "$AWS_PROFILE" "$TF_VAR_aws_region" "$TF_CLI_ARGS_init"`,
+            '_',
+            new URL(`../${directory}/.envrc.example`, import.meta.url).pathname,
+          ],
+          {
+            encoding: 'utf8',
+            env: { PATH: `${bin}:${process.env.PATH}`, ...env },
+          },
+        );
+      const fromProfile = load({
+        STUB_ACCOUNT: '111111111111',
+        STUB_REGION: 'us-east-2',
+      });
+      assert.equal(fromProfile.status, 0, fromProfile.stderr);
+      assert.deepEqual(fromProfile.stdout.trim().split('\n'), [
+        `mcc-${environment}-admin`,
+        'us-east-2',
+        '-backend-config=bucket=mcc-stats-suite-tofu-state-111111111111-us-east-2 -backend-config=region=us-east-2',
+      ]);
+      // AWS_REGION wins over the profile, as it does for the AWS CLI.
+      const override = load({
+        STUB_ACCOUNT: '111111111111',
+        STUB_REGION: 'us-east-2',
+        AWS_REGION: 'eu-west-1',
+      });
+      assert.match(override.stdout, /tofu-state-111111111111-eu-west-1 /);
+      const unset = load({ STUB_ACCOUNT: '', STUB_REGION: '' });
+      assert.equal(unset.status, 0, unset.stderr);
+      assert.match(unset.stderr, /Set sso_account_id and region/);
+    }
+    const backend = repositoryFile(
+      `infrastructure/${environment}/bootstrap/backend.tf.example`,
+    );
+    assert.match(
+      backend,
+      new RegExp(`key += "${environment}/bootstrap/opentofu.tfstate"`),
+    );
+    assert.match(backend, /encrypt += true/);
+    assert.match(backend, /use_lockfile += true/);
+    assert.doesNotMatch(backend, /^\s*(bucket|region)\s*=/m);
   }
 });

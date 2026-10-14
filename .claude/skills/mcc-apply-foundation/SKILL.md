@@ -31,7 +31,7 @@ Keep a short record in the conversation: the PR number, title, head SHA, affecte
 
 4. Pick the affected roots from `gh pr diff <N> -R samlevin/mcc-stats-suite --name-only`. Only `infrastructure/dev/foundation` and `infrastructure/prod/foundation` are candidates. A root is affected when a changed file matches its `file_patterns` in the PR head's `.terrateam/config.yml`, which you read with `git show <head>:.terrateam/config.yml`. In those patterns `${DIR}` is the root and `*` does not cross `/`. Today that is the root's own `*.tf`, `*.tfvars`, and `*.hcl` files, `infrastructure/modules/foundation/*.tf`, and `.terrateam/config.yml`. If neither root is affected, stop: there is nothing to apply.
 
-5. Check that each affected root has its ignored local inputs in the main checkout: `.envrc`, created from the committed `.envrc.example` in that root and allowed with `direnv allow` (it loads the repository-root `.envrc`, created from the root `.envrc.example`), and `backend.hcl`, created from `backend.hcl.example` with the bucket Terrateam uses for that environment. If one is missing, stop and tell the person which file to create from which example. Do not create them.
+5. Check that each affected root has its ignored local input in the main checkout: `.envrc`, created from the committed `.envrc.example` in that root and allowed with `direnv allow`. It is self-contained and derives the account, Region, and state bucket from its AWS profile. If it is missing, stop and tell the person to create it from that root's `.envrc.example`. Do not create it.
 
    ```console
    MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
@@ -49,45 +49,44 @@ Report the title, head SHA, CI result, affected roots, and worktree path. Gate: 
 
 ## Root setup
 
-Shell state does not carry between commands, so every plan and apply runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`) and the worktree path. The block reads inputs only from the root's local `.envrc` through `direnv` and its `backend.hcl`, both in the main checkout: the profile `MCC_<ENV>_INFRA_PROFILE`, the account `MCC_<ENV>_ACCOUNT_ID`, and `TF_VAR_aws_region`, `TF_VAR_email_domain`, and `TF_VAR_github_oidc_subject_repository`. These match what Terrateam supplies from the `infra/foundation-<env>` GitHub Environment. The block removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from each `direnv`, `aws`, and `tofu` command, then passes exactly the loaded values. It checks that the profile's account equals `MCC_<ENV>_ACCOUNT_ID` and initializes the root against the committed lock file and the S3 backend. It prints none of the values.
+Shell state does not carry between commands, so every plan and apply runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`) and the worktree path. The block reads inputs only from the root's local `.envrc` in the main checkout, through `direnv`: `AWS_PROFILE`, `TF_VAR_aws_region`, `TF_CLI_ARGS_init` (the state bucket and Region), `TF_VAR_email_domain`, and `TF_VAR_github_oidc_subject_repository`. Terrateam builds the same values from the repository secrets and variables and the bootstrap naming rules. The block removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from each `direnv`, `aws`, and `tofu` command, then passes exactly the loaded values. It checks that the state bucket follows the bootstrap naming rule `mcc-stats-suite-tofu-state-<account>-<region>` for the loaded Region, checks that the profile's account equals the account in that bucket name, and initializes the root against the committed lock file and that bucket. It prints none of the values.
 
 ```console
 bash <<'EOF'
 set -euo pipefail
 E=<env>; WT=<worktree path>
-U=$(printf %s "$E" | tr a-z A-Z)
 case "$E" in dev | prod) ;; *) echo "unknown environment $E" >&2; exit 1 ;; esac
 MAIN=$(dirname "$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)")
 SRC="$MAIN/infrastructure/$E/foundation"
 R="$WT/infrastructure/$E/foundation"
 [ -f "$SRC/.envrc" ] || { echo "$SRC/.envrc is missing; create it from .envrc.example in that directory" >&2; exit 1; }
-[ -f "$SRC/backend.hcl" ] || { echo "$SRC/backend.hcl is missing; create it from backend.hcl.example in that directory" >&2; exit 1; }
 clean() {
   env $(env | sed -nE 's/^((AWS|TF|TOFU)_[A-Za-z0-9_]*)=.*/-u \1/p' |
     grep -vE '^-u (AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE)$') "$@"
 }
 LOCAL=$(clean DIRENV_LOG_FORMAT= direnv exec "$SRC" bash -c \
   'for p; do n=${p#*=}; printf "%s=%q\n" "${p%%=*}" "${!n-}"; done' _ \
-  PROFILE="MCC_${U}_INFRA_PROFILE" ACCOUNT="MCC_${U}_ACCOUNT_ID" REGION=TF_VAR_aws_region \
+  PROFILE=AWS_PROFILE REGION=TF_VAR_aws_region INIT=TF_CLI_ARGS_init \
   DOMAIN=TF_VAR_email_domain SUBJECT=TF_VAR_github_oidc_subject_repository) ||
   { echo "direnv could not load $SRC/.envrc; run direnv allow there" >&2; exit 1; }
 eval "$LOCAL"
-missing() { echo "$1 is not set by $SRC/.envrc or the repository-root .envrc it loads; see $2" >&2; exit 1; }
-[ -n "$PROFILE" ] || missing "MCC_${U}_INFRA_PROFILE" "$SRC/.envrc.example"
-[[ $ACCOUNT =~ ^[0-9]{12}$ ]] || missing "MCC_${U}_ACCOUNT_ID (an account ID)" "the .envrc.example files"
-[ -n "$REGION" ] || missing TF_VAR_aws_region "the repository-root .envrc.example"
-[ -n "$DOMAIN" ] || missing TF_VAR_email_domain "$SRC/.envrc.example"
-[ -n "$SUBJECT" ] || missing TF_VAR_github_oidc_subject_repository "the repository-root .envrc.example"
-for pair in "MCC_${U}_INFRA_PROFILE=$PROFILE" "TF_VAR_aws_region=$REGION" "TF_VAR_email_domain=$DOMAIN" \
-  "TF_VAR_github_oidc_subject_repository=$SUBJECT"; do
+missing() { echo "$1 is not set by $SRC/.envrc; see $SRC/.envrc.example" >&2; exit 1; }
+[ -n "$PROFILE" ] || missing AWS_PROFILE
+[ -n "$DOMAIN" ] || missing TF_VAR_email_domain
+[ -n "$SUBJECT" ] || missing TF_VAR_github_oidc_subject_repository
+for pair in "TF_VAR_email_domain=$DOMAIN" "TF_VAR_github_oidc_subject_repository=$SUBJECT"; do
   case "${pair#*=}" in
     *REPLACE_WITH_* | *OWNER@OWNER_ID*) echo "${pair%%=*} still holds the example placeholder; set the real value in the .envrc" >&2; exit 1 ;;
   esac
 done
+[[ $INIT =~ ^-backend-config=bucket=(mcc-stats-suite-tofu-state-([0-9]{12})-([a-z0-9-]+))\ -backend-config=region=([a-z0-9-]+)$ ]] &&
+  [ "${BASH_REMATCH[3]}" = "$REGION" ] && [ "${BASH_REMATCH[4]}" = "$REGION" ] ||
+  { echo "TF_CLI_ARGS_init or TF_VAR_aws_region in $SRC/.envrc does not follow its .envrc.example; check that the profile sets sso_account_id and region" >&2; exit 1; }
+BUCKET=${BASH_REMATCH[1]}; ACCOUNT=${BASH_REMATCH[2]}
 CALLER=$(clean AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" aws sts get-caller-identity --query Account --output text) ||
   { echo "AWS profile $PROFILE has no valid credentials; run aws sso login --profile $PROFILE" >&2; exit 1; }
 [ "$CALLER" = "$ACCOUNT" ] ||
-  { echo "AWS profile $PROFILE is not the account in MCC_${U}_ACCOUNT_ID; nothing ran" >&2; exit 1; }
+  { echo "AWS profile $PROFILE is not the account in the state bucket name its .envrc derives; nothing ran" >&2; exit 1; }
 tf() {
   clean AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION" \
     TF_IN_AUTOMATION=1 TF_INPUT=0 TF_VAR_aws_region="$REGION" TF_VAR_email_domain="$DOMAIN" \
@@ -95,13 +94,13 @@ tf() {
     tofu -chdir="$R" "$@"
 }
 tf init -no-color -input=false -reconfigure -lockfile=readonly \
-  -backend-config="$SRC/backend.hcl" >"$WT/$E.init.log" 2>&1 ||
+  -backend-config="bucket=$BUCKET" -backend-config="region=$REGION" >"$WT/$E.init.log" 2>&1 ||
   { tail -n 40 "$WT/$E.init.log" >&2; exit 1; }
 # the step's commands follow here
 EOF
 ```
 
-The worktree holds no `*.auto.tfvars`, so like Terrateam the plan sees only these inputs and the committed code. If direnv cannot load the `.envrc`, a value is missing, or the account check fails, the profile points at the wrong account, its credentials expired, or the local files were never set up; stop and let the person fix it.
+The worktree holds no `*.auto.tfvars`, so like Terrateam the plan sees only these inputs and the committed code. If direnv cannot load the `.envrc`, a value is missing, or the account check fails, the profile points at the wrong account, lacks `sso_account_id` or `region`, its credentials expired, or the `.envrc` was never set up; stop and let the person fix it. The account check cannot tell dev from prod, because the `.envrc` derives both the bucket and the expected account from the same profile; the plan review in step 2 catches a root planned against the other environment.
 
 ## 2. Plan a root (gated)
 

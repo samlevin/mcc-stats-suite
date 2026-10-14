@@ -23,6 +23,13 @@ on:
         description: Human-readable source such as main or a release tag
         required: true
         type: string
+    # Repository secrets reach a called workflow only when the caller passes
+    # them. Each caller passes the account of the environment it deploys.
+    secrets:
+      DEV_AWS_ACCOUNT_ID:
+        required: false
+      PROD_AWS_ACCOUNT_ID:
+        required: false
 
 concurrency:
   group: deploy-${{ inputs.application }}-${{ inputs.environment }}
@@ -67,12 +74,13 @@ jobs:
       deployment: false
     env:
       MCC_BUILD_ENVIRONMENT: ${{ inputs.environment }}
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
-      # The account ID and deploy role ARN are environment secrets, so Actions
-      # masks them in logs. Keep them out of job outputs and deployment URLs,
-      # where a masked value is dropped.
-      MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID || '' }}
-      MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && secrets.AWS_ACCOUNT_ID || '' }}
+      AWS_REGION: ${{ inputs.environment == 'prod' && vars.PROD_AWS_REGION || inputs.environment == 'dev' && vars.DEV_AWS_REGION || 'us-east-1' }}
+      # The account IDs are repository secrets, so Actions masks them in logs,
+      # including inside the role ARN built from them. Keep them out of job
+      # outputs and deployment URLs, where a masked value is dropped. Exactly
+      # one of these is set.
+      MCC_DEV_ACCOUNT_ID: ${{ inputs.environment == 'dev' && secrets.DEV_AWS_ACCOUNT_ID || '' }}
+      MCC_PROD_ACCOUNT_ID: ${{ inputs.environment == 'prod' && secrets.PROD_AWS_ACCOUNT_ID || '' }}
     steps:
       - name: Validate deployment request
         env:
@@ -96,6 +104,10 @@ jobs:
           esac
           if [[ ! "${TARGET_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::Deployment SHA must contain 40 lowercase hexadecimal characters"
+            exit 1
+          fi
+          if [[ ! "${MCC_DEV_ACCOUNT_ID}${MCC_PROD_ACCOUNT_ID}" =~ ^[0-9]{12}$ ]]; then
+            echo "::error::The caller must pass the ${DEPLOYMENT_ENVIRONMENT} account ID repository secret, a 12-digit account ID"
             exit 1
           fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -136,7 +148,7 @@ jobs:
         uses: ./.cache-workflow/.github/actions/turbo-s3-cache
         with:
           environment: ${{ inputs.environment }}
-          account-id: ${{ secrets.AWS_ACCOUNT_ID }}
+          account-id: ${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}
           region: ${{ env.AWS_REGION }}
       - name: Build selected application with dependencies
         env:
@@ -148,11 +160,11 @@ jobs:
         run: npm test --workspace "applications/${{ inputs.application }}"
       - uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
-          role-to-assume: ${{ secrets.AWS_CDK_DEPLOY_ROLE_ARN }}
+          role-to-assume: arn:aws:iam::${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}:role/mcc-stats-suite-${{ inputs.environment }}-github-cdk-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Verify target account
         env:
-          EXPECTED_ACCOUNT: ${{ secrets.AWS_ACCOUNT_ID }}
+          EXPECTED_ACCOUNT: ${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}
         run: |
           ACTUAL_ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
           if [ -z "${EXPECTED_ACCOUNT}" ] || [ "${ACTUAL_ACCOUNT}" != "${EXPECTED_ACCOUNT}" ]; then

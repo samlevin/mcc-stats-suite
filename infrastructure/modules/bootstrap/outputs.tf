@@ -42,7 +42,7 @@ output "github_oidc_subjects" {
 }
 
 output "bootstrap_backend_config" {
-  description = "Values for backend.hcl after the first local apply."
+  description = "Backend settings for the state migration after the first local apply. backend.tf.example holds the key, encrypt, and use_lockfile values, and the root's .envrc passes the bucket and Region."
   value = {
     bucket       = aws_s3_bucket.state.id
     key          = "${var.environment}/bootstrap/opentofu.tfstate"

@@ -9,6 +9,11 @@ on:
       sha:
         required: true
         type: string
+    secrets:
+      DEV_AWS_ACCOUNT_ID:
+        required: false
+      PROD_AWS_ACCOUNT_ID:
+        required: false
 
 permissions:
   contents: read
@@ -26,6 +31,8 @@ jobs:
       sha: ${{ inputs.sha }}
       operation: continuous-delivery
       source: main
+    secrets:
+      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
 
   approval-prompt:
     name: Post production approval prompt
@@ -101,3 +108,5 @@ jobs:
       sha: ${{ inputs.sha }}
       operation: continuous-delivery
       source: main
+    secrets:
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

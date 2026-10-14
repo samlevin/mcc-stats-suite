@@ -86,7 +86,7 @@ The release pull request updates package versions, changelogs, the root lockfile
 
 ## Test against your own AWS account
 
-To deploy an ephemeral stack, you need your own dev account set up with [Self-hosting](docs/self-hosting/README.md). Copy `.envrc.example` to the ignored `.envrc`, fill its placeholders, run `direnv allow`, and verify the account before any diff or deployment:
+To deploy an ephemeral stack, you need your own dev account set up with [Self-hosting](docs/self-hosting/README.md). Copy `.envrc.example` to the ignored `.envrc`, set `AWS_PROFILE`, run `direnv allow`, and verify the account before any diff or deployment:
 
 ```console
 aws sso login
@@ -96,7 +96,7 @@ npm run app:deploy -- <application> --environment dev --ephemeral <name>
 
 The deployment harness checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and `--ephemeral`. Ephemeral names are 1 to 20 lowercase letters, numbers, or hyphens; `dev` and `prod` are reserved. Stacks are named `<application>-e-<name>`.
 
-Never commit credentials, account IDs, email addresses, domain names, populated `backend.hcl`, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
+Never commit credentials, account IDs, email addresses, domain names, populated `.envrc` files, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
 
 ## Change shared infrastructure
 
