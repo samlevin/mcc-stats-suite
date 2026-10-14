@@ -79,6 +79,8 @@ tofu -chdir=infrastructure/dev/bootstrap test -test-directory=../../modules/boot
 
 Then run `tofu plan` in each bootstrap root and apply only the reviewed change.
 
+Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc`, `backend.hcl`, and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply.
+
 ### Trusted deployment workflows
 
 The CDK entry role trusts a GitHub OIDC token only when its `workflow` claim matches an entry in `cdk_workflow_names` in `infrastructure/modules/bootstrap/variables.tf`. GitHub sets that claim to the `name:` of the top-level workflow that started the run, never to the name of a reusable workflow it calls. The list therefore names every workflow that calls `.github/workflows/_deploy-aws-application.yml`: `deploy-applications` for continuous delivery and `rollback-aws-application` for production rollback. `node --test scripts/deployment-workflows.test.mjs` fails when the list and those workflows disagree.
