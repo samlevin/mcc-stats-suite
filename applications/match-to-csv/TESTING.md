@@ -9,7 +9,7 @@ npm run app:synth -- match-to-csv --environment dev
 npm run verify:bundle --workspace @samlevin/match-to-csv
 ```
 
-Unit tests replace mail parsing, image inspection, Textract, and evidence writes with local fakes. They do not call AWS. Coverage thresholds fail the test command when statement or line coverage drops below 80 percent, branch coverage drops below 65 percent, or function coverage drops below 60 percent.
+Unit tests replace mail parsing, image inspection, Textract, and evidence writes with local fakes. They do not call AWS. Coverage thresholds fail the test command when line coverage drops below 80 percent, branch coverage drops below 65 percent, or function coverage drops below 60 percent.
 
 CDK synthesis uses Docker to install Sharp for Linux ARM64. `verify:bundle` inspects the synthesized `ProcessEmail` and `ExtractText` assets and fails if either is missing the native Sharp binary.
 

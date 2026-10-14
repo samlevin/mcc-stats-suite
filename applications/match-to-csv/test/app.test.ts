@@ -1,20 +1,19 @@
-import t from 'tap';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { Match } from 'aws-cdk-lib/assertions';
 import { buildStack, synthesize } from './support/app';
 
-t.test('stable stacks have termination protection', (t) => {
-  t.equal(buildStack({ environment: 'dev' }).terminationProtection, true);
-  t.equal(buildStack({ environment: 'prod' }).terminationProtection, true);
-  t.end();
+test('stable stacks have termination protection', () => {
+  assert.equal(buildStack({ environment: 'dev' }).terminationProtection, true);
+  assert.equal(buildStack({ environment: 'prod' }).terminationProtection, true);
 });
 
-t.test('ephemeral stacks have no termination protection', (t) => {
+test('ephemeral stacks have no termination protection', () => {
   const stack = buildStack({ environment: 'dev', ephemeral: 'test' });
-  t.equal(stack.terminationProtection, false);
-  t.end();
+  assert.equal(stack.terminationProtection, false);
 });
 
-t.test('the git SHA prefers the checked-out commit', (t) => {
+test('the git SHA prefers the checked-out commit', () => {
   const cases: [NodeJS.ProcessEnv, string][] = [
     [{ GIT_SHA: 'checked-out', GITHUB_SHA: 'trigger' }, 'checked-out'],
     [{ GITHUB_SHA: 'trigger' }, 'trigger'],
@@ -28,109 +27,101 @@ t.test('the git SHA prefers the checked-out commit', (t) => {
       Environment: { Variables: Match.objectLike({ GIT_SHA: expected }) },
     });
   }
-  t.end();
 });
 
-t.test(
-  'process email reads only its environment sender allowlist parameter',
-  (t) => {
-    for (const [environment, ephemeral] of [
-      ['dev', undefined],
-      ['prod', undefined],
-      ['dev', 'test'],
-    ] as const) {
-      const template = synthesize({
-        environment,
-        ...(ephemeral ? { ephemeral } : {}),
-      });
-      const parameterName = `/mcc/${environment}/match-to-csv/sender-allowlist`;
-      template.hasResourceProperties('AWS::Lambda::Function', {
-        FunctionName: Match.stringLikeRegexp('-ProcessEmail$'),
-        Environment: {
-          Variables: Match.objectLike({
-            SENDER_ALLOWLIST_PARAMETER: parameterName,
-          }),
-        },
-      });
-      const statements = Object.values(
-        template.findResources('AWS::IAM::Policy'),
-      ).flatMap(
-        (policy) =>
-          policy.Properties.PolicyDocument.Statement as Array<{
-            Action: string | string[];
-            Resource: unknown;
-          }>,
-      );
-      const ssmStatements = statements.filter((statement) =>
-        [statement.Action].flat().some((action) => action.startsWith('ssm:')),
-      );
-      t.equal(ssmStatements.length, 1, `${environment} ${ephemeral ?? ''}`);
-      t.equal(ssmStatements[0].Action, 'ssm:GetParameter');
-      t.match(
-        JSON.stringify(ssmStatements[0].Resource),
+test('process email reads only its environment sender allowlist parameter', () => {
+  for (const [environment, ephemeral] of [
+    ['dev', undefined],
+    ['prod', undefined],
+    ['dev', 'test'],
+  ] as const) {
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const parameterName = `/mcc/${environment}/match-to-csv/sender-allowlist`;
+    template.hasResourceProperties('AWS::Lambda::Function', {
+      FunctionName: Match.stringLikeRegexp('-ProcessEmail$'),
+      Environment: {
+        Variables: Match.objectLike({
+          SENDER_ALLOWLIST_PARAMETER: parameterName,
+        }),
+      },
+    });
+    const statements = Object.values(
+      template.findResources('AWS::IAM::Policy'),
+    ).flatMap(
+      (policy) =>
+        policy.Properties.PolicyDocument.Statement as Array<{
+          Action: string | string[];
+          Resource: unknown;
+        }>,
+    );
+    const ssmStatements = statements.filter((statement) =>
+      [statement.Action].flat().some((action) => action.startsWith('ssm:')),
+    );
+    assert.equal(ssmStatements.length, 1, `${environment} ${ephemeral ?? ''}`);
+    assert.equal(ssmStatements[0].Action, 'ssm:GetParameter');
+    assert.ok(
+      JSON.stringify(ssmStatements[0].Resource).includes(
         `:parameter${parameterName}"`,
-      );
-    }
-    t.end();
-  },
-);
+      ),
+    );
+  }
+});
 
 for (const [environment, ephemeral, retention] of [
   ['dev', undefined, 14],
   ['prod', undefined, 90],
   ['dev', 'test', 14],
 ] as const) {
-  t.test(
-    `${environment} ${ephemeral ?? 'stable'} log groups have bounded retention and the correct lifecycle`,
-    (t) => {
-      const template = synthesize({
-        environment,
-        ...(ephemeral ? { ephemeral } : {}),
-      });
-      const resources = template.toJSON().Resources as Record<
-        string,
-        {
-          Type: string;
-          DeletionPolicy?: string;
-          UpdateReplacePolicy?: string;
-          Properties: { LogGroupName?: string };
-        }
-      >;
-      const logGroups = template.findResources('AWS::Logs::LogGroup');
-      t.equal(Object.keys(logGroups).length, 6);
-      for (const group of Object.values(logGroups)) {
-        t.equal(group.Properties.RetentionInDays, retention);
-        t.equal(
-          group.DeletionPolicy,
-          ephemeral ? 'Delete' : 'RetainExceptOnCreate',
-        );
-        t.equal(group.UpdateReplacePolicy, ephemeral ? 'Delete' : 'Retain');
+  test(`${environment} ${ephemeral ?? 'stable'} log groups have bounded retention and the correct lifecycle`, () => {
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const resources = template.toJSON().Resources as Record<
+      string,
+      {
+        Type: string;
+        DeletionPolicy?: string;
+        UpdateReplacePolicy?: string;
+        Properties: { LogGroupName?: string };
       }
-      const functions = template.findResources('AWS::Lambda::Function');
-      t.equal(Object.keys(functions).length, 5);
-      const prefix = `match-to-csv-${ephemeral ? `e-${ephemeral}` : environment}-`;
-      const functionNames = new Set<string>();
-      for (const fn of Object.values(functions)) {
-        const functionName = fn.Properties.FunctionName as string;
-        t.ok(functionName.startsWith(prefix), functionName);
-        functionNames.add(functionName);
-        const logGroupId = fn.Properties.LoggingConfig.LogGroup.Ref as string;
-        t.equal(resources[logGroupId].Type, 'AWS::Logs::LogGroup');
-        t.equal(
-          resources[logGroupId].Properties.LogGroupName,
-          `/aws/lambda/${functionName}`,
-        );
+    >;
+    const logGroups = template.findResources('AWS::Logs::LogGroup');
+    assert.equal(Object.keys(logGroups).length, 6);
+    for (const group of Object.values(logGroups)) {
+      assert.equal(group.Properties.RetentionInDays, retention);
+      assert.equal(
+        group.DeletionPolicy,
+        ephemeral ? 'Delete' : 'RetainExceptOnCreate',
+      );
+      assert.equal(group.UpdateReplacePolicy, ephemeral ? 'Delete' : 'Retain');
+    }
+    const functions = template.findResources('AWS::Lambda::Function');
+    assert.equal(Object.keys(functions).length, 5);
+    const prefix = `match-to-csv-${ephemeral ? `e-${ephemeral}` : environment}-`;
+    const functionNames = new Set<string>();
+    for (const fn of Object.values(functions)) {
+      const functionName = fn.Properties.FunctionName as string;
+      assert.ok(functionName.startsWith(prefix), functionName);
+      functionNames.add(functionName);
+      const logGroupId = fn.Properties.LoggingConfig.LogGroup.Ref as string;
+      assert.equal(resources[logGroupId].Type, 'AWS::Logs::LogGroup');
+      assert.equal(
+        resources[logGroupId].Properties.LogGroupName,
+        `/aws/lambda/${functionName}`,
+      );
+    }
+    assert.equal(functionNames.size, 5);
+    if (ephemeral) {
+      for (const resource of Object.values(resources)) {
+        assert.notEqual(resource.DeletionPolicy, 'Retain');
+        assert.notEqual(resource.UpdateReplacePolicy, 'Retain');
       }
-      t.equal(functionNames.size, 5);
-      if (ephemeral) {
-        for (const resource of Object.values(resources)) {
-          t.not(resource.DeletionPolicy, 'Retain');
-          t.not(resource.UpdateReplacePolicy, 'Retain');
-        }
-      }
-      t.end();
-    },
-  );
+    }
+  });
 }
 
 type AlarmResource = {
@@ -148,13 +139,13 @@ type AlarmResource = {
 };
 
 for (const environment of ['dev', 'prod'] as const) {
-  t.test(`${environment} alarms publish failures to the stack topic`, (t) => {
+  test(`${environment} alarms publish failures to the stack topic`, () => {
     const template = synthesize({ environment });
     const prefix = `match-to-csv-${environment}`;
     const topics = template.findResources('AWS::SNS::Topic');
-    t.equal(Object.keys(topics).length, 1);
+    assert.equal(Object.keys(topics).length, 1);
     const [topicId] = Object.keys(topics);
-    t.equal(topics[topicId].Properties.TopicName, `${prefix}-alarms`);
+    assert.equal(topics[topicId].Properties.TopicName, `${prefix}-alarms`);
     template.resourceCountIs('AWS::SNS::Subscription', 0);
 
     const alarms = Object.values(
@@ -176,19 +167,23 @@ for (const environment of ['dev', 'prod'] as const) {
       ['MaterializeTrainingDataErrors', 'AWS/Lambda', 'Errors'],
       ['ZeroRowExtractions', 'MCC/MatchToCsv', 'ZeroRowExtractions'],
     ];
-    t.equal(alarms.length, expected.length);
+    assert.equal(alarms.length, expected.length);
     for (const [id, namespace, metricName] of expected) {
       const alarm = byName.get(`${prefix}-${id}`);
       if (!alarm) {
-        t.fail(`missing alarm ${prefix}-${id}`);
+        assert.fail(`missing alarm ${prefix}-${id}`);
         continue;
       }
-      t.equal(alarm.Namespace, namespace, id);
-      t.equal(alarm.MetricName, metricName, id);
-      t.equal(alarm.Threshold, 1, id);
-      t.equal(alarm.ComparisonOperator, 'GreaterThanOrEqualToThreshold', id);
-      t.equal(alarm.TreatMissingData, 'notBreaching', id);
-      t.same(alarm.AlarmActions, [{ Ref: topicId }], id);
+      assert.equal(alarm.Namespace, namespace, id);
+      assert.equal(alarm.MetricName, metricName, id);
+      assert.equal(alarm.Threshold, 1, id);
+      assert.equal(
+        alarm.ComparisonOperator,
+        'GreaterThanOrEqualToThreshold',
+        id,
+      );
+      assert.equal(alarm.TreatMissingData, 'notBreaching', id);
+      assert.deepEqual(alarm.AlarmActions, [{ Ref: topicId }], id);
     }
 
     const resources = template.toJSON().Resources as Record<
@@ -203,51 +198,53 @@ for (const environment of ['dev', 'prod'] as const) {
       };
       return resources[value.Ref ?? value['Fn::GetAtt']![0]].Properties;
     };
-    t.equal(
+    assert.equal(
       dimensionTarget('WorkflowExecutionsFailed').StateMachineName,
       prefix,
     );
-    t.equal(
+    assert.equal(
       dimensionTarget('ReplayWorkflowExecutionsTimedOut').StateMachineName,
       `${prefix}-replay`,
     );
-    t.equal(
+    assert.equal(
       dimensionTarget('EventsDeadLetters').QueueName,
       `${prefix}-events-dlq`,
     );
     for (const id of ['ExtractTextErrors', 'ZeroRowExtractions']) {
-      t.equal(dimensionTarget(id).FunctionName, `${prefix}-ExtractText`, id);
+      assert.equal(
+        dimensionTarget(id).FunctionName,
+        `${prefix}-ExtractText`,
+        id,
+      );
     }
-    t.equal(byName.get(`${prefix}-ZeroRowExtractions`)!.Statistic, 'Sum');
-    t.equal(byName.get(`${prefix}-EventsDeadLetters`)!.Statistic, 'Maximum');
-    t.end();
+    assert.equal(byName.get(`${prefix}-ZeroRowExtractions`)!.Statistic, 'Sum');
+    assert.equal(
+      byName.get(`${prefix}-EventsDeadLetters`)!.Statistic,
+      'Maximum',
+    );
   });
 
-  t.test(
-    `${environment} subscribes the alarm email from its SSM parameter`,
-    (t) => {
-      const parameterName = `/mcc/${environment}/match-to-csv/alarm-email`;
-      const template = synthesize(
-        { environment },
-        { MCC_ALARM_EMAIL_PARAMETER: parameterName },
-      );
-      const subscriptions = Object.values(
-        template.findResources('AWS::SNS::Subscription'),
-      );
-      t.equal(subscriptions.length, 1);
-      const [subscription] = subscriptions;
-      t.equal(subscription.Properties.Protocol, 'email');
-      const parameter = template.toJSON().Parameters[
-        subscription.Properties.Endpoint.Ref
-      ] as { Type: string; Default: string };
-      t.equal(parameter.Type, 'AWS::SSM::Parameter::Value<String>');
-      t.equal(parameter.Default, parameterName);
-      t.end();
-    },
-  );
+  test(`${environment} subscribes the alarm email from its SSM parameter`, () => {
+    const parameterName = `/mcc/${environment}/match-to-csv/alarm-email`;
+    const template = synthesize(
+      { environment },
+      { MCC_ALARM_EMAIL_PARAMETER: parameterName },
+    );
+    const subscriptions = Object.values(
+      template.findResources('AWS::SNS::Subscription'),
+    );
+    assert.equal(subscriptions.length, 1);
+    const [subscription] = subscriptions;
+    assert.equal(subscription.Properties.Protocol, 'email');
+    const parameter = template.toJSON().Parameters[
+      subscription.Properties.Endpoint.Ref
+    ] as { Type: string; Default: string };
+    assert.equal(parameter.Type, 'AWS::SSM::Parameter::Value<String>');
+    assert.equal(parameter.Default, parameterName);
+  });
 }
 
-t.test('ephemeral stacks create no alarms, topic, or subscription', (t) => {
+test('ephemeral stacks create no alarms, topic, or subscription', () => {
   const template = synthesize(
     { environment: 'dev', ephemeral: 'test' },
     { MCC_ALARM_EMAIL_PARAMETER: '/mcc/dev/match-to-csv/alarm-email' },
@@ -255,5 +252,4 @@ t.test('ephemeral stacks create no alarms, topic, or subscription', (t) => {
   template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
   template.resourceCountIs('AWS::SNS::Topic', 0);
   template.resourceCountIs('AWS::SNS::Subscription', 0);
-  t.end();
 });
