@@ -23,6 +23,11 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
+import {
+  bundlingOptions,
+  checkLocalEsbuild,
+  localEsbuildVersion,
+} from './bundling';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -35,6 +40,7 @@ export class MatchToCsvStack extends Stack {
     super(scope, id, props);
 
     const { deployment, gitSha } = props;
+    if (this.bundlingRequired) checkLocalEsbuild(localEsbuildVersion());
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -351,14 +357,7 @@ export class MatchToCsvStack extends Stack {
       environment,
       projectRoot: repositoryRoot,
       depsLockFilePath: path.join(repositoryRoot, 'package-lock.json'),
-      bundling: {
-        minify: true,
-        sourceMap: true,
-        target: 'node22',
-        nodeModules: includeSharp ? ['sharp'] : undefined,
-        // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
-        forceDockerBundling: includeSharp && this.bundlingRequired,
-      },
+      bundling: bundlingOptions(includeSharp, this.bundlingRequired),
     });
   }
 
