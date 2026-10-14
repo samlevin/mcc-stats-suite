@@ -27,7 +27,9 @@ Keep a short record in the conversation: the PR number, title, head SHA, affecte
    git diff --name-only "$(git merge-base origin/main <head>)" origin/main -- infrastructure .terrateam
    ```
 
-4. Pick the affected roots from `gh pr diff <N> -R samlevin/mcc-stats-suite --name-only`. Only `infrastructure/dev/foundation` and `infrastructure/prod/foundation` are candidates. A root is affected when a changed file matches its `file_patterns` in the PR head's `.terrateam/config.yml`, which you read with `git show <head>:.terrateam/config.yml`. In those patterns `${DIR}` is the root and `*` does not cross `/`. Today that is the root's own `*.tf`, `*.tfvars`, and `*.hcl` files, `infrastructure/modules/foundation/*.tf`, and `.terrateam/config.yml`. If neither root is affected, stop: there is nothing to apply.
+4. Pick the affected roots from `gh pr diff <N> -R samlevin/mcc-stats-suite --name-only`. Only `infrastructure/dev/foundation` and `infrastructure/prod/foundation` are candidates. A root is affected when a changed file matches its `file_patterns` in the PR head's `.terrateam/config.yml`, which you read with `git show <head>:.terrateam/config.yml`. In those patterns `${DIR}` is the root and `*` does not cross `/`. Today that is the root's own `*.tf`, `*.tfvars`, and `*.hcl` files, its `external-inputs.revision`, `infrastructure/modules/foundation/*.tf`, and `.terrateam/config.yml`. If neither root is affected, stop: there is nothing to apply.
+
+   If the PR changes `infrastructure/<env>/foundation/external-inputs.revision`, a GitHub secret that feeds that root changed, such as `<ENV>_MCC_EMAIL_DOMAIN`. This skill cannot read GitHub secrets, and the root's `.envrc` reads the email domain back from the applied SSM parameter, so a local plan would show no change and an apply would do nothing. Stop for that root and tell the person to apply it through Terrateam (`terrateam plan`, then `terrateam apply <env> and foundation` on the PR). The only local alternative is that the person sets `email_domain_override` in that root's `.envrc` in the main checkout to the new value, for this apply only, and says so in their latest message; then continue with that root, and remind them to remove the override after the apply. Never treat a revision-file root as applied unless its plan showed the expected change.
 
 5. Check that each affected root has its ignored local input in the main checkout: `.envrc`, created from the committed `.envrc.example` in that root and allowed with `direnv allow`. It is self-contained and derives the account, Region, and state bucket from its AWS profile, and reads the email domain from the applied foundation's SSM parameter, so nobody types the domain. If it is missing, stop and tell the person to create it from that root's `.envrc.example`. Do not create it.
 
@@ -118,7 +120,7 @@ tf show -json "$E.tfplan" | jq -r '.resource_changes[]? | select(.change.actions
 shasum -a 256 "$R/$E.tfplan"
 ```
 
-The plan file stays in the root's directory inside the worktree, where `.gitignore` already covers `*.tfplan`. Record the digest. Present the root, profile, head SHA, counts, every action, and the digest. Read `tf show -no-color "$E.tfplan"` when an action needs detail. Call out every destroy, replacement, IAM or policy change, import, and any change the PR diff does not explain, which may be drift. The domain comes from the applied parameter, so a `(sensitive value)` change to the SES or SSM resources means the `.envrc` used `email_domain_override` or the parameter changed outside OpenTofu; call it out. Stop entirely if the plan proposes recreating the foundation or creating named resources that already exist; that means the wrong backend or account. For a prod plan, compare it with the applied dev plan, allowing for environment names, account IDs, and values. Gate: apply this root.
+The plan file stays in the root's directory inside the worktree, where `.gitignore` already covers `*.tfplan`. Record the digest. Present the root, profile, head SHA, counts, every action, and the digest. Read `tf show -no-color "$E.tfplan"` when an action needs detail. Call out every destroy, replacement, IAM or policy change, import, and any change the PR diff does not explain, which may be drift. The domain comes from the applied parameter, so a `(sensitive value)` change to the SES or SSM resources means the `.envrc` used `email_domain_override` or the parameter changed outside OpenTofu; call it out. For a root whose `external-inputs.revision` changed, the plan must show that `(sensitive value)` change on the `/mcc/<env>/match-to-csv/email-domain` parameter; a plan without it is a stop, never a success, and that root does not count as applied for the merge. Stop entirely if the plan proposes recreating the foundation or creating named resources that already exist; that means the wrong backend or account. For a prod plan, compare it with the applied dev plan, allowing for environment names, account IDs, and values. Gate: apply this root.
 
 A "no changes" plan still gets its gate. Applying it is harmless, and the merge requires every affected root to have applied.
 
@@ -136,7 +138,7 @@ rm -f "$R/$E.tfplan"
 
 ## 4. Merge (gated)
 
-Every affected root must have applied at the recorded head. Merge the way Terrateam's automerge does, with the PR title, only if the head has not moved:
+Every affected root must have applied at the recorded head, and a root whose `external-inputs.revision` changed only counts when its applied plan showed the expected `(sensitive value)` change. Merge the way Terrateam's automerge does, with the PR title, only if the head has not moved:
 
 ```console
 gh pr merge <N> -R samlevin/mcc-stats-suite --squash --subject "<title> (#<N>)" --match-head-commit <head>

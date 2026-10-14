@@ -23,7 +23,7 @@ GitHub holds only the values nobody can derive: for each environment, the AWS ac
 
 The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Set `MCC_TURBO_CACHE` to `true` after the account and Region settings above. `main` CI uses the dev account and Region, and each deploy uses those of the environment it deploys. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
 
-The foundation's inputs, including the email domain, are not GitHub settings unless your infrastructure CI/CD runs in GitHub Actions. [Apply and change the foundation](40-change-foundation.md#inputs) lists them.
+Only Terrateam reads the email domain secrets, as the table shows. A local foundation apply reads the domain from the SSM parameter the foundation owns; [Apply and change the foundation](40-change-foundation.md#inputs) lists every foundation input.
 
 ## Branch protection
 
