@@ -15,7 +15,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), and drift check (`check`) |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
-Edit the sources, run `npm run agents:generate`, and commit the output. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
+Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
 
 ## Agents and skills
 
@@ -57,7 +57,7 @@ The personal `review` skill (multi-lens PR review that posts to GitHub) was not 
 | Stack management | `mcc-stack-manager` (`Bash, Read`) | `mcc-stack-manager` | same source |
 | Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source |
 | Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source |
-| Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security` (not model-invocable), `/mcc-write-prose` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security` (`allow_implicit_invocation: false`), `$mcc-write-prose` | same source; manifests generated |
+| Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security` (not model-invocable), `/mcc-write-prose`, `/mcc-agents` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security` (`allow_implicit_invocation: false`), `$mcc-write-prose`, `$mcc-agents` | same source; manifests generated |
 | Policy resolution | `node scripts/agent-policy.mjs resolve --tool claude ...` | `... --tool codex ...` | `scripts/agent-policy.test.mjs` |
 
 "Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role and workflow for both tools and compares shared lines.

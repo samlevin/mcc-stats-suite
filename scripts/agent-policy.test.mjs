@@ -281,6 +281,7 @@ test('every role and workflow renders for both tools with matching bodies', () =
     assert.ok(names.includes(`.codex/agents/${PREFIX}${role}.toml`), role);
   }
   for (const skill of [
+    'agents',
     'implement',
     'create-github-issue',
     'review-code',

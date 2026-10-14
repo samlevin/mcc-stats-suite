@@ -31,7 +31,7 @@ Pipe long output through `tail -n 60`. Tests never call AWS.
 
 ## Repository agent workflows
 
-Version-controlled agents and skills under `.claude/agents/` and `.claude/skills/` (Claude Code) and `.codex/agents/` and `.agents/skills/` (Codex) encapsulate MCC delivery. Every identifier starts with `mcc-`, so a contributor's own `code-reviewer` or `issue-implementer` keeps working, and routing always names the `mcc-` definition. Both tools get the same roles, handoffs, and checks; only the packaging differs. The definitions are generated from `.agents/roles/`, `.agents/workflows/`, and `.agents/policy.json`: edit the source, run `npm run agents:generate`, and commit the output. `.agents/README.md` has the parity matrix, trust and discovery requirements, and known runtime limits.
+Version-controlled agents and skills under `.claude/agents/` and `.claude/skills/` (Claude Code) and `.codex/agents/` and `.agents/skills/` (Codex) encapsulate MCC delivery. Every identifier starts with `mcc-`, so a contributor's own `code-reviewer` or `issue-implementer` keeps working, and routing always names the `mcc-` definition. Both tools get the same roles, handoffs, and checks; only the packaging differs. The definitions are generated from `.agents/roles/`, `.agents/workflows/`, and `.agents/policy.json`: edit the source, run `npm run agents:generate`, and commit the output, or ask `mcc-agents` to do all three. `.agents/README.md` has the parity matrix, trust and discovery requirements, and known runtime limits.
 
 | Request | Claude Code | Codex | Role it dispatches |
 | --- | --- | --- | --- |
@@ -40,6 +40,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | Review a pushed branch or PR | `/mcc-review-code` | `$mcc-review-code` | `mcc-code-reviewer` (read-only, reports to you) |
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
 | Write a PR body, issue body, comment, or doc | `/mcc-write-prose` | `$mcc-write-prose` | none |
+| Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits sources, regenerates both tools, verifies |
 
 - Serial delivery: `mcc-orchestrator` dispatches one executable leaf at a time in dependency order and starts the next only after the previous leaf's PR is open or its blocker is recorded. Sibling leaves never run concurrently, even on request.
 - Handoffs: `mcc-implementer` spawns `mcc-code-reviewer` before opening a PR when the review threshold above applies, and `mcc-stack-manager` for stacked branches. Nothing else spawns a reviewer, and no automatic flow spawns `mcc-security-reviewer`.
