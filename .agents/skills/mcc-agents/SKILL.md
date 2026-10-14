@@ -16,7 +16,6 @@ The Claude Code and Codex definitions are generated. Never edit a generated file
 | Model or effort for a capability, or which models and efforts a tool accepts | `.agents/policy.json` (`capabilities`, `supported`) |
 | An agent's instructions, tools, isolation, color, or Codex permissions | `.agents/roles/<role>.md` (frontmatter `claude:` and `codex:` keys, body shared) |
 | A skill's instructions, description, argument hint, or invocation policy | `.agents/workflows/<name>.md` |
-| A skill that exists only when a feature flag is on | `feature: <flag>` in the skill's frontmatter; the generator skips the skill when the flag is false |
 | A reference a skill ships | `.agents/workflows/<name>/references/*.md` |
 | A new role | add `.agents/roles/<role>.md` and a `roles` entry in `policy.json` mapping it to a capability |
 | A new skill | add `.agents/workflows/<name>.md`; add it to the skill list in `scripts/agent-policy.test.mjs` |

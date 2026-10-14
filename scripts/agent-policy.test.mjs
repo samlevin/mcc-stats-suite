@@ -1,11 +1,5 @@
 import assert from 'node:assert/strict';
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -24,7 +18,6 @@ import {
   resolve,
   substitute,
   TOOLS,
-  workflowEnabled,
 } from './agent-policy.mjs';
 
 const policy = loadPolicy();
@@ -419,7 +412,6 @@ test('every role and workflow renders for both tools with matching bodies', () =
     'review-code',
     'review-security',
     'write-prose',
-    ...(policy.binding.features.infrastructure ? ['apply-foundation'] : []),
   ]) {
     assert.ok(
       names.includes(`.claude/skills/${PREFIX}${skill}/SKILL.md`),
@@ -550,65 +542,6 @@ test('generate writes every file and check reports stale or orphaned output', ()
       'utf8',
     ),
     /display_name: 'Other: flow'/,
-  );
-});
-
-test('a workflow gated on a feature exists only where the binding enables it', () => {
-  assert.equal(workflowEnabled(policy, {}), true);
-  assert.equal(workflowEnabled(other, { feature: 'infrastructure' }), false);
-  assert.equal(
-    workflowEnabled(
-      {
-        ...other,
-        binding: { ...other.binding, features: { infrastructure: true } },
-      },
-      { feature: 'infrastructure' },
-    ),
-    true,
-  );
-  assert.throws(
-    () => workflowEnabled(policy, { feature: 'magic' }),
-    /Unknown workflow feature: magic/,
-  );
-  // The infrastructure apply skills are absent, not reworded, without
-  // CI-applied infrastructure; the other skills stay.
-  const base = mkdtempSync(join(tmpdir(), 'agent-policy-'));
-  mkdirSync(join(base, '.agents/roles'), { recursive: true });
-  mkdirSync(join(base, '.agents/workflows'), { recursive: true });
-  for (const name of ['apply-foundation', 'write-prose'])
-    writeFileSync(
-      join(base, `.agents/workflows/${name}.md`),
-      readFileSync(
-        new URL(`../.agents/workflows/${name}.md`, import.meta.url),
-        'utf8',
-      ),
-    );
-  const bind = (infrastructure) =>
-    writeFileSync(
-      join(base, '.agents/policy.json'),
-      JSON.stringify({
-        ...other,
-        binding: { ...other.binding, features: { infrastructure } },
-        roles: {},
-      }),
-    );
-  bind(true);
-  assert.ok(
-    generate(base).includes('.claude/skills/other-apply-foundation/SKILL.md'),
-  );
-  bind(false);
-  assert.deepEqual(check(base), [
-    '.agents/skills/other-apply-foundation/SKILL.md',
-    '.agents/skills/other-apply-foundation/agents/openai.yaml',
-    '.claude/skills/other-apply-foundation/SKILL.md',
-  ]);
-  const written = generate(base);
-  assert.ok(written.includes('.claude/skills/other-write-prose/SKILL.md'));
-  assert.ok(!written.some((path) => path.includes('apply-foundation')));
-  assert.deepEqual(check(base), []);
-  assert.equal(
-    existsSync(join(base, '.claude/skills/other-apply-foundation/SKILL.md')),
-    false,
   );
 });
 

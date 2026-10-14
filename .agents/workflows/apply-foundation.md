@@ -2,7 +2,6 @@
 name: apply-foundation
 description: "Person-invoked local stand-in for Terrateam on one {{label}} pull request: the agent plans and applies its OpenTofu foundation roots, dev then prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, and merge, then squash-merges like Terrateam automerge. Only when a person asks, for example 'apply foundation for PR #N'; never part of delivery."
 argument-hint: "<PR number>"
-feature: infrastructure
 claude:
   disable-model-invocation: true
 codex:

@@ -19,7 +19,7 @@ Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-ag
 
 ## Reuse in another repository
 
-The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false. A whole skill that operates that infrastructure, such as `apply-foundation`, sets `feature: infrastructure` in its frontmatter instead; the generator skips it, and `generate` removes its output, when the feature is off.
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 
@@ -62,7 +62,7 @@ The personal `review` skill (multi-lens PR review that posts to GitHub) was not 
 | Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source |
 | Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source |
 | Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security` and `/mcc-apply-foundation` (not model-invocable), `/mcc-write-prose`, `/mcc-agents` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security` and `$mcc-apply-foundation` (`allow_implicit_invocation: false`), `$mcc-write-prose`, `$mcc-agents` | same source; manifests generated |
-| Foundation apply | the agent runs `gh`, `git`, `aws`, and `tofu` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source; generator gate tested in `scripts/agent-policy.test.mjs` |
+| Foundation apply | the agent runs `gh`, `git`, `aws`, and `tofu` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
 | Policy resolution | `node scripts/agent-policy.mjs resolve --tool claude ...` | `... --tool codex ...` | `scripts/agent-policy.test.mjs` |
 
 "Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role and workflow for both tools and compares shared lines.
