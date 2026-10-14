@@ -120,4 +120,4 @@ Use a disposable dev account and never run destructive denial probes against sha
 
 After the operator creates the local bootstrap and updates the permission set, verify that a merge to `main` still deploys shared dev through GitHub Actions. The AWS-free tests in `scripts/local-cdk-bootstrap.test.mjs` evaluate the generated policies and synthesize every application; they do not replace this live validation.
 
-Next: [Configure GitHub, Terrateam, and Release Please](30-configure-github.md).
+Next: [Configure GitHub and Release Please](30-configure-github.md).

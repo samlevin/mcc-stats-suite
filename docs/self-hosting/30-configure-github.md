@@ -1,70 +1,33 @@
-# Configure GitHub, Terrateam, and Release Please
+# Configure GitHub and Release Please
 
 ## Environments
 
-Create four GitHub Environments:
+Create two GitHub Environments, `dev` and `prod`, for application deployments. The CDK entry roles trust only the deployment workflow on `main` in the matching environment, so a deployment from any other branch fails at role assumption.
 
-- `dev` and `prod` serve application deployments. The CDK entry roles trust only the deployment workflow on `main` in the matching environment, so a deployment from any other branch fails at role assumption.
-- `infra/foundation-dev` and `infra/foundation-prod` serve Terrateam. Give them no required reviewers, so Terrateam jobs never wait for an Actions approval.
-
-Give `prod` at least one required reviewer and disable administrator bypass. The deployment workflow checks both before every production job and fails if either is missing. As the only reviewer, leave **Prevent self-review** off so you can approve your own deployments. This gate covers application deployments and rollbacks only. Terrateam's `access_control` is the production gate for infrastructure: only repository administrators can apply prod or change Terrateam's configuration and workflow.
+Give `prod` at least one required reviewer and disable administrator bypass. The deployment workflow checks both before every production job and fails if either is missing. As the only reviewer, leave **Prevent self-review** off so you can approve your own deployments. This gate covers application deployments and rollbacks only. Foundation applies are gated by whoever can run OpenTofu against prod; see [Apply and change the foundation](40-change-foundation.md).
 
 ## Variables and secrets
 
-Every value comes from the bootstrap outputs or your own configuration. Store identifiers as variables, except the inbound email domain, which is a secret: the Terrateam workflow prints its environment's variables in a public log, and GitHub masks secret values. None of them is an AWS credential; Terrateam and GitHub Actions get short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
+Every value comes from the bootstrap outputs or your own configuration. Store identifiers as variables and the release app key as a secret. None of them is an AWS credential; GitHub Actions gets short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
 
 | Scope | Name | Kind | Value | Used by |
 | --- | --- | --- | --- | --- |
 | `dev` environment | `AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | application deploys |
 | `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | variable | dev `cdk_deploy_role_arn` | application deploys |
 | `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
-| `infra/foundation-dev` environment | `DEV_TERRATEAM_ROLE_ARN` | variable | dev `terrateam_role_arn` | Terrateam |
-| `infra/foundation-dev` environment | `DEV_TOFU_STATE_BUCKET` | variable | dev `state_bucket_name` | Terrateam |
-| `infra/foundation-dev` environment | `DEV_AWS_REGION` | variable | workload Region | Terrateam |
-| `infra/foundation-dev` environment | `DEV_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives dev email, in lowercase | Terrateam, for the shared receipt rule |
 | `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION` | variables | prod equivalents of the dev values | application deploys |
-| `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values | Terrateam |
-| `infra/foundation-prod` environment | `PROD_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives prod email, in lowercase | Terrateam, for the shared receipt rule |
 | repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | Turbo cache in `main` CI |
 | repository | `DEV_AWS_REGION` | variable | workload Region | Turbo cache in `main` CI |
-| repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, when the repository uses immutable OIDC subjects | Terrateam, for the Turbo cache role trust |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
 
-`main` CI fails at its cache step until `DEV_AWS_ACCOUNT_ID` is set and the dev foundation has created the `mcc-stats-suite-dev-github-turbo-cache` role.
+`main` CI fails at its cache step until `DEV_AWS_ACCOUNT_ID` is set and the [dev foundation](40-change-foundation.md) has created the `mcc-stats-suite-dev-github-turbo-cache` role.
+
+The foundation's inputs, including the email domain, are not GitHub settings unless your infrastructure CI/CD runs in GitHub Actions. [Apply and change the foundation](40-change-foundation.md#inputs) lists them.
 
 ## Branch protection
 
 Protect `main`: require pull requests and the `check`, `gitleaks`, and `semantic_pr` status checks, require branches to be up to date, and block force pushes and deletion. Enable auto-merge if you want pull requests to merge when their checks pass.
-
-## Terrateam
-
-1. Install the Terrateam GitHub App for only this repository.
-2. Keep its generated `.github/workflows/terrateam.yml`. Do not replace [`.terrateam/config.yml`](../../.terrateam/config.yml) with a generated example. It already defines the roots, access policy, OIDC workflows, and drift schedule.
-3. Do not run Terrateam's own AWS bootstrap. The repository bootstrap already created the roles.
-
-The committed configuration does the following:
-
-- plans the foundation roots only when a `terrateam plan` comment on the pull request asks for it, never when the pull request opens or changes;
-- never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
-- locks each root from its first apply until the pull request merges, and takes no lock when a pull request merges without a Terrateam apply;
-- runs dev jobs in `infra/foundation-dev` and prod jobs in `infra/foundation-prod`, neither of which has required reviewers;
-- squash-merges the pull request with its title once every planned root has applied without error, never after a failed apply, so a pull request sees only a dev, a prod, or a dev-then-prod sequence;
-- lets repository writers apply dev and only administrators apply prod;
-- requires an administrator for changes to Terrateam's workflow or configuration;
-- never touches the bootstrap roots; and
-- checks both foundation roots for drift weekly and opens an issue instead of reconciling.
-
-The Terrateam role trust requires this repository, the `.github/workflows/terrateam.yml` workflow, and the `terrateam-action[bot]` actor. Treat any change to that workflow, the Terrateam configuration, or `infrastructure/modules/bootstrap` as a change to cloud access.
-
-Verify the setup before relying on it:
-
-1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans nothing. Comment `terrateam plan` and confirm Terrateam plans dev in `infra/foundation-dev` with no pending deployment review.
-2. Confirm a pull request from a non-administrator that changes `.terrateam/config.yml` is blocked from Terrateam operations.
-3. From an unrelated workflow, request an OIDC token and try to assume the Terrateam role. AWS must reject it.
-4. After a Terrateam run, check CloudTrail for an assumed-role session from the expected workflow and repository.
-
-The Terrateam role has `PowerUserAccess`. Replace it with project-specific permissions before letting many people apply infrastructure.
 
 ## Release Please
 
@@ -78,10 +41,10 @@ Do not replace the app with a personal access token or give the workflow's `GITH
 
 ## Changes a fork needs
 
-A fork deploys to its own accounts with its own Terrateam and Release Please installations. It also needs a few repository changes:
+A fork deploys to its own accounts with its own Release Please app. It also needs a few repository changes:
 
 - Workspaces use the `@samlevin` npm scope, and `.npmrc` sends that scope to GitHub Packages. The `publish-shared-packages` workflow (`publish-packages.yml`) publishes the shared packages there, which only works under the matching owner. Rename the scope or delete the workflow. Applications build from the local workspaces and never download published versions.
 - `issue-triage.yml` and `pr-issue-metadata.yml` run only in `samlevin/mcc-stats-suite`. They skip on a fork. To use them, change the repository check, point the scripts at your own GitHub Project, and add a `MCC_PROJECT_TOKEN` secret with issue, pull request, and project access.
 - The README badges point at the upstream repository.
 
-Next: [Change the foundation](40-change-foundation.md).
+Next: [Apply the foundation](40-change-foundation.md).

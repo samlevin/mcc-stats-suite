@@ -2,7 +2,8 @@
 # This directory's ignored .envrc selects the dev administrator profile and
 # the GitHub Environment name. See ../../../.envrc.example.
 #
-# Set both flags to false only when this root bootstraps a locally managed,
-# disposable Sandbox account rather than the shared dev account.
-create_terrateam_role  = true
+# Set create_terrateam_role to true only if Terrateam applies the foundation.
+# Set create_cdk_deploy_role to false only when this root bootstraps a locally
+# managed, disposable Sandbox account rather than the shared dev account.
+create_terrateam_role  = false
 create_cdk_deploy_role = true
