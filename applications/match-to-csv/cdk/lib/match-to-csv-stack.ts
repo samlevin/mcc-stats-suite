@@ -1,5 +1,4 @@
 import * as path from 'path';
-import { version as esbuildVersion } from 'esbuild/package.json';
 import type { DeploymentConfig } from '@samlevin/cdk-config';
 import {
   Aspects,
@@ -24,6 +23,11 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
+import {
+  bundlingOptions,
+  checkLocalEsbuild,
+  localEsbuildVersion,
+} from './bundling';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -36,6 +40,7 @@ export class MatchToCsvStack extends Stack {
     super(scope, id, props);
 
     const { deployment, gitSha } = props;
+    if (this.bundlingRequired) checkLocalEsbuild(localEsbuildVersion());
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -352,16 +357,7 @@ export class MatchToCsvStack extends Stack {
       environment,
       projectRoot: repositoryRoot,
       depsLockFilePath: path.join(repositoryRoot, 'package-lock.json'),
-      bundling: {
-        minify: true,
-        sourceMap: true,
-        target: 'node22',
-        nodeModules: includeSharp ? ['sharp'] : undefined,
-        // Docker bundling installs esbuild in CDK's image; use the locked version.
-        esbuildVersion,
-        // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
-        forceDockerBundling: includeSharp && this.bundlingRequired,
-      },
+      bundling: bundlingOptions(includeSharp, this.bundlingRequired),
     });
   }
 
