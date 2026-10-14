@@ -1150,9 +1150,13 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
       );
       const load = (env) => {
         writeFileSync(calls, '');
+        // Debian and Ubuntu bash source /etc/bash.bashrc even for -c when
+        // stdin is a socket, as spawnSync's default pipes are on Linux, and
+        // -u then fails on PS1. Close stdin and skip startup files.
         const result = spawnSync(
           'bash',
           [
+            '--norc',
             '-euo',
             'pipefail',
             '-c',
@@ -1162,6 +1166,7 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
           ],
           {
             encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
             env: { PATH: `${bin}:${process.env.PATH}`, ...env },
           },
         );
