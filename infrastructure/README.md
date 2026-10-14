@@ -49,7 +49,7 @@ Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/s
 
 ## Inbound email contract
 
-Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input; keep it out of version control and out of plain CI variables. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
+Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input; keep it out of version control and out of plain CI variables. A local apply, including one through `mcc-apply-foundation`, reads it from the root's ignored `.envrc`. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
 
 ## Turborepo cache storage contract
 

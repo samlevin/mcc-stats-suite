@@ -6,9 +6,9 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 
 [`.terrateam/config.yml`](../../.terrateam/config.yml) and the generated `.github/workflows/terrateam.yml` define the setup. With them, Terrateam:
 
-- plans the foundation roots on every pull request that changes them; a change to `infrastructure/modules/foundation` or `.terrateam/config.yml` plans dev and prod, and a change to one environment root plans only that root;
+- plans the foundation roots only when a `terrateam plan` comment on the pull request asks for it, never when the pull request opens or changes; a change to `infrastructure/modules/foundation` or `.terrateam/config.yml` affects dev and prod, and a change to one environment root affects only that root;
 - never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
-- locks each root from its first apply until the pull request merges;
+- locks each root from its first apply until the pull request merges, and takes no lock when a pull request merges without a Terrateam apply;
 - runs dev jobs in the `infra/foundation-dev` GitHub Environment and prod jobs in `infra/foundation-prod`;
 - squash-merges the pull request with its title once every planned root has applied without error, never after a failed apply;
 - lets repository writers apply dev and only administrators apply prod;
@@ -16,7 +16,7 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 - never touches the bootstrap, module, or inactive data-platform directories; and
 - checks both foundation roots for drift weekly and opens an issue instead of reconciling.
 
-Terrateam plans a root only when a changed file matches that root's `file_patterns`. Module calls are not discovered, so every local module a root calls needs its own pattern. [AGENTS.md](../../AGENTS.md#terrateam-module-mapping) describes the mapping rules.
+A root is affected only when a changed file matches that root's `file_patterns`. Module calls are not discovered, so every local module a root calls needs its own pattern. [AGENTS.md](../../AGENTS.md#terrateam-module-mapping) describes the mapping rules.
 
 ## Bootstrap the Terrateam role
 
@@ -56,24 +56,26 @@ Terrateam passes these to the foundation roots as the backend bucket and Region,
 
 Verify the setup before relying on it:
 
-1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans dev in `infra/foundation-dev` with no pending deployment review.
+1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans nothing. Comment `terrateam plan` and confirm Terrateam plans dev in `infra/foundation-dev` with no pending deployment review.
 2. Confirm a pull request from a non-administrator that changes `.terrateam/config.yml` is blocked from Terrateam operations.
 3. From an unrelated workflow, request an OIDC token and try to assume the Terrateam role. AWS must reject it.
 4. After a Terrateam run, check CloudTrail for an assumed-role session from the expected workflow and repository.
 
 ## Change the foundation with Terrateam
 
-1. Open a pull request. Terrateam plans each affected root. If a plan is missing or stale, comment `terrateam plan`.
+1. Open a pull request. Terrateam plans nothing until someone asks. Comment `terrateam plan` to start. When dev is affected, the comment plans dev only, and prod plans after the dev apply. A change confined to `infrastructure/prod/foundation` plans prod at once. After pushing a new commit, comment `terrateam plan` again.
 2. Read every planned action, as in [Apply and change the foundation](40-change-foundation.md#change-the-foundation-later).
-3. Comment `terrateam apply dev and foundation`. Terrateam locks both roots for this pull request. No other pull request can apply them until this one merges.
-4. Validate dev. If the change needs fixing, push a new commit, review the new plans, and apply dev again.
-5. Compare the prod plan with the applied dev plan, then comment `terrateam apply prod and foundation`. Only repository administrators can apply prod, and prod cannot apply until dev has applied.
+3. Comment `terrateam apply dev and foundation`. Terrateam locks the dev root for this pull request. No other pull request can apply it until this one merges.
+4. Validate dev. If the change needs fixing, push a new commit, comment `terrateam plan`, review the new plan, and apply dev again.
+5. After the dev apply succeeds, Terrateam plans prod. If no prod plan appears, comment `terrateam plan prod and foundation`. Compare the prod plan with the applied dev plan, then comment `terrateam apply prod and foundation`. Terrateam locks the prod root until the pull request merges. Only repository administrators can apply prod, and prod cannot plan or apply until dev has applied.
 
 When every planned root has applied without error, Terrateam squash-merges the pull request using its title. A change confined to `infrastructure/prod/foundation` has no dev step. If the merge is blocked, for example by a pending required check, merge the pull request yourself once the checks pass.
 
-Do not merge a foundation pull request before applying it. With the strict lock policy, the merge takes the locks anyway, and the roots stay locked until the change is applied. Never force-unlock a pull request that has applied part of a change.
+Terrateam takes a lock only when it applies a root, and the merge releases it. Merging a pull request that Terrateam never applied, such as one applied outside Terrateam, takes no lock and does not block later foundation pull requests. Never force-unlock a pull request that has applied part of a change.
 
-For [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist), apply the import pull request with `terrateam apply dev and foundation`, then `terrateam plan prod and foundation` and `terrateam apply prod and foundation`.
+When Terrateam cannot run, a person can invoke `/mcc-apply-foundation` in Claude Code or `$mcc-apply-foundation` in Codex for one pull request. An agent cannot start it for you. It reads the inputs from each foundation root's ignored `.envrc` and `backend.hcl` in your checkout, which you create from the `.envrc.example` and `backend.hcl.example` files in that root. It checks the account, plans and applies dev before prod, applies only the saved plans that person reviewed, and squash-merges with the pull request title, stopping for approval before every step. Because Terrateam never applied that pull request, the merge takes no Terrateam lock.
+
+For [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist), apply the import pull request with `terrateam plan` and `terrateam apply dev and foundation`, then `terrateam plan prod and foundation` and `terrateam apply prod and foundation`.
 
 ## Drift issues
 

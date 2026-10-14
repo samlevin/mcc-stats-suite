@@ -18,7 +18,7 @@ Each root reads:
 | Backend `bucket` | the bootstrap's `state_bucket_name` output | Copy `backend.hcl.example` to the ignored `backend.hcl` and replace the placeholder, or pass `-backend-config=bucket=<name>`. The key is `operational/foundation.tfstate`. |
 | Backend `region` | workload Region | In `backend.hcl`, or `-backend-config=region=<region>`. The example defaults to `us-east-1`. |
 | `aws_region` | workload Region | Set it in `<environment>.auto.tfvars`. The example defaults to `us-east-1`, and its value overrides the `TF_VAR_aws_region` the root `.envrc` exports. |
-| `email_domain` | verified SES domain for that environment, in lowercase | Required and sensitive. Set it in the ignored `<environment>.auto.tfvars` or export `TF_VAR_email_domain`. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
+| `email_domain` | verified SES domain for that environment, in lowercase | Required and sensitive. Set it in the ignored `<environment>.auto.tfvars` or export `TF_VAR_email_domain`, for example from the root's ignored `.envrc`, copied from `.envrc.example`. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
 | `github_oidc_subject_repository` | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` | Needed when the repository uses immutable OIDC subjects, matching the bootstrap. The root `.envrc` exports it as `TF_VAR_github_oidc_subject_repository`. |
 | `force_destroy` | `<environment>.auto.tfvars` | `true` in the dev example, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
