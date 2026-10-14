@@ -36,6 +36,10 @@
     "ci:test": {
       "dependsOn": ["^build"],
       "outputs": []
+    },
+    "@samlevin/cdk-config#ci:test": {
+      "dependsOn": ["build"],
+      "outputs": []
     }
   },
   "cacheDir": ".turbo/cache",

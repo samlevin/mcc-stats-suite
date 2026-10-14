@@ -171,6 +171,12 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
         .dependencies.includes(`@samlevin/${name}#build`),
     );
   }
+  // cdk-config tests load the package's own dist.
+  assert.ok(
+    staticTasks
+      .get('@samlevin/cdk-config#ci:test')
+      .dependencies.includes('@samlevin/cdk-config#build'),
+  );
   assert.ok(
     staticTasks
       .get('@samlevin/match-to-csv#ci:test')
