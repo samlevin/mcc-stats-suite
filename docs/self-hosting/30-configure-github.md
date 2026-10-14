@@ -45,9 +45,9 @@ Protect `main`: require pull requests and the `check`, `gitleaks`, and `semantic
 
 The committed configuration does the following:
 
-- plans the foundation roots on every pull request that changes them;
+- plans the foundation roots only when a `terrateam plan` comment on the pull request asks for it, never when the pull request opens or changes;
 - never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
-- locks each root from its first apply until the pull request merges;
+- locks each root from its first apply until the pull request merges, and takes no lock when a pull request merges without a Terrateam apply;
 - runs dev jobs in `infra/foundation-dev` and prod jobs in `infra/foundation-prod`, neither of which has required reviewers;
 - squash-merges the pull request with its title once every planned root has applied without error, never after a failed apply, so a pull request sees only a dev, a prod, or a dev-then-prod sequence;
 - lets repository writers apply dev and only administrators apply prod;
@@ -59,7 +59,7 @@ The Terrateam role trust requires this repository, the `.github/workflows/terrat
 
 Verify the setup before relying on it:
 
-1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans dev in `infra/foundation-dev` with no pending deployment review.
+1. Open a pull request that changes a comment in `infrastructure/dev/foundation` and confirm Terrateam plans nothing. Comment `terrateam plan` and confirm Terrateam plans dev in `infra/foundation-dev` with no pending deployment review.
 2. Confirm a pull request from a non-administrator that changes `.terrateam/config.yml` is blocked from Terrateam operations.
 3. From an unrelated workflow, request an OIDC token and try to assume the Terrateam role. AWS must reject it.
 4. After a Terrateam run, check CloudTrail for an assumed-role session from the expected workflow and repository.
