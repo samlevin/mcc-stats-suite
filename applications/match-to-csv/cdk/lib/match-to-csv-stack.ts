@@ -32,10 +32,13 @@ interface MatchToCsvStackProps extends StackProps {
 }
 
 export class MatchToCsvStack extends Stack {
+  private readonly deployment: DeploymentConfig;
+
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
     const { deployment, gitSha } = props;
+    this.deployment = deployment;
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -92,7 +95,6 @@ export class MatchToCsvStack extends Stack {
     );
 
     const processEmail = this.nodeFunction(
-      deployment,
       'ProcessEmail',
       'process-email.ts',
       {
@@ -103,7 +105,6 @@ export class MatchToCsvStack extends Stack {
       true,
     );
     const extractText = this.nodeFunction(
-      deployment,
       'ExtractText',
       'extract-text.ts',
       {
@@ -114,21 +115,18 @@ export class MatchToCsvStack extends Stack {
       true,
     );
     const writeExtractedCsv = this.nodeFunction(
-      deployment,
       'WriteExtractedCsv',
       'write-extracted-csv.ts',
       lambdaEnvironment,
       1024,
     );
     const compareRuns = this.nodeFunction(
-      deployment,
       'CompareRuns',
       'compare-runs.ts',
       lambdaEnvironment,
       1024,
     );
     const materializeTrainingData = this.nodeFunction(
-      deployment,
       'MaterializeTrainingData',
       'materialize-training-data.ts',
       lambdaEnvironment,
@@ -212,7 +210,6 @@ export class MatchToCsvStack extends Stack {
     const logGroup = this.logGroup(
       'WorkflowLogs',
       `/aws/vendedlogs/states/${deployment.resourcePrefix}`,
-      deployment,
     );
     const workflow = new sfn.StateMachine(this, 'Workflow', {
       stateMachineName: deployment.resourcePrefix,
@@ -335,25 +332,22 @@ export class MatchToCsvStack extends Stack {
     });
   }
 
-  private logGroup(
-    id: string,
-    logGroupName: string,
-    deployment: DeploymentConfig,
-  ): logs.LogGroup {
+  private logGroup(id: string, logGroupName: string): logs.LogGroup {
     return new logs.LogGroup(this, id, {
       logGroupName,
       retention:
-        deployment.environment === 'prod'
+        this.deployment.environment === 'prod'
           ? logs.RetentionDays.THREE_MONTHS
           : logs.RetentionDays.TWO_WEEKS,
-      removalPolicy: deployment.ephemeral
+      // Stable groups outlive the stack but are cleaned up if their creation rolls back,
+      // so a failed first deploy cannot leave a fixed name behind.
+      removalPolicy: this.deployment.ephemeral
         ? RemovalPolicy.DESTROY
-        : RemovalPolicy.RETAIN,
+        : RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
     });
   }
 
   private nodeFunction(
-    deployment: DeploymentConfig,
     id: string,
     fileName: string,
     environment: Record<string, string>,
@@ -362,17 +356,15 @@ export class MatchToCsvStack extends Stack {
     timeout = Duration.minutes(2),
   ): lambdaNode.NodejsFunction {
     const repositoryRoot = path.join(__dirname, '..', '..', '..', '..');
+    const functionName = `${this.deployment.resourcePrefix}-${id}`;
     return new lambdaNode.NodejsFunction(this, id, {
+      functionName,
       entry: path.join(__dirname, '..', '..', 'src', 'lambdas', fileName),
       handler: 'handler',
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       memorySize,
-      logGroup: this.logGroup(
-        `${id}Logs`,
-        `/aws/lambda/${deployment.resourcePrefix}-${id}`,
-        deployment,
-      ),
+      logGroup: this.logGroup(`${id}Logs`, `/aws/lambda/${functionName}`),
       timeout,
       tracing: lambda.Tracing.ACTIVE,
       environment,

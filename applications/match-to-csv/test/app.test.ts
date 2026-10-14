@@ -56,19 +56,28 @@ for (const [environment, ephemeral, retention] of [
       t.equal(Object.keys(logGroups).length, 6);
       for (const group of Object.values(logGroups)) {
         t.equal(group.Properties.RetentionInDays, retention);
-        t.equal(group.DeletionPolicy, ephemeral ? 'Delete' : 'Retain');
+        t.equal(
+          group.DeletionPolicy,
+          ephemeral ? 'Delete' : 'RetainExceptOnCreate',
+        );
         t.equal(group.UpdateReplacePolicy, ephemeral ? 'Delete' : 'Retain');
       }
       const functions = template.findResources('AWS::Lambda::Function');
       t.equal(Object.keys(functions).length, 5);
+      const prefix = `match-to-csv-${ephemeral ? `e-${ephemeral}` : environment}-`;
+      const functionNames = new Set<string>();
       for (const fn of Object.values(functions)) {
+        const functionName = fn.Properties.FunctionName as string;
+        t.ok(functionName.startsWith(prefix), functionName);
+        functionNames.add(functionName);
         const logGroupId = fn.Properties.LoggingConfig.LogGroup.Ref as string;
         t.equal(resources[logGroupId].Type, 'AWS::Logs::LogGroup');
-        t.match(
+        t.equal(
           resources[logGroupId].Properties.LogGroupName,
-          /^\/aws\/lambda\//,
+          `/aws/lambda/${functionName}`,
         );
       }
+      t.equal(functionNames.size, 5);
       if (ephemeral) {
         for (const resource of Object.values(resources)) {
           t.not(resource.DeletionPolicy, 'Retain');
