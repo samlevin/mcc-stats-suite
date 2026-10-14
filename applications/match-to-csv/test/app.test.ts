@@ -2,6 +2,9 @@ import t from 'tap';
 import { Match } from 'aws-cdk-lib/assertions';
 import { buildStack, synthesize } from './support/app';
 
+// CDK construction and synthesis can exceed TAP's 30s default during concurrent CI checks.
+t.setTimeout(60_000);
+
 t.test('stable stacks have termination protection', (t) => {
   t.equal(buildStack({ environment: 'dev' }).terminationProtection, true);
   t.equal(buildStack({ environment: 'prod' }).terminationProtection, true);
