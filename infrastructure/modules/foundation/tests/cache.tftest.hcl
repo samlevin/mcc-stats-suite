@@ -348,21 +348,46 @@ run "prod_github_cache_role" {
   }
 }
 
-# The cache is upstream-only: a mutable upstream subject still matches, while a
-# fork, a renamed copy, or a root without a subject repository gets no role and
-# no bucket exception.
-run "mutable_upstream_subject_keeps_github_cache_role" {
+# The role trusts the repository the foundation is deployed for: a fork's role
+# trusts only the fork, a mutable subject keeps the same repository, and a root
+# without a subject repository gets no role and no bucket exception.
+run "fork_subject_trusts_only_the_fork" {
   command = plan
   plan_options { refresh = false }
   module { source = "../../modules/foundation" }
   variables {
     environment                    = "dev"
     create_github_cache_role       = true
-    github_oidc_subject_repository = "samlevin/mcc-stats-suite"
+    github_oidc_subject_repository = "forker@3/mcc-stats-suite@4"
   }
   assert {
-    condition     = length(aws_iam_role.github_cache) == 1 && length(aws_iam_role_policy.github_cache) == 1 && output.github_turbo_cache_role_arn == "arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache"
-    error_message = "The upstream repository keeps its cache role with or without immutable subject IDs."
+    condition     = length(aws_iam_role.github_cache) == 1 && output.github_turbo_cache_role_arn == "arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache"
+    error_message = "A fork's foundation creates its own cache role."
+  }
+  assert {
+    condition = alltrue([for statement in data.aws_iam_policy_document.cache_assume_role.statement : alltrue([for condition in statement.condition :
+      condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:forker@3/mcc-stats-suite@4:environment:dev", "repo:forker@3/mcc-stats-suite@4:ref:refs/heads/main"]) :
+      condition.variable == "token.actions.githubusercontent.com:repository" ? toset(condition.values) == toset(["forker/mcc-stats-suite"]) : true
+    ])])
+    error_message = "A fork's cache role trusts only the fork, never upstream."
+  }
+}
+
+run "mutable_subject_trusts_the_same_repository" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment                    = "prod"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = "forker/mcc-stats-suite"
+  }
+  assert {
+    condition = length(aws_iam_role.github_cache) == 1 && alltrue([for statement in data.aws_iam_policy_document.cache_assume_role.statement : alltrue([for condition in statement.condition :
+      condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:forker/mcc-stats-suite:environment:prod"]) :
+      condition.variable == "token.actions.githubusercontent.com:repository" ? toset(condition.values) == toset(["forker/mcc-stats-suite"]) : true
+    ])])
+    error_message = "A subject without immutable IDs names the repository directly."
   }
 }
 
@@ -371,8 +396,9 @@ run "missing_subject_gets_no_github_cache_role" {
   plan_options { refresh = false }
   module { source = "../../modules/foundation" }
   variables {
-    environment              = "dev"
-    create_github_cache_role = true
+    environment                    = "dev"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = null
   }
   override_resource {
     target = aws_s3_bucket.turbo_cache
@@ -383,41 +409,11 @@ run "missing_subject_gets_no_github_cache_role" {
   }
   assert {
     condition     = length(aws_iam_role.github_cache) == 0 && length(aws_iam_role_policy.github_cache) == 0 && output.github_turbo_cache_role_arn == null
-    error_message = "A foundation without the upstream subject repository must not create a role that trusts upstream."
+    error_message = "A foundation without a subject repository has no repository to trust and creates no cache role."
   }
   assert {
     condition     = alltrue([for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : alltrue([for condition in statement.condition : condition.variable != "aws:PrincipalArn"])])
     error_message = "Without the role, no principal may escape the bucket data/listing deny statements."
-  }
-}
-
-run "fork_subject_gets_no_github_cache_role" {
-  command = plan
-  plan_options { refresh = false }
-  module { source = "../../modules/foundation" }
-  variables {
-    environment                    = "prod"
-    create_github_cache_role       = true
-    github_oidc_subject_repository = "owner@1/mcc-stats-suite@2"
-  }
-  assert {
-    condition     = length(aws_iam_role.github_cache) == 0 && length(aws_iam_role_policy.github_cache) == 0 && output.github_turbo_cache_role_arn == null
-    error_message = "A fork's subject repository must not create a role that trusts upstream."
-  }
-}
-
-run "renamed_copy_subject_gets_no_github_cache_role" {
-  command = plan
-  plan_options { refresh = false }
-  module { source = "../../modules/foundation" }
-  variables {
-    environment                    = "dev"
-    create_github_cache_role       = true
-    github_oidc_subject_repository = "samlevin@1/mcc-stats-suite-copy@2"
-  }
-  assert {
-    condition     = length(aws_iam_role.github_cache) == 0 && output.github_turbo_cache_role_arn == null
-    error_message = "Only the exact upstream repository may get the cache role."
   }
 }
 

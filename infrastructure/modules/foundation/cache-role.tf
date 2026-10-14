@@ -2,11 +2,12 @@ locals {
   cache_role_name          = "${local.name}-github-turbo-cache"
   cache_role_arn           = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.cache_role_name}"
   cache_role_arns          = setunion(var.cache_service_role_arns, local.github_cache_role ? toset([local.cache_role_arn]) : toset([]))
-  cache_subject_repository = coalesce(var.github_oidc_subject_repository, var.cache_github_repository)
-  // The Turbo cache serves only the cache repository. The role exists only when
-  // the subject repository the root deploys for names it, with any immutable
-  // IDs removed, so a fork or self-hosted foundation never trusts upstream.
-  github_cache_role = var.create_github_cache_role && try(replace(var.github_oidc_subject_repository, "/@[0-9]+/", ""), null) == var.cache_github_repository
+  cache_subject_repository = var.github_oidc_subject_repository == null ? "" : var.github_oidc_subject_repository
+  // The role trusts only the repository this foundation is deployed for, named
+  // by its subject repository with any immutable IDs removed, so a fork's role
+  // trusts the fork and never upstream. Without a subject there is no role.
+  cache_github_repository = replace(local.cache_subject_repository, "/@[0-9]+/", "")
+  github_cache_role       = var.create_github_cache_role && local.cache_subject_repository != ""
 }
 
 data "aws_iam_policy_document" "cache_assume_role" {
@@ -35,7 +36,7 @@ data "aws_iam_policy_document" "cache_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:repository"
-      values   = [var.cache_github_repository]
+      values   = [local.cache_github_repository]
     }
   }
 }

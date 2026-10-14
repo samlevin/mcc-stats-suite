@@ -439,7 +439,7 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
   assert.match(workflow, /format\('push-\{0\}', github\.run_id\)/);
   assert.match(
     workflow,
-    /Start trusted dev Turbo cache\n(?:[ ]+#.*\n)?[ ]+if: github\.repository == 'samlevin\/mcc-stats-suite' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
+    /Start trusted dev Turbo cache\n(?:[ ]+#.*\n)?[ ]+if: vars\.MCC_TURBO_CACHE == 'true' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
   );
   // Only the infrastructure job restores a generic cache, keyed to its own
   // provider binaries; every other job uses isolated caches.
@@ -537,9 +537,9 @@ test('cache uses dedicated session credentials and environment contracts without
   );
 });
 
-test('Turbo cache steps run only in the upstream repository', () => {
+test('Turbo cache steps run only in repositories that opt in', () => {
   // Find cache steps by what they do, so a new or renamed step cannot slip
-  // past the repository gate.
+  // past the MCC_TURBO_CACHE gate.
   const directory = new URL('../.github/workflows/', import.meta.url);
   const steps = readdirSync(directory)
     .filter((name) => /\.ya?ml$/.test(name))
@@ -565,24 +565,21 @@ test('Turbo cache steps run only in the upstream repository', () => {
       'ci.yml application-bundles: Start trusted dev Turbo cache',
     ],
   );
-  const context = (repository) => ({
-    github: { repository, event_name: 'push', ref: 'refs/heads/main' },
+  const context = (vars) => ({
+    vars,
+    github: { event_name: 'push', ref: 'refs/heads/main' },
     needs: { scope: { outputs: { full: 'true' } } },
   });
   for (const { id, step } of steps) {
     assert.equal(typeof step.if, 'string', id);
     assert.ok(!step.if.includes('${{'), id);
     assert.equal(
-      evaluate(step.if, context('samlevin/mcc-stats-suite')),
+      evaluate(step.if, context({ MCC_TURBO_CACHE: 'true' })),
       true,
       id,
     );
-    for (const repository of [
-      'fork/mcc-stats-suite',
-      'samlevin/mcc-stats-suite-fork',
-      'samlevin/other',
-    ]) {
-      assert.equal(evaluate(step.if, context(repository)), false, id);
+    for (const vars of [{}, { MCC_TURBO_CACHE: 'false' }]) {
+      assert.equal(evaluate(step.if, context(vars)), false, id);
     }
   }
 });

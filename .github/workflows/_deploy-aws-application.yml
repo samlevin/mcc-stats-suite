@@ -103,10 +103,10 @@ jobs:
         env:
           TARGET_SHA: ${{ inputs.sha }}
         run: test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
-      # The Turbo cache belongs to the upstream accounts; forks and self-hosted
-      # copies build uncached.
+      # The Turbo cache is opt-in per repository; a repository without
+      # MCC_TURBO_CACHE builds uncached.
       - name: Check out cache action from the qualified workflow revision
-        if: github.repository == 'samlevin/mcc-stats-suite'
+        if: vars.MCC_TURBO_CACHE == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.workflow_sha }}
@@ -129,7 +129,7 @@ jobs:
           METADATA="$(npm run release:metadata --silent -- --application "${APPLICATION}")"
           echo "metadata=${METADATA}" >> "${GITHUB_OUTPUT}"
       - name: Start environment Turbo cache
-        if: github.repository == 'samlevin/mcc-stats-suite'
+        if: vars.MCC_TURBO_CACHE == 'true'
         uses: ./.cache-workflow/.github/actions/turbo-s3-cache
         with:
           environment: ${{ inputs.environment }}
