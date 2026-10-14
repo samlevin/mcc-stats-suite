@@ -131,9 +131,10 @@ dirs:
 # Workflow steps are defined once here and composed below. Every Terrateam init
 # uses the committed provider lock file and fails when it is stale.
 #
-# GitHub holds only the account IDs and email domains, as repository secrets,
-# and the Regions, as repository variables. The role ARN and the state bucket
-# follow the bootstrap naming rules and are built from them. The runner
+# GitHub holds only the account IDs, email domains, and email aliases, as
+# repository secrets, and the Regions, as repository variables. The role ARN
+# and the state bucket follow the bootstrap naming rules and are built from
+# them. The runner
 # substitutes $NAME and ${NAME} in role_arn, extra_args, and every cmd element
 # before anything runs, fails on an undefined name, and rejects shell syntax
 # such as $(...) or ${NAME#...}, so a cmd here must contain no other `$`.
@@ -167,6 +168,11 @@ definitions:
     name: TF_VAR_email_domain
     cmd: ['echo', '${DEV_MCC_EMAIL_DOMAIN}']
     sensitive: true
+  dev_email_alias: &dev_email_alias
+    type: env
+    name: TF_VAR_email_alias
+    cmd: ['echo', '${DEV_MCC_EMAIL_ALIAS}']
+    sensitive: true
   prod_oidc: &prod_oidc
     type: oidc
     provider: aws
@@ -186,6 +192,11 @@ definitions:
     name: TF_VAR_email_domain
     cmd: ['echo', '${PROD_MCC_EMAIL_DOMAIN}']
     sensitive: true
+  prod_email_alias: &prod_email_alias
+    type: env
+    name: TF_VAR_email_alias
+    cmd: ['echo', '${PROD_MCC_EMAIL_ALIAS}']
+    sensitive: true
 
 workflows:
   - tag_query: 'dev'
@@ -196,6 +207,7 @@ workflows:
       - *dev_aws_region
       - *oidc_subject_repository
       - *dev_email_domain
+      - *dev_email_alias
       - type: plan
     apply:
       - *dev_oidc
@@ -203,6 +215,7 @@ workflows:
       - *dev_aws_region
       - *oidc_subject_repository
       - *dev_email_domain
+      - *dev_email_alias
       - type: apply
 
   - tag_query: 'prod'
@@ -213,6 +226,7 @@ workflows:
       - *prod_aws_region
       - *oidc_subject_repository
       - *prod_email_domain
+      - *prod_email_alias
       - type: plan
     apply:
       - *prod_oidc
@@ -220,4 +234,5 @@ workflows:
       - *prod_aws_region
       - *oidc_subject_repository
       - *prod_email_domain
+      - *prod_email_alias
       - type: apply

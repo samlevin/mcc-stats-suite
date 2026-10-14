@@ -27,7 +27,7 @@ The receipt rules enable SES scanning, so SES prepends `X-SES-Spam-Verdict`, `X-
 
 An optional sender allowlist lives in the `/mcc/<environment>/match-to-csv/sender-allowlist` SSM parameter. Ephemeral stacks read the `dev` parameter. Operators create it by hand as a `String` or `StringList` holding addresses separated by commas or whitespace. Matching ignores case. OpenTofu does not manage the parameter, so sender addresses stay out of source and state. When the parameter exists, a message is accepted only if every `From` address is listed. A message with no `From` address is rejected. When the parameter does not exist, every sender is accepted as before.
 
-A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, or `SENDER_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses).
+A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, or `RECIPIENT_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses). They record the recipient check as `recipientCheck` (`NOT_CONFIGURED` for stable stacks, otherwise `ALLOWED` or `DENIED`, with the recipients SES recorded in its `Received` header).
 
 ## Deployment
 
@@ -41,7 +41,7 @@ Local developer stacks are explicit:
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-Ephemeral deployments read the domain for their `submit+<name>@` rule from `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds it. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
+Ephemeral deployments build their `<alias>+<name>@<domain>` rule from `/mcc/dev/match-to-csv/email-alias` and `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds either. The foundation owns the shared rule set and the `<alias>@<domain>` rule. The rule keeps the alias and domain from the stack's last deploy, so an ephemeral `process-email` reads both parameters for every message and rejects one whose SES recipient is not the current `<alias>+<name>@<domain>` with `RECIPIENT_NOT_ALLOWED`, before storing any attachment. Changing the alias or domain therefore needs no ephemeral redeploy to stop mail to the old address, only to receive mail at the new one. Never put the alias or domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
 
 ## Alarms
 

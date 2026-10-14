@@ -141,6 +141,15 @@ export function localBootstrap(template) {
         ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
         applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
       ),
+      // match-to-csv's process-email reads its sender allowlist and the
+      // submission address it checks from dev parameters; no other application
+      // reads parameters at runtime. Each function's own policy still names the
+      // exact parameters it reads.
+      statement(
+        'ReadApplicationParameters',
+        'ssm:GetParameter',
+        arn('ssm', 'parameter/mcc/dev/match-to-csv/*'),
+      ),
       // The app uses keys only for S3 server-side encryption.
       statement(
         'UseKeysThroughS3',

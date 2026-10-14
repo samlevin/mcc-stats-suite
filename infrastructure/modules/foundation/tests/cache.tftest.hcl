@@ -31,6 +31,7 @@ override_resource {
 }
 
 variables {
+  email_alias  = "example-alias"
   email_domain = "mail.example.com"
 }
 

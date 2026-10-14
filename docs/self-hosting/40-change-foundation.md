@@ -18,6 +18,7 @@ Each root's ignored `.envrc`, created from the `.envrc.example` in that director
 | Backend `bucket` and `region` | `TF_CLI_ARGS_init`, derived from the profile | `mcc-stats-suite-tofu-state-<account>-<region>`, the bucket the bootstrap created. The key, `operational/foundation.tfstate`, is in `versions.tf`. |
 | `aws_region` | `TF_VAR_aws_region`, derived from the profile | The profile's Region, or `AWS_REGION` when the profile has none. |
 | `email_domain` | `TF_VAR_email_domain`, read from the SSM parameter `/mcc/<environment>/match-to-csv/email-domain` | Verified SES domain for that environment, in lowercase. Required and sensitive. The applied foundation owns the parameter, so a local plan sees the applied domain and never changes it. The read needs a signed-in profile; when it fails, the `.envrc` warns and leaves the input unset. In CI/CD, store the domain as a secret, never a plain variable, and never commit it. |
+| `email_alias` | `TF_VAR_email_alias`, read from the SSM parameter `/mcc/<environment>/match-to-csv/email-alias` | The part of the submission address `<alias>@<domain>` before the @: lowercase letters, digits, `_`, `-`, and single dots, with no `+`. Required and sensitive, and read the same way as the domain. Ephemeral stacks use `<alias>+<name>@<domain>`. |
 | `github_oidc_subject_repository` | `TF_VAR_github_oidc_subject_repository`, which you edit | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects, matching the bootstrap. The Turbo cache role trusts only this repository, and a root without it creates no cache role. |
 | `force_destroy` | variable default | `true` in dev, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
@@ -41,7 +42,7 @@ aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. Run `direnv reload` after signing in, so the `.envrc` can read the email domain. The first apply in a new environment has no parameter to read yet: for that apply only, set `email_domain_override` in the `.envrc` to the lowercase domain verified for SES, and remove it afterwards. Then plan and apply:
+Stop unless STS reports the dev account. Run `direnv reload` after signing in, so the `.envrc` can read the email domain and alias. The apply that creates a parameter, such as the first apply in a new environment, has nothing to read yet. For that apply only, set `email_domain_override` in the `.envrc` to the lowercase domain verified for SES, or `email_alias_override` to the alias, and remove it afterwards. Then plan and apply:
 
 ```console
 tofu init
@@ -80,16 +81,16 @@ Bootstrap changes are separate; see [Update bootstrap later](10-bootstrap-accoun
 
 ## Change an external input
 
-The email domain is set in one place, the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. Terrateam writes it to AWS, including the SSM parameter that local `.envrc` files and application deploys read. Terrateam's change detection cannot see a secret, so a change to the domain, or to any other secret that feeds a foundation root, goes through a pull request. To switch an environment to a new domain:
+The email domain is set in one place, the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret, and so is the email alias, in `DEV_MCC_EMAIL_ALIAS` or `PROD_MCC_EMAIL_ALIAS`. Terrateam writes them to AWS, including the SSM parameters that local `.envrc` files, application deploys, and ephemeral stacks read. Terrateam's change detection cannot see a secret, so a change to either, or to any other secret that feeds a foundation root, goes through a pull request. To switch an environment to a new domain:
 
 1. Prepare the new domain in that environment's account and workload Region, as in [Inbound email](00-prerequisites.md#inbound-email). Its SES identity must show `Success`, and its MX record must point at `inbound-smtp.<region>.amazonaws.com`. Without both, mail to the new domain never arrives, and every `match-to-csv` deploy fails its identity and MX checks.
 2. Update the secret, for example `gh secret set PROD_MCC_EMAIL_DOMAIN`.
 3. Open a pull request that adds a line with the date and the reason to `infrastructure/<environment>/foundation/external-inputs.revision`. Never write the value or a hash of it there.
-4. Comment `terrateam plan`, review the `(sensitive value)` changes, and apply as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam). The apply moves the shared `submit@` receipt rule and the SSM parameter to the new domain.
-5. Nothing needs a redeploy. The stable stacks receive mail at the new domain as soon as the foundation applies, because the foundation owns the shared `submit@` rule and the stable `match-to-csv` stack does not use the domain. The next `match-to-csv` deploy runs the SES identity and MX checks again. Each dev [ephemeral stack](50-deploy-and-release-applications.md#ephemeral-stacks) keeps its `submit+<name>@` rule on the old domain until you redeploy or destroy it.
+4. Comment `terrateam plan`, review the `(sensitive value)` changes, and apply as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam). The apply moves the shared `<alias>@<domain>` receipt rule and the SSM parameter to the new domain.
+5. Nothing needs a redeploy. The stable stacks receive mail at the new domain as soon as the foundation applies, because the foundation owns the shared `<alias>@<domain>` rule and the stable `match-to-csv` stack does not use the domain. The next `match-to-csv` deploy runs the SES identity and MX checks again. Each dev [ephemeral stack](50-deploy-and-release-applications.md#ephemeral-stacks) keeps its `<alias>+<name>@` rule on the old domain until you redeploy or destroy it, but its `process-email` checks every recipient against the current parameters and rejects mail to the old address.
 6. In each foundation root you plan from locally, run `direnv reload`, after `aws sso login --profile "$AWS_PROFILE"` if the session has expired. The `.envrc` reads the domain from SSM only when the directory loads. Until you reload it, a local plan proposes changing the domain back.
 
-Steps 2 to 4 apply to every secret that feeds a foundation root.
+To change the alias, skip step 1, set the alias secret in step 2, and follow the remaining steps. Every sender needs the new address, because mail to the old alias no longer matches the shared rule. Steps 2 to 4 apply to every secret that feeds a foundation root.
 
 Terrateam checks the foundation roots for drift daily and never reconciles, so a secret changed without a revision pull request shows up as a drift issue within a day and is never applied without review.
 

@@ -1,6 +1,7 @@
 // Inbound email is account-wide: a Region has one active receipt rule set.
-// The foundation owns the rule set, its activation, and the submit@ rule, and
-// publishes the set's name and the domain in SSM.
+// The foundation owns the rule set, its activation, and the shared
+// <alias>@<domain> rule, and publishes the set's name, the alias, and the
+// domain in SSM.
 locals {
   receipt_rule_set_name = "mcc-inbound-${var.environment}"
 }
@@ -9,10 +10,11 @@ resource "aws_ses_receipt_rule_set" "inbound" {
   rule_set_name = local.receipt_rule_set_name
 }
 
+// The rule's name is an AWS resource name, not part of the address.
 resource "aws_ses_receipt_rule" "store_raw_email" {
   name          = "submit"
   rule_set_name = aws_ses_receipt_rule_set.inbound.rule_set_name
-  recipients    = ["submit@${var.email_domain}"]
+  recipients    = ["${var.email_alias}@${var.email_domain}"]
   enabled       = true
   scan_enabled  = true
   tls_policy    = "Optional"
@@ -56,4 +58,10 @@ resource "aws_ssm_parameter" "email_domain" {
   name  = "/mcc/${var.environment}/match-to-csv/email-domain"
   type  = "String"
   value = var.email_domain
+}
+
+resource "aws_ssm_parameter" "email_alias" {
+  name  = "/mcc/${var.environment}/match-to-csv/email-alias"
+  type  = "String"
+  value = var.email_alias
 }

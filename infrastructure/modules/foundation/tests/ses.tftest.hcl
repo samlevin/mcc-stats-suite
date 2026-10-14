@@ -31,6 +31,7 @@ override_resource {
 }
 
 variables {
+  email_alias  = "example-alias"
   email_domain = "mail.example.com"
 }
 
@@ -53,9 +54,9 @@ run "dev_shared_rule" {
   assert {
     condition = (
       length(aws_ses_receipt_rule.store_raw_email.recipients) == 1 &&
-      contains(aws_ses_receipt_rule.store_raw_email.recipients, "submit@mail.example.com")
+      contains(aws_ses_receipt_rule.store_raw_email.recipients, "example-alias@mail.example.com")
     )
-    error_message = "The shared rule must accept only submit@ the configured domain."
+    error_message = "The shared rule must accept only the configured alias at the configured domain."
   }
 
   assert {
@@ -71,18 +72,22 @@ run "dev_shared_rule" {
       aws_ssm_parameter.receipt_rule_set_name.name == "/mcc/dev/match-to-csv/receipt-rule-set-name" &&
       aws_ssm_parameter.receipt_rule_set_name.value == "mcc-inbound-dev" &&
       aws_ssm_parameter.email_domain.name == "/mcc/dev/match-to-csv/email-domain" &&
-      aws_ssm_parameter.email_domain.value == "mail.example.com"
+      aws_ssm_parameter.email_domain.value == "mail.example.com" &&
+      aws_ssm_parameter.email_alias.name == "/mcc/dev/match-to-csv/email-alias" &&
+      aws_ssm_parameter.email_alias.value == "example-alias"
     )
-    error_message = "The rule set name and the domain must be published in SSM."
+    error_message = "The rule set name, the alias, and the domain must be published in SSM."
   }
 
   assert {
     condition = (
       issensitive(var.email_domain) &&
+      issensitive(var.email_alias) &&
       issensitive(aws_ses_receipt_rule.store_raw_email.recipients) &&
-      issensitive(aws_ssm_parameter.email_domain.value)
+      issensitive(aws_ssm_parameter.email_domain.value) &&
+      issensitive(aws_ssm_parameter.email_alias.value)
     )
-    error_message = "The domain must stay sensitive so Terrateam plan comments and drift issues redact it."
+    error_message = "The alias and the domain must stay sensitive so Terrateam plan comments and drift issues redact the recipients."
   }
 }
 
@@ -97,7 +102,8 @@ run "prod_shared_rule" {
       aws_ses_receipt_rule_set.inbound.rule_set_name == "mcc-inbound-prod" &&
       one(aws_ses_receipt_rule.store_raw_email.s3_action).object_key_prefix == "incoming/prod/" &&
       aws_ssm_parameter.receipt_rule_set_name.name == "/mcc/prod/match-to-csv/receipt-rule-set-name" &&
-      aws_ssm_parameter.email_domain.name == "/mcc/prod/match-to-csv/email-domain"
+      aws_ssm_parameter.email_domain.name == "/mcc/prod/match-to-csv/email-domain" &&
+      aws_ssm_parameter.email_alias.name == "/mcc/prod/match-to-csv/email-alias"
     )
     error_message = "Prod must use its own rule set, prefix, and SSM parameters."
   }
@@ -109,7 +115,7 @@ run "reject_non_domain" {
   module { source = "../../modules/foundation" }
   variables {
     environment  = "dev"
-    email_domain = "submit@mail.example.com"
+    email_domain = "example-alias@mail.example.com"
   }
   expect_failures = [var.email_domain]
 }
@@ -123,4 +129,97 @@ run "reject_uppercase_domain" {
     email_domain = "Mail.Example.com"
   }
   expect_failures = [var.email_domain]
+}
+
+run "accept_dotted_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "example.alias_1-x"
+  }
+
+  assert {
+    condition     = contains(aws_ses_receipt_rule.store_raw_email.recipients, "example.alias_1-x@mail.example.com")
+    error_message = "Dots between parts, digits, underscores, and hyphens are valid in the alias."
+  }
+}
+
+// Ephemeral addresses append +<name>, so a + in the alias would be ambiguous.
+run "reject_plus_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "example-alias+tag"
+  }
+  expect_failures = [var.email_alias]
+}
+
+run "reject_uppercase_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "Example-Alias"
+  }
+  expect_failures = [var.email_alias]
+}
+
+run "reject_address_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "example-alias@mail.example.com"
+  }
+  expect_failures = [var.email_alias]
+}
+
+run "reject_empty_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = ""
+  }
+  expect_failures = [var.email_alias]
+}
+
+run "reject_misplaced_dots_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = ".example..alias"
+  }
+  expect_failures = [var.email_alias]
+}
+
+run "reject_quoted_characters_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "example alias"
+  }
+  expect_failures = [var.email_alias]
+}
+
+run "reject_long_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+  expect_failures = [var.email_alias]
 }

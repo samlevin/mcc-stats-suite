@@ -15,6 +15,7 @@ GitHub holds only the values nobody can derive: for each environment, the AWS ac
 | repository | `DEV_AWS_ACCOUNT_ID`, `PROD_AWS_ACCOUNT_ID` | secrets | each bootstrap's `aws_account_id` | application deploys, Turbo cache in `main` CI |
 | repository | `DEV_AWS_REGION`, `PROD_AWS_REGION` | variables | workload Region of each account | application deploys, Turbo cache in `main` CI |
 | repository | `DEV_MCC_EMAIL_DOMAIN`, `PROD_MCC_EMAIL_DOMAIN` | secrets | verified SES domain that receives each environment's email, in lowercase | [Terrateam](70-optional-terrateam.md) only |
+| repository | `DEV_MCC_EMAIL_ALIAS`, `PROD_MCC_EMAIL_ALIAS` | secrets | each environment's submission alias, the part of `<alias>@<domain>` before the @: lowercase letters, digits, `_`, `-`, and single dots, with no `+` | [Terrateam](70-optional-terrateam.md) only |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
 | repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in `main` CI and deploys |

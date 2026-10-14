@@ -23,7 +23,7 @@ You edit the first section of each file. The second section reads the account ID
 | Root | You edit |
 | --- | --- |
 | bootstrap | `AWS_PROFILE`, `TF_VAR_github_organization`, `TF_VAR_github_oidc_subject_repository` |
-| foundation | `AWS_PROFILE`, `TF_VAR_github_oidc_subject_repository`, and `email_domain_override` only for the first apply in a new environment |
+| foundation | `AWS_PROFILE`, `TF_VAR_github_oidc_subject_repository`, and `email_domain_override` and `email_alias_override` only for the first apply in a new environment |
 | data-platform | `AWS_PROFILE` |
 
 The repository root has its own `.envrc`, created from the root `.envrc.example`. It sets only `AWS_PROFILE`, which `npm run app:*` reads. It defaults to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
@@ -119,7 +119,7 @@ create_terrateam_role  = false
 create_cdk_deploy_role = false
 ```
 
-The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain`: for the first apply, set `email_domain_override` in that checkout's foundation `.envrc` to a lowercase domain verified for SES in that account. Later plans read it from the parameter that apply creates. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to your infrastructure CI/CD or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
+The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain` and `email_alias`. For the first apply, set `email_domain_override` in that checkout's foundation `.envrc` to a lowercase domain verified for SES in that account, and `email_alias_override` to the lowercase part of the address before the @. Later plans read both from the parameters that apply creates. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to your infrastructure CI/CD or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
 
 ## Keep local files untracked
 
