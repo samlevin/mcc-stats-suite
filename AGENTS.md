@@ -41,7 +41,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
 | Write a PR body, issue body, comment, or doc | `/mcc-write-prose` | `$mcc-write-prose` | none |
 | Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits sources, regenerates both tools, verifies |
-| Plan and apply a PR's foundation roots while Terrateam cannot run, only when a person asks | `/mcc-apply-foundation` | `$mcc-apply-foundation` | none; the agent runs `gh`, `git`, `aws`, and `tofu` itself, one approved step at a time |
+| Plan and apply a PR's foundation roots while Terrateam cannot run, only when a person asks | `/mcc-apply-foundation` | `$mcc-apply-foundation` | none; the agent runs `gh`, `git`, `aws`, `tofu`, and `direnv` itself, one approved step at a time |
 
 - Serial delivery: `mcc-orchestrator` dispatches one executable leaf at a time in dependency order and starts the next only after the previous leaf's PR is open or its blocker is recorded. Sibling leaves never run concurrently, even on request.
 - Handoffs: `mcc-implementer` spawns `mcc-code-reviewer` before opening a PR when the review threshold above applies, and `mcc-stack-manager` for stacked branches. Nothing else spawns a reviewer, and no automatic flow spawns `mcc-security-reviewer`.

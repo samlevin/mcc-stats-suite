@@ -20,7 +20,7 @@ cp .envrc.example .envrc
 direnv allow
 ```
 
-The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is not local configuration, except in a disposable sandbox account (see below): Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` and `PROD_MCC_EMAIL_DOMAIN` secrets described in [Configure GitHub](30-configure-github.md), and the foundation publishes it in SSM for CDK. Repositories created recently use immutable OIDC subjects. If yours does, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`. A rename or transfer changes the subject and needs a bootstrap update.
+The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is not local configuration, except in a disposable sandbox account (see below) and in each foundation root's ignored `.envrc` for a local apply through `mcc-apply-foundation` (see [Change the foundation](40-change-foundation.md)): Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` and `PROD_MCC_EMAIL_DOMAIN` secrets described in [Configure GitHub](30-configure-github.md), and the foundation publishes it in SSM for CDK. Repositories created recently use immutable OIDC subjects. If yours does, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`. A rename or transfer changes the subject and needs a bootstrap update.
 
 ## Bootstrap dev
 
