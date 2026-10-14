@@ -1,6 +1,7 @@
 {
-  "name": "@samlevin/cdk-config",
+  "name": "@mcc/cdk-config",
   "version": "1.0.0",
+  "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -16,9 +17,6 @@
     "type": "git",
     "url": "https://github.com/samlevin/mcc-stats-suite.git",
     "directory": "packages/cdk-config"
-  },
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
   },
   "dependencies": {
     "@types/node": "^22.19.15"

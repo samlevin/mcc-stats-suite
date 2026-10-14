@@ -26,7 +26,7 @@ npm run check
 Target one logical application with npm's workspace flag:
 
 ```console
-npm test --workspace @samlevin/match-to-csv
+npm test --workspace @mcc/match-to-csv
 npm run app:synth -- match-to-csv
 ```
 
@@ -41,7 +41,7 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Concurrent CI checks
 
-The scope job reads the baseline classifier before either gate runs. The required `check` job aggregates the selected gates on `ubuntu-latest`. The ARM64 `application-checks` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside Turbo `build` and `ci:test`; it does no Docker work. CI skips `typecheck` because `build` already type-checks every source and test file; local `npm run check` keeps it. `ci:test` depends on `^build` only, because application tests run the sources; `@samlevin/cdk-config#ci:test` also waits for its own build because its tests load `dist`. The parallel ARM64 `application-bundles` job starts pulling the digest-pinned bundling image before `npm ci` and runs `ci:synth` and `verify:bundle`; it runs only for full-scope changes. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. The bundling image pin lives in `applications/match-to-csv/cdk/lib/bundling.ts`, which explains how to update it. Synthesis and native verification are never cached.
+The scope job reads the baseline classifier before either gate runs. The required `check` job aggregates the selected gates on `ubuntu-latest`. The ARM64 `application-checks` job installs dependencies once, prepares shared declarations for lint, and runs repository checks alongside Turbo `build` and `ci:test`; it does no Docker work. CI skips `typecheck` because `build` already type-checks every source and test file; local `npm run check` keeps it. `ci:test` depends on `^build` only, because application tests run the sources; `@mcc/cdk-config#ci:test` also waits for its own build because its tests load `dist`. The parallel ARM64 `application-bundles` job starts pulling the digest-pinned bundling image before `npm ci` and runs `ci:synth` and `verify:bundle`; it runs only for full-scope changes. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. The bundling image pin lives in `applications/match-to-csv/cdk/lib/bundling.ts`, which explains how to update it. Synthesis and native verification are never cached.
 
 For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, mixed infrastructure/application changes, CI selection, dependencies at the root, unknown paths, and every full-scope push to `main` check all workspaces. Unknown paths also run OpenTofu checks; application and package changes do not. The baseline classifier controls documentation and recognized repository checks. Deployment requires successful CI and remains limited to pushes to `main`. Infrastructure-only pushes publish an empty application selection, so `deploy-applications` completes without deploying.
 

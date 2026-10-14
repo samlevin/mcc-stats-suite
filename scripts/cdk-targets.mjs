@@ -80,7 +80,7 @@ export function cdkArguments({
     'run',
     `cdk:${action}`,
     '--workspace',
-    `@samlevin/${application}`,
+    `@mcc/${application}`,
     '--',
     '-c',
     `environment=${environment}`,

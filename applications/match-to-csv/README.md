@@ -27,7 +27,7 @@ The receipt rules enable SES scanning, so SES prepends `X-SES-Spam-Verdict`, `X-
 
 An optional sender allowlist lives in the `/mcc/<environment>/match-to-csv/sender-allowlist` SSM parameter. Ephemeral stacks read the `dev` parameter. Operators create it by hand as a `String` or `StringList` holding addresses separated by commas or whitespace. Matching ignores case. OpenTofu does not manage the parameter, so sender addresses stay out of source and state. When the parameter exists, a message is accepted only if every `From` address is listed. A message with no `From` address is rejected. When the parameter does not exist, every sender is accepted as before.
 
-A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@samlevin/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, or `SENDER_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses).
+A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, or `SENDER_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses).
 
 ## Deployment
 
@@ -131,10 +131,10 @@ The split algorithm hashes the seed and `screenshotId`. Eighty percent of screen
 ## Development and tests
 
 ```console
-npm test --workspace @samlevin/match-to-csv
-npm run typecheck --workspace @samlevin/match-to-csv
+npm test --workspace @mcc/match-to-csv
+npm run typecheck --workspace @mcc/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @samlevin/match-to-csv
+npm run verify:bundle --workspace @mcc/match-to-csv
 ```
 
 The test suite enforces minimum statement, branch, line, and function coverage. It covers MIME intake behavior, multiple attachments, rejections, submission events, processing success and failure records, parser behavior, semantic mapping, multiple tables, CSV escaping, comparison behavior, ephemeral paths, materialization joins, and deterministic dataset splits. Tests do not call AWS.

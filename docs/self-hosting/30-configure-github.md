@@ -43,7 +43,6 @@ Do not replace the app with a personal access token or give the workflow's `GITH
 
 A fork deploys to its own accounts with its own Release Please app. It also needs a few repository changes:
 
-- Workspaces use the `@samlevin` npm scope, and `.npmrc` sends that scope to GitHub Packages. The `publish-shared-packages` workflow (`publish-packages.yml`) publishes the shared packages there, which only works under the matching owner. Rename the scope or delete the workflow. Applications build from the local workspaces and never download published versions.
 - `issue-triage.yml`, `pr-issue-metadata.yml`, and `pr-issue-status.yml` run only in `samlevin/mcc-stats-suite`. They skip on a fork. To use them, change the repository check, point the scripts at your own GitHub Project, and add a `MCC_PROJECT_TOKEN` secret with issue, pull request, and project access.
 - The README badges point at the upstream repository.
 - `match-to-csv` CI and deploy jobs run on GitHub-hosted ARM64 runners (`ubuntu-24.04-arm`), which are free only for public repositories.

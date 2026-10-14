@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```console
-npm test --workspace @samlevin/admin
+npm test --workspace @mcc/admin
 npm run app:synth -- admin
 ```
 

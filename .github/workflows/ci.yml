@@ -122,7 +122,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      packages: read
     env:
       MCC_BUILD_ENVIRONMENT: dev
     outputs:
@@ -135,11 +134,7 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-          registry-url: https://npm.pkg.github.com
-          scope: '@samlevin'
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
         # Opt-in per repository; a repository without MCC_TURBO_CACHE runs uncached.
         if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
@@ -172,8 +167,8 @@ jobs:
             [.tasks[]
               | select(.task == "cdk:deploy" and .command != "<NONEXISTENT>")
               | .package
-              | select(startswith("@samlevin/"))
-              | sub("^@samlevin/"; "")]
+              | select(startswith("@mcc/"))
+              | sub("^@mcc/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
   application-bundles:
@@ -185,7 +180,6 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      packages: read
     env:
       MCC_BUILD_ENVIRONMENT: dev
     steps:
@@ -203,11 +197,7 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-          registry-url: https://npm.pkg.github.com
-          scope: '@samlevin'
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
         if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/turbo-s3-cache

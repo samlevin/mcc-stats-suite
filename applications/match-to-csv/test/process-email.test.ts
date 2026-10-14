@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import type { S3ObjectReference } from '@samlevin/contracts';
+import type { S3ObjectReference } from '@mcc/contracts';
 import {
   attachmentRejectionCodes,
   parseSenderAllowlist,

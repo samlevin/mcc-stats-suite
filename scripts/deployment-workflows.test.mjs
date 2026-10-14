@@ -207,17 +207,28 @@ test('selection rejects shared packages and unknown applications and accepts no 
   }
 });
 
-test('package publication runs separately after trusted CI at the validated SHA', () => {
-  const publication = workflow('publish-packages');
-  assert.deepEqual(publication.on.workflow_run, orchestration.on.workflow_run);
-  assert.equal(
-    publication.jobs['publish-packages'].if,
-    orchestration.jobs.qualify.if,
+test('workspaces install locally without a package registry or token', () => {
+  const root = new URL('../', import.meta.url);
+  assert.equal(existsSync(new URL('.npmrc', root)), false);
+  for (const name of ['contracts', 'cdk-config']) {
+    const pkg = JSON.parse(
+      readFileSync(new URL(`packages/${name}/package.json`, root), 'utf8'),
+    );
+    assert.equal(pkg.name, `@mcc/${name}`);
+    assert.equal(pkg.private, true);
+    assert.equal(pkg.publishConfig, undefined);
+  }
+  const workflows = readdirSync(new URL('.github/workflows/', root)).filter(
+    (file) => file.endsWith('.yml'),
   );
-  assert.equal(
-    publication.jobs['publish-packages'].steps[0].with.ref,
-    '${{ github.event.workflow_run.head_sha }}',
-  );
+  for (const file of workflows) {
+    const text = readFileSync(
+      new URL(`.github/workflows/${file}`, root),
+      'utf8',
+    );
+    assert.doesNotMatch(text, /npm\.pkg\.github\.com|NODE_AUTH_TOKEN/, file);
+    assert.doesNotMatch(text, /^\s*packages:\s*(read|write)\s*$/m, file);
+  }
 });
 
 test('approval prompt uses the qualified application and SHA with comment permissions', () => {
