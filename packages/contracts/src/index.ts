@@ -42,6 +42,16 @@ export type AttachmentRejectionCode =
   | 'IMAGE_TOO_LARGE'
   | 'IMAGE_TOO_SMALL';
 
+/**
+ * Why a whole submission was rejected. Screening codes (SES verdicts and the
+ * sender allowlist) stop a message before any attachment is stored.
+ */
+export type SubmissionRejectionCode =
+  | 'NO_PROCESSABLE_SCREENSHOTS'
+  | 'SPAM_VERDICT_FAILED'
+  | 'VIRUS_VERDICT_FAILED'
+  | 'SENDER_NOT_ALLOWED';
+
 export interface RejectedAttachment {
   attachmentIndex: number;
   attachmentName: string;

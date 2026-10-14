@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import type {
   AttachmentRejectionCode,
   ProcessEmailInput,
@@ -10,6 +11,7 @@ import type {
   RejectedAttachment,
   S3ObjectReference,
   SourceScreenshot,
+  SubmissionRejectionCode,
 } from '@samlevin/contracts';
 import { simpleParser } from 'mailparser';
 import sharp from 'sharp';
@@ -19,6 +21,7 @@ import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 
 const s3 = new S3Client({});
+const ssm = new SSMClient({});
 const MIN_IMAGE_WIDTH = 640;
 const MIN_IMAGE_HEIGHT = 360;
 
@@ -30,11 +33,51 @@ interface ParsedAttachment {
   cid?: string;
 }
 
+interface HeaderLine {
+  key: string;
+  line: string;
+}
+
 interface ParsedEmail {
   messageId?: string;
   subject?: string;
+  /** Header lines in message order; SES prepends its verdict headers. */
+  headerLines?: readonly HeaderLine[];
+  /** Addresses in the `From` header. */
+  fromAddresses?: string[];
   attachments: ParsedAttachment[];
 }
+
+/**
+ * Verdicts SES adds when the receipt rule enables scanning. Null means the
+ * header is absent.
+ */
+export interface SesVerdicts {
+  spam: string | null;
+  virus: string | null;
+  spf: string | null;
+  dkim: string | null;
+}
+
+export interface SenderAllowlistDecision {
+  /** NOT_CONFIGURED when the deployment names no parameter or it does not exist. */
+  status: 'NOT_CONFIGURED' | 'ALLOWED' | 'DENIED';
+  parameterName: string | null;
+  fromAddresses: string[];
+}
+
+export interface SubmissionScreening {
+  sesVerdicts: SesVerdicts;
+  senderAllowlist: SenderAllowlistDecision;
+  rejectionCodes: SubmissionRejectionCode[];
+}
+
+const VERDICT_HEADERS: Record<keyof SesVerdicts, string> = {
+  spam: 'x-ses-spam-verdict',
+  virus: 'x-ses-virus-verdict',
+  spf: 'x-ses-spf-verdict',
+  dkim: 'x-ses-dkim-verdict',
+};
 
 interface ImageMetadata {
   format?: string;
@@ -49,6 +92,8 @@ interface ImageMetadata {
 export interface ProcessEmailDependencies {
   getRawEmail(input: ProcessEmailInput): Promise<Buffer>;
   parseEmail(rawEmail: Buffer): Promise<ParsedEmail>;
+  /** Allowed sender addresses, or undefined when the parameter does not exist. */
+  getSenderAllowlist(parameterName: string): Promise<string[] | undefined>;
   inspectImage(content: Buffer): Promise<ImageMetadata>;
   putObject(
     reference: S3ObjectReference,
@@ -76,8 +121,25 @@ const defaultDependencies: ProcessEmailDependencies = {
     return {
       messageId: parsed.messageId,
       subject: parsed.subject,
+      headerLines: parsed.headerLines,
+      fromAddresses: (parsed.from?.value ?? []).flatMap((entry) =>
+        entry.address ? [entry.address] : [],
+      ),
       attachments: parsed.attachments,
     };
+  },
+  async getSenderAllowlist(parameterName) {
+    try {
+      const response = await ssm.send(
+        new GetParameterCommand({ Name: parameterName }),
+      );
+      return parseSenderAllowlist(response.Parameter?.Value ?? '');
+    } catch (error) {
+      if (error instanceof Error && error.name === 'ParameterNotFound') {
+        return undefined;
+      }
+      throw error;
+    }
   },
   async inspectImage(content) {
     return sharp(content, { failOn: 'none' }).metadata();
@@ -117,6 +179,13 @@ export async function processEmail(
   const parsed = await dependencies.parseEmail(
     await dependencies.getRawEmail(event),
   );
+  // Read the allowlist before writing evidence, so a transient SSM error
+  // fails the invocation cleanly and a retry starts from scratch.
+  const allowlistParameter = process.env.SENDER_ALLOWLIST_PARAMETER || null;
+  const allowlist = allowlistParameter
+    ? await dependencies.getSenderAllowlist(allowlistParameter)
+    : undefined;
+  const screening = screenSubmission(parsed, allowlistParameter, allowlist);
   const submissionId = dependencies.id();
   const submissionPrefix = namespacedObjectKey(`submissions/${submissionId}`);
   const screenshots: SourceScreenshot[] = [];
@@ -133,11 +202,16 @@ export async function processEmail(
       subject: parsed.subject,
       receivedAt: dependencies.timestamp(),
       attachmentCount: parsed.attachments.length,
+      sesVerdicts: screening.sesVerdicts,
+      senderAllowlist: screening.senderAllowlist,
     },
   );
 
   try {
-    for (const [index, attachment] of parsed.attachments.entries()) {
+    // A screened-out message stores and analyzes nothing; the raw MIME stays.
+    const attachments =
+      screening.rejectionCodes.length === 0 ? parsed.attachments : [];
+    for (const [index, attachment] of attachments.entries()) {
       const attachmentName = safeObjectName(
         attachment.filename ?? `attachment-${index + 1}`,
       );
@@ -222,6 +296,13 @@ export async function processEmail(
       }
     }
 
+    const rejectionCodes: SubmissionRejectionCode[] =
+      screening.rejectionCodes.length > 0
+        ? screening.rejectionCodes
+        : screenshots.length === 0
+          ? ['NO_PROCESSABLE_SCREENSHOTS']
+          : [];
+    const accepted = rejectionCodes.length === 0;
     const completedAt = dependencies.timestamp();
     await dependencies.writeJson(
       evidenceBucket,
@@ -229,10 +310,11 @@ export async function processEmail(
       {
         schemaVersion: 'email-submission-completion/v1',
         submissionId,
-        status: screenshots.length > 0 ? 'SUCCEEDED' : 'REJECTED',
+        status: accepted ? 'SUCCEEDED' : 'REJECTED',
         completedAt,
         acceptedScreenshotCount: screenshots.length,
         rejectedAttachments,
+        rejectionCodes,
       },
     );
     await submissionEvent(
@@ -240,18 +322,22 @@ export async function processEmail(
       evidenceBucket,
       submissionPrefix,
       submissionId,
-      screenshots.length > 0 ? 'SUBMISSION_ACCEPTED' : 'SUBMISSION_REJECTED',
+      accepted ? 'SUBMISSION_ACCEPTED' : 'SUBMISSION_REJECTED',
       {
         acceptedScreenshotCount: screenshots.length,
         rejectedAttachmentCount: rejectedAttachments.length,
+        rejectionCodes,
+        sesVerdicts: screening.sesVerdicts,
+        senderAllowlist: screening.senderAllowlist,
       },
     );
 
-    if (screenshots.length === 0) {
-      throw new NoProcessableScreenshotsError();
+    if (screening.rejectionCodes.length > 0) {
+      throw new SubmissionRejectedError(screening.rejectionCodes);
     }
+    if (!accepted) throw new NoProcessableScreenshotsError();
   } catch (error) {
-    if (!(error instanceof NoProcessableScreenshotsError)) {
+    if (!(error instanceof SubmissionRejectedError)) {
       const failure = errorSummary(error);
       await Promise.all([
         dependencies.writeJson(
@@ -291,6 +377,81 @@ export async function processEmail(
     rejectedAttachmentCount: rejectedAttachments.length,
   });
   return { submissionId, screenshots, rejectedAttachments };
+}
+
+/**
+ * Decides whether a message may be processed at all. A FAIL spam or virus
+ * verdict rejects it, and so does a configured allowlist that does not list
+ * every `From` address. SPF and DKIM verdicts are recorded, not enforced.
+ */
+export function screenSubmission(
+  email: Pick<ParsedEmail, 'headerLines' | 'fromAddresses'>,
+  allowlistParameter: string | null,
+  allowlist: string[] | undefined,
+): SubmissionScreening {
+  const sesVerdicts = parseSesVerdicts(email.headerLines ?? []);
+  const fromAddresses = (email.fromAddresses ?? []).map((address) =>
+    address.trim().toLowerCase(),
+  );
+  const rejectionCodes: SubmissionRejectionCode[] = [];
+  if (sesVerdicts.spam === 'FAIL') rejectionCodes.push('SPAM_VERDICT_FAILED');
+  if (sesVerdicts.virus === 'FAIL') rejectionCodes.push('VIRUS_VERDICT_FAILED');
+
+  let status: SenderAllowlistDecision['status'] = 'NOT_CONFIGURED';
+  if (allowlist) {
+    const allowed = new Set(allowlist.map((entry) => entry.toLowerCase()));
+    status =
+      fromAddresses.length > 0 &&
+      fromAddresses.every((address) => allowed.has(address))
+        ? 'ALLOWED'
+        : 'DENIED';
+    if (status === 'DENIED') rejectionCodes.push('SENDER_NOT_ALLOWED');
+  }
+
+  return {
+    sesVerdicts,
+    senderAllowlist: {
+      status,
+      parameterName: allowlistParameter,
+      fromAddresses,
+    },
+    rejectionCodes,
+  };
+}
+
+/**
+ * Reads each verdict from its first (topmost) header. SES prepends its own
+ * headers, so a copy the sender wrote further down cannot override it.
+ */
+export function parseSesVerdicts(
+  headerLines: readonly HeaderLine[],
+): SesVerdicts {
+  const verdicts: SesVerdicts = {
+    spam: null,
+    virus: null,
+    spf: null,
+    dkim: null,
+  };
+  for (const name of Object.keys(VERDICT_HEADERS) as Array<keyof SesVerdicts>) {
+    const line = headerLines.find(
+      (candidate) => candidate.key.toLowerCase() === VERDICT_HEADERS[name],
+    )?.line;
+    if (line === undefined) continue;
+    verdicts[name] = line
+      .slice(line.indexOf(':') + 1)
+      .replace(/\r?\n[ \t]+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+  return verdicts;
+}
+
+/** Splits a parameter value on commas and whitespace into lowercase addresses. */
+export function parseSenderAllowlist(value: string): string[] {
+  return value
+    .split(/[\s,]+/)
+    .map((entry) => entry.toLowerCase())
+    .filter((entry) => entry.length > 0);
 }
 
 export function attachmentRejectionCodes(
@@ -344,9 +505,18 @@ function errorSummary(error: unknown): { name: string; message: string } {
   return { name: 'UnknownError', message: String(error) };
 }
 
-class NoProcessableScreenshotsError extends Error {
+/** A recorded rejection: the workflow fails, but not as a FAILED submission. */
+class SubmissionRejectedError extends Error {
+  constructor(rejectionCodes: SubmissionRejectionCode[]) {
+    super(`Submission rejected: ${rejectionCodes.join(', ')}`);
+    this.name = 'SubmissionRejectedError';
+  }
+}
+
+class NoProcessableScreenshotsError extends SubmissionRejectedError {
   constructor() {
-    super('Email contains no processable screenshot attachments');
+    super(['NO_PROCESSABLE_SCREENSHOTS']);
+    this.message = 'Email contains no processable screenshot attachments';
     this.name = 'NoProcessableScreenshotsError';
   }
 }

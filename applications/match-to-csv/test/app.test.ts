@@ -31,6 +31,50 @@ t.test('the git SHA prefers the checked-out commit', (t) => {
   t.end();
 });
 
+t.test(
+  'process email reads only its environment sender allowlist parameter',
+  (t) => {
+    for (const [environment, ephemeral] of [
+      ['dev', undefined],
+      ['prod', undefined],
+      ['dev', 'test'],
+    ] as const) {
+      const template = synthesize({
+        environment,
+        ...(ephemeral ? { ephemeral } : {}),
+      });
+      const parameterName = `/mcc/${environment}/match-to-csv/sender-allowlist`;
+      template.hasResourceProperties('AWS::Lambda::Function', {
+        FunctionName: Match.stringLikeRegexp('-ProcessEmail$'),
+        Environment: {
+          Variables: Match.objectLike({
+            SENDER_ALLOWLIST_PARAMETER: parameterName,
+          }),
+        },
+      });
+      const statements = Object.values(
+        template.findResources('AWS::IAM::Policy'),
+      ).flatMap(
+        (policy) =>
+          policy.Properties.PolicyDocument.Statement as Array<{
+            Action: string | string[];
+            Resource: unknown;
+          }>,
+      );
+      const ssmStatements = statements.filter((statement) =>
+        [statement.Action].flat().some((action) => action.startsWith('ssm:')),
+      );
+      t.equal(ssmStatements.length, 1, `${environment} ${ephemeral ?? ''}`);
+      t.equal(ssmStatements[0].Action, 'ssm:GetParameter');
+      t.match(
+        JSON.stringify(ssmStatements[0].Resource),
+        `:parameter${parameterName}"`,
+      );
+    }
+    t.end();
+  },
+);
+
 for (const [environment, ephemeral, retention] of [
   ['dev', undefined, 14],
   ['prod', undefined, 90],
