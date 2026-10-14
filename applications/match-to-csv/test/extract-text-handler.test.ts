@@ -1,4 +1,5 @@
-import t from 'tap';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { createHash } from 'node:crypto';
 import {
   runExtraction,
@@ -49,7 +50,7 @@ function dependencies(
   };
 }
 
-t.test('runExtraction records a complete successful run', async (t) => {
+test('runExtraction records a complete successful run', async () => {
   const writes: Array<{ key: string; value: any }> = [];
   const publishedRowCounts: number[] = [];
   const result = await runExtraction(
@@ -65,9 +66,9 @@ t.test('runExtraction records a complete successful run', async (t) => {
     ),
   );
 
-  t.equal(result.runId, 'id-1');
-  t.match(result.normalizedArtifact.key, /^ephemeral\/tester\//);
-  t.ok(
+  assert.equal(result.runId, 'id-1');
+  assert.match(result.normalizedArtifact.key, /^ephemeral\/tester\//);
+  assert.ok(
     writes.some(
       (write) =>
         write.key.endsWith('/manifest.json') &&
@@ -80,122 +81,119 @@ t.test('runExtraction records a complete successful run', async (t) => {
   const responseIndex = writes.findIndex((write) =>
     write.key.endsWith('/textract/raw-response.json'),
   );
-  t.ok(
+  assert.ok(
     requestIndex >= 0 && requestIndex < responseIndex,
     'request is recorded before provider invocation completes',
   );
-  t.ok(
+  assert.ok(
     writes.some(
       (write) =>
         write.key.endsWith('/completion.json') &&
         write.value.status === 'SUCCEEDED',
     ),
   );
-  t.ok(writes.some((write) => write.value.type === 'RUN_SUCCEEDED'));
-  t.same(
+  assert.ok(writes.some((write) => write.value.type === 'RUN_SUCCEEDED'));
+  assert.deepEqual(
     publishedRowCounts,
     [0],
     'a response without a table publishes a zero-row extraction',
   );
 });
 
-t.test(
-  'runExtraction records provider failures and rethrows them',
-  async (t) => {
-    const writes: Array<{ key: string; value: any }> = [];
-    const publishedRowCounts: number[] = [];
-    const providerError = new Error('try again');
-    providerError.name = 'Textract.ThrottlingException';
+test('runExtraction records provider failures and rethrows them', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  const publishedRowCounts: number[] = [];
+  const providerError = new Error('try again');
+  providerError.name = 'Textract.ThrottlingException';
 
-    await t.rejects(
-      runExtraction(
-        { source },
-        dependencies(
-          writes,
-          async () => {
-            throw providerError;
-          },
-          undefined,
-          publishedRowCounts,
-        ),
-      ),
-      { name: 'Textract.ThrottlingException' },
-    );
-
-    t.ok(writes.some((write) => write.key.endsWith('/textract/request.json')));
-    t.ok(
-      writes.some(
-        (write) =>
-          write.key.endsWith('/completion.json') &&
-          write.value.status === 'FAILED',
-      ),
-    );
-    t.ok(writes.some((write) => write.value.type === 'RUN_FAILED'));
-    t.same(publishedRowCounts, [], 'a failed run publishes no row count');
-  },
-);
-
-t.test(
-  'runExtraction refuses a source whose bytes do not match its hash',
-  async (t) => {
-    const writes: Array<{ key: string; value: any }> = [];
-    await t.rejects(
-      runExtraction(
-        { source: { ...source, sha256: 'different' } },
-        dependencies(writes, async () => {
-          throw new Error('provider must not be called');
-        }),
-      ),
-      { name: 'SourceHashMismatchError' },
-    );
-    t.ok(
-      writes.some(
-        (write) =>
-          write.key.endsWith('/completion.json') &&
-          write.value.error.name === 'SourceHashMismatchError',
-      ),
-    );
-  },
-);
-
-t.test(
-  'runExtraction enforces the 10,000,000-byte Textract limit',
-  async (t) => {
-    const atLimit = Buffer.alloc(10_000_000);
-    const overLimit = Buffer.alloc(10_000_001);
-    const hash = (image: Buffer) =>
-      createHash('sha256').update(image).digest('hex');
-
-    let analyzed = 0;
-    await runExtraction(
-      { source: { ...source, sha256: hash(atLimit) } },
+  await assert.rejects(
+    runExtraction(
+      { source },
       dependencies(
-        [],
+        writes,
         async () => {
-          analyzed += 1;
-          return { $metadata: {}, Blocks: [] };
+          throw providerError;
         },
-        atLimit,
+        undefined,
+        publishedRowCounts,
       ),
-    );
-    t.equal(analyzed, 1, 'an image at the limit reaches the provider');
+    ),
+    { name: 'Textract.ThrottlingException' },
+  );
 
-    const writes: Array<{ key: string; value: any }> = [];
-    await t.rejects(
-      runExtraction(
-        { source: { ...source, sha256: hash(overLimit) } },
-        dependencies(
-          writes,
-          async () => {
-            throw new Error('provider must not be called');
-          },
-          overLimit,
-        ),
+  assert.ok(
+    writes.some((write) => write.key.endsWith('/textract/request.json')),
+  );
+  assert.ok(
+    writes.some(
+      (write) =>
+        write.key.endsWith('/completion.json') &&
+        write.value.status === 'FAILED',
+    ),
+  );
+  assert.ok(writes.some((write) => write.value.type === 'RUN_FAILED'));
+  assert.deepEqual(
+    publishedRowCounts,
+    [],
+    'a failed run publishes no row count',
+  );
+});
+
+test('runExtraction refuses a source whose bytes do not match its hash', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  await assert.rejects(
+    runExtraction(
+      { source: { ...source, sha256: 'different' } },
+      dependencies(writes, async () => {
+        throw new Error('provider must not be called');
+      }),
+    ),
+    { name: 'SourceHashMismatchError' },
+  );
+  assert.ok(
+    writes.some(
+      (write) =>
+        write.key.endsWith('/completion.json') &&
+        write.value.error.name === 'SourceHashMismatchError',
+    ),
+  );
+});
+
+test('runExtraction enforces the 10,000,000-byte Textract limit', async () => {
+  const atLimit = Buffer.alloc(10_000_000);
+  const overLimit = Buffer.alloc(10_000_001);
+  const hash = (image: Buffer) =>
+    createHash('sha256').update(image).digest('hex');
+
+  let analyzed = 0;
+  await runExtraction(
+    { source: { ...source, sha256: hash(atLimit) } },
+    dependencies(
+      [],
+      async () => {
+        analyzed += 1;
+        return { $metadata: {}, Blocks: [] };
+      },
+      atLimit,
+    ),
+  );
+  assert.equal(analyzed, 1, 'an image at the limit reaches the provider');
+
+  const writes: Array<{ key: string; value: any }> = [];
+  await assert.rejects(
+    runExtraction(
+      { source: { ...source, sha256: hash(overLimit) } },
+      dependencies(
+        writes,
+        async () => {
+          throw new Error('provider must not be called');
+        },
+        overLimit,
       ),
-      { name: 'ImageTooLargeError' },
-    );
-    t.notOk(
-      writes.some((write) => write.key.endsWith('/textract/request.json')),
-    );
-  },
-);
+    ),
+    { name: 'ImageTooLargeError' },
+  );
+  assert.ok(
+    !writes.some((write) => write.key.endsWith('/textract/request.json')),
+  );
+});

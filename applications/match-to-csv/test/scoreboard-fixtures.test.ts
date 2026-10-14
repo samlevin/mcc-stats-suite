@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import t from 'tap';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import {
   processScoreboardImage,
   type TextractBlockLite,
@@ -21,9 +22,11 @@ const fixtureFiles = fs
   .filter((f) => f.endsWith('.fixture.json'))
   .sort();
 
-t.test('scoreboard fixtures: directory has at least one fixture', (t) => {
-  t.ok(fixtureFiles.length > 0, 'expected one or more *.fixture.json files');
-  t.end();
+test('scoreboard fixtures: directory has at least one fixture', () => {
+  assert.ok(
+    fixtureFiles.length > 0,
+    'expected one or more *.fixture.json files',
+  );
 });
 
 for (const file of fixtureFiles) {
@@ -31,9 +34,12 @@ for (const file of fixtureFiles) {
   const raw = fs.readFileSync(filePath, 'utf8');
   const fixture = JSON.parse(raw) as ScoreboardFixture;
 
-  t.test(`scoreboard fixture: ${fixture.name}`, (t) => {
+  test(`scoreboard fixture: ${fixture.name}`, () => {
     const rows = processScoreboardImage(fixture.blocks, fixture.rowColors);
-    t.same(rows, fixture.expectedRows, `${file} should match expected rows`);
-    t.end();
+    assert.deepEqual(
+      rows,
+      fixture.expectedRows,
+      `${file} should match expected rows`,
+    );
   });
 }

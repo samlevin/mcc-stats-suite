@@ -1,27 +1,26 @@
-import t from 'tap';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { namespacedObjectKey, processingRunPrefix } from '../src/lib/s3';
 
-t.test('namespacedObjectKey keeps stable deployment keys unchanged', (t) => {
+test('namespacedObjectKey keeps stable deployment keys unchanged', () => {
   delete process.env.OBJECT_PREFIX;
-  t.equal(
+  assert.equal(
     namespacedObjectKey('matches/123/summary.csv'),
     'matches/123/summary.csv',
   );
-  t.end();
 });
 
-t.test('namespacedObjectKey isolates personal deployment artifacts', (t) => {
+test('namespacedObjectKey isolates personal deployment artifacts', () => {
   process.env.OBJECT_PREFIX = 'ephemeral/tester';
-  t.equal(
+  assert.equal(
     namespacedObjectKey('matches/123/summary.csv'),
     'ephemeral/tester/matches/123/summary.csv',
   );
   delete process.env.OBJECT_PREFIX;
-  t.end();
 });
 
-t.test('processingRunPrefix follows the stored source key namespace', (t) => {
-  t.equal(
+test('processingRunPrefix follows the stored source key namespace', () => {
+  assert.equal(
     processingRunPrefix(
       {
         screenshotId: 'screen',
@@ -39,5 +38,4 @@ t.test('processingRunPrefix follows the stored source key namespace', (t) => {
     ),
     'ephemeral/tester/submissions/submission/screenshots/screen/runs/run',
   );
-  t.end();
 });

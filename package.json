@@ -36,6 +36,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.19.15",
     "aws-cdk": "2.1134.0",
+    "esbuild": "0.28.1",
     "eslint": "^10.8.1",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.9.0",

@@ -1,7 +1,8 @@
-import t from 'tap';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import { rowsToCsv } from '../src/lib/csv';
 
-t.test('CSV output quotes commas, quotes, and numeric flags', (t) => {
+test('CSV output quotes commas, quotes, and numeric flags', () => {
   const csv = rowsToCsv([
     {
       team: 'Blue',
@@ -14,8 +15,7 @@ t.test('CSV output quotes commas, quotes, and numeric flags', (t) => {
       loss: 0,
     },
   ]);
-  t.match(csv, /"Player, ""One"""/);
-  t.match(csv, /"1","0"/);
-  t.ok(csv.endsWith('\n'));
-  t.end();
+  assert.match(csv, /"Player, ""One"""/);
+  assert.match(csv, /"1","0"/);
+  assert.ok(csv.endsWith('\n'));
 });
