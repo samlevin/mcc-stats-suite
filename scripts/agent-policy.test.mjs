@@ -4,20 +4,110 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import {
+  binding,
   check,
   generate,
   loadPolicy,
   parseSource,
-  PREFIX,
+  placeholders,
+  prefix,
   render,
   renderBody,
   renderRole,
   renderWorkflow,
   resolve,
+  substitute,
   TOOLS,
 } from './agent-policy.mjs';
 
 const policy = loadPolicy();
+const PREFIX = prefix(policy);
+// The same policy bound to another repository with no CI-applied infrastructure.
+const other = {
+  ...policy,
+  binding: {
+    namespace: 'other',
+    label: 'Other',
+    repository: 'example/other',
+    project: { owner: 'example', number: 7, name: 'Other delivery' },
+    docs: { triage: 'TRIAGE.md', workflow: 'AGENTS.md', guides: ['AGENTS.md'] },
+    features: { infrastructure: false },
+  },
+};
+
+test('the binding resolves every placeholder and feature section', () => {
+  assert.equal(PREFIX, `${policy.binding.namespace}-`);
+  assert.deepEqual(placeholders(other), {
+    prefix: 'other-',
+    label: 'Other',
+    repository: 'example/other',
+    'project.owner': 'example',
+    'project.number': '7',
+    'project.name': 'Other delivery',
+    'project.url': 'https://github.com/users/example/projects/7',
+    'docs.triage': 'TRIAGE.md',
+    'docs.workflow': 'AGENTS.md',
+    'docs.guides': '`AGENTS.md`',
+  });
+  assert.equal(
+    placeholders(policy)['docs.guides'],
+    '`WORKFLOW.md`, `CONTRIBUTING.md`, or `TESTING.md`',
+  );
+  const text =
+    'Spawn {{prefix}}implementer in {{repository}}{{#infrastructure}} (infra){{/infrastructure}}.';
+  assert.equal(
+    substitute(text, policy),
+    `Spawn ${PREFIX}implementer in ${policy.binding.repository} (infra).`,
+  );
+  assert.equal(
+    substitute(text, other),
+    'Spawn other-implementer in example/other.',
+  );
+  assert.throws(
+    () => substitute('{{nope}}', policy),
+    /Unknown placeholder: nope/,
+  );
+  assert.equal(substitute('a \\{{prefix}} b', policy), 'a {{prefix}} b');
+  assert.throws(
+    () => substitute('{{#magic}}x{{/magic}}', policy),
+    /Unknown feature section: magic/,
+  );
+  assert.throws(
+    () => substitute('{{#infrastructure}}x', policy),
+    /Unbalanced feature section/,
+  );
+  assert.throws(
+    () => binding({ ...policy, binding: undefined }),
+    /missing binding/,
+  );
+  assert.throws(
+    () =>
+      binding({
+        ...policy,
+        binding: { ...policy.binding, namespace: 'Bad-Name' },
+      }),
+    /namespace must be lowercase/,
+  );
+  assert.throws(
+    () =>
+      binding({
+        ...policy,
+        binding: { ...policy.binding, project: { owner: 'x', name: 'y' } },
+      }),
+    /missing project.number/,
+  );
+});
+
+test('generated output carries no unresolved placeholder and follows the binding', () => {
+  for (const [path, content] of render()) {
+    // The maintainer skill documents the placeholders literally.
+    if (!path.includes(`/${PREFIX}agents/`))
+      assert.doesNotMatch(content, /\{\{/, path);
+    assert.ok(path.includes(`/${PREFIX}`), path);
+  }
+  const resolved = resolve(other, { tool: 'claude', role: 'implementer' });
+  assert.equal(resolved.spawn.subagent_type, 'other-implementer');
+});
 
 test('every role and capability resolves to a supported setting for both tools', () => {
   for (const tool of TOOLS) {
@@ -83,7 +173,7 @@ test('a prompt override replaces only the named setting', () => {
     effort: 'ultra',
   });
   assert.deepEqual(both.spawn, {
-    agent_type: 'mcc-implementer',
+    agent_type: `${PREFIX}implementer`,
     model: 'gpt-6-sol',
     reasoning_effort: 'ultra',
     fork_turns: 'none',
@@ -235,7 +325,7 @@ test('Claude agents pin the policy; Codex agents omit model and effort', () => {
     roles: { ...policy.roles, sample: 'code-review' },
   };
   const claude = renderRole(sample, 'sample', source, 'claude');
-  assert.match(claude, /^name: mcc-sample$/m);
+  assert.match(claude, new RegExp(`^name: ${PREFIX}sample$`, 'm'));
   assert.match(claude, /^tools: Read, Grep$/m);
   assert.match(
     claude,
@@ -254,7 +344,7 @@ test('Claude agents pin the policy; Codex agents omit model and effort', () => {
   assert.match(claude, /Claude line\./);
   assert.doesNotMatch(claude, /Codex line\./);
   const codex = renderRole(sample, 'sample', source, 'codex');
-  assert.match(codex, /^name = "mcc-sample"$/m);
+  assert.match(codex, new RegExp(`^name = "${PREFIX}sample"$`, 'm'));
   assert.match(codex, /^default_permissions = ":read-only"$/m);
   assert.doesNotMatch(codex, /^model/m);
   assert.doesNotMatch(codex, /^model_reasoning_effort/m);
@@ -279,7 +369,7 @@ Body.
 `;
   const claude = renderWorkflow(policy, 'sample', workflow, 'claude');
   assert.deepEqual(Object.keys(claude), ['SKILL.md']);
-  assert.match(claude['SKILL.md'], /^name: mcc-sample$/m);
+  assert.match(claude['SKILL.md'], new RegExp(`^name: ${PREFIX}sample$`, 'm'));
   assert.match(claude['SKILL.md'], /^argument-hint: '\[target\]'$/m);
   assert.match(claude['SKILL.md'], /^disable-model-invocation: true$/m);
   assert.match(
@@ -294,7 +384,7 @@ Body.
     'SKILL.md',
     'agents/openai.yaml',
   ]);
-  assert.match(codex['SKILL.md'], /^name: mcc-sample$/m);
+  assert.match(codex['SKILL.md'], new RegExp(`^name: ${PREFIX}sample$`, 'm'));
   assert.doesNotMatch(codex['SKILL.md'], /^model:/m);
   assert.match(codex['agents/openai.yaml'], /display_name: 'MCC: Sample'/);
   assert.match(codex['agents/openai.yaml'], /allow_implicit_invocation: false/);
@@ -341,9 +431,12 @@ test('every role and workflow renders for both tools with matching bodies', () =
   for (const role of Object.keys(policy.roles)) {
     const shared = renderBody(
       parseSource(
-        readFileSync(
-          new URL(`../.agents/roles/${role}.md`, import.meta.url),
-          'utf8',
+        substitute(
+          readFileSync(
+            new URL(`../.agents/roles/${role}.md`, import.meta.url),
+            'utf8',
+          ),
+          policy,
         ),
       ).body,
       'claude',
@@ -395,25 +488,52 @@ test('generate writes every file and check reports stale or orphaned output', ()
   );
   const written = generate(base);
   assert.deepEqual(written, [
-    '.agents/skills/mcc-flow/SKILL.md',
-    '.agents/skills/mcc-flow/agents/openai.yaml',
-    '.claude/agents/mcc-sample.md',
-    '.claude/skills/mcc-flow/SKILL.md',
-    '.codex/agents/mcc-sample.toml',
+    `.agents/skills/${PREFIX}flow/SKILL.md`,
+    `.agents/skills/${PREFIX}flow/agents/openai.yaml`,
+    `.claude/agents/${PREFIX}sample.md`,
+    `.claude/skills/${PREFIX}flow/SKILL.md`,
+    `.codex/agents/${PREFIX}sample.toml`,
   ]);
   assert.deepEqual(check(base), []);
-  writeFileSync(join(base, '.codex/agents/mcc-sample.toml'), 'edited');
-  writeFileSync(join(base, '.claude/agents/mcc-orphan.md'), 'orphan');
+  writeFileSync(join(base, `.codex/agents/${PREFIX}sample.toml`), 'edited');
+  writeFileSync(join(base, `.claude/agents/${PREFIX}orphan.md`), 'orphan');
   writeFileSync(join(base, '.claude/agents/personal.md'), 'not ours');
   assert.deepEqual(check(base), [
-    '.claude/agents/mcc-orphan.md',
-    '.codex/agents/mcc-sample.toml',
+    `.claude/agents/${PREFIX}orphan.md`,
+    `.codex/agents/${PREFIX}sample.toml`,
   ]);
   generate(base);
   assert.deepEqual(check(base), []);
   assert.equal(
     readFileSync(join(base, '.claude/agents/personal.md'), 'utf8'),
     'not ours',
+  );
+  // Rebinding the same sources renames the output and resolves the text.
+  writeFileSync(
+    join(base, '.agents/policy.json'),
+    JSON.stringify({ ...other, roles: { sample: 'code-review' } }),
+  );
+  writeFileSync(
+    join(base, '.agents/roles/sample.md'),
+    source.replace('Shared line.', 'Shared {{label}} line in {{repository}}.'),
+  );
+  assert.deepEqual(generate(base), [
+    '.agents/skills/other-flow/SKILL.md',
+    '.agents/skills/other-flow/agents/openai.yaml',
+    '.claude/agents/other-sample.md',
+    '.claude/skills/other-flow/SKILL.md',
+    '.codex/agents/other-sample.toml',
+  ]);
+  assert.match(
+    readFileSync(join(base, '.claude/agents/other-sample.md'), 'utf8'),
+    /Shared Other line in example\/other\./,
+  );
+  assert.match(
+    readFileSync(
+      join(base, '.agents/skills/other-flow/agents/openai.yaml'),
+      'utf8',
+    ),
+    /display_name: 'Other: flow'/,
   );
 });
 
