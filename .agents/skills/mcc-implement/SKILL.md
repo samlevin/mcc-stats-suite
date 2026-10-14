@@ -1,6 +1,6 @@
 ---
 name: mcc-implement
-description: "Deliver an MCC GitHub issue or rework an MCC PR with the repository's namespaced agents. Use for \"implement"
+description: "Deliver an MCC GitHub issue or rework an MCC PR with the repository's namespaced agents. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. Routes a container to mcc-orchestrator (serial, one leaf at a time) and a leaf or PR to mcc-implementer, applying the repository model/effort policy or an explicit prompt override."
 ---
 <!-- Generated from .agents/workflows/implement.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 

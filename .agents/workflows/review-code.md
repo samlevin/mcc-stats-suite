@@ -1,6 +1,6 @@
 ---
 name: review-code
-description: Independent read-only code review of a pushed MCC branch or PR against its issue's acceptance criteria and exact base/head SHAs, run by mcc-code-reviewer at the repository policy or an explicit override. Use for "review #N", "review <PR URL>", or "review branch <name>" in samlevin/mcc-stats-suite. Reports findings to you; never posts, edits, or approves.
+description: "Independent read-only code review of a pushed MCC branch or PR against its issue's acceptance criteria and exact base/head SHAs, run by mcc-code-reviewer at the repository policy or an explicit override. Use for \"review #N\", \"review <PR URL>\", or \"review branch <name>\" in samlevin/mcc-stats-suite. Reports findings to you; never posts, edits, or approves."
 argument-hint: "<PR number | PR URL | branch> [model <name>] [effort <level>]"
 codex:
   display_name: "MCC: Review code"
