@@ -29,6 +29,9 @@ export function createMatchToCsvApp(
       environmentVariables.GIT_SHA ||
       environmentVariables.GITHUB_SHA ||
       'local',
+    // Set by the deploy workflow when the optional alarm-email parameter exists.
+    alarmEmailParameter:
+      environmentVariables.MCC_ALARM_EMAIL_PARAMETER || undefined,
     env: {
       account: deployment.account,
       region: deployment.region,
