@@ -1,8 +1,12 @@
 locals {
   cache_role_name          = "${local.name}-github-turbo-cache"
   cache_role_arn           = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:role/${local.cache_role_name}"
-  cache_role_arns          = setunion(var.cache_service_role_arns, var.create_github_cache_role ? toset([local.cache_role_arn]) : toset([]))
+  cache_role_arns          = setunion(var.cache_service_role_arns, local.github_cache_role ? toset([local.cache_role_arn]) : toset([]))
   cache_subject_repository = coalesce(var.github_oidc_subject_repository, var.cache_github_repository)
+  // The Turbo cache serves only the cache repository. The role exists only when
+  // the subject repository the root deploys for names it, with any immutable
+  // IDs removed, so a fork or self-hosted foundation never trusts upstream.
+  github_cache_role = var.create_github_cache_role && try(replace(var.github_oidc_subject_repository, "/@[0-9]+/", ""), null) == var.cache_github_repository
 }
 
 data "aws_iam_policy_document" "cache_assume_role" {
@@ -37,7 +41,7 @@ data "aws_iam_policy_document" "cache_assume_role" {
 }
 
 resource "aws_iam_role" "github_cache" {
-  count                = var.create_github_cache_role ? 1 : 0
+  count                = local.github_cache_role ? 1 : 0
   name                 = local.cache_role_name
   assume_role_policy   = data.aws_iam_policy_document.cache_assume_role.json
   permissions_boundary = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project_name}-workload-boundary"
@@ -87,7 +91,7 @@ data "aws_iam_policy_document" "github_cache" {
 }
 
 resource "aws_iam_role_policy" "github_cache" {
-  count  = var.create_github_cache_role ? 1 : 0
+  count  = local.github_cache_role ? 1 : 0
   name   = "turbo-cache"
   role   = aws_iam_role.github_cache[0].id
   policy = data.aws_iam_policy_document.github_cache.json

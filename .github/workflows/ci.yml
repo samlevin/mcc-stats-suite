@@ -141,7 +141,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
+        # The cache belongs to the upstream accounts; forks run uncached.
+        if: github.repository == 'samlevin/mcc-stats-suite' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
@@ -208,7 +209,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.repository == 'samlevin/mcc-stats-suite' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev

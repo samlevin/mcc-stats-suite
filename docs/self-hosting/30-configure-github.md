@@ -16,12 +16,10 @@ Every value comes from the bootstrap outputs or your own configuration. Store id
 | `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | variable | dev `cdk_deploy_role_arn` | application deploys |
 | `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
 | `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION` | variables | prod equivalents of the dev values | application deploys |
-| repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | Turbo cache in `main` CI |
-| repository | `DEV_AWS_REGION` | variable | workload Region | Turbo cache in `main` CI |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
 
-`main` CI fails at its cache step until `DEV_AWS_ACCOUNT_ID` is set and the [dev foundation](40-change-foundation.md) has created the `mcc-stats-suite-dev-github-turbo-cache` role.
+The Turbo cache runs only in `samlevin/mcc-stats-suite`. A self-hosted copy builds uncached in CI and deployments, and its foundation creates no cache role.
 
 The foundation's inputs, including the email domain, are not GitHub settings unless your infrastructure CI/CD runs in GitHub Actions. [Apply and change the foundation](40-change-foundation.md#inputs) lists them.
 

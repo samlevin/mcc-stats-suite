@@ -263,7 +263,7 @@ run "dev_github_cache_role" {
   variables {
     environment                    = "dev"
     create_github_cache_role       = true
-    github_oidc_subject_repository = "owner@1/repository@2"
+    github_oidc_subject_repository = "samlevin@1/mcc-stats-suite@2"
   }
   override_resource {
     target = aws_s3_bucket.turbo_cache
@@ -279,7 +279,7 @@ run "dev_github_cache_role" {
   assert {
     condition = alltrue([for statement in data.aws_iam_policy_document.cache_assume_role.statement :
       statement.actions == toset(["sts:AssumeRoleWithWebIdentity"]) && alltrue([for condition in statement.condition :
-        condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:owner@1/repository@2:environment:dev", "repo:owner@1/repository@2:ref:refs/heads/main"]) :
+        condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:samlevin@1/mcc-stats-suite@2:environment:dev", "repo:samlevin@1/mcc-stats-suite@2:ref:refs/heads/main"]) :
         condition.variable == "token.actions.githubusercontent.com:ref" ? toset(condition.values) == toset(["refs/heads/main"]) :
         condition.variable == "token.actions.githubusercontent.com:aud" ? toset(condition.values) == toset(["sts.amazonaws.com"]) :
         condition.variable == "token.actions.githubusercontent.com:repository" && toset(condition.values) == toset(["samlevin/mcc-stats-suite"])
@@ -309,7 +309,7 @@ run "prod_github_cache_role" {
   variables {
     environment                    = "prod"
     create_github_cache_role       = true
-    github_oidc_subject_repository = "owner@1/repository@2"
+    github_oidc_subject_repository = "samlevin@1/mcc-stats-suite@2"
   }
   override_resource {
     target = aws_s3_bucket.turbo_cache
@@ -325,7 +325,7 @@ run "prod_github_cache_role" {
   assert {
     condition = alltrue([for statement in data.aws_iam_policy_document.cache_assume_role.statement :
       statement.actions == toset(["sts:AssumeRoleWithWebIdentity"]) && alltrue([for condition in statement.condition :
-        condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:owner@1/repository@2:environment:prod"]) :
+        condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:samlevin@1/mcc-stats-suite@2:environment:prod"]) :
         condition.variable == "token.actions.githubusercontent.com:ref" ? toset(condition.values) == toset(["refs/heads/main"]) :
         condition.variable == "token.actions.githubusercontent.com:aud" ? toset(condition.values) == toset(["sts.amazonaws.com"]) :
         condition.variable == "token.actions.githubusercontent.com:repository" && toset(condition.values) == toset(["samlevin/mcc-stats-suite"])
@@ -345,6 +345,79 @@ run "prod_github_cache_role" {
       statement.sid == "UseCacheKeyThroughS3" && statement.actions == toset(["kms:Decrypt", "kms:GenerateDataKey"]) && length(statement.condition) == 2
     ])
     error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
+  }
+}
+
+# The cache is upstream-only: a mutable upstream subject still matches, while a
+# fork, a renamed copy, or a root without a subject repository gets no role and
+# no bucket exception.
+run "mutable_upstream_subject_keeps_github_cache_role" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment                    = "dev"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = "samlevin/mcc-stats-suite"
+  }
+  assert {
+    condition     = length(aws_iam_role.github_cache) == 1 && length(aws_iam_role_policy.github_cache) == 1 && output.github_turbo_cache_role_arn == "arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache"
+    error_message = "The upstream repository keeps its cache role with or without immutable subject IDs."
+  }
+}
+
+run "missing_subject_gets_no_github_cache_role" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment              = "dev"
+    create_github_cache_role = true
+  }
+  override_resource {
+    target = aws_s3_bucket.turbo_cache
+    values = {
+      id  = "mcc-stats-suite-dev-000000000000-turbo-cache"
+      arn = "arn:aws:s3:::mcc-stats-suite-dev-000000000000-turbo-cache"
+    }
+  }
+  assert {
+    condition     = length(aws_iam_role.github_cache) == 0 && length(aws_iam_role_policy.github_cache) == 0 && output.github_turbo_cache_role_arn == null
+    error_message = "A foundation without the upstream subject repository must not create a role that trusts upstream."
+  }
+  assert {
+    condition     = alltrue([for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : alltrue([for condition in statement.condition : condition.variable != "aws:PrincipalArn"])])
+    error_message = "Without the role, no principal may escape the bucket data/listing deny statements."
+  }
+}
+
+run "fork_subject_gets_no_github_cache_role" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment                    = "prod"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = "owner@1/mcc-stats-suite@2"
+  }
+  assert {
+    condition     = length(aws_iam_role.github_cache) == 0 && length(aws_iam_role_policy.github_cache) == 0 && output.github_turbo_cache_role_arn == null
+    error_message = "A fork's subject repository must not create a role that trusts upstream."
+  }
+}
+
+run "renamed_copy_subject_gets_no_github_cache_role" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment                    = "dev"
+    create_github_cache_role       = true
+    github_oidc_subject_repository = "samlevin@1/mcc-stats-suite-copy@2"
+  }
+  assert {
+    condition     = length(aws_iam_role.github_cache) == 0 && output.github_turbo_cache_role_arn == null
+    error_message = "Only the exact upstream repository may get the cache role."
   }
 }
 

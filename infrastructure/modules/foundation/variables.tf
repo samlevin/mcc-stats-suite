@@ -30,13 +30,13 @@ variable "cache_service_role_arns" {
 }
 
 variable "create_github_cache_role" {
-  description = "Create the dedicated trusted GitHub Actions S3 cache workload role using bootstrap resources."
+  description = "Create the dedicated trusted GitHub Actions S3 cache workload role using bootstrap resources. Takes effect only when github_oidc_subject_repository names cache_github_repository, so forks and self-hosted copies get no role."
   type        = bool
   default     = false
 }
 
 variable "cache_github_repository" {
-  description = "Repository allowed to assume the cache role."
+  description = "The only repository that runs the Turbo cache and may assume its role."
   type        = string
   default     = "samlevin/mcc-stats-suite"
 }

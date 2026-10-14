@@ -6,6 +6,7 @@ import {
   statSync,
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -14,6 +15,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
 import ts from 'typescript';
+import { parse } from 'yaml';
 import { classify, selectScopes, workspaceMode } from './ci-scope.mjs';
 import {
   evaluate,
@@ -437,7 +439,7 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
   assert.match(workflow, /format\('push-\{0\}', github\.run_id\)/);
   assert.match(
     workflow,
-    /Start trusted dev Turbo cache\n[ ]+if: github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
+    /Start trusted dev Turbo cache\n(?:[ ]+#.*\n)?[ ]+if: github\.repository == 'samlevin\/mcc-stats-suite' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
   );
   // Only the infrastructure job restores a generic cache, keyed to its own
   // provider binaries; every other job uses isolated caches.
@@ -533,6 +535,56 @@ test('cache uses dedicated session credentials and environment contracts without
     workflow.indexOf('Start environment Turbo cache') <
       workflow.indexOf('AWS_CDK_DEPLOY_ROLE_ARN'),
   );
+});
+
+test('Turbo cache steps run only in the upstream repository', () => {
+  // Find cache steps by what they do, so a new or renamed step cannot slip
+  // past the repository gate.
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  const steps = readdirSync(directory)
+    .filter((name) => /\.ya?ml$/.test(name))
+    .flatMap((name) =>
+      Object.entries(
+        parse(readFileSync(new URL(name, directory), 'utf8')).jobs ?? {},
+      ).flatMap(([job, { steps = [] }]) =>
+        steps
+          .filter(
+            (step) =>
+              step.uses?.endsWith('/actions/turbo-s3-cache') ||
+              step.with?.path === '.cache-workflow',
+          )
+          .map((step) => ({ id: `${name} ${job}: ${step.name}`, step })),
+      ),
+    );
+  assert.deepEqual(
+    steps.map(({ id }) => id),
+    [
+      '_deploy-aws-application.yml deploy: Check out cache action from the qualified workflow revision',
+      '_deploy-aws-application.yml deploy: Start environment Turbo cache',
+      'ci.yml application-checks: Start trusted dev Turbo cache',
+      'ci.yml application-bundles: Start trusted dev Turbo cache',
+    ],
+  );
+  const context = (repository) => ({
+    github: { repository, event_name: 'push', ref: 'refs/heads/main' },
+    needs: { scope: { outputs: { full: 'true' } } },
+  });
+  for (const { id, step } of steps) {
+    assert.equal(typeof step.if, 'string', id);
+    assert.ok(!step.if.includes('${{'), id);
+    assert.equal(
+      evaluate(step.if, context('samlevin/mcc-stats-suite')),
+      true,
+      id,
+    );
+    for (const repository of [
+      'fork/mcc-stats-suite',
+      'samlevin/mcc-stats-suite-fork',
+      'samlevin/other',
+    ]) {
+      assert.equal(evaluate(step.if, context(repository)), false, id);
+    }
+  }
 });
 
 test('same revision has separate dev and prod Turbo task hashes', () => {
