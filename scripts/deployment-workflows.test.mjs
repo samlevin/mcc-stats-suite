@@ -675,14 +675,24 @@ const trustedWorkflowNames = () => {
   return [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort();
 };
 
-test('CDK entry role trusts exactly the workflows that deploy', () => {
+test('CDK entry role trusts current callers and only the approved future names', () => {
   const callers = deploymentCallerNames();
   assert.deepEqual(callers, [
     'deploy-applications',
     'rollback-aws-application',
   ]);
-  assert.deepEqual(trustedWorkflowNames(), callers);
-  assert.ok(!callers.includes(deployment.name));
+  const trusted = trustedWorkflowNames();
+  // Add and apply trust before issue #133 renames either caller. Retain the
+  // current names until a follow-up removes them after the rename.
+  assert.deepEqual(
+    trusted,
+    [
+      ...callers,
+      'Delivery: deploy to dev then prod',
+      'Delivery: roll back prod',
+    ].sort(),
+  );
+  assert.ok(!trusted.includes(deployment.name));
   // The bootstrap roots must use the module default, which this test pins.
   for (const environment of ['dev', 'prod']) {
     for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {

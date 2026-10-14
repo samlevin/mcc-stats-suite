@@ -64,7 +64,14 @@ variable "terrateam_workflow_path" {
 variable "cdk_workflow_names" {
   description = "Names of the top-level GitHub Actions workflows that call the reusable deployment workflow. GitHub puts the caller's name, not the reusable workflow's, in the OIDC workflow claim."
   type        = list(string)
-  default     = ["deploy-applications", "rollback-aws-application"]
+  # Apply these additive names in dev and prod before renaming the workflows.
+  # Keep the existing names until a follow-up removes them after the rename.
+  default = [
+    "deploy-applications",
+    "rollback-aws-application",
+    "Delivery: deploy to dev then prod",
+    "Delivery: roll back prod",
+  ]
 
   validation {
     condition     = length(var.cdk_workflow_names) > 0 && alltrue([for name in var.cdk_workflow_names : length(trimspace(name)) > 0])
