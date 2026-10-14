@@ -63,7 +63,9 @@ test('the binding resolves every placeholder and feature section', () => {
     'Spawn {{prefix}}implementer in {{repository}}{{#infrastructure}} (infra){{/infrastructure}}.';
   assert.equal(
     substitute(text, policy),
-    `Spawn ${PREFIX}implementer in ${policy.binding.repository} (infra).`,
+    `Spawn ${PREFIX}implementer in ${policy.binding.repository}${
+      policy.binding.features.infrastructure ? ' (infra)' : ''
+    }.`,
   );
   assert.equal(
     substitute(text, other),
