@@ -4,9 +4,8 @@ Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/
 
 - an encrypted, versioned, deletion-protected S3 state bucket;
 - the GitHub Actions OIDC provider, unless the account already has one;
-- optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md);
+- optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md), with an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role;
 - `mcc-stats-suite-<environment>-github-cdk-deploy`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
-- with that role, an inline grant that lets it manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role; and
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
 
 Bootstrap stays local so that CI identities cannot rewrite their own trust. Never let infrastructure CI/CD apply the bootstrap roots.
@@ -20,7 +19,11 @@ cp .envrc.example .envrc
 direnv allow
 ```
 
-The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it. Repositories created recently use immutable OIDC subjects. If yours does, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`. A rename or transfer changes the subject and needs a bootstrap update.
+The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it. Set `MCC_AWS_REGION` to your workload Region.
+
+Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise delete that line and the `TF_VAR_github_oidc_subject_repository` line. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
+
+The root `.envrc` defaults `AWS_PROFILE` to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
 
 ## Bootstrap dev
 
@@ -33,7 +36,7 @@ aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. Keep `create_cdk_deploy_role = true` in `bootstrap.auto.tfvars`. Set `create_terrateam_role = false` unless you use Terrateam. If the account already has a GitHub OIDC provider, also set `github_oidc_provider_arn` there.
+Stop unless STS reports the dev account. In `bootstrap.auto.tfvars`, keep `create_cdk_deploy_role = true` and keep the `create_terrateam_role = false` line unless you use Terrateam. Do not delete that line: the variable defaults to `true`. If the account already has a GitHub OIDC provider, also set `github_oidc_provider_arn` there.
 
 Create the resources with temporary local state:
 

@@ -22,7 +22,7 @@ Terrateam plans a root only when a changed file matches that root's `file_patter
 
 Set `create_terrateam_role = true` in each account's `bootstrap.auto.tfvars` and apply the bootstrap as in [Bootstrap the dev and prod accounts](10-bootstrap-accounts.md). The bootstrap then creates `mcc-stats-suite-<environment>-terrateam` with:
 
-- `PowerUserAccess`, plus any `additional_terrateam_policy_arns`;
+- `PowerUserAccess`;
 - an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role, with the `mcc-stats-suite-workload-boundary` permissions boundary; and
 - a trust policy that accepts GitHub OIDC tokens only from this repository, the `terrateam_workflow_path` workflow (`.github/workflows/terrateam.yml` by default), and the `terrateam-action[bot]` actor.
 
@@ -79,6 +79,4 @@ For [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-t
 
 Terrateam's weekly drift check opens a GitHub issue when a foundation plan is not empty. Handle it as in [Foundation drift](60-recover-and-troubleshoot.md#foundation-drift), and close the issue after a later plan is empty.
 
-## Forks
-
-A fork needs its own Terrateam installation, its own GitHub Environments and values from the table above, and its own bootstrap roles. Without Terrateam, delete `.github/workflows/terrateam.yml` and `.terrateam/config.yml`, or leave them unused.
+A fork needs its own Terrateam installation, GitHub Environments, values from the table above, and bootstrap roles. [Configure GitHub](30-configure-github.md#changes-a-fork-needs) lists the other fork changes.

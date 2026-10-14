@@ -16,10 +16,10 @@ Each root reads:
 | Input | Where it comes from | Notes |
 | --- | --- | --- |
 | Backend `bucket` | the bootstrap's `state_bucket_name` output | Copy `backend.hcl.example` to the ignored `backend.hcl` and replace the placeholder, or pass `-backend-config=bucket=<name>`. The key is `operational/foundation.tfstate`. |
-| Backend `region` | workload Region | In `backend.hcl`, or `-backend-config=region=<region>`. |
-| `aws_region` | workload Region | In `<environment>.auto.tfvars` or `TF_VAR_aws_region`. The root `.envrc` exports it. |
+| Backend `region` | workload Region | In `backend.hcl`, or `-backend-config=region=<region>`. The example defaults to `us-east-1`. |
+| `aws_region` | workload Region | Set it in `<environment>.auto.tfvars`. The example defaults to `us-east-1`, and its value overrides the `TF_VAR_aws_region` the root `.envrc` exports. |
 | `email_domain` | verified SES domain for that environment, in lowercase | Required and sensitive. Set it in the ignored `<environment>.auto.tfvars` or export `TF_VAR_email_domain`. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
-| `github_oidc_subject_repository` | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` | Needed when the repository uses immutable OIDC subjects, matching the bootstrap. The root `.envrc` exports it as `TF_VAR_github_oidc_subject_repository`. Without it, the Turbo cache role trusts the mutable `OWNER/REPOSITORY` subject. |
+| `github_oidc_subject_repository` | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` | Needed when the repository uses immutable OIDC subjects, matching the bootstrap. The root `.envrc` exports it as `TF_VAR_github_oidc_subject_repository`. |
 | `force_destroy` | `<environment>.auto.tfvars` | `true` in the dev example, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
 
@@ -50,9 +50,20 @@ Read every planned action. Reject unexpected replacements, deletions, or policy 
 
 ## Apply prod
 
-Repeat from `infrastructure/prod/foundation` with `prod.auto.tfvars` and the `mcc-prod-admin` profile, at the same commit. Stop unless STS reports the prod account. Never reuse the dev backend file or bucket. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values, before applying.
+Repeat at the same commit from `infrastructure/prod/foundation`:
 
-The dev foundation must exist before any ephemeral stack, and `main` CI needs the dev Turbo cache role. See [Configure GitHub](30-configure-github.md#variables-and-secrets).
+```console
+cd infrastructure/prod/foundation
+cp backend.hcl.example backend.hcl
+cp prod.auto.tfvars.example prod.auto.tfvars
+export AWS_PROFILE=mcc-prod-admin
+aws sso login --profile "$AWS_PROFILE"
+aws sts get-caller-identity --profile "$AWS_PROFILE"
+```
+
+Stop unless STS reports the prod account. Never reuse the dev backend file or bucket. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values, before applying.
+
+Each environment's foundation must exist before anything deploys there, including ephemeral stacks in dev. The `infrastructure/<environment>/data-platform` roots are inactive; skip them. See [Configure GitHub](30-configure-github.md#variables-and-secrets).
 
 ## Change the foundation later
 

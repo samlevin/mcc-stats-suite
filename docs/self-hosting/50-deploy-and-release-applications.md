@@ -58,6 +58,8 @@ For a failure test, send an unsupported or undersized image. The submission reco
 
 Never commit test messages, recipient addresses, or domains.
 
+To get alarm email for a stable stack, create a `String` SSM parameter `/mcc/<environment>/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
+
 ## Releases
 
 Release Please versions each application and the shared `@samlevin/cdk-config` and `@samlevin/contracts` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
