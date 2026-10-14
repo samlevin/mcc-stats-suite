@@ -36,9 +36,13 @@ export function isAgentWorkflowPath(path) {
 export function classify(path) {
   if (isAgentWorkflowPath(path)) return 'repository';
   if (path.endsWith('.md')) return 'documentation';
-  // Templates under infrastructure/ are copied by operators, never read by
-  // OpenTofu or a workspace build.
-  if (path.startsWith('infrastructure/') && path.endsWith('.example'))
+  // Templates under infrastructure/ are copied by operators, and
+  // external-inputs.revision files only make Terrateam plan a root. Neither is
+  // read by OpenTofu or a workspace build.
+  if (
+    path.startsWith('infrastructure/') &&
+    (path.endsWith('.example') || path.endsWith('/external-inputs.revision'))
+  )
     return 'documentation';
   // .terrateam/config.yml is Prettier-formatted, so it stays on the full path
   // where format:check runs; full also selects the infrastructure job.

@@ -4,7 +4,7 @@
 
 You need two AWS accounts, `dev` and `prod`, and an IAM Identity Center administrator permission set in each. Any account structure works. [samlevin/aws-bootstrap](https://github.com/samlevin/aws-bootstrap) describes one way to build it.
 
-Pick one workload Region that supports SES email receiving, and use it everywhere: the root `.envrc`, every `backend.hcl`, and every `*.auto.tfvars`. The examples default to different Regions, so check each file.
+Pick one workload Region that supports SES email receiving, and use it everywhere. Set it as the `region` of every AWS profile below; each `.envrc` reads it from there.
 
 ## Inbound email
 
@@ -25,7 +25,7 @@ Install the versions pinned in [`.tool-versions`](../../.tool-versions), plus:
 
 ## SSO profiles
 
-Create an SSO profile for each account and permission set you use. Keep `dev` or `prod` in each profile name. `scripts/cdk-app.mjs` compares the profile name with the requested environment and refuses a mismatch. The templates assume these names, which you can change in your `.envrc` files:
+Create an SSO profile for each account and permission set you use. Keep `dev` or `prod` in each profile name. `scripts/cdk-app.mjs` compares the profile name with the requested environment and refuses a mismatch. Each profile needs `sso_account_id` and `region`, which every `.envrc` reads to find the account, Region, and state bucket. The templates assume these names, which you can change in your `.envrc` files:
 
 | Profile | Account | Use |
 | --- | --- | --- |

@@ -11,16 +11,15 @@ Whatever runs OpenTofu, keep these rules:
 
 ## Inputs
 
-Each root reads:
+Each root's ignored `.envrc`, created from the `.envrc.example` in that directory, supplies every input, so `tofu init`, `plan`, and `apply` need nothing else. [Configure local inputs](10-bootstrap-accounts.md#configure-local-inputs) explains its layout.
 
 | Input | Where it comes from | Notes |
 | --- | --- | --- |
-| Backend `bucket` | the bootstrap's `state_bucket_name` output | Copy `backend.hcl.example` to the ignored `backend.hcl` and replace the placeholder, or pass `-backend-config=bucket=<name>`. The key is `operational/foundation.tfstate`. |
-| Backend `region` | workload Region | In `backend.hcl`, or `-backend-config=region=<region>`. The example defaults to `us-east-1`. |
-| `aws_region` | workload Region | Set it in `<environment>.auto.tfvars`. The example defaults to `us-east-1`, and its value overrides the `TF_VAR_aws_region` the root `.envrc` exports. |
-| `email_domain` | verified SES domain for that environment, in lowercase | Required and sensitive. Set it in the ignored `<environment>.auto.tfvars` or export `TF_VAR_email_domain`, for example from the root's ignored `.envrc`, copied from `.envrc.example`. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
-| `github_oidc_subject_repository` | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects | Matches the bootstrap. The Turbo cache role trusts only this repository, and a root without it creates no cache role. The root `.envrc` exports it as `TF_VAR_github_oidc_subject_repository`. |
-| `force_destroy` | `<environment>.auto.tfvars` | `true` in the dev example, `false` in prod. |
+| Backend `bucket` and `region` | `TF_CLI_ARGS_init`, derived from the profile | `mcc-stats-suite-tofu-state-<account>-<region>`, the bucket the bootstrap created. The key, `operational/foundation.tfstate`, is in `versions.tf`. |
+| `aws_region` | `TF_VAR_aws_region`, derived from the profile | The profile's Region, or `AWS_REGION` when the profile has none. |
+| `email_domain` | `TF_VAR_email_domain`, read from the SSM parameter `/mcc/<environment>/match-to-csv/email-domain` | Verified SES domain for that environment, in lowercase. Required and sensitive. The applied foundation owns the parameter, so a local plan sees the applied domain and never changes it. The read needs a signed-in profile; when it fails, the `.envrc` warns and leaves the input unset. In CI/CD, store the domain as a secret, never a plain variable, and never commit it. |
+| `github_oidc_subject_repository` | `TF_VAR_github_oidc_subject_repository`, which you edit | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects, matching the bootstrap. The Turbo cache role trusts only this repository, and a root without it creates no cache role. |
+| `force_destroy` | variable default | `true` in dev, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
 
 The identity that applies the foundation needs to manage KMS, S3, SES receipt rules, SSM parameters, and the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, plus read and write access to the state bucket. The administrator permission sets from [prerequisites](00-prerequisites.md) are enough. For a CI/CD identity, see [CI roles for the foundation](10-bootstrap-accounts.md#ci-roles-for-the-foundation). To use Terrateam, as the upstream repository does, follow [Apply the foundation with Terrateam](70-optional-terrateam.md).
@@ -31,17 +30,21 @@ From the repository root, with the dev administrator profile:
 
 ```console
 cd infrastructure/dev/foundation
-cp backend.hcl.example backend.hcl
-cp dev.auto.tfvars.example dev.auto.tfvars
-export AWS_PROFILE=mcc-dev-admin
+cp .envrc.example .envrc
+```
+
+Edit the first section of `.envrc`, then load it and sign in:
+
+```console
+direnv allow
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. Fill in `backend.hcl` and `dev.auto.tfvars`, then plan and apply:
+Stop unless STS reports the dev account. Run `direnv reload` after signing in, so the `.envrc` can read the email domain. The first apply in a new environment has no parameter to read yet: for that apply only, set `email_domain_override` in the `.envrc` to the lowercase domain verified for SES, and remove it afterwards. Then plan and apply:
 
 ```console
-tofu init -backend-config=backend.hcl
+tofu init
 tofu plan -out=foundation.tfplan
 tofu apply foundation.tfplan
 ```
@@ -54,14 +57,10 @@ Repeat at the same commit from `infrastructure/prod/foundation`:
 
 ```console
 cd infrastructure/prod/foundation
-cp backend.hcl.example backend.hcl
-cp prod.auto.tfvars.example prod.auto.tfvars
-export AWS_PROFILE=mcc-prod-admin
-aws sso login --profile "$AWS_PROFILE"
-aws sts get-caller-identity --profile "$AWS_PROFILE"
+cp .envrc.example .envrc
 ```
 
-Stop unless STS reports the prod account. Never reuse the dev backend file or bucket. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values, before applying.
+Edit the first section of `.envrc`, then run `direnv allow`, sign in, and check the identity as for dev. Stop unless STS reports the prod account. Never reuse the dev `.envrc` or bucket. Compare the prod plan with the applied dev plan, allowing for environment names, account IDs, and values, before applying.
 
 Each environment's foundation must exist before anything deploys there, including ephemeral stacks in dev. The `infrastructure/<environment>/data-platform` roots are inactive; skip them. See [Configure GitHub](30-configure-github.md#variables-and-secrets).
 
@@ -78,6 +77,21 @@ Apply from the pull request before merging, or from `main` right after merging. 
 If initialization reports a missing backend or a plan proposes recreating the foundation, stop and follow [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist).
 
 Bootstrap changes are separate; see [Update bootstrap later](10-bootstrap-accounts.md#update-bootstrap-later).
+
+## Change an external input
+
+The email domain is set in one place, the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. Terrateam writes it to AWS, including the SSM parameter that local `.envrc` files and application deploys read. Terrateam's change detection cannot see a secret, so a change to the domain, or to any other secret that feeds a foundation root, goes through a pull request. To switch an environment to a new domain:
+
+1. Prepare the new domain in that environment's account and workload Region, as in [Inbound email](00-prerequisites.md#inbound-email). Its SES identity must show `Success`, and its MX record must point at `inbound-smtp.<region>.amazonaws.com`. Without both, mail to the new domain never arrives, and every `match-to-csv` deploy fails its identity and MX checks.
+2. Update the secret, for example `gh secret set PROD_MCC_EMAIL_DOMAIN`.
+3. Open a pull request that adds a line with the date and the reason to `infrastructure/<environment>/foundation/external-inputs.revision`. Never write the value or a hash of it there.
+4. Comment `terrateam plan`, review the `(sensitive value)` changes, and apply as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam). The apply moves the shared `submit@` receipt rule and the SSM parameter to the new domain.
+5. Nothing needs a redeploy. The stable stacks receive mail at the new domain as soon as the foundation applies, because the foundation owns the shared `submit@` rule and the stable `match-to-csv` stack does not use the domain. The next `match-to-csv` deploy runs the SES identity and MX checks again. Each dev [ephemeral stack](50-deploy-and-release-applications.md#ephemeral-stacks) keeps its `submit+<name>@` rule on the old domain until you redeploy or destroy it.
+6. In each foundation root you plan from locally, run `direnv reload`, after `aws sso login --profile "$AWS_PROFILE"` if the session has expired. The `.envrc` reads the domain from SSM only when the directory loads. Until you reload it, a local plan proposes changing the domain back.
+
+Steps 2 to 4 apply to every secret that feeds a foundation root.
+
+Terrateam checks the foundation roots for drift daily and never reconciles, so a secret changed without a revision pull request shows up as a drift issue within a day and is never applied without review.
 
 ## Detect drift
 

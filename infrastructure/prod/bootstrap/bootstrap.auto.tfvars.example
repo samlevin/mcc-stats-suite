@@ -1,6 +1,6 @@
-# Common AWS, GitHub, and Owner values come from the ignored root .envrc.
-# This directory's ignored .envrc selects the prod administrator profile and
-# the GitHub Environment name. See ../../../.envrc.example.
+# Optional. The profile, Region, and GitHub inputs come from this directory's
+# ignored .envrc; see .envrc.example.
+#
 # Set create_terrateam_role to true only if Terrateam applies the foundation.
 create_terrateam_role    = false
 create_cdk_deploy_role   = true

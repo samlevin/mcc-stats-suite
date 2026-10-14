@@ -21,7 +21,7 @@ variable "github_oidc_subject_repository" {
 }
 
 variable "email_domain" {
-  description = "Verified SES domain for inbound email, in lowercase. Terrateam supplies it from the DEV_MCC_EMAIL_DOMAIN secret of the infra/foundation-dev GitHub Environment; never commit it or store it as a variable. Sensitive so plan comments redact it."
+  description = "Verified SES domain for inbound email, in lowercase. Terrateam supplies it from the DEV_MCC_EMAIL_DOMAIN repository secret; never commit it or store it as a variable. Sensitive so plan comments redact it."
   type        = string
   sensitive   = true
 }

@@ -60,3 +60,6 @@ jobs:
     with:
       application: ${{ matrix.application }}
       sha: ${{ needs.qualify.outputs.sha }}
+    secrets:
+      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

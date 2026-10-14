@@ -1,5 +1,0 @@
-bucket       = "REPLACE_WITH_PROD_STATE_BUCKET"
-key          = "operational/foundation.tfstate"
-region       = "us-east-1"
-use_lockfile = true
-encrypt      = true

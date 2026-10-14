@@ -12,18 +12,25 @@ Bootstrap stays local so that CI identities cannot rewrite their own trust. Neve
 
 ## Configure local inputs
 
-From the repository root, copy the template, replace every placeholder, and allow it:
+Each OpenTofu root under `infrastructure/<environment>/` has its own ignored `.envrc`, which you create from the committed `.envrc.example` in that directory. Each is self-contained, so `tofu init`, `plan`, and `apply` work from that directory with nothing else set. Every `.envrc` follows the rule stated at its top:
 
-```console
-cp .envrc.example .envrc
-direnv allow
-```
+- `AWS_*` names are read by the AWS CLI and SDKs: `AWS_PROFILE`, and `AWS_REGION` only when the profile has no Region.
+- `TF_VAR_<name>` sets the OpenTofu input `<name>` and nothing else.
+- `TF_CLI_ARGS_init` carries the backend bucket and Region, so there are no backend files to fill in.
 
-The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it. Set `MCC_AWS_REGION` to your workload Region.
+You edit the first section of each file. The second section reads the account ID and Region from the profile with `aws configure get`, which reads the local AWS config and makes no network call, and builds the state bucket name `mcc-stats-suite-tofu-state-<account>-<region>`. The foundation `.envrc` also reads the email domain from the applied foundation's SSM parameter, which needs a signed-in profile. If the profile has no `sso_account_id`, set `account_id` in the first section, without `export`.
 
-Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise set it to `OWNER/REPOSITORY`. The foundation's optional Turbo cache role needs this value either way. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
+| Root | You edit |
+| --- | --- |
+| bootstrap | `AWS_PROFILE`, `TF_VAR_github_organization`, `TF_VAR_github_oidc_subject_repository` |
+| foundation | `AWS_PROFILE`, `TF_VAR_github_oidc_subject_repository`, and `email_domain_override` only for the first apply in a new environment |
+| data-platform | `AWS_PROFILE` |
 
-The root `.envrc` defaults `AWS_PROFILE` to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
+The repository root has its own `.envrc`, created from the root `.envrc.example`. It sets only `AWS_PROFILE`, which `npm run app:*` reads. It defaults to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
+
+Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `TF_VAR_github_oidc_subject_repository` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise set it to `OWNER/REPOSITORY`. The foundation's optional Turbo cache role needs this value either way. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
+
+The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it.
 
 ## Bootstrap dev
 
@@ -31,12 +38,17 @@ The root `.envrc` defaults `AWS_PROFILE` to `mcc-dev`, which works only after [l
 cd infrastructure/dev/bootstrap
 cp .envrc.example .envrc
 cp bootstrap.auto.tfvars.example bootstrap.auto.tfvars
+```
+
+Edit the first section of `.envrc`, then load it and sign in:
+
+```console
 direnv allow
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. In `bootstrap.auto.tfvars`, keep `create_cdk_deploy_role = true` and keep the `create_terrateam_role = false` line unless you use Terrateam. Do not delete that line: the variable defaults to `true`. If the account already has a GitHub OIDC provider, also set `github_oidc_provider_arn` there.
+Stop unless STS reports the dev account. In `bootstrap.auto.tfvars`, keep `create_cdk_deploy_role = true` and keep the `create_terrateam_role = false` line unless you use Terrateam. Do not delete that line: the variable defaults to `true`. If the account already has a GitHub OIDC provider, also set `github_oidc_provider_arn` there. Leave `state_bucket_name` unset: every `.envrc` and Terrateam derive the bucket name from the account and Region.
 
 Create the resources with temporary local state:
 
@@ -46,27 +58,19 @@ tofu plan -out=bootstrap.tfplan
 tofu apply bootstrap.tfplan
 ```
 
-The plan should contain only the resources listed above. Migrate the state into the new bucket immediately. Copy the values from `tofu output bootstrap_backend_config` into `backend.hcl`:
+The plan should contain only the resources listed above. Migrate the state into the new bucket immediately. `backend.tf.example` holds the state key, and the `.envrc` already passes the bucket and Region:
 
 ```console
-cp backend.hcl.example backend.hcl
-tofu output bootstrap_backend_config
 cp backend.tf.example backend.tf
-tofu init -migrate-state -backend-config=backend.hcl
+tofu init -migrate-state
 tofu plan
 ```
 
-Approve the migration. The final plan must report no changes. Keep these outputs somewhere private; [GitHub configuration](30-configure-github.md) needs them:
-
-```console
-tofu output -raw aws_account_id
-tofu output -raw state_bucket_name
-tofu output -raw cdk_deploy_role_arn
-```
+Approve the migration. The final plan must report no changes. [GitHub configuration](30-configure-github.md) needs only the account ID, `tofu output -raw aws_account_id`. Keep it private; the workflows build the role ARNs and the bucket name from it.
 
 ## Bootstrap prod
 
-Repeat the dev procedure from `infrastructure/prod/bootstrap`. Its `.envrc` selects the prod administrator profile and sets the prod account ID. Stop unless STS reports the prod account. Never reuse the dev backend file, bucket, or role ARNs.
+Repeat the dev procedure from `infrastructure/prod/bootstrap`. Its `.envrc` selects the prod administrator profile. Stop unless STS reports the prod account. Never reuse the dev `.envrc`, bucket, or role ARNs.
 
 ## Update bootstrap later
 
@@ -81,7 +85,7 @@ tofu -chdir=infrastructure/dev/bootstrap test -test-directory=../../modules/boot
 
 Then run `tofu plan` in each bootstrap root and apply only the reviewed change.
 
-Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc`, `backend.hcl`, and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply.
+Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc` and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply.
 
 ### Trusted deployment workflows
 
@@ -93,7 +97,7 @@ When you rename one of those workflows, or add a workflow that calls the reusabl
 cd infrastructure/dev/bootstrap
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
-tofu init -backend-config=backend.hcl
+tofu init
 tofu plan -out=bootstrap.tfplan
 tofu apply bootstrap.tfplan
 ```
@@ -108,17 +112,17 @@ The bootstrap creates no generic CI role for the foundation. To apply it from CI
 
 ## Disposable developer accounts
 
-A personal sandbox account can reuse the dev bootstrap root without trusting GitHub. Use a separate checkout so its ignored backend files and `.terraform` directory can never be confused with dev, and set both flags to `false` in `bootstrap.auto.tfvars`:
+A personal sandbox account can reuse the dev bootstrap root without trusting GitHub. Use a separate checkout so its ignored `.envrc` files and `.terraform` directories can never be confused with dev, and set both flags to `false` in `bootstrap.auto.tfvars`:
 
 ```hcl
 create_terrateam_role  = false
 create_cdk_deploy_role = false
 ```
 
-The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain`: set it in the ignored `dev.auto.tfvars` or export `TF_VAR_email_domain`, using a lowercase domain verified for SES in that account. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to your infrastructure CI/CD or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
+The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain`: for the first apply, set `email_domain_override` in that checkout's foundation `.envrc` to a lowercase domain verified for SES in that account. Later plans read it from the parameter that apply creates. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to your infrastructure CI/CD or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
 
 ## Keep local files untracked
 
-These files are ignored and must stay that way: `**/backend.hcl`, `**/*.auto.tfvars`, `*.tfstate*`, `*.tfplan`, `.env*`, and `.envrc`. Commit only source, `.example` files, and `.terraform.lock.hcl`. Role ARNs and account IDs are not credentials, but keeping them in GitHub variables keeps forks portable and the account layout private.
+These files are ignored and must stay that way: `**/backend.tf`, `**/*.auto.tfvars`, `*.tfstate*`, `*.tfplan`, `.env*`, and `.envrc`. Commit only source, `.example` files, and `.terraform.lock.hcl`. Account IDs and role ARNs are not credentials, but the repository is public, so GitHub keeps the account IDs as secrets and the workflows build the role ARNs from them.
 
 Next: [Bootstrap CDK and grant local deploy access](20-bootstrap-cdk.md).

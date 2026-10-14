@@ -169,3 +169,5 @@ jobs:
       sha: ${{ needs.qualify.outputs.sha }}
       operation: ${{ inputs.operation }}
       source: ${{ inputs.release-tag }}
+    secrets:
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

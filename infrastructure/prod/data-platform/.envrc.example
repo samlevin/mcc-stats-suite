@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Copy to .envrc in this directory, edit the first section, then run:
+#   direnv allow
+# This file is self-contained: tofu init, plan, and apply work from this
+# directory with nothing else set. Every exported name follows one rule:
+#   AWS_*             read by the AWS CLI and SDKs (AWS_PROFILE, and AWS_REGION
+#                     only when the profile sets no Region)
+#   TF_VAR_<name>     sets the OpenTofu input <name> and nothing else
+#   TF_CLI_ARGS_init  passes the backend bucket and Region to tofu init
+
+# Edit these.
+export AWS_PROFILE="mcc-prod-admin"
+
+# Derived from the values above; do not edit. `aws configure get` reads the
+# local AWS config and makes no network call. When the profile has no
+# sso_account_id, set account_id="<12-digit ID>" (not exported) above.
+account_id="${account_id:-$(aws configure get sso_account_id || true)}"
+region="${AWS_REGION:-$(aws configure get region || true)}"
+if [[ -z "$account_id" || -z "$region" ]]; then
+  echo "Set sso_account_id and region on profile $AWS_PROFILE, or set account_id and AWS_REGION in this file" >&2
+fi
+export TF_VAR_aws_region="$region"
+export TF_CLI_ARGS_init="-backend-config=bucket=mcc-stats-suite-tofu-state-${account_id}-${region} -backend-config=region=${region}"

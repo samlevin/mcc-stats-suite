@@ -7,17 +7,17 @@ cd "$(git rev-parse --show-toplevel)"
 export AWS_PROFILE=mcc-dev-admin
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
-npx cdk bootstrap "aws://${MCC_DEV_ACCOUNT_ID}/${MCC_AWS_REGION}" \
+npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$(aws configure get region)" \
   --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 ```
 
-Verify the account ID before approving. For prod, enter the prod bootstrap directory so `direnv` loads the prod profile and account ID:
+Verify the account ID before approving. The account ID and Region come from the profile's `sso_account_id` and `region`. For prod, enter the prod bootstrap directory so `direnv` loads the prod profile:
 
 ```console
 cd infrastructure/prod/bootstrap
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
-npx cdk bootstrap "aws://${MCC_PROD_ACCOUNT_ID}/${MCC_AWS_REGION}" \
+npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$(aws configure get region)" \
   --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 ```
 
@@ -33,7 +33,7 @@ Keep the default `hnb659fds` bootstrap for GitHub Actions. Local developers use 
 cd "$(git rev-parse --show-toplevel)"
 aws sts get-caller-identity --profile mcc-dev-admin
 npx cdk bootstrap --show-template | node scripts/local-cdk-bootstrap.mjs > /tmp/mcc-local-bootstrap.yaml
-npx cdk bootstrap "aws://${MCC_DEV_ACCOUNT_ID}/${MCC_AWS_REGION}" \
+npx cdk bootstrap "aws://$(aws configure get sso_account_id --profile mcc-dev-admin)/$(aws configure get region --profile mcc-dev-admin)" \
   --profile mcc-dev-admin --qualifier mcclocal1 \
   --toolkit-stack-name CDKToolkitLocal --template /tmp/mcc-local-bootstrap.yaml
 aws cloudformation set-stack-policy --profile mcc-dev-admin --stack-name CDKToolkitLocal \
