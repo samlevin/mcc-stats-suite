@@ -8,23 +8,24 @@ Give `prod` at least one required reviewer and disable administrator bypass. The
 
 ## Variables and secrets
 
-Every value comes from the bootstrap outputs or your own configuration. Store identifiers as variables and the release app key as a secret. None of them is an AWS credential; GitHub Actions gets short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
+Every value comes from the bootstrap outputs or your own configuration. Store account IDs, role ARNs, and the release app key as secrets: the repository is public, variables print unmasked in workflow logs, and GitHub masks secret values. Store Regions and other non-identifying values as variables. None of them is an AWS credential; GitHub Actions gets short-lived AWS sessions through OIDC. Never create `AWS_ACCESS_KEY_ID` or `AWS_SECRET_ACCESS_KEY` secrets.
 
 | Scope | Name | Kind | Value | Used by |
 | --- | --- | --- | --- | --- |
-| `dev` environment | `AWS_ACCOUNT_ID` | variable | dev `aws_account_id` | application deploys |
-| `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | variable | dev `cdk_deploy_role_arn` | application deploys |
+| `dev` environment | `AWS_ACCOUNT_ID` | secret | dev `aws_account_id` | application deploys |
+| `dev` environment | `AWS_CDK_DEPLOY_ROLE_ARN` | secret | dev `cdk_deploy_role_arn` | application deploys |
 | `dev` environment | `AWS_REGION` | variable | workload Region | application deploys |
-| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN`, `AWS_REGION` | variables | prod equivalents of the dev values | application deploys |
+| `prod` environment | `AWS_ACCOUNT_ID`, `AWS_CDK_DEPLOY_ROLE_ARN` | secrets | prod equivalents of the dev values | application deploys |
+| `prod` environment | `AWS_REGION` | variable | workload Region | application deploys |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
 | repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in `main` CI and deploys |
-| repository | `DEV_AWS_ACCOUNT_ID` | variable | dev `aws_account_id` (only with the cache) | Turbo cache in `main` CI |
-| repository | `DEV_AWS_REGION` | variable | workload Region (only with the cache) | Turbo cache in `main` CI |
+| repository | `DEV_AWS_ACCOUNT_ID` | secret | dev `aws_account_id` (only with the cache) | Turbo cache in `main` CI |
+| repository | `DEV_AWS_REGION` | variable | workload Region (only with the cache or [Terrateam](70-optional-terrateam.md)) | Turbo cache in `main` CI, Terrateam dev plans |
 
 ### Turbo cache
 
-The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Then set `DEV_AWS_ACCOUNT_ID` and `DEV_AWS_REGION`, and set `MCC_TURBO_CACHE` to `true` last. Deploys use the `dev` and `prod` environment variables above. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
+The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Then set the `DEV_AWS_ACCOUNT_ID` secret and the `DEV_AWS_REGION` variable, and set `MCC_TURBO_CACHE` to `true` last. Deploys use the `dev` and `prod` environment settings above. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
 
 The foundation's inputs, including the email domain, are not GitHub settings unless your infrastructure CI/CD runs in GitHub Actions. [Apply and change the foundation](40-change-foundation.md#inputs) lists them.
 

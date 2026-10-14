@@ -34,16 +34,17 @@ Treat any change to the Terrateam workflow, the Terrateam configuration, or `inf
 
 Create two more GitHub Environments, `infra/foundation-dev` and `infra/foundation-prod`. Give them no required reviewers, so Terrateam jobs never wait for an Actions approval. Terrateam's `access_control`, not the `prod` deployment approval, is the production gate for infrastructure.
 
-Store the email domain as a secret. The Terrateam workflow prints its environment's variables in a public log, and GitHub masks secret values.
+Store the role ARNs, state buckets, and email domains as secrets. The Terrateam workflow prints its environment's variables in a public log, and GitHub masks secret values. Terrateam reads secrets and variables the same way, so `.terrateam/config.yml` does not care which kind a name is.
 
 | Scope | Name | Kind | Value |
 | --- | --- | --- | --- |
-| `infra/foundation-dev` environment | `DEV_TERRATEAM_ROLE_ARN` | variable | dev `terrateam_role_arn` |
-| `infra/foundation-dev` environment | `DEV_TOFU_STATE_BUCKET` | variable | dev `state_bucket_name` |
-| `infra/foundation-dev` environment | `DEV_AWS_REGION` | variable | workload Region |
+| `infra/foundation-dev` environment | `DEV_TERRATEAM_ROLE_ARN` | secret | dev `terrateam_role_arn` |
+| `infra/foundation-dev` environment | `DEV_TOFU_STATE_BUCKET` | secret | dev `state_bucket_name` |
 | `infra/foundation-dev` environment | `DEV_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives dev email, in lowercase |
-| `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values |
+| `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET` | secrets | prod equivalents of the dev values |
+| `infra/foundation-prod` environment | `PROD_AWS_REGION` | variable | workload Region |
 | `infra/foundation-prod` environment | `PROD_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives prod email, in lowercase |
+| repository | `DEV_AWS_REGION` | variable | workload Region; the same variable the dev Turbo cache reads |
 | repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects; the Turbo cache role needs it |
 
 Terrateam passes these to the foundation roots as the backend bucket and Region, `TF_VAR_aws_region`, `TF_VAR_email_domain`, and `TF_VAR_github_oidc_subject_repository`.

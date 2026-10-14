@@ -146,7 +146,7 @@ jobs:
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
-          account-id: ${{ vars.DEV_AWS_ACCOUNT_ID }}
+          account-id: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
           region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
       - name: Run independent checks concurrently
         env:
@@ -213,7 +213,7 @@ jobs:
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
-          account-id: ${{ vars.DEV_AWS_ACCOUNT_ID }}
+          account-id: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
           region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
       - name: Synthesize stacks and verify native bundles
         env:

@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { parse } from 'yaml';
 import { evaluate, runScript, workflow } from './workflow-test-helpers.mjs';
 const ci = workflow('ci');
 const orchestration = workflow('deploy-dev');
@@ -690,5 +691,143 @@ test('CDK entry role trusts exactly the workflows that deploy', () => {
         /cdk_workflow_name/,
       );
     }
+  }
+});
+
+// Names that identify an AWS account, a role, a state bucket, or the email
+// domain. The repository is public and variables print unmasked, so each is a
+// secret.
+const SECRET_NAMES = [
+  'AWS_ACCOUNT_ID',
+  'AWS_CDK_DEPLOY_ROLE_ARN',
+  'DEV_AWS_ACCOUNT_ID',
+  'DEV_TERRATEAM_ROLE_ARN',
+  'DEV_TOFU_STATE_BUCKET',
+  'DEV_MCC_EMAIL_DOMAIN',
+  'PROD_TERRATEAM_ROLE_ARN',
+  'PROD_TOFU_STATE_BUCKET',
+  'PROD_MCC_EMAIL_DOMAIN',
+  'MCC_EMAIL_DOMAIN',
+];
+
+const workflowFiles = () => {
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  return readdirSync(directory)
+    .filter((name) => /\.ya?ml$/.test(name))
+    .map((name) => ({
+      name,
+      text: readFileSync(new URL(name, directory), 'utf8'),
+    }));
+};
+
+test('account IDs, role ARNs, buckets, and domains are never read as variables', () => {
+  const files = [
+    ...workflowFiles(),
+    {
+      name: 'turbo-s3-cache',
+      text: repositoryFile('.github/actions/turbo-s3-cache/action.yml'),
+    },
+  ];
+  for (const { name, text } of files) {
+    for (const secret of SECRET_NAMES) {
+      assert.doesNotMatch(
+        text,
+        new RegExp(`vars\\.${secret}\\b`),
+        `${name} reads ${secret} as a variable`,
+      );
+    }
+  }
+  const deploy = deployment.jobs.deploy;
+  assert.equal(
+    deploy.env.MCC_DEV_ACCOUNT_ID,
+    "${{ inputs.environment == 'dev' && secrets.AWS_ACCOUNT_ID || '' }}",
+  );
+  assert.equal(
+    deploy.env.MCC_PROD_ACCOUNT_ID,
+    "${{ inputs.environment == 'prod' && secrets.AWS_ACCOUNT_ID || '' }}",
+  );
+  const withInput = (input) =>
+    deploy.steps
+      .filter((step) => step.with?.[input])
+      .map((step) => step.with[input]);
+  assert.deepEqual(withInput('account-id'), ['${{ secrets.AWS_ACCOUNT_ID }}']);
+  assert.deepEqual(withInput('role-to-assume'), [
+    '${{ secrets.AWS_CDK_DEPLOY_ROLE_ARN }}',
+  ]);
+  for (const job of ['application-checks', 'application-bundles']) {
+    const cache = ci.jobs[job].steps.find((step) =>
+      step.uses?.endsWith('/actions/turbo-s3-cache'),
+    );
+    assert.equal(
+      cache.with['account-id'],
+      '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
+      job,
+    );
+  }
+});
+
+test('no condition, job output, or deployment URL depends on a masked value', () => {
+  // Actions masks secrets wherever they appear and drops job outputs that
+  // contain one, so a secret, or an account ID derived from one, must stay
+  // out of these places.
+  const masked = /secrets\.|_ACCOUNT_ID|ROLE_ARN|STATE_BUCKET|EMAIL_DOMAIN/;
+  for (const { name, text } of workflowFiles()) {
+    const parsed = parse(text);
+    const outputs = parsed.on?.workflow_call?.outputs;
+    if (outputs) {
+      assert.doesNotMatch(JSON.stringify(outputs), masked, name);
+    }
+    for (const [id, job] of Object.entries(parsed.jobs ?? {})) {
+      const where = `${name} ${id}`;
+      assert.doesNotMatch(String(job.if ?? ''), masked, `${where} if`);
+      assert.doesNotMatch(
+        JSON.stringify(job.outputs ?? {}),
+        masked,
+        `${where} outputs`,
+      );
+      if (typeof job.environment === 'object') {
+        assert.doesNotMatch(
+          String(job.environment.url ?? ''),
+          masked,
+          `${where} environment url`,
+        );
+      }
+      for (const step of job.steps ?? []) {
+        assert.doesNotMatch(
+          String(step.if ?? ''),
+          masked,
+          `${where} ${step.name ?? step.uses} if`,
+        );
+      }
+    }
+  }
+});
+
+test('deployment checks the caller account against the account secret', () => {
+  const step = deployment.jobs.deploy.steps.find(
+    (candidate) => candidate.name === 'Verify target account',
+  );
+  assert.equal(step.env.EXPECTED_ACCOUNT, '${{ secrets.AWS_ACCOUNT_ID }}');
+  // The secret reaches the shell through the environment, never inline.
+  assert.doesNotMatch(step.run, /\$\{\{/);
+  const directory = mkdtempSync(join(tmpdir(), 'mcc-account-check-'));
+  writeFileSync(
+    join(directory, 'aws'),
+    '#!/usr/bin/env bash\necho 111111111111\n',
+    { mode: 0o755 },
+  );
+  const run = (expected) =>
+    spawnSync('bash', ['-e', '-c', step.run], {
+      encoding: 'utf8',
+      env: {
+        PATH: `${directory}:${process.env.PATH}`,
+        EXPECTED_ACCOUNT: expected,
+      },
+    });
+  assert.equal(run('111111111111').status, 0);
+  for (const expected of ['222222222222', '']) {
+    const result = run(expected);
+    assert.equal(result.status, 1, expected);
+    assert.match(result.stdout, /wrong account/);
   }
 });
