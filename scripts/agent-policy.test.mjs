@@ -474,6 +474,82 @@ test('the write-prose skill keeps its attribution in both tools', () => {
     );
 });
 
+// Report and relay wording that callers depend on. Each check matches a short
+// phrase on one rendered line, so rewording elsewhere does not break it.
+const lineWith = (content, ...phrases) =>
+  content
+    .split('\n')
+    .find((line) =>
+      phrases.every((phrase) =>
+        typeof phrase === 'string' ? line.includes(phrase) : phrase.test(line),
+      ),
+    );
+
+test('caller skills relay the agent result verbatim in both tools', () => {
+  const files = render();
+  for (const skill of ['implement', 'review-code', 'review-security'])
+    for (const path of [
+      `.claude/skills/${PREFIX}${skill}/SKILL.md`,
+      `.agents/skills/${PREFIX}${skill}/SKILL.md`,
+    ])
+      assert.ok(
+        lineWith(
+          files.get(path),
+          /\b(relay|print)\b/i,
+          'Requested settings:',
+          /\bverbatim\b/,
+        ),
+        `${path} must relay the result and its Requested settings line verbatim`,
+      );
+});
+
+test('every role reports its requested settings in both tools', () => {
+  const files = render();
+  for (const role of Object.keys(policy.roles))
+    for (const path of [
+      `.claude/agents/${PREFIX}${role}.md`,
+      `.codex/agents/${PREFIX}${role}.toml`,
+    ])
+      assert.ok(
+        files.get(path).includes('Requested settings: Policy:'),
+        `${path} must return a Requested settings: Policy: line`,
+      );
+});
+
+test('the implementer sends the reviewer its own resolved policy line', () => {
+  const files = render();
+  for (const path of [
+    `.claude/agents/${PREFIX}implementer.md`,
+    `.codex/agents/${PREFIX}implementer.toml`,
+  ])
+    assert.ok(
+      lineWith(
+        files.get(path),
+        'review_mode=pre_pr',
+        'resolved `Policy:` line',
+        'role=code-reviewer',
+      ),
+      `${path} pre-PR packet must carry the reviewer's resolved Policy: line`,
+    );
+});
+
+test('the README keeps the effective-model verification row', () => {
+  const readme = readFileSync(
+    new URL('../.agents/README.md', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    lineWith(
+      readme,
+      /^\|/,
+      'Effective-model verification',
+      'sqlite3',
+      'state_5.sqlite',
+    ),
+    'README must keep the effective-model verification row with the Codex sqlite3 check',
+  );
+});
+
 test('generated definitions in the repository are current', () => {
   assert.deepEqual(check(), []);
 });
