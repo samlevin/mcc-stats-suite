@@ -22,6 +22,6 @@ Terrateam takes a lock only when it applies a root, and the merge releases it. M
 
 If initialization reports a missing backend or a plan proposes recreating the foundation, stop and follow [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist).
 
-Never apply the foundation from a local shell. Bootstrap changes do not go through Terrateam; see [Update bootstrap later](10-bootstrap-accounts.md#update-bootstrap-later).
+Never apply the foundation from a local shell, except through the `mcc-apply-foundation` skill when Terrateam cannot run. A person starts it for one pull request. The agent reads the inputs from each foundation root's ignored `.envrc` and `backend.hcl` in your checkout, which you create from the `.envrc.example` and `backend.hcl.example` files in that root. It checks the account, plans and applies dev before prod, applies only the saved plans that person reviewed, and squash-merges with the pull request title, stopping for approval before every step. Because Terrateam never applied that pull request, the merge takes no Terrateam lock. Bootstrap changes do not go through Terrateam; see [Update bootstrap later](10-bootstrap-accounts.md#update-bootstrap-later).
 
 Next: [Deploy, release, and roll back applications](50-deploy-and-release-applications.md).
