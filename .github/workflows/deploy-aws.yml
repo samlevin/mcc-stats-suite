@@ -35,6 +35,7 @@ permissions:
 
 jobs:
   qualify:
+    name: Qualify rollback release
     runs-on: ubuntu-latest
     outputs:
       release-url: ${{ steps.release.outputs.release-url }}
@@ -153,6 +154,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   deploy-prod:
+    name: Roll back production
     needs: qualify
     permissions:
       actions: read

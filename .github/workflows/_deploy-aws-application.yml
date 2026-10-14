@@ -37,6 +37,7 @@ permissions:
 
 jobs:
   qualify-production:
+    name: Verify production reviewer protection
     if: inputs.environment == 'prod'
     runs-on: ubuntu-latest
     permissions:

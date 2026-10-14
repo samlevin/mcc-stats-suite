@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   scope:
+    name: Detect change scope
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.scope.outputs.full }}
@@ -86,6 +87,7 @@ jobs:
               core.setOutput(name, value);
 
   infrastructure:
+    name: Validate infrastructure
     needs: scope
     if: needs.scope.outputs.infrastructure != 'false'
     runs-on: ubuntu-latest
@@ -111,6 +113,7 @@ jobs:
         run: ./scripts/tofu-checks.sh
 
   application-checks:
+    name: Validate applications
     needs: scope
     if: needs.scope.outputs.check != 'false'
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
@@ -195,6 +198,7 @@ jobs:
           fi
 
   select-deployment:
+    name: Select applications to deploy
     needs: check
     # The implicit success() fails when either gate was skipped upstream of
     # check, so require check's own result instead.
