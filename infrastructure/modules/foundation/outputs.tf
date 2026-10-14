@@ -33,7 +33,7 @@ output "turbo_cache_service_policy_json" {
 
 output "github_turbo_cache_role_arn" {
   description = "Dedicated cache workload role; never the CDK deployment role."
-  value       = var.create_github_cache_role ? local.cache_role_arn : null
+  value       = local.github_cache_role ? local.cache_role_arn : null
 }
 
 output "receipt_rule_set_name" {

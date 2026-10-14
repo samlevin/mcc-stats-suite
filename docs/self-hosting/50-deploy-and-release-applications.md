@@ -10,7 +10,7 @@ Each application owns a CDK stack per environment:
 
 `scripts/cdk-app.mjs` refuses plain `dev` and `prod` deploys outside GitHub Actions on `main`, refuses ephemeral deploys inside GitHub Actions, and refuses to destroy a stable stack. Ephemeral deploys use the local `mcclocal1` bootstrap, which deploys only through CloudFormation change sets named `mcclocal1-deploy`. The wrapper therefore rejects hotswap and watch, role ARN, toolkit stack, and change-set name options, the short `-r` and `-m` options, and deployment methods other than `--method=direct`.
 
-Before a stable deploy, the wrapper synthesizes the release, deploys that same assembly, and compares it with the deployed template. It refuses to remove or replace a stateful resource that the deployed template does not retain, refuses to remove a custom resource whose delete handler would run, and refuses while the stack is still updating; see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure). Because the assembly is reused, stable deploys accept only `--require-approval`. When a stable stack's first create rolled back, the wrapper stops and lists what the rollback kept; see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure). The check runs from the revision being deployed, so a rollback to a release from before the check runs without it.
+For a stable deploy, the wrapper confirms that the active AWS account matches `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID`, or the profile's `sso_account_id` when the variable is unset. It then builds `@samlevin/cdk-config` and runs `cdk deploy` for the application, passing any other options through unchanged. The wrapper does not compare the release with the deployed template, so it will not stop a change that removes or replaces a stateful resource or a custom resource. The production job prints a CDK diff before it deploys, but nothing gates the deploy on that diff. If the deploy fails, see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure).
 
 ## Ephemeral stacks
 
@@ -57,6 +57,8 @@ After a `match-to-csv` change reaches dev, and before approving prod:
 For a failure test, send an unsupported or undersized image. The submission records a rejection and the workflow does not report an empty success. For a provider failure, the run contains `RUN_STARTED`, `RUN_FAILED`, the provider request, and a failed completion object.
 
 Never commit test messages, recipient addresses, or domains.
+
+To get alarm email for a stable stack, create a `String` SSM parameter `/mcc/<environment>/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
 
 ## Releases
 

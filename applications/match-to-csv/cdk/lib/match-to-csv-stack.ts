@@ -11,6 +11,8 @@ import {
   type StackProps,
 } from 'aws-cdk-lib';
 import type { Construct, IConstruct } from 'constructs';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as events from 'aws-cdk-lib/aws-events';
 import * as targets from 'aws-cdk-lib/aws-events-targets';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -20,6 +22,8 @@ import * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as ses from 'aws-cdk-lib/aws-ses';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
@@ -30,11 +34,22 @@ import {
   checkLocalEsbuild,
   localEsbuildVersion,
 } from './bundling';
+import {
+  FUNCTION_NAME_DIMENSION,
+  METRIC_NAMESPACE,
+  ZERO_ROW_EXTRACTIONS_METRIC,
+} from '../../src/lib/metrics';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
   /** Commit recorded in Lambda environments and OCR evidence. */
   gitSha: string;
+  /**
+   * SSM parameter that holds the email address subscribed to alarms. The
+   * address resolves at deploy time, so it never appears in source or in the
+   * synthesized template. Without it, alarms still publish to the topic.
+   */
+  alarmEmailParameter?: string;
 }
 
 export class MatchToCsvStack extends Stack {
@@ -43,7 +58,7 @@ export class MatchToCsvStack extends Stack {
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
-    const { deployment, gitSha } = props;
+    const { deployment, gitSha, alarmEmailParameter } = props;
     this.deployment = deployment;
     if (this.bundlingRequired) checkLocalEsbuild(localEsbuildVersion());
     iam.PermissionsBoundary.of(this).apply(
@@ -101,11 +116,15 @@ export class MatchToCsvStack extends Stack {
       ),
     );
 
+    // Operators create this optional parameter out of band; sender addresses
+    // never live in source or OpenTofu state.
+    const senderAllowlistParameter = `${prefix}/sender-allowlist`;
     const processEmail = this.nodeFunction(
       'ProcessEmail',
       'process-email.ts',
       {
         EVIDENCE_BUCKET: evidenceBucket.bucketName,
+        SENDER_ALLOWLIST_PARAMETER: senderAllowlistParameter,
         ...lambdaEnvironment,
       },
       1024,
@@ -143,6 +162,18 @@ export class MatchToCsvStack extends Stack {
     );
 
     rawEmailBucket.grantRead(processEmail);
+    processEmail.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [
+          this.formatArn({
+            service: 'ssm',
+            resource: 'parameter',
+            resourceName: senderAllowlistParameter.slice(1),
+          }),
+        ],
+      }),
+    );
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
     this.grantEvidenceAccess(evidenceBucket, extractText, true);
     this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
@@ -287,6 +318,32 @@ export class MatchToCsvStack extends Stack {
       }),
     );
 
+    // Ephemeral stacks run under the local workload boundary, which grants no
+    // CloudWatch alarm or SNS administration, and nobody watches them.
+    if (!deployment.isEphemeral) {
+      this.addAlarms({
+        alarmEmailParameter,
+        stateMachines: { Workflow: workflow, ReplayWorkflow: replayWorkflow },
+        functions: {
+          ProcessEmail: processEmail,
+          ExtractText: extractText,
+          WriteExtractedCsv: writeExtractedCsv,
+          CompareRuns: compareRuns,
+          MaterializeTrainingData: materializeTrainingData,
+        },
+        deadLetterQueue: workflowDlq,
+        zeroRowExtractions: new cloudwatch.Metric({
+          namespace: METRIC_NAMESPACE,
+          metricName: ZERO_ROW_EXTRACTIONS_METRIC,
+          dimensionsMap: {
+            [FUNCTION_NAME_DIMENSION]: extractText.functionName,
+          },
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.minutes(5),
+        }),
+      });
+    }
+
     // The foundation owns the receipt rule set, its activation, and the shared
     // submit@ rule. An ephemeral stack adds only its own plus-addressed rule.
     if (deployment.ephemeral) {
@@ -337,6 +394,78 @@ export class MatchToCsvStack extends Stack {
     new CfnOutput(this, 'ObjectPrefix', {
       value: deployment.objectPrefix || '(environment default)',
     });
+  }
+
+  /**
+   * Every alarm fires on a single occurrence in a five-minute period and
+   * treats missing data as healthy, because an idle pipeline emits nothing.
+   */
+  private addAlarms(sources: {
+    alarmEmailParameter?: string;
+    stateMachines: Record<string, sfn.StateMachine>;
+    functions: Record<string, lambda.IFunction>;
+    deadLetterQueue: sqs.IQueue;
+    zeroRowExtractions: cloudwatch.IMetric;
+  }): void {
+    const prefix = this.deployment.resourcePrefix;
+    const topic = new sns.Topic(this, 'AlarmTopic', {
+      topicName: `${prefix}-alarms`,
+    });
+    if (sources.alarmEmailParameter) {
+      topic.addSubscription(
+        new subscriptions.EmailSubscription(
+          ssm.StringParameter.valueForStringParameter(
+            this,
+            sources.alarmEmailParameter,
+          ),
+        ),
+      );
+    }
+    const action = new cloudwatchActions.SnsAction(topic);
+    const alarm = (
+      id: string,
+      metric: cloudwatch.IMetric,
+      description: string,
+    ): void => {
+      new cloudwatch.Alarm(this, `${id}Alarm`, {
+        alarmName: `${prefix}-${id}`,
+        alarmDescription: description,
+        metric,
+        threshold: 1,
+        evaluationPeriods: 1,
+        comparisonOperator:
+          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
+      }).addAlarmAction(action);
+    };
+
+    for (const [id, stateMachine] of Object.entries(sources.stateMachines)) {
+      alarm(
+        `${id}ExecutionsFailed`,
+        stateMachine.metricFailed(),
+        `A ${id} execution failed.`,
+      );
+      alarm(
+        `${id}ExecutionsTimedOut`,
+        stateMachine.metricTimedOut(),
+        `A ${id} execution timed out.`,
+      );
+    }
+    alarm(
+      'EventsDeadLetters',
+      sources.deadLetterQueue.metricApproximateNumberOfMessagesVisible({
+        statistic: cloudwatch.Stats.MAXIMUM,
+      }),
+      'EventBridge could not start the workflow for a received email.',
+    );
+    for (const [id, fn] of Object.entries(sources.functions)) {
+      alarm(`${id}Errors`, fn.metricErrors(), `The ${id} Lambda failed.`);
+    }
+    alarm(
+      'ZeroRowExtractions',
+      sources.zeroRowExtractions,
+      'A screenshot extraction succeeded without extracting any rows.',
+    );
   }
 
   private logGroup(id: string, logGroupName: string): logs.LogGroup {

@@ -4,7 +4,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 
 | Path | Purpose |
 | --- | --- |
-| `policy.json` | Model and effort per capability and tool, plus the values each tool accepts |
+| `policy.json` | The repository binding (namespace prefix, repository, project, tracker documents, feature flags), the model and effort per capability and tool, and the values each tool accepts |
 | `roles/*.md` | Source of each agent role (shared text, with `<!-- claude-only -->` and `<!-- codex-only -->` blocks) |
 | `workflows/*.md` | Source of each skill, the user-facing entry points |
 | `workflows/<name>/` | Supporting references copied verbatim into both tools' skills |
@@ -16,6 +16,10 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
 Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
+
+## Reuse in another repository
+
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 
@@ -57,7 +61,9 @@ The personal `review` skill (multi-lens PR review that posts to GitHub) was not 
 | Stack management | `mcc-stack-manager` (`Bash, Read`) | `mcc-stack-manager` | same source |
 | Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source |
 | Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source |
-| Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security` (not model-invocable), `/mcc-write-prose`, `/mcc-agents` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security` (`allow_implicit_invocation: false`), `$mcc-write-prose`, `$mcc-agents` | same source; manifests generated |
+| Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security`, `/mcc-apply-foundation`, and `/mcc-apply-bootstrap` (not model-invocable), `/mcc-write-prose`, `/mcc-agents` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security`, `$mcc-apply-foundation`, and `$mcc-apply-bootstrap` (`allow_implicit_invocation: false`), `$mcc-write-prose`, `$mcc-agents` | same source; manifests generated |
+| Foundation apply | the agent runs `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
+| Bootstrap apply | the agent runs `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
 | Policy resolution | `node scripts/agent-policy.mjs resolve --tool claude ...` | `... --tool codex ...` | `scripts/agent-policy.test.mjs` |
 
 "Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role and workflow for both tools and compares shared lines.
@@ -104,6 +110,12 @@ Claude Code loads `.claude/agents/` and `.claude/skills/` by walking up from the
 Codex loads `.agents/skills/` from every directory between the working directory and the repository root, in trusted and untrusted projects alike. It loads `.codex/agents/` only when the project is trusted (`trust_level = "trusted"` for the repository path in `~/.codex/config.toml`, which Codex writes when you accept the trust prompt). A linked worktree inherits the main checkout's trust. Until the project is trusted, `spawn_agent` reports an unknown `agent_type` for `mcc-*`, and the skills say so instead of continuing. Codex lists skills that share a name side by side rather than picking one, which the prefix also avoids. `$mcc-review-security` has `allow_implicit_invocation: false`, so Codex never picks it on its own.
 
 Trusting the folder is the only activation step in either tool. Nothing here installs, copies, symlinks, or registers anything outside the checkout, and a session in another repository does not see these definitions. Ordinary prerequisites stay yours: the tool itself, `gh` with authentication, the `gh stack` extension for stacked branches, and `npm ci` for the checks (the resolver itself runs without `node_modules`).
+
+## Infrastructure apply skills
+
+`mcc-apply-foundation` stands in for Terrateam on one pull request's foundation roots. It and `mcc-apply-bootstrap` are the only workflows that apply infrastructure, and the `AGENTS.md` exception covers each only when a person invokes it: neither tool lets a model start it on its own, the skill refuses requests relayed by another agent, and it stops for that person's approval before every plan, apply, and merge. The skill is instructions only, with no repository script behind it. The agent runs `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` itself, and uses `gh` only for the pull request's state, checks, and merge. It reads every OpenTofu input, read-only, from each foundation root's ignored `.envrc` and `backend.hcl` in the main checkout, removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from every `direnv`, `aws`, and `tofu` command, checks that the profile's account matches `MCC_<ENV>_ACCOUNT_ID` from `.envrc` before any OpenTofu command, applies only the saved plan the person reviewed, and never plans a bootstrap or data-platform root. The OpenTofu state lock is the only lock. No test exercises the flow itself; running it against a real pull request is a manual check.
+
+`mcc-apply-bootstrap` applies `infrastructure/dev/bootstrap` and then `infrastructure/prod/bootstrap` at the current `origin/main` commit, which Terrateam never runs. It has no pull request, CI gate, or merge, and it follows the same rules as the foundation skill: person-invoked only, one approval per plan and apply, prod only after dev has applied at the same commit, and a new `main` commit voids every plan. The agent runs `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` itself. It reads every OpenTofu input, read-only, from each bootstrap root's ignored `.envrc`, `backend.hcl`, and `*.auto.tfvars` in the main checkout, removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from every `direnv`, `aws`, and `tofu` command, checks that the profile's account matches `MCC_<ENV>_ACCOUNT_ID` from `.envrc` before any OpenTofu command, applies only the saved plan the person reviewed, and never plans a foundation or data-platform root. Running it against both accounts is a manual check.
 
 ## Known limitations
 

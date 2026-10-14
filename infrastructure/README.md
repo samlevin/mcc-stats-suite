@@ -5,8 +5,8 @@ OpenTofu owns account bootstrap and persistent resources shared by application r
 | Root | Owner | Purpose |
 |---|---|---|
 | `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
-| `<environment>/foundation` | Terrateam | KMS, durable evidence storage, the SES receipt rule set, and SSM resource contracts |
-| `<environment>/data-platform` | Terrateam when activated | Shared analytics and lakehouse resources |
+| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the SES receipt rule set, and SSM resource contracts |
+| `<environment>/data-platform` | OpenTofu, when activated | Shared analytics and lakehouse resources |
 
 ## Bootstrap
 
@@ -22,35 +22,34 @@ For stable accounts, each root creates:
 - a private, encrypted, versioned S3 state bucket
 - native S3 state locking
 - the GitHub Actions OIDC provider, or reuse of an existing provider
-- a Terrateam role restricted to the repository's Terrateam workflow
+- optionally, a Terrateam role restricted to the repository's Terrateam workflow
 - a protected-environment CDK role restricted to the deployment workflow on
   `main`
 - a permissions boundary for application runtime roles
 
-For a disposable, locally managed dev account, set
-`create_terrateam_role = false` and `create_cdk_deploy_role = false`. The root
-then omits GitHub OIDC and CI roles while retaining state and the workload
-boundary.
+Set `create_terrateam_role = false` unless you apply the foundation with
+Terrateam. For a disposable, locally managed dev account, also set
+`create_cdk_deploy_role = false`. The root then omits GitHub OIDC and CI roles
+while retaining state and the workload boundary.
 
 The state bucket uses deletion protection, requires TLS, and retains noncurrent
 versions for 90 days. Both CI roles receive `PowerUserAccess`; the CDK entry
-role may assume only this account's `cdk-*` bootstrap roles. Terrateam cannot
-administer IAM, and neither CI role operates this bootstrap state.
+role may assume only this account's `cdk-*` bootstrap roles. The Terrateam role
+cannot administer IAM beyond the Turbo cache role, and neither CI role operates
+this bootstrap state.
 
 Apply bootstrap changes locally through an authorized IAM Identity Center
-session. Terrateam manages only stable operational roots.
+session. CI/CD manages only stable operational roots.
 
 ## Foundation promotion
 
-Foundation code is not packaged or assigned a separate release ID. Terrateam plans pull-request revisions, and the maintainer applies dev and then prod from the pull request. Prod cannot apply before dev. Dev jobs run in the `infra/foundation-dev` GitHub Environment and prod jobs in `infra/foundation-prod`; neither has required reviewers, and only repository administrators can apply prod. Each root stays locked from its first apply until the pull request merges, and Terrateam merges it once every planned root has applied. Nothing applies from `main`. Follow [Change the foundation](../docs/self-hosting/40-change-foundation.md).
+Foundation code is not packaged or assigned a separate release ID. Plan and apply dev, then prod, from the same commit, by hand or from any infrastructure CI/CD. Follow [Apply and change the foundation](../docs/self-hosting/40-change-foundation.md). To use Terrateam, as the upstream repository does, see [Apply the foundation with Terrateam](../docs/self-hosting/70-optional-terrateam.md).
 
-Changes to `modules/foundation` or `.terrateam/config.yml` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
-
-Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and Terrateam for foundation changes.
+Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and run each environment root separately.
 
 ## Inbound email contract
 
-Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input, supplied by Terrateam from the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` secret. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
+Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input; keep it out of version control and out of plain CI variables. A local apply, including one through `mcc-apply-foundation`, reads it from the root's ignored `.envrc`. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
 
 ## Turborepo cache storage contract
 
@@ -58,11 +57,11 @@ The foundation module defines a cache bucket named `<project>-<environment>-<acc
 
 Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc/<environment>/turbo-cache/bucket-name` and `/mcc/<environment>/turbo-cache/data-key-arn`.
 
-The Terrateam role can create this cache role only after the bootstrap grants it permission. Apply the bootstrap first, following [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later).
+When the Terrateam role applies the foundation, it can create this cache role only after the bootstrap grants it permission. Apply the bootstrap first, following [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later).
 
-Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role. It uses the existing bootstrap GitHub provider and workload permissions boundary; foundation never creates a second provider. The role trusts this repository at `refs/heads/main`. Dev accepts the main branch subject for CI and the protected dev environment subject for deployment builds. Prod accepts only the protected prod environment subject. When GitHub immutable repository subjects are enabled, set the `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` repository variable to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, matching bootstrap. Terrateam passes it to both foundation roots as `github_oidc_subject_repository`; without it, the role trusts the mutable `OWNER/REPOSITORY` subject that GitHub no longer sends. No pull request subject is trusted.
+Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role. It uses the existing bootstrap GitHub provider and workload permissions boundary; foundation never creates a second provider. The role trusts only the repository named by `github_oidc_subject_repository`, at `refs/heads/main`, so a fork's foundation creates a role for the fork and never trusts upstream. Dev accepts the main branch subject for CI and the protected dev environment subject for deployment builds. Prod accepts only the protected prod environment subject. When GitHub immutable repository subjects are enabled, pass `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, matching bootstrap, to both foundation roots as `github_oidc_subject_repository` (the root `.envrc` exports it from `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY`). Without immutable subjects, pass `OWNER/REPOSITORY`. A root without the value creates no cache role. No pull request subject is trusted.
 
-The dedicated role can read the two environment-specific SSM cache contracts, list hash candidates only under `turbogha/<environment>/`, and read/write/abort multipart uploads only in that prefix. KMS decrypt/data-key permissions require the regional S3 service and this bucket's encryption context with S3 Bucket Keys. It cannot delete cache objects, administer IAM, read evidence, use another environment's cache, or use the key directly. `github_turbo_cache_role_arn` publishes the role ARN. Configure repository `DEV_AWS_ACCOUNT_ID` and `DEV_AWS_REGION` for trusted CI; deployments use the existing protected environment account/region variables.
+The dedicated role can read the two environment-specific SSM cache contracts, list hash candidates only under `turbogha/<environment>/`, and read/write/abort multipart uploads only in that prefix. KMS decrypt/data-key permissions require the regional S3 service and this bucket's encryption context with S3 Bucket Keys. It cannot delete cache objects, administer IAM, read evidence, use another environment's cache, or use the key directly. `github_turbo_cache_role_arn` publishes the role ARN. `main` CI reads the repository `DEV_AWS_ACCOUNT_ID` and `DEV_AWS_REGION` variables, and deployments use the protected environment account and Region variables. Every cache step in CI and deployments runs only when the repository variable `MCC_TURBO_CACHE` is `true`, so a repository that has not opted in builds uncached.
 
 `cache_service_role_arns` remains an additional explicit same-account workload allowlist and defaults empty. The managed CI cache role is included automatically in both stable roots. Bucket policy denies data/listing access to other principals, including broadly privileged CDK deployment roles. The allowlist removes a denial and grants no permissions itself. Lifecycle expiration still works. OpenTofu `HeadBucket` refreshes remain possible because the listing denial applies to positive `s3:max-keys`, which object-list requests supply; metadata-only refreshes expose no cache names.
 
@@ -80,4 +79,4 @@ tofu -chdir=infrastructure/prod/foundation init -backend=false -lockfile=readonl
 tofu -chdir=infrastructure/prod/foundation validate
 ```
 
-These tests check dev/prod naming and SSM contracts, retention, encryption, IAM policy statements, and invalid service-role inputs. They do not inspect deployed resources. Review real environment plans through Terrateam before accepting the infrastructure change; expected changes are the cache bucket's controls, its SSM parameters, and outputs, with no evidence bucket, KMS key, or deployment-role replacement.
+These tests check dev/prod naming and SSM contracts, retention, encryption, IAM policy statements, and invalid service-role inputs. They do not inspect deployed resources. Review real environment plans before accepting the infrastructure change; expected changes are the cache bucket's controls, its SSM parameters, and outputs, with no evidence bucket, KMS key, or deployment-role replacement.
