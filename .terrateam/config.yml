@@ -58,6 +58,19 @@ dirs:
       autoapply: false
       file_patterns: ['!**/*']
 
+  # Data platform roots stay out of Terrateam until they are activated.
+  infrastructure/dev/data-platform:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/prod/data-platform:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
@@ -83,85 +96,84 @@ dirs:
         - 'infrastructure/modules/foundation/*.tf'
         - '.terrateam/config.yml'
 
+# Workflow steps are defined once here and composed below. Every Terrateam init
+# uses the committed provider lock file and fails when it is stale.
+definitions:
+  lockfile_readonly: &lockfile_readonly '-lockfile=readonly'
+  oidc_subject_repository: &oidc_subject_repository
+    type: env
+    name: TF_VAR_github_oidc_subject_repository
+    cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
+  dev_oidc: &dev_oidc
+    type: oidc
+    provider: aws
+    role_arn: '${DEV_TERRATEAM_ROLE_ARN}'
+  dev_init: &dev_init
+    type: init
+    extra_args:
+      - *lockfile_readonly
+      - '-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}'
+      - '-backend-config=region=${DEV_AWS_REGION}'
+  dev_aws_region: &dev_aws_region
+    type: env
+    name: TF_VAR_aws_region
+    cmd: ['echo', '${DEV_AWS_REGION}']
+  dev_email_domain: &dev_email_domain
+    type: env
+    name: TF_VAR_email_domain
+    cmd: ['echo', '${DEV_MCC_EMAIL_DOMAIN}']
+    sensitive: true
+  prod_oidc: &prod_oidc
+    type: oidc
+    provider: aws
+    role_arn: '${PROD_TERRATEAM_ROLE_ARN}'
+  prod_init: &prod_init
+    type: init
+    extra_args:
+      - *lockfile_readonly
+      - '-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}'
+      - '-backend-config=region=${PROD_AWS_REGION}'
+  prod_aws_region: &prod_aws_region
+    type: env
+    name: TF_VAR_aws_region
+    cmd: ['echo', '${PROD_AWS_REGION}']
+  prod_email_domain: &prod_email_domain
+    type: env
+    name: TF_VAR_email_domain
+    cmd: ['echo', '${PROD_MCC_EMAIL_DOMAIN}']
+    sensitive: true
+
 workflows:
   - tag_query: 'dev'
     environment: infra/foundation-dev
     plan:
-      - type: oidc
-        provider: aws
-        role_arn: '${DEV_TERRATEAM_ROLE_ARN}'
-      - type: init
-        extra_args:
-          - '-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}'
-          - '-backend-config=region=${DEV_AWS_REGION}'
-      - type: env
-        name: TF_VAR_aws_region
-        cmd: ['echo', '${DEV_AWS_REGION}']
-      - type: env
-        name: TF_VAR_github_oidc_subject_repository
-        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
-      - type: env
-        name: TF_VAR_email_domain
-        cmd: ['echo', '${DEV_MCC_EMAIL_DOMAIN}']
-        sensitive: true
+      - *dev_oidc
+      - *dev_init
+      - *dev_aws_region
+      - *oidc_subject_repository
+      - *dev_email_domain
       - type: plan
     apply:
-      - type: oidc
-        provider: aws
-        role_arn: '${DEV_TERRATEAM_ROLE_ARN}'
-      - type: init
-        extra_args:
-          - '-backend-config=bucket=${DEV_TOFU_STATE_BUCKET}'
-          - '-backend-config=region=${DEV_AWS_REGION}'
-      - type: env
-        name: TF_VAR_aws_region
-        cmd: ['echo', '${DEV_AWS_REGION}']
-      - type: env
-        name: TF_VAR_github_oidc_subject_repository
-        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
-      - type: env
-        name: TF_VAR_email_domain
-        cmd: ['echo', '${DEV_MCC_EMAIL_DOMAIN}']
-        sensitive: true
+      - *dev_oidc
+      - *dev_init
+      - *dev_aws_region
+      - *oidc_subject_repository
+      - *dev_email_domain
       - type: apply
 
   - tag_query: 'prod'
     environment: infra/foundation-prod
     plan:
-      - type: oidc
-        provider: aws
-        role_arn: '${PROD_TERRATEAM_ROLE_ARN}'
-      - type: init
-        extra_args:
-          - '-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}'
-          - '-backend-config=region=${PROD_AWS_REGION}'
-      - type: env
-        name: TF_VAR_aws_region
-        cmd: ['echo', '${PROD_AWS_REGION}']
-      - type: env
-        name: TF_VAR_github_oidc_subject_repository
-        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
-      - type: env
-        name: TF_VAR_email_domain
-        cmd: ['echo', '${PROD_MCC_EMAIL_DOMAIN}']
-        sensitive: true
+      - *prod_oidc
+      - *prod_init
+      - *prod_aws_region
+      - *oidc_subject_repository
+      - *prod_email_domain
       - type: plan
     apply:
-      - type: oidc
-        provider: aws
-        role_arn: '${PROD_TERRATEAM_ROLE_ARN}'
-      - type: init
-        extra_args:
-          - '-backend-config=bucket=${PROD_TOFU_STATE_BUCKET}'
-          - '-backend-config=region=${PROD_AWS_REGION}'
-      - type: env
-        name: TF_VAR_aws_region
-        cmd: ['echo', '${PROD_AWS_REGION}']
-      - type: env
-        name: TF_VAR_github_oidc_subject_repository
-        cmd: ['echo', '${MCC_GITHUB_OIDC_SUBJECT_REPOSITORY}']
-      - type: env
-        name: TF_VAR_email_domain
-        cmd: ['echo', '${PROD_MCC_EMAIL_DOMAIN}']
-        sensitive: true
+      - *prod_oidc
+      - *prod_init
+      - *prod_aws_region
+      - *oidc_subject_repository
+      - *prod_email_domain
       - type: apply
