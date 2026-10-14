@@ -141,7 +141,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
+        # Opt-in per repository; a repository without MCC_TURBO_CACHE runs uncached.
+        if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
@@ -208,7 +209,7 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Start trusted dev Turbo cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev

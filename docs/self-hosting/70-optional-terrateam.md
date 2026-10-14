@@ -44,7 +44,7 @@ Store the email domain as a secret. The Terrateam workflow prints its environmen
 | `infra/foundation-dev` environment | `DEV_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives dev email, in lowercase |
 | `infra/foundation-prod` environment | `PROD_TERRATEAM_ROLE_ARN`, `PROD_TOFU_STATE_BUCKET`, `PROD_AWS_REGION` | variables | prod equivalents of the dev values |
 | `infra/foundation-prod` environment | `PROD_MCC_EMAIL_DOMAIN` | secret | verified SES domain that receives prod email, in lowercase |
-| repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, when the repository uses immutable OIDC subjects |
+| repository | `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` | variable | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects; the Turbo cache role needs it |
 
 Terrateam passes these to the foundation roots as the backend bucket and Region, `TF_VAR_aws_region`, `TF_VAR_email_domain`, and `TF_VAR_github_oidc_subject_repository`.
 

@@ -21,7 +21,7 @@ direnv allow
 
 The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it. Set `MCC_AWS_REGION` to your workload Region.
 
-Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise delete that line and the `TF_VAR_github_oidc_subject_repository` line. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
+Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise set it to `OWNER/REPOSITORY`. The foundation's optional Turbo cache role needs this value either way. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
 
 The root `.envrc` defaults `AWS_PROFILE` to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
 
