@@ -4,7 +4,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 
 | Path | Purpose |
 | --- | --- |
-| `policy.json` | Model and effort per capability and tool, plus the values each tool accepts |
+| `policy.json` | The repository binding (namespace prefix, repository, project, tracker documents, feature flags), the model and effort per capability and tool, and the values each tool accepts |
 | `roles/*.md` | Source of each agent role (shared text, with `<!-- claude-only -->` and `<!-- codex-only -->` blocks) |
 | `workflows/*.md` | Source of each skill, the user-facing entry points |
 | `workflows/<name>/` | Supporting references copied verbatim into both tools' skills |
@@ -16,6 +16,10 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
 Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
+
+## Reuse in another repository
+
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 

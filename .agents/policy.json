@@ -1,41 +1,101 @@
 {
   "$schema": "./policy.schema.json",
-  "description": "Repository model and effort policy for the MCC agent workflows. scripts/agent-policy.mjs reads this file; both the Claude Code and Codex definitions are generated from it.",
+  "description": "Repository binding, model, and effort policy for the agent workflows. scripts/agent-policy.mjs reads this file; both the Claude Code and Codex definitions are generated from it, and every placeholder in .agents/roles and .agents/workflows resolves here.",
+  "binding": {
+    "namespace": "mcc",
+    "label": "MCC",
+    "repository": "samlevin/mcc-stats-suite",
+    "project": {
+      "owner": "samlevin",
+      "number": 1,
+      "name": "MCC delivery"
+    },
+    "docs": {
+      "triage": "ISSUE_TRIAGE.md",
+      "workflow": "WORKFLOW.md",
+      "guides": ["WORKFLOW.md", "CONTRIBUTING.md", "TESTING.md"]
+    },
+    "features": {
+      "infrastructure": true
+    }
+  },
   "capabilities": {
     "issue-creation": {
       "summary": "Plan, draft, and publish issues in the main thread",
-      "claude": { "model": "sonnet", "effort": "medium" },
-      "codex": { "model": "gpt-6.1-sol", "effort": "medium" }
+      "claude": {
+        "model": "sonnet",
+        "effort": "medium"
+      },
+      "codex": {
+        "model": "gpt-6.1-sol",
+        "effort": "medium"
+      }
     },
     "issue-triage": {
       "summary": "Independent read-only classification of drafted issues",
-      "claude": { "model": "haiku", "effort": "low" },
-      "codex": { "model": "gpt-6-luna", "effort": "low" }
+      "claude": {
+        "model": "haiku",
+        "effort": "low"
+      },
+      "codex": {
+        "model": "gpt-6-luna",
+        "effort": "low"
+      }
     },
     "orchestration": {
       "summary": "Serial dispatch of a container's executable leaves",
-      "claude": { "model": "sonnet", "effort": "medium" },
-      "codex": { "model": "gpt-6-luna", "effort": "medium" }
+      "claude": {
+        "model": "sonnet",
+        "effort": "medium"
+      },
+      "codex": {
+        "model": "gpt-6-luna",
+        "effort": "medium"
+      }
     },
     "implementation": {
       "summary": "Leaf delivery and PR rework through a ready-for-review PR",
-      "claude": { "model": "opus", "effort": "high" },
-      "codex": { "model": "gpt-6.1-sol", "effort": "high" }
+      "claude": {
+        "model": "opus",
+        "effort": "high"
+      },
+      "codex": {
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      }
     },
     "stack-management": {
       "summary": "Branch topology and gh stack operations for the implementer",
-      "claude": { "model": "sonnet", "effort": "low" },
-      "codex": { "model": "gpt-6-luna", "effort": "low" }
+      "claude": {
+        "model": "sonnet",
+        "effort": "low"
+      },
+      "codex": {
+        "model": "gpt-6-luna",
+        "effort": "low"
+      }
     },
     "code-review": {
       "summary": "Read-only review against acceptance criteria and exact SHAs",
-      "claude": { "model": "opus", "effort": "high" },
-      "codex": { "model": "gpt-6.1-sol", "effort": "high" }
+      "claude": {
+        "model": "opus",
+        "effort": "high"
+      },
+      "codex": {
+        "model": "gpt-6.1-sol",
+        "effort": "high"
+      }
     },
     "security-review": {
       "summary": "Explicitly requested read-only security review",
-      "claude": { "model": "opus", "effort": "max" },
-      "codex": { "model": "gpt-6-astra", "effort": "high" }
+      "claude": {
+        "model": "opus",
+        "effort": "max"
+      },
+      "codex": {
+        "model": "gpt-6-astra",
+        "effort": "high"
+      }
     }
   },
   "roles": {
