@@ -20,6 +20,8 @@
     "format:check": "prettier . --check --ignore-unknown",
     "check": "npm run format:check && npm run lint && npm run release:check && npm run typecheck && npm test && npm run build",
     "release:check": "node scripts/release-metadata.mjs --check",
+    "agents:check": "node scripts/agent-policy.mjs check",
+    "agents:generate": "node scripts/agent-policy.mjs generate",
     "release:metadata": "node scripts/release-metadata.mjs",
     "cdk:synth": "turbo run cdk:synth",
     "app:synth": "node scripts/cdk-app.mjs synth",

@@ -1,0 +1,7 @@
+# Generated from .agents/workflows/create-github-issue.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`.
+interface:
+  display_name: 'MCC: Create GitHub issue'
+  short_description: File typed MCC issues with independent triage
+  default_prompt: Use $mcc-create-github-issue to file this as an MCC issue.
+policy:
+  allow_implicit_invocation: true
