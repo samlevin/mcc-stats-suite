@@ -15,6 +15,11 @@ export default tseslint.config(
       '**/.terraform/**',
       '**/.turbo/**',
       '**/.tap/**',
+      // Agent-owned linked worktrees are full repository copies. ESLint does
+      // not read .gitignore, so without these entries `eslint .` in the main
+      // checkout type-checks every worktree and can exhaust the V8 heap.
+      '.claude/worktrees/**',
+      '.codex/worktrees/**',
     ],
   },
   {
