@@ -60,6 +60,64 @@ Never commit test messages, recipient addresses, or domains.
 
 To get alarm email for a stable stack, create a `String` SSM parameter `/mcc/<environment>/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
 
+## Manage the sender allowlist
+
+The optional `match-to-csv` sender allowlist is the SSM parameter `/mcc/<environment>/match-to-csv/sender-allowlist`. Use `/mcc/dev/match-to-csv/sender-allowlist` for shared dev and every ephemeral stack, and `/mcc/prod/match-to-csv/sender-allowlist` for production. A dev allowlist change affects all those dev stacks.
+
+Create the parameter by hand as `String` or `StringList`. `process-email` splits the value on commas or whitespace and matches addresses without regard to case. Use comma-separated addresses for `StringList`, as Parameter Store requires. When the parameter exists, every `From` address must be listed. A message with no `From` address is rejected. If the parameter is missing, the allowlist accepts every sender; SES verdict screening and attachment validation still apply.
+
+`process-email` reads the parameter for each message and does not cache its value between invocations. Creation, updates, and deletion apply to the next message without a plan, pull request, or deploy. Keep this parameter hand-managed. Never add it to OpenTofu or commit its value or real sender addresses to the repository.
+
+### AWS console
+
+1. Sign in to the target environment's AWS account and select the Region where `match-to-csv` is deployed. Open **Systems Manager -> Parameter Store**.
+2. To create the allowlist, choose **Create parameter**. Enter the environment's full parameter name above, choose the **Standard** tier, and choose **String** or **StringList** as the type. For `String`, keep the data type as **text**. Enter the allowed addresses, such as `player@example.test,teammate@example.test`, then choose **Create parameter**. See AWS's [console creation reference](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-create-console.html) for the field descriptions.
+3. To update it, open the parameter and choose **Edit**. Replace the value with the complete desired list, save the changes, then check the saved value.
+4. To remove the restriction, select the parameter in Parameter Store, choose **Delete**, and confirm deletion. A missing parameter accepts every sender through the allowlist.
+
+### AWS CLI
+
+Use a signed-in profile with permission to read, write, and delete the parameter in the application's Region. These examples use the `mcc-dev` profile and its configured Region. For production, change both the profile to `mcc-prod` and `environment` to `prod` before running any command.
+
+```console
+export AWS_PROFILE=mcc-dev
+environment=dev
+allowlist_parameter="/mcc/${environment}/match-to-csv/sender-allowlist"
+aws sso login --profile "$AWS_PROFILE"
+aws sts get-caller-identity
+```
+
+Create or replace the complete list with [`put-parameter --overwrite`](https://docs.aws.amazon.com/cli/latest/reference/ssm/put-parameter.html). Replace these placeholder addresses with your allowed senders locally. Use the existing parameter's type when updating it; this example creates a `String`.
+
+```console
+aws ssm put-parameter \
+  --name "$allowlist_parameter" \
+  --type String \
+  --value 'player@example.test,teammate@example.test' \
+  --overwrite
+```
+
+Read the saved type, value, and version:
+
+```console
+aws ssm get-parameter \
+  --name "$allowlist_parameter" \
+  --query 'Parameter.{Type:Type,Value:Value,Version:Version}'
+```
+
+To add or remove a sender, rerun `put-parameter --overwrite` with the entire revised list, then read it back. To remove the restriction entirely, delete the parameter:
+
+```console
+aws ssm delete-parameter --name "$allowlist_parameter"
+aws ssm get-parameter --name "$allowlist_parameter"
+```
+
+The final read should return `ParameterNotFound`. Sender addresses in CLI history and output stay local; never copy them into a commit, issue, or pull request.
+
+### Verify in dev
+
+After saving the dev allowlist, send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result. After an update or deletion, send a new message to verify the new behavior without redeploying.
+
 ## Releases
 
 Release Please versions each application and the shared `@samlevin/cdk-config` and `@samlevin/contracts` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
