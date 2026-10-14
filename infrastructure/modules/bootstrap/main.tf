@@ -268,7 +268,7 @@ data "aws_iam_policy_document" "cdk_deploy_assume_role" {
     condition {
       test     = "StringEquals"
       variable = "token.actions.githubusercontent.com:workflow"
-      values   = [var.cdk_workflow_name]
+      values   = var.cdk_workflow_names
     }
 
     condition {

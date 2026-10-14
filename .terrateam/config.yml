@@ -16,13 +16,18 @@ drift:
       tag_query: 'foundation'
       schedule: weekly
 
-# Foundation changes are applied from the pull request, dev before prod. Nothing
-# applies from main. A root stays locked from its first apply until the pull
-# request merges, and Terrateam merges it once every planned root has applied.
-lock_policy: strict
+# Foundation roots run only on request. Opening or updating a pull request plans
+# nothing; a `terrateam plan` comment plans dev, and dev is applied by comment.
+# Prod plans only after the dev apply succeeds and is also applied by comment.
+# Nothing applies from main. A root is locked only when Terrateam applies it, and
+# the lock is released when the pull request merges, so merging a pull request
+# that Terrateam never applied takes no lock. Terrateam merges the pull request
+# only after every planned root has applied.
+lock_policy: apply
 
 automerge:
   enabled: true
+  require_explicit_apply: true
   merge_strategy: squash
   retain_pr_title: true
 
@@ -59,6 +64,26 @@ dirs:
       autoapply: false
       file_patterns: ['!**/*']
 
+  # Modules are not roots. Without these entries Terrateam would plan them with its
+  # default workflow, and access control would reject them as untagged.
+  infrastructure/modules/bootstrap:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/modules/data-platform:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/modules/foundation:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
   # Data platform roots stay out of Terrateam until they are activated.
   infrastructure/dev/data-platform:
     when_modified:
@@ -75,6 +100,7 @@ dirs:
   infrastructure/dev/foundation:
     tags: [aws, dev, foundation]
     when_modified:
+      autoplan: false
       autoapply: false
       file_patterns:
         - '${DIR}/*.tf'
@@ -86,10 +112,10 @@ dirs:
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
     when_modified:
+      autoplan: false
       autoapply: false
       depends_on:
         tag_query: 'dir:infrastructure/dev/foundation'
-        prune_on_no_change: true
       file_patterns:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'

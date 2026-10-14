@@ -1,13 +1,13 @@
 ---
 name: agents
-description: "Maintain the MCC repository agent workflows: change a role's model or effort, edit a role or skill, add or remove a role or skill, update the supported model list, then regenerate, verify, and stage the Claude Code and Codex output. Use for 'regenerate the agents', 'change the implementer model', 'add an agent role', or any edit under .agents/, .claude/agents, .claude/skills, or .codex/agents in samlevin/mcc-stats-suite."
+description: "Maintain the {{label}} repository agent workflows: change a role's model or effort, edit a role or skill, add or remove a role or skill, update the supported model list, then regenerate, verify, and stage the Claude Code and Codex output. Use for 'regenerate the agents', 'change the implementer model', 'add an agent role', or any edit under .agents/, .claude/agents, .claude/skills, or .codex/agents in {{repository}}."
 argument-hint: "[what to change, or 'regenerate']"
 codex:
-  display_name: "MCC: Maintain agents"
+  display_name: "{{label}}: Maintain agents"
   short_description: "Edit agent sources, regenerate both tools, verify, stage"
-  default_prompt: "Use $mcc-agents to apply this change to the repository agent workflows."
+  default_prompt: "Use ${{prefix}}agents to apply this change to the repository agent workflows."
 ---
-# MCC maintain agents
+# {{label}} maintain agents
 
 The Claude Code and Codex definitions are generated. Never edit a generated file; every one carries a `Generated from ...` header and `npm run agents:check` rejects hand edits. Work in the branch and worktree you already have; this skill does not create issues, branches, or PRs.
 
@@ -15,6 +15,7 @@ The Claude Code and Codex definitions are generated. Never edit a generated file
 
 | Change | Edit |
 | --- | --- |
+| The repository the workflows bind to: namespace prefix, label, repository, project, tracker documents, feature flags | `.agents/policy.json` (`binding`) |
 | Model or effort for a capability, or which models and efforts a tool accepts | `.agents/policy.json` (`capabilities`, `supported`) |
 | An agent's instructions, tools, isolation, color, or Codex permissions | `.agents/roles/<role>.md` (frontmatter `claude:` and `codex:` keys, body shared) |
 | A skill's instructions, description, argument hint, or invocation policy | `.agents/workflows/<name>.md` |
@@ -23,7 +24,7 @@ The Claude Code and Codex definitions are generated. Never edit a generated file
 | A new skill | add `.agents/workflows/<name>.md`; add it to the skill list in `scripts/agent-policy.test.mjs` |
 | Remove a role or skill | delete the source (and the `roles` entry); `generate` removes the generated output |
 
-Text that applies to one tool goes in a `<!-- claude-only -->` ... `<!-- /claude-only -->` or `<!-- codex-only -->` ... `<!-- /codex-only -->` block; everything else is shared and must read correctly in both tools. Do not add `model` or `model_reasoning_effort` to a Codex agent; the policy is applied at spawn time on purpose. Names get the `mcc-` prefix from the generator, so write `name: implementer`, not `name: mcc-implementer`. Keep `.agents/README.md` current when the policy table or the file layout changes; its policy table is a copy of `policy.json`.
+Sources never name the repository. Write `\{{prefix}}`, `\{{label}}`, `\{{repository}}`, `\{{project.owner}}`, `\{{project.number}}`, `\{{project.name}}`, `\{{project.url}}`, `\{{docs.triage}}`, `\{{docs.workflow}}`, or `\{{docs.guides}}` and the generator fills them from `binding`; an unknown placeholder fails generation. Wrap text that applies only when a feature flag is on in `\{{#infrastructure}}` ... `\{{/infrastructure}}`. To show a placeholder literally, as this paragraph does, write `\\{{` in the source. Text that applies to one tool goes in a `<!-- claude-only -->` ... `<!-- /claude-only -->` or `<!-- codex-only -->` ... `<!-- /codex-only -->` block; everything else is shared and must read correctly in both tools. Do not add `model` or `model_reasoning_effort` to a Codex agent; the policy is applied at spawn time on purpose. Names get the `{{prefix}}` prefix from the generator, so write `name: implementer`, not `name: {{prefix}}implementer`. Keep `.agents/README.md` current when the policy table or the file layout changes; its policy table is a copy of `policy.json`.
 
 Before adding a Codex model to `supported`, confirm it exists in `codex debug models`. Before adding a Claude model, confirm it is one of the documented aliases or a `claude-*` ID.
 

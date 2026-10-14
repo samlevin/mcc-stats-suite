@@ -2,9 +2,9 @@
 name: write-prose
 description: Style rules for text published for OTHER people to read. Load ONLY when writing or editing a PR title/description, commit message, GitHub issue body or comment, PR review comment, README/docs file, release notes, or email. NEVER load for replies to the user, progress updates, final reports, agent-to-agent handoffs, or code.
 codex:
-  display_name: "MCC: Write prose"
+  display_name: "{{label}}: Write prose"
   short_description: "Style rules for PR bodies, issue bodies, comments, and docs"
-  default_prompt: "Use $mcc-write-prose before writing this text for other people."
+  default_prompt: "Use ${{prefix}}write-prose before writing this text for other people."
 ---
 
 # Writing Prose That Doesn't Sound Like AI

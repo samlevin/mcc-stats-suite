@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
@@ -456,10 +457,11 @@ function runPrerequisites(stub) {
     [
       '#!/usr/bin/env bash',
       `echo "aws $*" >> "${join(directory, 'calls.log')}"`,
-      'case "$1 $2" in',
-      `  "ssm get-parameters") cat "${join(directory, 'parameters.json')}" ;;`,
-      `  "ses describe-active-receipt-rule-set") echo "${stub.active ?? 'mcc-match-to-csv-dev'}" ;;`,
-      `  "ses get-identity-verification-attributes") echo "${stub.identity ?? 'Success'}" ;;`,
+      'case "$1 $2 $4" in',
+      `  "ssm get-parameters /mcc/dev/match-to-csv/alarm-email") echo "${stub.alarmEmailCount ?? 0}" ;;`,
+      `  "ssm get-parameters "*) cat "${join(directory, 'parameters.json')}" ;;`,
+      `  "ses describe-active-receipt-rule-set "*) echo "${stub.active ?? 'mcc-match-to-csv-dev'}" ;;`,
+      `  "ses get-identity-verification-attributes "*) echo "${stub.identity ?? 'Success'}" ;;`,
       '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
       'esac',
     ].join('\n'),
@@ -512,7 +514,28 @@ test('match-to-csv prerequisites pass and mask the published domain', () => {
     'aws ses get-identity-verification-attributes --identities mail.example.com ' +
       '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
     'dig +short MX mail.example.com',
+    'aws ssm get-parameters --names /mcc/dev/match-to-csv/alarm-email ' +
+      '--query length(Parameters) --output text',
   ]);
+  assert.match(
+    result.stdout,
+    /::notice::\/mcc\/dev\/match-to-csv\/alarm-email is not set/,
+  );
+});
+
+test('match-to-csv prerequisites export the optional alarm email parameter name', () => {
+  const result = runPrerequisites({ alarmEmailCount: 1 });
+  assert.equal(result.status, 0, result.stderr + result.stdout);
+  // Only the parameter name leaves the step. CloudFormation resolves the
+  // address itself, so the step never reads the value.
+  assert.equal(
+    result.githubEnv,
+    'MCC_ALARM_EMAIL_PARAMETER=/mcc/dev/match-to-csv/alarm-email\n',
+  );
+  assert.ok(
+    result.calls.every((call) => !call.includes('get-parameter ')),
+    'the step never reads the alarm email value',
+  );
 });
 
 for (const [name, stub, message] of [
@@ -599,4 +622,73 @@ test('one deployment selector publishes the application selection after the requ
     }),
     false,
   );
+});
+
+const repositoryFile = (path) =>
+  readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+
+// GitHub's OIDC `workflow` claim carries the top-level workflow's `name:`,
+// never the name of a reusable workflow it calls.
+const deploymentCallerNames = () => {
+  const workflows = new Map(
+    readdirSync(new URL('../.github/workflows/', import.meta.url))
+      .filter((file) => file.endsWith('.yml'))
+      .map((file) => [file, workflow(file.slice(0, -'.yml'.length))]),
+  );
+  const reaches = (file, target, seen = new Set()) => {
+    if (seen.has(file)) return false;
+    seen.add(file);
+    return Object.values(workflows.get(file)?.jobs ?? {}).some((job) => {
+      const called = job.uses?.match(/^\.\/\.github\/workflows\/(.+\.yml)$/);
+      return (
+        called && (called[1] === target || reaches(called[1], target, seen))
+      );
+    });
+  };
+  const triggers = ({ on }) =>
+    typeof on === 'string'
+      ? [on]
+      : Array.isArray(on)
+        ? on
+        : Object.keys(on ?? {});
+  return [...workflows]
+    .filter(
+      ([file, definition]) =>
+        !triggers(definition).includes('workflow_call') &&
+        reaches(file, '_deploy-aws-application.yml'),
+    )
+    .map(([, definition]) => definition.name)
+    .sort();
+};
+
+const trustedWorkflowNames = () => {
+  const variables = repositoryFile(
+    'infrastructure/modules/bootstrap/variables.tf',
+  );
+  const block = variables.match(
+    /variable "cdk_workflow_names" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(block, 'bootstrap must declare cdk_workflow_names');
+  const list = block.match(/^\s*default\s*=\s*\[([^\]]*)\]/m)?.[1];
+  assert.ok(list !== undefined, 'cdk_workflow_names needs a list default');
+  return [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort();
+};
+
+test('CDK entry role trusts exactly the workflows that deploy', () => {
+  const callers = deploymentCallerNames();
+  assert.deepEqual(callers, [
+    'deploy-applications',
+    'rollback-aws-application',
+  ]);
+  assert.deepEqual(trustedWorkflowNames(), callers);
+  assert.ok(!callers.includes(deployment.name));
+  // The bootstrap roots must use the module default, which this test pins.
+  for (const environment of ['dev', 'prod']) {
+    for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {
+      assert.doesNotMatch(
+        repositoryFile(`infrastructure/${environment}/bootstrap/${file}`),
+        /cdk_workflow_name/,
+      );
+    }
+  }
 });

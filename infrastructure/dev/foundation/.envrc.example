@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Copy to .envrc, replace every placeholder, then run: direnv allow
+# Requires the repository-root .envrc, which sets the dev account ID, the
+# Region, and the OIDC subject repository.
+source_up
+
+# Local AWS profile for the dev foundation account.
+export MCC_DEV_INFRA_PROFILE="mcc-dev-admin"
+export AWS_PROFILE="$MCC_DEV_INFRA_PROFILE"
+# Lowercase domain verified for SES in dev. Never commit it.
+export TF_VAR_email_domain="REPLACE_WITH_VERIFIED_DOMAIN"

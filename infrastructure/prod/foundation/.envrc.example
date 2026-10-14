@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Copy to .envrc, replace every placeholder, then run: direnv allow
+# Requires the repository-root .envrc, which sets the Region and the OIDC
+# subject repository.
+source_up
+
+# Local AWS profile and account ID for the prod foundation account.
+export MCC_PROD_INFRA_PROFILE="mcc-prod-admin"
+export MCC_PROD_ACCOUNT_ID="222222222222"
+export AWS_PROFILE="$MCC_PROD_INFRA_PROFILE"
+# Lowercase domain verified for SES in prod. Never commit it.
+export TF_VAR_email_domain="REPLACE_WITH_VERIFIED_DOMAIN"

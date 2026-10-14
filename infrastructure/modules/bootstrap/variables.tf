@@ -61,10 +61,15 @@ variable "terrateam_workflow_path" {
   default     = ".github/workflows/terrateam.yml"
 }
 
-variable "cdk_workflow_name" {
-  description = "GitHub Actions workflow name trusted by the CDK entry role."
-  type        = string
-  default     = "deploy-aws-application"
+variable "cdk_workflow_names" {
+  description = "Names of the top-level GitHub Actions workflows that call the reusable deployment workflow. GitHub puts the caller's name, not the reusable workflow's, in the OIDC workflow claim."
+  type        = list(string)
+  default     = ["deploy-applications", "rollback-aws-application"]
+
+  validation {
+    condition     = length(var.cdk_workflow_names) > 0 && alltrue([for name in var.cdk_workflow_names : length(trimspace(name)) > 0])
+    error_message = "cdk_workflow_names must list at least one non-empty workflow name."
+  }
 }
 
 variable "project_name" {

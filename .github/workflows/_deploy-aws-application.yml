@@ -103,7 +103,10 @@ jobs:
         env:
           TARGET_SHA: ${{ inputs.sha }}
         run: test "$(git rev-parse HEAD)" = "${TARGET_SHA}"
+      # The Turbo cache is opt-in per repository; a repository without
+      # MCC_TURBO_CACHE builds uncached.
       - name: Check out cache action from the qualified workflow revision
+        if: vars.MCC_TURBO_CACHE == 'true'
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ github.workflow_sha }}
@@ -126,6 +129,7 @@ jobs:
           METADATA="$(npm run release:metadata --silent -- --application "${APPLICATION}")"
           echo "metadata=${METADATA}" >> "${GITHUB_OUTPUT}"
       - name: Start environment Turbo cache
+        if: vars.MCC_TURBO_CACHE == 'true'
         uses: ./.cache-workflow/.github/actions/turbo-s3-cache
         with:
           environment: ${{ inputs.environment }}
@@ -195,6 +199,18 @@ jobs:
             grep -Fq "inbound-smtp.${AWS_REGION}.amazonaws.com."; then
             echo "::error::The MX record for the published domain does not target SES inbound receiving in the deployment region"
             exit 1
+          fi
+          # The alarm email is optional. CloudFormation resolves it from SSM, so
+          # the address never reaches the template or these logs.
+          ALARM_EMAIL_PARAMETER="/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/alarm-email"
+          ALARM_EMAIL_COUNT="$(aws ssm get-parameters \
+            --names "${ALARM_EMAIL_PARAMETER}" \
+            --query 'length(Parameters)' \
+            --output text)"
+          if [ "${ALARM_EMAIL_COUNT}" = "1" ]; then
+            echo "MCC_ALARM_EMAIL_PARAMETER=${ALARM_EMAIL_PARAMETER}" >> "${GITHUB_ENV}"
+          else
+            echo "::notice::${ALARM_EMAIL_PARAMETER} is not set; alarms publish to the stack topic without an email subscription"
           fi
       - name: Synthesize
         run: |

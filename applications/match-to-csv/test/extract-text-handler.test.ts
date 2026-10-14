@@ -22,6 +22,7 @@ function dependencies(
   writes: Array<{ key: string; value: any }>,
   analyze: ExtractTextDependencies['analyze'],
   image: Buffer = Buffer.from('image'),
+  publishedRowCounts: number[] = [],
 ): ExtractTextDependencies {
   let id = 0;
   return {
@@ -39,6 +40,9 @@ function dependencies(
       writes.push({ key, value });
       return { bucket, key };
     },
+    publishExtractionMetrics(rowCount) {
+      publishedRowCounts.push(rowCount);
+    },
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
     build: { gitSha: 'commit-sha', environment: 'TEST' },
@@ -47,12 +51,18 @@ function dependencies(
 
 t.test('runExtraction records a complete successful run', async (t) => {
   const writes: Array<{ key: string; value: any }> = [];
+  const publishedRowCounts: number[] = [];
   const result = await runExtraction(
     { source },
-    dependencies(writes, async () => ({
-      $metadata: { requestId: 'request-id' },
-      Blocks: [],
-    })),
+    dependencies(
+      writes,
+      async () => ({
+        $metadata: { requestId: 'request-id' },
+        Blocks: [],
+      }),
+      undefined,
+      publishedRowCounts,
+    ),
   );
 
   t.equal(result.runId, 'id-1');
@@ -82,21 +92,32 @@ t.test('runExtraction records a complete successful run', async (t) => {
     ),
   );
   t.ok(writes.some((write) => write.value.type === 'RUN_SUCCEEDED'));
+  t.same(
+    publishedRowCounts,
+    [0],
+    'a response without a table publishes a zero-row extraction',
+  );
 });
 
 t.test(
   'runExtraction records provider failures and rethrows them',
   async (t) => {
     const writes: Array<{ key: string; value: any }> = [];
+    const publishedRowCounts: number[] = [];
     const providerError = new Error('try again');
     providerError.name = 'Textract.ThrottlingException';
 
     await t.rejects(
       runExtraction(
         { source },
-        dependencies(writes, async () => {
-          throw providerError;
-        }),
+        dependencies(
+          writes,
+          async () => {
+            throw providerError;
+          },
+          undefined,
+          publishedRowCounts,
+        ),
       ),
       { name: 'Textract.ThrottlingException' },
     );
@@ -110,6 +131,7 @@ t.test(
       ),
     );
     t.ok(writes.some((write) => write.value.type === 'RUN_FAILED'));
+    t.same(publishedRowCounts, [], 'a failed run publishes no row count');
   },
 );
 

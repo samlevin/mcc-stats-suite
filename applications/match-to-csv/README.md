@@ -10,6 +10,7 @@ The package does not create matches, associate screenshots with matches, adjudic
 configured SES recipient
   -> raw MIME email in S3
   -> EventBridge and Step Functions
+  -> sender screening (SES verdicts and optional allowlist)
   -> attachment validation
   -> one SourceScreenshot per accepted image
   -> one ProcessingRun per screenshot
@@ -19,6 +20,14 @@ configured SES recipient
 The original image is never transformed or replaced. Rejected image attachments are preserved with rejection metadata. Non-image attachments remain available in the retained MIME message.
 
 V1 processing accepts PNG and JPEG images up to 10 MB (10,000,000 bytes, the Textract synchronous limit) with dimensions of at least 640 by 360 pixels. It rejects unreadable images, unsupported formats, oversized images, and small images. A message without a processable screenshot records a rejected submission and fails its workflow execution instead of succeeding without output.
+
+## Sender screening
+
+The receipt rules enable SES scanning, so SES prepends `X-SES-Spam-Verdict`, `X-SES-Virus-Verdict`, `X-SES-SPF-Verdict`, and `X-SES-DKIM-Verdict` headers to each message. `process-email` reads the topmost copy of each header, so a copy the sender wrote lower in the message cannot override it. A `FAIL` spam or virus verdict rejects the submission before any attachment is stored or sent to Textract. The SPF and DKIM verdicts are recorded but not enforced.
+
+An optional sender allowlist lives in the `/mcc/<environment>/match-to-csv/sender-allowlist` SSM parameter. Ephemeral stacks read the `dev` parameter. Operators create it by hand as a `String` or `StringList` holding addresses separated by commas or whitespace. Matching ignores case. OpenTofu does not manage the parameter, so sender addresses stay out of source and state. When the parameter exists, a message is accepted only if every `From` address is listed. A message with no `From` address is rejected. When the parameter does not exist, every sender is accepted as before.
+
+A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@samlevin/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, or `SENDER_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses).
 
 ## Deployment
 
@@ -33,6 +42,12 @@ npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
 Ephemeral deployments read the domain for their `submit+<name>@` rule from `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds it. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
+
+## Alarms
+
+Stable stacks publish CloudWatch alarms to the `match-to-csv-<environment>-alarms` SNS topic. An alarm fires on any failed or timed-out execution of either state machine, any message in the `-events-dlq` queue, any Lambda error, and any screenshot whose extraction succeeds with no rows. `extract-text` reports the row count as the `ZeroRowExtractions` and `ExtractedRows` metrics in the `MCC/MatchToCsv` namespace, using the CloudWatch embedded metric format. Ephemeral stacks create no alarms or topic.
+
+To receive alarm email, create a `String` parameter named `/mcc/<environment>/match-to-csv/alarm-email` that holds the address, then redeploy. The deploy workflow subscribes the address only when the parameter exists, and CloudFormation reads the value at deploy time, so the address stays out of the repository, the template, and the workflow logs. SNS sends a confirmation email, and the subscription delivers alarms only after someone confirms it.
 
 ## Evidence layout
 
