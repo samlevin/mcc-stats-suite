@@ -1260,6 +1260,7 @@ test('every match-to-csv ephemeral resource falls under the local execution poli
       ]),
   );
   let checked = 0;
+  let logGroupsChecked = 0;
   for (const [logicalId, resource] of Object.entries(
     synthesizedTemplate.Resources,
   )) {
@@ -1289,10 +1290,17 @@ test('every match-to-csv ephemeral resource falls under the local execution poli
         );
         break;
       case 'AWS::Logs::LogGroup':
-        check(
+        for (const action of [
           'logs:CreateLogGroup',
-          `arn:aws:logs:us-east-1:${ACCOUNT}:log-group:${properties.LogGroupName}`,
-        );
+          'logs:PutRetentionPolicy',
+          'logs:DeleteLogGroup',
+        ]) {
+          check(
+            action,
+            `arn:aws:logs:us-east-1:${ACCOUNT}:log-group:${properties.LogGroupName}`,
+          );
+        }
+        logGroupsChecked += 1;
         break;
       case 'AWS::IAM::Role':
         check(
@@ -1319,5 +1327,6 @@ test('every match-to-csv ephemeral resource falls under the local execution poli
       default:
     }
   }
+  assert.equal(logGroupsChecked, 6);
   assert.ok(checked > 10, `checked ${checked} resources`);
 });
