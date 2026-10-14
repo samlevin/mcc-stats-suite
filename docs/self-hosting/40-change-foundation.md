@@ -22,6 +22,6 @@ Do not merge a foundation pull request before applying it. With the strict lock 
 
 If initialization reports a missing backend or a plan proposes recreating the foundation, stop and follow [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist).
 
-Never apply the foundation from a local shell, except through the `mcc-apply-foundation` skill when Terrateam cannot run. A person starts it for one pull request, and it follows the same inputs, account checks, saved plans, dev-before-prod order, locks, and squash merge, stopping for that person's approval before every step. Bootstrap changes do not go through Terrateam; see [Update bootstrap later](10-bootstrap-accounts.md#update-bootstrap-later).
+Never apply the foundation from a local shell, except through the `mcc-apply-foundation` skill when Terrateam cannot run. A person starts it for one pull request, and the agent follows the same inputs, account checks, saved plans, dev-before-prod order, and squash merge, stopping for that person's approval before every step. It takes no lock beyond the OpenTofu state lock. Bootstrap changes do not go through Terrateam; see [Update bootstrap later](10-bootstrap-accounts.md#update-bootstrap-later).
 
 Next: [Deploy, release, and roll back applications](50-deploy-and-release-applications.md).
