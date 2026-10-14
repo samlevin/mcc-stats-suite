@@ -42,9 +42,9 @@ session. Terrateam manages only stable operational roots.
 
 ## Foundation promotion
 
-Foundation code is not packaged or assigned a separate release ID. Terrateam plans pull-request revisions, and the maintainer applies dev and then prod from the pull request. Prod cannot apply before dev. Dev jobs run in the `infra/foundation-dev` GitHub Environment and prod jobs in `infra/foundation-prod`; neither has required reviewers, and only repository administrators can apply prod. Each root stays locked from its first apply until the pull request merges, and Terrateam merges it once every planned root has applied. Nothing applies from `main`. Follow [Change the foundation](../docs/self-hosting/40-change-foundation.md).
+Foundation code is not packaged or assigned a separate release ID. Terrateam plans a pull request only when a `terrateam plan` comment asks it to, and the maintainer applies dev and then prod from the pull request. Prod cannot apply before dev. Dev jobs run in the `infra/foundation-dev` GitHub Environment and prod jobs in `infra/foundation-prod`; neither has required reviewers, and only repository administrators can apply prod. Each root stays locked from its first apply until the pull request merges, and Terrateam merges it once every planned root has applied. Nothing applies from `main`. Follow [Change the foundation](../docs/self-hosting/40-change-foundation.md).
 
-Changes to `modules/foundation` or `.terrateam/config.yml` trigger both environment roots. Changes confined to one environment root trigger only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
+Changes to `modules/foundation` or `.terrateam/config.yml` affect both environment roots. Changes confined to one environment root affect only that environment. Terrateam checks foundation roots for drift weekly, opens an issue for a non-empty drift plan, and never reconciles automatically.
 
 Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and Terrateam for foundation changes.
 
