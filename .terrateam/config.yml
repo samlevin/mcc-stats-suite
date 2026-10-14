@@ -59,6 +59,26 @@ dirs:
       autoapply: false
       file_patterns: ['!**/*']
 
+  # Modules are not roots. Without these entries Terrateam would plan them with its
+  # default workflow, and access control would reject them as untagged.
+  infrastructure/modules/bootstrap:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/modules/data-platform:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
+  infrastructure/modules/foundation:
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns: ['!**/*']
+
   # Data platform roots stay out of Terrateam until they are activated.
   infrastructure/dev/data-platform:
     when_modified:
