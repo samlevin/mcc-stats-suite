@@ -2,6 +2,8 @@
 const repositoryFiles = new Set([
   '.github/labels.json',
   '.github/workflows/issue-triage.yml',
+  '.github/workflows/pr-issue-metadata.yml',
+  '.github/workflows/pr-issue-status.yml',
   '.github/workflows/semantic.pr.yaml',
   '.github/workflows/secret-scan.yml',
   '.github/CODEOWNERS',
@@ -12,6 +14,10 @@ const repositoryFiles = new Set([
   'scripts/issue-triage.mjs',
   'scripts/issue-triage.test.mjs',
   'scripts/issue-containers.mjs',
+  'scripts/issue-pr-metadata.mjs',
+  'scripts/issue-pr-metadata.test.mjs',
+  'scripts/issue-pr-status.mjs',
+  'scripts/issue-pr-status.test.mjs',
 ]);
 
 // Known workspaces. Shared with scripts/ci-checks.mjs so selection and Turbo
