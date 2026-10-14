@@ -18,4 +18,8 @@ Then operate it:
 - [Deploy, release, and roll back applications](50-deploy-and-release-applications.md)
 - [Recover and troubleshoot](60-recover-and-troubleshoot.md)
 
+Optional:
+
+- [Apply the foundation with Terrateam](70-optional-terrateam.md), as the upstream repository does
+
 To build the AWS organization itself (Control Tower, Identity Center, account vending), follow [samlevin/aws-bootstrap](https://github.com/samlevin/aws-bootstrap) first.

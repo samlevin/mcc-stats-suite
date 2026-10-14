@@ -43,7 +43,7 @@ session. CI/CD manages only stable operational roots.
 
 ## Foundation promotion
 
-Foundation code is not packaged or assigned a separate release ID. Plan and apply dev, then prod, from the same commit, by hand or from any infrastructure CI/CD. Follow [Apply and change the foundation](../docs/self-hosting/40-change-foundation.md). The upstream repository runs this through Terrateam, configured in `.terrateam/config.yml`; changes to `modules/foundation` or that file plan both environment roots there.
+Foundation code is not packaged or assigned a separate release ID. Plan and apply dev, then prod, from the same commit, by hand or from any infrastructure CI/CD. Follow [Apply and change the foundation](../docs/self-hosting/40-change-foundation.md). To use Terrateam, as the upstream repository does, see [Apply the foundation with Terrateam](../docs/self-hosting/70-optional-terrateam.md).
 
 Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and run each environment root separately.
 

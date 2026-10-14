@@ -4,7 +4,7 @@ Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/
 
 - an encrypted, versioned, deletion-protected S3 state bucket;
 - the GitHub Actions OIDC provider, unless the account already has one;
-- optionally, `mcc-stats-suite-<environment>-terrateam`, a Terrateam role (see [Optional CI role for Terrateam](#optional-ci-role-for-terrateam));
+- optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md);
 - `mcc-stats-suite-<environment>-github-cdk-deploy`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
 - with that role, an inline grant that lets it manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role; and
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
@@ -97,11 +97,11 @@ tofu apply bootstrap.tfplan
 
 Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. Until both accounts are re-applied, a renamed or new workflow fails at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Afterwards, re-run the failed workflow.
 
-## Optional CI role for Terrateam
+## CI roles for the foundation
 
-The upstream repository applies its foundation with [Terrateam](https://terrateam.io). You do not need it. With `create_terrateam_role = true`, the bootstrap creates `mcc-stats-suite-<environment>-terrateam` with `PowerUserAccess` and a grant to manage the Turbo cache role. Its trust accepts only GitHub OIDC tokens from this repository's `terrateam_workflow_path` workflow (`.github/workflows/terrateam.yml` by default) with the `terrateam-action[bot]` actor, so no other CI can use it. Its ARN is the `terrateam_role_arn` output, and `terrateam_oidc_hook` prints the matching Terrateam hook. The upstream setup is in [`.terrateam/config.yml`](../../.terrateam/config.yml).
+The bootstrap creates no generic CI role for the foundation. To apply it from CI/CD, give that system its own role in each account. It needs to manage the foundation's resources, including the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, and to read and write the state bucket. Treat that role, and the workflow it trusts, as production access.
 
-To apply the foundation from another CI/CD system, leave the flag `false` and give that system its own role in each account. It needs to manage the foundation's resources, including the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, and to read and write the state bucket. Treat that role, and the workflow it trusts, as production access.
+`create_terrateam_role = true` creates a role that only Terrateam can assume. See [Apply the foundation with Terrateam](70-optional-terrateam.md#bootstrap-the-terrateam-role).
 
 ## Disposable developer accounts
 
