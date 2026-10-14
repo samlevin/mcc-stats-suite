@@ -74,6 +74,29 @@ resource "aws_s3_bucket_object_lock_configuration" "evidence" {
   }
 }
 
+# Evidence has no lifecycle expiry, including ephemeral/ objects. Retain OCR
+# evidence for audit and replay beyond the 365-day GOVERNANCE lock minimum.
+
+# Both environments use the same rule; production deployments never write
+# ephemeral/ objects. Shared application objects outside this prefix are retained.
+resource "aws_s3_bucket_lifecycle_configuration" "ephemeral" {
+  for_each = {
+    attachments = aws_s3_bucket.attachments.id
+    output      = aws_s3_bucket.output.id
+  }
+  bucket = each.value
+
+  rule {
+    id     = "expire-ephemeral-after-30-days"
+    status = "Enabled"
+    filter { prefix = "ephemeral/" }
+    expiration { days = 30 }
+    noncurrent_version_expiration { noncurrent_days = 30 }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.data]
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "raw_email" {
   bucket = aws_s3_bucket.raw_email.id
   rule {
