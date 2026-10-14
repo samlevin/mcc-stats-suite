@@ -1,7 +1,9 @@
 import t from 'tap';
 import { version as lockedEsbuild } from 'esbuild/package.json';
 import {
+  BUNDLING_IMAGE,
   bundlingOptions,
+  bundlingRuntime,
   checkLocalEsbuild,
   localEsbuildVersion,
 } from '../cdk/lib/bundling';
@@ -39,6 +41,19 @@ t.test(
       () => checkLocalEsbuild('0.21.5'),
       /Local esbuild 0\.21\.5 differs/,
     );
+    t.end();
+  },
+);
+
+t.test(
+  'the bundling image is pinned by digest on the Node.js 22 runtime',
+  (t) => {
+    t.match(
+      BUNDLING_IMAGE,
+      /^public\.ecr\.aws\/sam\/build-nodejs22\.x@sha256:[0-9a-f]{64}$/,
+    );
+    t.equal(bundlingRuntime.name, 'nodejs22.x');
+    t.equal(bundlingRuntime.bundlingImage.image, BUNDLING_IMAGE);
     t.end();
   },
 );

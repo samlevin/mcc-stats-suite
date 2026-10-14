@@ -34,7 +34,7 @@
       "cache": false
     },
     "ci:test": {
-      "dependsOn": ["build"],
+      "dependsOn": ["^build"],
       "outputs": []
     }
   },
