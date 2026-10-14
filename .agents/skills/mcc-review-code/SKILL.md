@@ -1,6 +1,6 @@
 ---
 name: mcc-review-code
-description: "Independent read-only code review of a pushed MCC branch or PR against its issue's acceptance criteria and exact base/head SHAs, run by mcc-code-reviewer at the repository policy or an explicit override. Use for \"review"
+description: "Independent read-only code review of a pushed MCC branch or PR against its issue's acceptance criteria and exact base/head SHAs, run by mcc-code-reviewer at the repository policy or an explicit override. Use for \"review #N\", \"review <PR URL>\", or \"review branch <name>\" in samlevin/mcc-stats-suite. Reports findings to you; never posts, edits, or approves."
 ---
 <!-- Generated from .agents/workflows/review-code.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 

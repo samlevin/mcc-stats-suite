@@ -202,6 +202,33 @@ test('tool-only blocks render for one tool and vanish for the other', () => {
   );
 });
 
+test('a plain frontmatter value containing " #" is rejected, not truncated', () => {
+  const truncated = `---
+name: implement
+description: Use for "implement #N" or an issue URL.
+---
+Body
+`;
+  assert.throws(
+    () => parseSource(truncated),
+    /Quote the frontmatter value of description/,
+  );
+  const quoted = truncated.replace(
+    'description: Use for "implement #N" or an issue URL.',
+    'description: "Use for \\"implement #N\\" or an issue URL."',
+  );
+  assert.equal(
+    parseSource(quoted).meta.description,
+    'Use for "implement #N" or an issue URL.',
+  );
+  assert.equal(
+    parseSource(`---\nname: x\nargument-hint: <#N | URL>\n---\nBody\n`).meta[
+      'argument-hint'
+    ],
+    '<#N | URL>',
+  );
+});
+
 test('Claude agents pin the policy; Codex agents omit model and effort', () => {
   const sample = {
     ...policy,

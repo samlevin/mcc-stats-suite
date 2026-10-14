@@ -110,6 +110,16 @@ export function resolve(
 export function parseSource(text) {
   const match = text.match(/^---\n([\s\S]*?)\n---\n?/);
   if (!match) throw new Error('Source is missing frontmatter');
+  // A plain (unquoted) scalar ends at ` #`, which YAML reads as a comment, so
+  // `Use for "implement #N"` would lose everything after `implement` in both
+  // tools without any error. Refuse the source instead of generating it.
+  const truncated = match[1]
+    .split('\n')
+    .find((line) => /^\s*[\w-]+:\s+[^"'|>\s].*\s#/.test(line));
+  if (truncated)
+    throw new Error(
+      `Quote the frontmatter value of ${truncated.trim().split(':')[0]}: a plain value ends at " #"`,
+    );
   return { meta: YAML().parse(match[1]), body: text.slice(match[0].length) };
 }
 
