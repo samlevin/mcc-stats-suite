@@ -13,6 +13,7 @@ concurrency:
 
 jobs:
   review:
+    name: Mark closing issues In review
     if: github.repository == 'samlevin/mcc-stats-suite' && !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 5

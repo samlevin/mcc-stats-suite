@@ -434,6 +434,8 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
     'application-bundles',
   ]);
   assert.equal(parsedWorkflow.jobs.check.if, '${{ !cancelled() }}');
+  // Job names are the required status-check contexts in the main ruleset.
+  assert.equal(parsedWorkflow.jobs.check.name, undefined);
   const dev = readFileSync(
     new URL('../.github/workflows/deploy-dev.yml', import.meta.url),
     'utf8',
