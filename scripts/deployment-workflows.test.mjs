@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   writeFileSync,
 } from 'node:fs';
@@ -621,4 +622,73 @@ test('one deployment selector publishes the application selection after the requ
     }),
     false,
   );
+});
+
+const repositoryFile = (path) =>
+  readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+
+// GitHub's OIDC `workflow` claim carries the top-level workflow's `name:`,
+// never the name of a reusable workflow it calls.
+const deploymentCallerNames = () => {
+  const workflows = new Map(
+    readdirSync(new URL('../.github/workflows/', import.meta.url))
+      .filter((file) => file.endsWith('.yml'))
+      .map((file) => [file, workflow(file.slice(0, -'.yml'.length))]),
+  );
+  const reaches = (file, target, seen = new Set()) => {
+    if (seen.has(file)) return false;
+    seen.add(file);
+    return Object.values(workflows.get(file)?.jobs ?? {}).some((job) => {
+      const called = job.uses?.match(/^\.\/\.github\/workflows\/(.+\.yml)$/);
+      return (
+        called && (called[1] === target || reaches(called[1], target, seen))
+      );
+    });
+  };
+  const triggers = ({ on }) =>
+    typeof on === 'string'
+      ? [on]
+      : Array.isArray(on)
+        ? on
+        : Object.keys(on ?? {});
+  return [...workflows]
+    .filter(
+      ([file, definition]) =>
+        !triggers(definition).includes('workflow_call') &&
+        reaches(file, '_deploy-aws-application.yml'),
+    )
+    .map(([, definition]) => definition.name)
+    .sort();
+};
+
+const trustedWorkflowNames = () => {
+  const variables = repositoryFile(
+    'infrastructure/modules/bootstrap/variables.tf',
+  );
+  const block = variables.match(
+    /variable "cdk_workflow_names" \{[\s\S]*?\n\}/,
+  )?.[0];
+  assert.ok(block, 'bootstrap must declare cdk_workflow_names');
+  const list = block.match(/^\s*default\s*=\s*\[([^\]]*)\]/m)?.[1];
+  assert.ok(list !== undefined, 'cdk_workflow_names needs a list default');
+  return [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort();
+};
+
+test('CDK entry role trusts exactly the workflows that deploy', () => {
+  const callers = deploymentCallerNames();
+  assert.deepEqual(callers, [
+    'deploy-applications',
+    'rollback-aws-application',
+  ]);
+  assert.deepEqual(trustedWorkflowNames(), callers);
+  assert.ok(!callers.includes(deployment.name));
+  // The bootstrap roots must use the module default, which this test pins.
+  for (const environment of ['dev', 'prod']) {
+    for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {
+      assert.doesNotMatch(
+        repositoryFile(`infrastructure/${environment}/bootstrap/${file}`),
+        /cdk_workflow_name/,
+      );
+    }
+  }
 });
