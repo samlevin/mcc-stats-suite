@@ -372,7 +372,15 @@ function assignTeamsByColor(
 ): Map<number, string | undefined> {
   const rowToTeam = new Map<number, string | undefined>();
 
-  if (!rowColors.length) {
+  // Cluster only the colors of rows that parsed as players. The header row
+  // and filtered non-player rows are usually shaded differently and would
+  // otherwise form their own cluster and turn an FFA board into a team game.
+  const playerRowIndices = new Set(players.map((p) => p.rowIndex));
+  const playerColors = rowColors.filter((rc) =>
+    playerRowIndices.has(rc.rowIndex),
+  );
+
+  if (!playerColors.length) {
     // No color info => safest is to treat as FFA.
     for (const p of players) rowToTeam.set(p.rowIndex, undefined);
     return rowToTeam;
@@ -381,7 +389,7 @@ function assignTeamsByColor(
   // Group rows into clusters based on RGB distance.
   const clusters: TeamCluster[] = [];
 
-  for (const rc of rowColors) {
+  for (const rc of playerColors) {
     let bestIdx = -1;
     let bestDist = Number.MAX_VALUE;
 
