@@ -50,8 +50,14 @@ test('the binding resolves every placeholder and feature section', () => {
     'docs.guides': '`AGENTS.md`',
   });
   assert.equal(
-    placeholders(policy)['docs.guides'],
-    '`WORKFLOW.md`, `CONTRIBUTING.md`, or `TESTING.md`',
+    placeholders({
+      ...other,
+      binding: {
+        ...other.binding,
+        docs: { ...other.binding.docs, guides: ['A.md', 'B.md', 'C.md'] },
+      },
+    })['docs.guides'],
+    '`A.md`, `B.md`, or `C.md`',
   );
   const text =
     'Spawn {{prefix}}implementer in {{repository}}{{#infrastructure}} (infra){{/infrastructure}}.';
