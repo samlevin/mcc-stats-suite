@@ -38,4 +38,4 @@ Order: parents, then children, then native parent links, then blocked-by edges (
 
 ## Verify and return
 
-Read back bodies, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, the triager's `Policy:` line, and any partial result or uncertainty, compactly.
+Read back bodies, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, the triager's `Requested settings: Policy: <as dispatched>` line with the requested model and effort, including overrides, and any partial result or uncertainty, compactly. Omit model self-identification and runtime verification commentary.
