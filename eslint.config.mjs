@@ -20,6 +20,8 @@ export default tseslint.config(
       // checkout type-checks every worktree and can exhaust the V8 heap.
       '.claude/worktrees/**',
       '.codex/worktrees/**',
+      // The infrastructure apply skills check out pull requests here.
+      '.infra-apply/**',
     ],
   },
   {

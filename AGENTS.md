@@ -11,7 +11,7 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 | Changed | Run |
 | --- | --- |
 | Docs only | `npm run format:check` |
-| `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs` |
+| `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs scripts/infra-apply*.mjs scripts/apply-*.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs scripts/infra-apply.test.mjs scripts/apply-*.test.mjs` |
 | `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
 | A workspace | iterate with `npm test --workspace @samlevin/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:check` (pinned OpenTofu formatting, backend-disabled init and validation for every environment root, plus module tests) |
@@ -41,16 +41,18 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
 | Write a PR body, issue body, comment, or doc | `/mcc-write-prose` | `$mcc-write-prose` | none |
 | Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits sources, regenerates both tools, verifies |
+| Plan and apply a PR's foundation roots while Terrateam cannot run, only when a person asks | `/mcc-apply-foundation` | `$mcc-apply-foundation` | none; runs `scripts/apply-foundation.mjs` one approved step at a time |
 
 - Serial delivery: `mcc-orchestrator` dispatches one executable leaf at a time in dependency order and starts the next only after the previous leaf's PR is open or its blocker is recorded. Sibling leaves never run concurrently, even on request.
 - Handoffs: `mcc-implementer` spawns `mcc-code-reviewer` before opening a PR when the review threshold above applies, and `mcc-stack-manager` for stacked branches. Nothing else spawns a reviewer, and no automatic flow spawns `mcc-security-reviewer`.
-- Authority: filing authorizes issue publication; implementation authorizes claims, project moves, commits, pushes, and ready-for-review PRs; review authorizes no edits or PR writes. Merges, deployments, infrastructure applies, and settings changes keep their separate approval.
+- Authority: filing authorizes issue publication; implementation authorizes claims, project moves, commits, pushes, and ready-for-review PRs; review authorizes no edits or PR writes. Merges, deployments, infrastructure applies, and settings changes keep their separate approval. A person who invokes an infrastructure apply skill authorizes its plans, applies, and merge for one pull request, and still approves each step.
 - Model and effort: `.agents/policy.json` names the model and effort for issue creation, triage, orchestration, implementation, stack management, code review, and security review, per tool. Every dispatcher runs `node scripts/agent-policy.mjs resolve --tool <claude|codex> --role <role>` and passes the result explicitly when it spawns; it never inherits a session or contributor default. An explicit `model <name>` or `effort <level>` in the request overrides only that setting, for that task and the handoffs it names (`reviewer effort max`), and changes nothing on disk. Unsupported values fail with a message instead of substituting another model or effort. Each agent echoes the `Policy:` line it was dispatched with and the model its runtime reports.
 
 ## Hard rules
 
 - Public repo: never commit credentials, account IDs, emails, domains, state, plans, or populated env files.
 - Never deploy, apply infrastructure, or weaken account checks in `scripts/cdk-app.mjs` or `packages/cdk-config`. Local CDK diff/deploy needs `--environment dev --ephemeral <name>`.
+- The one exception: a person may invoke an infrastructure apply skill (`mcc-apply-foundation`). It plans, applies, and merges only the roots it names, for the pull request that person chose, each step after that person's explicit approval. No agent starts one, and no agent runs its plans or applies outside it. Never weaken the account checks in `scripts/infra-apply.mjs`.
 - OpenTofu owns persistent shared resources; CDK owns application compute. Never manage a resource from both.
 - Evidence is immutable: never overwrite raw MIME, screenshots, provider responses, or runs; events are append-only. Replay creates a new run. Unknown layouts stay `UNKNOWN`.
 - Shared-package changes include every consumer update. Keep `package.json`, `package-lock.json`, `.release-please-manifest.json`, and `release-please-config.json` in sync (`npm run release:check`).

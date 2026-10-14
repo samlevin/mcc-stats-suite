@@ -42,6 +42,9 @@ pnpm-debug.log*
 .claude/worktrees/
 .codex/worktrees/
 
+# Local state and PR worktrees of the infrastructure apply skills
+.infra-apply/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

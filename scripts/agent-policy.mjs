@@ -278,6 +278,17 @@ export function renderRole(policy, name, source, tool) {
   return lines.join('\n') + '\n';
 }
 
+// A workflow whose frontmatter names a `feature` exists only in repositories
+// whose binding enables it, so a skill that operates CI-applied
+// infrastructure is absent, not merely reworded, where there is none.
+export function workflowEnabled(policy, meta) {
+  if (meta.feature === undefined) return true;
+  const features = binding(policy).features;
+  if (!(meta.feature in features))
+    throw new Error(`Unknown workflow feature: ${meta.feature}`);
+  return features[meta.feature];
+}
+
 export function renderWorkflow(policy, name, source, tool) {
   const { meta, body } = parseSource(substitute(source, policy));
   if (meta.name !== name)
@@ -377,6 +388,8 @@ export function render(base = root) {
       join(base, SOURCES.workflows, `${name}.md`),
       'utf8',
     );
+    if (!workflowEnabled(policy, parseSource(substitute(source, policy)).meta))
+      continue;
     const shared = join(base, SOURCES.workflows, name);
     for (const tool of TOOLS) {
       const target = `${OUTPUTS[tool].skills}/${prefix(policy)}${name}`;
