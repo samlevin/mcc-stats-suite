@@ -64,6 +64,8 @@ resource "aws_s3_bucket_versioning" "data" {
   }
 }
 
+# Retain production OCR evidence for audit and replay beyond the 365-day
+# GOVERNANCE lock minimum; only ephemeral/ evidence expires, after its lock.
 resource "aws_s3_bucket_object_lock_configuration" "evidence" {
   bucket = aws_s3_bucket.evidence.id
   rule {
@@ -74,27 +76,34 @@ resource "aws_s3_bucket_object_lock_configuration" "evidence" {
   }
 }
 
-# Evidence has no lifecycle expiry, including ephemeral/ objects. Retain OCR
-# evidence for audit and replay beyond the 365-day GOVERNANCE lock minimum.
-
-# Both environments use the same rule; production deployments never write
-# ephemeral/ objects. Shared application objects outside this prefix are retained.
+# Both environments use the same rules; production deployments never write
+# ephemeral/ objects. Objects outside this prefix are retained. Ephemeral evidence
+# cannot be replayed once its screenshots expire, so it expires when its lock ends.
 resource "aws_s3_bucket_lifecycle_configuration" "ephemeral" {
   for_each = {
-    attachments = aws_s3_bucket.attachments.id
-    output      = aws_s3_bucket.output.id
+    attachments = { bucket = aws_s3_bucket.attachments.id, days = 30 }
+    output      = { bucket = aws_s3_bucket.output.id, days = 30 }
+    evidence    = { bucket = aws_s3_bucket.evidence.id, days = 366 }
   }
-  bucket = each.value
+  bucket = each.value.bucket
 
   rule {
-    id     = "expire-ephemeral-after-30-days"
+    id     = "expire-ephemeral"
     status = "Enabled"
     filter { prefix = "ephemeral/" }
-    expiration { days = 30 }
+    expiration { days = each.value.days }
     noncurrent_version_expiration { noncurrent_days = 30 }
+    abort_incomplete_multipart_upload { days_after_initiation = 7 }
   }
 
-  depends_on = [aws_s3_bucket_versioning.data]
+  rule {
+    id     = "remove-ephemeral-delete-markers"
+    status = "Enabled"
+    filter { prefix = "ephemeral/" }
+    expiration { expired_object_delete_marker = true }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.data, aws_s3_bucket_object_lock_configuration.evidence]
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "raw_email" {
