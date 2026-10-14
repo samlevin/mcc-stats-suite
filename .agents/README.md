@@ -93,9 +93,9 @@ The resolver refuses a model or effort the repository does not list and prints w
 
 ### Reports
 
-Each dispatched role reports `Requested settings: Policy: <as dispatched>`. The policy line records the requested model and effort and whether each came from policy or an explicit override. Caller workflows retain that label when relaying results, including a container's per-leaf reports and issue triage results. These values describe the dispatch request. Routine reports omit model self-identification, runtime-verification fields, and automatic verification warnings or discussions.
+Each dispatched role reports `Requested settings: Policy: <as dispatched>`. The policy line records the requested model and effort and whether each came from policy or an explicit override. Caller workflows retain that label when relaying results, including a container's per-leaf reports and issue triage results. These values describe the dispatch request, not what the runtime ran: `CLAUDE_CODE_EFFORT_LEVEL` and a Codex agent file field override them silently (see [Known limitations](#known-limitations)). Use the effective-model verification row below when that matters. Routine reports omit model self-identification, runtime-verification fields, and automatic verification warnings or discussions; `AGENTS.md` states this once for every role and skill.
 
-For example, a default Codex implementation reports `Requested settings: Policy: tool=codex role=mcc-implementer model=gpt-6.1-sol effort=high (model: policy, effort: policy)`. A code review requested with `model gpt-6-sol effort xhigh` reports `Requested settings: Policy: tool=codex role=mcc-code-reviewer model=gpt-6-sol effort=xhigh (model: override, effort: override)`.
+For example, a default Codex implementation reports `Requested settings: Policy: tool=codex role=implementer model=gpt-6.1-sol effort=high (model: policy, effort: policy)`. A code review requested with `model gpt-6-sol effort xhigh` reports `Requested settings: Policy: tool=codex role=code-reviewer model=gpt-6-sol effort=xhigh (model: override, effort: override)`.
 
 ### Vendor differences and adapters
 
@@ -105,6 +105,7 @@ For example, a default Codex implementation reports `Requested settings: Policy:
 | Precedence in the runtime | per-invocation parameter > frontmatter > `CLAUDE_CODE_SUBAGENT_MODEL` > session model; `CLAUDE_CODE_EFFORT_LEVEL` beats every effort source | agent file field > spawn value > `[agents].default_subagent_*` > parent |
 | Main-thread skill model | skill frontmatter pins it for the turn | not possible; start the session with `codex -m <model> -c model_reasoning_effort=<effort>` |
 | Built-in guidance | none against overrides | the `spawn_agent` description says not to set `model` unless the user asks; the skills override that because the repository policy is the user's standing request |
+| Effective-model verification (operator check) | the Agent tool call shows the parameters, and the subagent's system prompt names its model | the child cannot read its model reliably; verify with `sqlite3 ~/.codex/state_5.sqlite "select agent_role, model, reasoning_effort from threads order by rowid desc limit 5"` (Codex 0.162 schema) or the thread view |
 
 ## Discovery, trust, and versions
 
@@ -126,6 +127,7 @@ Trusting the folder is the only activation step in either tool. Nothing here ins
 
 - Codex skills cannot change the session model, so the issue-creation policy for Codex is advisory for the main thread and binding only for the spawned triager.
 - Claude Code honors `CLAUDE_CODE_EFFORT_LEVEL` above everything, including the repository policy and a prompt override. Leave it unset when you want the repository defaults.
+- Reports carry requested settings, never verified ones. Codex cannot verify a child's model from inside the child; the thread table or thread view is the ground truth.
 - Prompt overrides are read from natural language by the dispatching skill; the resolver validates the values but cannot see the request.
 - Codex approval rules are personal. The repository ships no exec policy, so a contributor's own rules decide which `git` and `gh` commands run without a prompt.
 

@@ -10,7 +10,7 @@ description: "Plan and file MCC GitHub issues, native sub-issues, and explicitly
 
 Repository `samlevin/mcc-stats-suite`, project [MCC delivery](https://github.com/users/samlevin/projects/1) (number 1, owner `samlevin`). Read `.agents/issue-creation.md` and the matching `.github/ISSUE_TEMPLATE/*.yml`; `AGENTS.md` is already loaded. Read `ISSUE_TRIAGE.md` only for a classification question. Discover labels (`gh label list`), project fields and options (`gh project field-list 1 --owner samlevin --format json`), and native issue types once per batch, and reuse the results. Repository commands run read-only against the human checkout; do not modify it.
 
-Codex skills cannot set the session model. The repository policy for `issue-creation` is `node scripts/agent-policy.mjs resolve --tool codex --capability issue-creation`; state its model and effort as requested settings in your first message. Start Codex with `codex -m <model> -c model_reasoning_effort=<effort>` to run the session at that policy, or at an explicit override.
+Codex skills cannot set the session model. The repository policy for `issue-creation` is `node scripts/agent-policy.mjs resolve --tool codex --capability issue-creation`; state its model and effort in your first message as `Advisory policy: ...`, not as requested settings, because nothing dispatched this session and it runs whatever model Codex started with. Start Codex with `codex -m <model> -c model_reasoning_effort=<effort>` to run the session at that policy, or at an explicit override.
 
 ## Plan
 
@@ -23,7 +23,7 @@ Search for duplicates first (`gh issue list --search`). Well-scoped requests go 
 
 ## Triage
 
-Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Spawn one `mcc-issue-triager` for the batch with the resolved model and effort. Send only the drafts (ref, title, body), accepted decisions, the discovered label and option lists, and the `Policy:` line (`Policy: tool=<tool> role=mcc-issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, and labels. On SPLIT_REQUIRED, split and re-triage only the affected drafts. There is no second pass otherwise. Never triage yourself in place of the triager.
+Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Spawn one `mcc-issue-triager` for the batch with the resolved model and effort. Send only the drafts (ref, title, body), accepted decisions, the discovered label and option lists, and the `Policy:` line (`Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, and labels. On SPLIT_REQUIRED, split and re-triage only the affected drafts. There is no second pass otherwise. Never triage yourself in place of the triager.
 
 Spawn with `spawn_agent`: `agent_type: mcc-issue-triager`, `model` and `reasoning_effort` from the resolver's `spawn` object, `fork_turns: "none"`. Always pass both values; the agent file carries neither. An unknown `agent_type` means the project is not trusted in Codex yet; say so and stop.
 
@@ -35,4 +35,4 @@ Order: parents, then children, then native parent links, then blocked-by edges (
 
 ## Verify and return
 
-Read back bodies, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, the triager's `Requested settings: Policy: <as dispatched>` line with the requested model and effort, including overrides, and any partial result or uncertainty, compactly. Omit model self-identification and runtime verification commentary.
+Read back bodies, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, the triager's `Requested settings: Policy: <as dispatched>` line, and any partial result or uncertainty, compactly.

@@ -35,4 +35,4 @@ Never: merge, enable auto-merge, deploy, apply infrastructure, change settings, 
 
 ## Report
 
-Relay the agent's READY FOR REVIEW or BLOCKED result, including `Requested settings: Policy: <as dispatched>` for each dispatched role. These are the requested model and effort, including overrides. Omit model self-identification and runtime verification commentary. Then list what still depends on merge, deploy, or human verification.
+Relay the agent's READY FOR REVIEW or BLOCKED result verbatim, including every `Requested settings:` line. Then list what still depends on merge, deploy, or human verification.

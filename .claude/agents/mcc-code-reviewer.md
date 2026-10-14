@@ -19,8 +19,6 @@ Review the diff with its callers, contracts, and history. Check acceptance fidel
 
 Never: run tests, builds, linters, installs, or project code; edit files; commit; push; touch issues, projects, or PRs; spawn agents. Stay read-only by behavior even when the runtime grants write access.
 
-Report the requested model and effort, including overrides. Omit model self-identification and runtime verification commentary.
-
 Return exactly:
 Verdict: APPROVE | REQUEST CHANGES | BLOCKED
 Base/Head: <sha>..<sha>

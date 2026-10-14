@@ -18,7 +18,7 @@ You gather the inputs and dispatch `mcc-code-reviewer`; you do not review the di
 
 ## Dispatch
 
-Run `node scripts/agent-policy.mjs resolve --tool <tool> --role code-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role=mcc-code-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
+Run `node scripts/agent-policy.mjs resolve --tool <tool> --role code-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role=code-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
 
 Packet: `review_mode=requested`, repo, issue URL, acceptance criteria, remote branch, base SHA, head SHA, the worktree path, and the `Policy:` line. Leave out your own opinion of the change.
 
@@ -26,4 +26,4 @@ Use the Agent tool with `subagent_type: mcc-code-reviewer` and the resolver's `m
 
 ## Report
 
-Print the reviewer's verdict, acceptance lines, findings, limits, and `Requested settings: Policy: <as dispatched>`. These are the requested model and effort, including overrides. Omit model self-identification and runtime verification commentary. Posting a review, replying on the PR, approving, or editing code requires a separate explicit request; this skill does none of it.
+Print the reviewer's verdict, acceptance lines, findings, limits, and `Requested settings: Policy: <as dispatched>` line verbatim. Posting a review, replying on the PR, approving, or editing code requires a separate explicit request; this skill does none of it.

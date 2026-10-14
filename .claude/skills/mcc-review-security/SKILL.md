@@ -19,7 +19,7 @@ Runs only when a person explicitly asked for a security review. If the request c
 
 ## Dispatch
 
-Run `node scripts/agent-policy.mjs resolve --tool <tool> --role security-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role=mcc-security-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
+Run `node scripts/agent-policy.mjs resolve --tool <tool> --role security-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role=security-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
 
 Packet: repo, branch, head SHA, base SHA, scope, the worktree path, and the `Policy:` line.
 
@@ -27,4 +27,4 @@ Use the Agent tool with `subagent_type: mcc-security-reviewer` and the resolver'
 
 ## Report
 
-Print the verdict, scope and SHAs, findings, limits, and `Requested settings: Policy: <as dispatched>`. These are the requested model and effort, including overrides. Omit model self-identification and runtime verification commentary. Never print secret values; cite locations. Filing issues or posting to the PR needs a separate explicit request.
+Print the verdict, scope and SHAs, findings, limits, and `Requested settings: Policy: <as dispatched>` line verbatim. Never print secret values; cite locations. Filing issues or posting to the PR needs a separate explicit request.
