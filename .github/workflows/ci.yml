@@ -116,8 +116,8 @@ jobs:
     name: Validate applications
     needs: scope
     if: needs.scope.outputs.check != 'false'
-    # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
-    # so Bun and the native dependencies do not execute under QEMU.
+    # Static checks do no Docker work. They stay on the ARM64 runner pool so
+    # tests run on the architecture Lambda uses.
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -154,6 +154,7 @@ jobs:
           CI_FULL: ${{ needs.scope.outputs.full }}
           CI_REPOSITORY: ${{ needs.scope.outputs.repository }}
           CI_MODE: ${{ needs.scope.outputs.mode }}
+          CI_JOB: static
         run: node scripts/ci-checks.mjs
       - name: Find affected deployable applications
         id: affected
@@ -174,8 +175,56 @@ jobs:
               | sub("^@samlevin/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
+  application-bundles:
+    needs: scope
+    if: needs.scope.outputs.check != 'false' && needs.scope.outputs.full == 'true'
+    # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
+    # so Bun and the native dependencies do not execute under QEMU.
+    runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      id-token: write
+      packages: read
+    env:
+      MCC_BUILD_ENVIRONMENT: dev
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - name: Start pulling the CDK bundling image
+        # Runs in the background so the pull overlaps Node setup and npm ci.
+        # The digest comes from the stack's pin, so CI bundles what deploys do.
+        run: |
+          IMAGE="$(grep -oE 'public\.ecr\.aws/sam/build-nodejs[0-9.]+x@sha256:[0-9a-f]{64}' applications/match-to-csv/cdk/lib/bundling.ts)"
+          test -n "${IMAGE}"
+          nohup docker pull --platform linux/arm64 "${IMAGE}" > "${RUNNER_TEMP}/image-pull.log" 2>&1 &
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.16.0'
+          cache: npm
+          registry-url: https://npm.pkg.github.com
+          scope: '@samlevin'
+      - run: npm ci
+        env:
+          NODE_AUTH_TOKEN: ${{ github.token }}
+      - name: Start trusted dev Turbo cache
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/turbo-s3-cache
+        with:
+          environment: dev
+          account-id: ${{ vars.DEV_AWS_ACCOUNT_ID }}
+          region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
+      - name: Synthesize stacks and verify native bundles
+        env:
+          CI_BASE: ${{ needs.scope.outputs.base }}
+          CI_HEAD: ${{ needs.scope.outputs.head }}
+          CI_FULL: ${{ needs.scope.outputs.full }}
+          CI_REPOSITORY: ${{ needs.scope.outputs.repository }}
+          CI_MODE: ${{ needs.scope.outputs.mode }}
+          CI_JOB: bundle
+        run: node scripts/ci-checks.mjs
   check:
-    needs: [scope, infrastructure, application-checks]
+    needs: [scope, infrastructure, application-checks, application-bundles]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
@@ -187,7 +236,9 @@ jobs:
           SCOPE_INFRASTRUCTURE: ${{ needs.scope.outputs.infrastructure }}
           SCOPE_APPLICATIONS: ${{ needs.scope.outputs.check }}
           INFRASTRUCTURE_RESULT: ${{ needs.infrastructure.result }}
+          SCOPE_FULL: ${{ needs.scope.outputs.full }}
           APPLICATIONS_RESULT: ${{ needs.application-checks.result }}
+          BUNDLES_RESULT: ${{ needs.application-bundles.result }}
         run: |
           test "$SCOPE_RESULT" = success
           if [[ "$SCOPE_INFRASTRUCTURE" != false ]]; then
@@ -195,6 +246,9 @@ jobs:
           fi
           if [[ "$SCOPE_APPLICATIONS" != false ]]; then
             test "$APPLICATIONS_RESULT" = success
+            if [[ "$SCOPE_FULL" = true ]]; then
+              test "$BUNDLES_RESULT" = success
+            fi
           fi
 
   select-deployment:
