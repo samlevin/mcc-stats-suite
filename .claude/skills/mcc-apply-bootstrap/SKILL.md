@@ -44,7 +44,7 @@ Report the commit, its subject, the latest commits that touched bootstrap (`git 
 
 ## Root setup
 
-Shell state does not carry between commands, so every plan and apply runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`) and the worktree path. The block reads inputs only from the root's local `.envrc` through `direnv` and its `*.auto.tfvars`, both in the main checkout. From the `.envrc` it reads `AWS_PROFILE`, `TF_VAR_aws_region`, `TF_CLI_ARGS_init` (the state bucket and Region), `TF_VAR_github_organization`, `TF_VAR_github_oidc_subject_repository`, and, when set, `TF_VAR_github_repository`. The CI-role flags, any `github_oidc_provider_arn`, and any `state_bucket_name` come from `bootstrap.auto.tfvars`. The block removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from each `direnv`, `aws`, and `tofu` command, then passes exactly the loaded values. It checks that the state bucket follows the bootstrap naming rule `mcc-stats-suite-tofu-state-<account>-<region>` for the loaded Region, checks that the profile's account equals the account in that bucket name, and initializes the root against the committed lock file and that bucket. It prints none of the values.
+Shell state does not carry between commands, so every plan and apply runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`) and the worktree path. The block reads inputs only from the root's local `.envrc` through `direnv` and its `*.auto.tfvars`, both in the main checkout. From the `.envrc` it reads `AWS_PROFILE`, `TF_VAR_aws_region`, `TF_CLI_ARGS_init` (the state bucket and Region), `TF_VAR_github_organization`, `TF_VAR_github_oidc_subject_repository`, and, when set, `TF_VAR_github_repository`. The CI-role flags, any `github_oidc_provider_arn`, and any `state_bucket_name` come from `bootstrap.auto.tfvars`. The block removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from each `direnv`, `aws`, and `tofu` command, then passes exactly the loaded values. It checks that the state bucket follows the bootstrap naming rule `mcc-stats-suite-tofu-state-<account>-<region>` for the loaded Region, checks that the profile's account equals the account in that bucket name, checks that the bucket's `Environment` tag equals `<env>`, and initializes the root against the committed lock file and that bucket. It prints none of the values.
 
 ```console
 bash <<'EOF'
@@ -83,6 +83,11 @@ CALLER=$(clean AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" aws sts get-caller-id
   { echo "AWS profile $PROFILE has no valid credentials; run aws sso login --profile $PROFILE" >&2; exit 1; }
 [ "$CALLER" = "$ACCOUNT" ] ||
   { echo "AWS profile $PROFILE is not the account in the state bucket name its .envrc derives; nothing ran" >&2; exit 1; }
+TAG=$(clean AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" aws s3api get-bucket-tagging --bucket "$BUCKET" \
+  --query "TagSet[?Key=='Environment'].Value | [0]" --output text) ||
+  { echo "Cannot read the Environment tag of the state bucket with AWS profile $PROFILE; nothing ran" >&2; exit 1; }
+[ "$TAG" = "$E" ] ||
+  { echo "AWS profile $PROFILE reaches the $TAG state bucket, not the $E one; nothing ran" >&2; exit 1; }
 cp "$R/backend.tf.example" "$R/backend.tf"
 for f in "$SRC"/*.auto.tfvars; do [ ! -e "$f" ] || cp "$f" "$R/"; done
 tf() {
@@ -99,7 +104,7 @@ tf init -no-color -input=false -reconfigure -lockfile=readonly \
 EOF
 ```
 
-`backend.tf` is copied from the committed `backend.tf.example`, which holds the state key, so the root always uses the S3 backend in the bucket the `.envrc` derives, never temporary local state. The copies of `backend.tf` and `*.auto.tfvars` stay in the worktree, where `.gitignore` already covers them. If direnv cannot load the `.envrc`, a value is missing, or the account check fails, the profile points at the wrong account, lacks `sso_account_id` or `region`, its credentials expired, or the `.envrc` was never set up; stop and let the person fix it. The account check cannot tell dev from prod, because the `.envrc` derives both the bucket and the expected account from the same profile; the plan review in step 2 catches a root planned against the other environment.
+`backend.tf` is copied from the committed `backend.tf.example`, which holds the state key, so the root always uses the S3 backend in the bucket the `.envrc` derives, never temporary local state. The copies of `backend.tf` and `*.auto.tfvars` stay in the worktree, where `.gitignore` already covers them. If direnv cannot load the `.envrc`, a value is missing, or the account check fails, the profile points at the wrong account, lacks `sso_account_id` or `region`, its credentials expired, or the `.envrc` was never set up; stop and let the person fix it. The `.envrc` derives both the bucket and the expected account from the same profile, so the account check alone cannot tell dev from prod. The block therefore also requires the state bucket's `Environment` tag, which bootstrap sets, to equal the root's environment; a missing or different tag, or a bucket the profile cannot read, stops the run before any OpenTofu command.
 
 ## 2. Plan a root (gated)
 
