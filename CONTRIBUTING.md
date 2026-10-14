@@ -67,7 +67,7 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
-Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, milestone, and project membership are copied from the linked issue automatically.
+Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, assignees, milestone, and project membership are copied from the linked issue automatically; nothing assigns people to issues.
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. The ARM64 `application-checks` job runs repository checks, `build`, and `ci:test` concurrently, while the parallel `application-bundles` job runs `ci:synth` and `verify:bundle`; the required `check` job aggregates selected results. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. The bundles job retains CDK synthesis and native bundle verification. Infrastructure-only main pushes save an empty deployment selection and deploy no applications. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
 
