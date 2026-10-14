@@ -24,7 +24,7 @@ Every value comes from the bootstrap outputs or your own configuration. Store id
 
 ### Turbo cache
 
-The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository, as bootstrap uses it. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Then set `DEV_AWS_ACCOUNT_ID` and `DEV_AWS_REGION`, and set `MCC_TURBO_CACHE` to `true` last. Deploys use the `dev` and `prod` environment variables above. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
+The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Then set `DEV_AWS_ACCOUNT_ID` and `DEV_AWS_REGION`, and set `MCC_TURBO_CACHE` to `true` last. Deploys use the `dev` and `prod` environment variables above. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
 
 The foundation's inputs, including the email domain, are not GitHub settings unless your infrastructure CI/CD runs in GitHub Actions. [Apply and change the foundation](40-change-foundation.md#inputs) lists them.
 
