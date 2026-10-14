@@ -19,10 +19,10 @@ Never run OpenTofu, `aws`, or `gh pr merge` yourself for this flow. Every step g
 
 ## What the script enforces
 
-- Inputs come only from the `infra/foundation-<env>` GitHub Environment variables (state bucket, region, email domain, Terrateam role ARN) and the repository variable `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY`. Ambient AWS credentials and profiles, `TF_VAR_*`, and other `TF_*` settings are stripped.
+- Inputs come only from the `infra/foundation-<env>` GitHub Environment variables (state bucket, region, email domain, Terrateam role ARN) and the repository variable `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY`. Ambient AWS credentials and profiles, `TF_VAR_*`, and other `TF_*` settings are stripped. GitHub never returns secret values, so `<ENV>_MCC_EMAIL_DOMAIN` must be stored as an environment variable for this flow.
 - The AWS profile is `mcc-dev-admin` or `mcc-prod-admin`, or `MCC_DEV_INFRA_PROFILE` or `MCC_PROD_INFRA_PROFILE` when set. Before any OpenTofu command, the caller account must equal the account in `<ENV>_TERRATEAM_ROLE_ARN`.
 - Affected roots come from the foundation `file_patterns` in `.terrateam/config.yml` at the PR head. `init` uses `-lockfile=readonly`. Prod plans and applies only after dev has applied at the same head, when dev is affected.
-- `apply` takes the digest that `plan` printed and runs only that saved plan. A re-plan changes the digest, and a new push to the PR voids every plan.
+- `apply` takes the digest that `plan` printed and runs only that saved plan. A re-plan changes the digest, and a new push to the PR voids every plan. Plan and apply refuse a branch that is behind main on infrastructure files or a PR worktree with local edits.
 - A root stays locked to the first PR that applies it until that PR merges or closes. The merge squashes with the PR title and `--match-head-commit`.
 - State and the detached PR worktree live in `.infra-apply/foundation/pr-<N>/` in the main checkout (ignored by git), or under `MCC_INFRA_APPLY_STATE` when set.
 

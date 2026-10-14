@@ -226,6 +226,15 @@ function requireState(ctx, pr) {
   ).trim();
   if (checkedOut !== state.head)
     throw new Error(`The PR worktree is not at ${state.head}`);
+  // Local edits in the PR worktree would be planned as if they were the head.
+  const dirty = check(
+    ctx.run('git', ['-C', source, 'status', '--porcelain'], {}),
+    'git status failed in the PR worktree',
+  ).trim();
+  if (dirty)
+    throw new Error(
+      `The PR worktree at ${source} has local changes; run cleanup and preflight again`,
+    );
   return state;
 }
 
@@ -250,6 +259,24 @@ function lockRoot(ctx, state, environment) {
   });
 }
 
+// GitHub never returns secret values, so this flow needs the domain stored
+// as an environment variable, not as the secret the setup guide describes.
+function emailDomain(ctx, environment) {
+  const name = `${upper(environment)}_MCC_EMAIL_DOMAIN`;
+  try {
+    return githubVariable(ctx.run, {
+      repository: ctx.repository,
+      name,
+      environment: githubEnvironment(environment),
+    });
+  } catch (error) {
+    throw new Error(
+      `${error.message}. This flow cannot read secrets; store ${name} as a variable in ${githubEnvironment(environment)}.`,
+      { cause: error },
+    );
+  }
+}
+
 // Inputs Terrateam supplies, read from the same GitHub variables.
 function foundationInputs(ctx, environment) {
   const E = upper(environment);
@@ -263,7 +290,7 @@ function foundationInputs(ctx, environment) {
   return {
     bucket: variable(`${E}_TOFU_STATE_BUCKET`),
     region: variable(`${E}_AWS_REGION`),
-    domain: variable(`${E}_MCC_EMAIL_DOMAIN`),
+    domain: emailDomain(ctx, environment),
     roleVariable,
     account: accountFromRoleArn(variable(roleVariable), roleVariable),
     subject: githubVariable(ctx.run, {
@@ -297,6 +324,30 @@ function openFoundation(ctx, state, environment) {
 
 function writeLog(path, result) {
   writeFileSync(path, `${result.stdout}${result.stderr}`);
+}
+
+// Every apply happens from a pull request, so a branch missing
+// infrastructure commits already on main would revert them. Plan and apply
+// repeat the check, because another PR can merge after this one's preflight.
+function assertCurrent(ctx, pr, head, mergeBase) {
+  let base = mergeBase;
+  if (!base) {
+    git(ctx, ['fetch', '-q', 'origin', 'main']);
+    base = git(ctx, ['merge-base', 'origin/main', head]);
+  }
+  const behind = git(ctx, [
+    'diff',
+    '--name-only',
+    base,
+    'origin/main',
+    '--',
+    'infrastructure',
+    '.terrateam',
+  ]);
+  if (behind)
+    throw new Error(
+      `PR #${pr} is behind main on infrastructure files; update the branch and run preflight again:\n${behind}`,
+    );
 }
 
 export function preflight(ctx, pr) {
@@ -339,21 +390,7 @@ export function preflight(ctx, pr) {
     throw new Error(
       `PR #${pr} changes no Terrateam-managed foundation files; nothing to plan`,
     );
-  // Every apply happens from a pull request, so a branch missing
-  // infrastructure commits already on main would revert them.
-  const behind = git(ctx, [
-    'diff',
-    '--name-only',
-    base,
-    'origin/main',
-    '--',
-    'infrastructure',
-    '.terrateam',
-  ]);
-  if (behind)
-    throw new Error(
-      `PR #${pr} is behind main on infrastructure files; update the branch first:\n${behind}`,
-    );
+  assertCurrent(ctx, pr, head, base);
 
   const dir = prDir(ctx, pr);
   const source = join(dir, 'src');
@@ -400,6 +437,7 @@ export function plan(ctx, pr, environment) {
   requireRoot(state, environment);
   lockRoot(ctx, state, environment);
   assertOrder(state, environment);
+  assertCurrent(ctx, pr, state.head);
   const dir = prDir(ctx, pr);
   const planFile = join(dir, `${environment}.tfplan`);
   for (const suffix of ['tfplan', 'plan.json', 'plan.txt'])
@@ -450,6 +488,7 @@ export function apply(ctx, pr, environment, reviewedDigest) {
   requireRoot(state, environment);
   lockRoot(ctx, state, environment);
   assertOrder(state, environment);
+  assertCurrent(ctx, pr, state.head);
   const dir = prDir(ctx, pr);
   const planFile = join(dir, `${environment}.tfplan`);
   const saved = state.plans[environment];

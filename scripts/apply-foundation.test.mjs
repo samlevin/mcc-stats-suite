@@ -135,6 +135,7 @@ function harness(options = {}) {
     live: undefined,
     files: ['infrastructure/modules/foundation/main.tf'],
     behind: '',
+    dirty: '',
     rollup: [{ name: 'check', status: 'COMPLETED', conclusion: 'SUCCESS' }],
     prStates: {},
     callerAccount: (profile) =>
@@ -168,6 +169,7 @@ function harness(options = {}) {
           ? ok(`${worktrees.get(args[1])}\n`)
           : fail();
       if (args[2] === 'merge-base') return ok(`${'b'.repeat(40)}\n`);
+      if (args[2] === 'status') return ok(world.dirty);
       if (args[2] === 'diff' && args.includes('origin/main'))
         return ok(world.behind);
       if (args[2] === 'diff') return ok(`${world.files.join('\n')}\n`);
@@ -189,6 +191,8 @@ function harness(options = {}) {
         const environment = args.includes('-e')
           ? args[args.indexOf('-e') + 1].replace('infra/foundation-', '')
           : undefined;
+        if (world.secretDomain && args[2].endsWith('_MCC_EMAIL_DOMAIN'))
+          return fail('variable not found');
         const value =
           environment === undefined
             ? { MCC_GITHUB_OIDC_SUBJECT_REPOSITORY: 'example@1/repo@2' }[
@@ -441,6 +445,39 @@ test('preflight refuses failing CI and branches behind main', () => {
         '12',
       ),
     /behind main on infrastructure files/,
+  );
+});
+
+test('plan and apply refuse a branch that fell behind main after preflight', () => {
+  const { world, calls, cli, digest } = harness();
+  cli('preflight', '12');
+  cli('plan', '12', 'dev');
+  const reviewed = digest('dev');
+  world.behind = 'infrastructure/modules/foundation/kms.tf\n';
+  const before = calls.length;
+  assert.throws(
+    () => cli('apply', '12', 'dev', reviewed),
+    /behind main on infrastructure files; update the branch and run preflight again/,
+  );
+  assert.throws(() => cli('plan', '12', 'dev'), /behind main/);
+  assert.ok(
+    !calls.slice(before).some((call) => ['aws', 'tofu'].includes(call.command)),
+  );
+});
+
+test('local edits in the PR worktree stop plan and apply', () => {
+  const { world, cli } = harness();
+  cli('preflight', '12');
+  world.dirty = ' M infrastructure/dev/foundation/main.tf\n';
+  assert.throws(() => cli('plan', '12', 'dev'), /has local changes/);
+});
+
+test('an email domain stored as a secret fails with the fix', () => {
+  const { cli } = harness({ secretDomain: true });
+  cli('preflight', '12');
+  assert.throws(
+    () => cli('plan', '12', 'dev'),
+    /cannot read secrets; store DEV_MCC_EMAIL_DOMAIN as a variable in infra\/foundation-dev/,
   );
 });
 
