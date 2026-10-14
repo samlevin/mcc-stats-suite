@@ -101,11 +101,15 @@ export class MatchToCsvStack extends Stack {
       ),
     );
 
+    // Operators create this optional parameter out of band; sender addresses
+    // never live in source or OpenTofu state.
+    const senderAllowlistParameter = `${prefix}/sender-allowlist`;
     const processEmail = this.nodeFunction(
       'ProcessEmail',
       'process-email.ts',
       {
         EVIDENCE_BUCKET: evidenceBucket.bucketName,
+        SENDER_ALLOWLIST_PARAMETER: senderAllowlistParameter,
         ...lambdaEnvironment,
       },
       1024,
@@ -143,6 +147,18 @@ export class MatchToCsvStack extends Stack {
     );
 
     rawEmailBucket.grantRead(processEmail);
+    processEmail.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ssm:GetParameter'],
+        resources: [
+          this.formatArn({
+            service: 'ssm',
+            resource: 'parameter',
+            resourceName: senderAllowlistParameter.slice(1),
+          }),
+        ],
+      }),
+    );
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
     this.grantEvidenceAccess(evidenceBucket, extractText, true);
     this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
