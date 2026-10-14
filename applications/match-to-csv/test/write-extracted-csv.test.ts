@@ -1,4 +1,5 @@
-import t from 'tap';
+import assert from 'node:assert/strict';
+import { test } from 'node:test';
 import type { ExtractTextOutput } from '@samlevin/contracts';
 import { writeExtractedCsv } from '../src/lambdas/write-extracted-csv';
 
@@ -34,44 +35,38 @@ const event: ExtractTextOutput = {
   },
 };
 
-t.test(
-  'export writes the CSV and structured table under the run',
-  async (t) => {
-    const writes: Array<{ key: string; contentType: string }> = [];
-    const result = await writeExtractedCsv(event, {
-      async putObject(_bucket, key, _body, contentType) {
-        writes.push({ key, contentType });
-      },
-    });
+test('export writes the CSV and structured table under the run', async () => {
+  const writes: Array<{ key: string; contentType: string }> = [];
+  const result = await writeExtractedCsv(event, {
+    async putObject(_bucket, key, _body, contentType) {
+      writes.push({ key, contentType });
+    },
+  });
 
-    t.equal(result.rowCount, 1);
-    t.same(writes.map(({ key }) => key).sort(), [
-      'submissions/submission-1/screenshots/screen-1/runs/run-1/export/extracted-table.json',
-      'submissions/submission-1/screenshots/screen-1/runs/run-1/export/extracted.csv',
-    ]);
-  },
-);
+  assert.equal(result.rowCount, 1);
+  assert.deepEqual(writes.map(({ key }) => key).sort(), [
+    'submissions/submission-1/screenshots/screen-1/runs/run-1/export/extracted-table.json',
+    'submissions/submission-1/screenshots/screen-1/runs/run-1/export/extracted.csv',
+  ]);
+});
 
-t.test(
-  'export resumes when one immutable artifact already exists',
-  async (t) => {
-    let collisionReported = false;
-    const result = await writeExtractedCsv(event, {
-      async putObject(_bucket, key) {
-        if (key.endsWith('.csv')) {
-          collisionReported = true;
-          throw { $metadata: { httpStatusCode: 412 } };
-        }
-      },
-    });
+test('export resumes when one immutable artifact already exists', async () => {
+  let collisionReported = false;
+  const result = await writeExtractedCsv(event, {
+    async putObject(_bucket, key) {
+      if (key.endsWith('.csv')) {
+        collisionReported = true;
+        throw { $metadata: { httpStatusCode: 412 } };
+      }
+    },
+  });
 
-    t.equal(collisionReported, true);
-    t.equal(result.rowCount, 1);
-  },
-);
+  assert.equal(collisionReported, true);
+  assert.equal(result.rowCount, 1);
+});
 
-t.test('export does not hide storage failures', async (t) => {
-  await t.rejects(
+test('export does not hide storage failures', async () => {
+  await assert.rejects(
     writeExtractedCsv(event, {
       async putObject() {
         throw new Error('storage unavailable');

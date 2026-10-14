@@ -5,7 +5,7 @@ import type { MatchToCsvStack } from '../../cdk/lib/match-to-csv-stack';
 
 /**
  * Builds the stack as the entry point does, without bundling Lambda code.
- * TAP child processes skip CDK's built-in CloudFormation schema validation;
+ * Test processes skip CDK's built-in CloudFormation schema validation;
  * ci:synth validates the real bundled template. Keep construct validation and
  * template assertions here without repeatedly starting the WASM schema engine.
  */
