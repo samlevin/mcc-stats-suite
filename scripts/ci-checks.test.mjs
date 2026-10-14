@@ -89,10 +89,35 @@ test('documentation and recognized repository scopes avoid workspace and infrast
     ['npm', ['run', 'format:check']],
   ]);
   const commands = checks({ full: false, repository: true });
-  assert.equal(commands.length, 3);
+  assert.equal(commands.length, 4);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
   assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
   assert.ok(JSON.stringify(commands).includes('branch-name.test.mjs'));
+  assert.ok(JSON.stringify(commands).includes('agent-policy.test.mjs'));
+  assert.deepEqual(commands[1], ['npm', ['run', 'agents:check']]);
+});
+
+test('agent workflow sources and generated definitions select the repository scope', () => {
+  for (const path of [
+    '.agents/policy.json',
+    '.agents/roles/implementer.md',
+    '.agents/workflows/implement.md',
+    '.agents/workflows/create-github-issue/references/github-operations.md',
+    '.agents/skills/mcc-implement/SKILL.md',
+    '.agents/skills/mcc-implement/agents/openai.yaml',
+    '.claude/agents/mcc-implementer.md',
+    '.claude/skills/mcc-implement/SKILL.md',
+    '.codex/agents/mcc-implementer.toml',
+    'scripts/agent-policy.mjs',
+    'scripts/agent-policy.test.mjs',
+  ])
+    assert.equal(classify(path), 'repository', path);
+  assert.equal(classify('.agents/README.md'), 'documentation');
+  assert.equal(classify('.agents/issue-creation.md'), 'documentation');
+  assert.equal(classify('.claude/settings.json'), 'full');
+  const scopes = selectScopes(['.agents/roles/implementer.md'], 'pull_request');
+  assert.equal(scopes.repository, true);
+  assert.equal(scopes.full, false);
 });
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {

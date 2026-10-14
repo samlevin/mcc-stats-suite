@@ -22,7 +22,19 @@ export function isApplicationPath(path) {
   );
 }
 
+// Agent workflow sources and their generated output. Checked before the
+// Markdown rule because a role or workflow source is Markdown, and editing
+// one must run the generated-definition check, not only the format check.
+export function isAgentWorkflowPath(path) {
+  return (
+    /^\.agents\/(policy\.json|roles\/|workflows\/|skills\/)/.test(path) ||
+    /^\.(claude|codex)\/(agents|skills)\//.test(path) ||
+    /^scripts\/agent-policy(\.test)?\.mjs$/.test(path)
+  );
+}
+
 export function classify(path) {
+  if (isAgentWorkflowPath(path)) return 'repository';
   if (path.endsWith('.md')) return 'documentation';
   // Templates under infrastructure/ are copied by operators, never read by
   // OpenTofu or a workspace build.

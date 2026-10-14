@@ -15,7 +15,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), and drift check (`check`) |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
-Edit the sources, run `npm run agents:generate`, and commit the output. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. Generated files carry a header saying so.
+Edit the sources, run `npm run agents:generate`, and commit the output. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
 
 ## Agents and skills
 
@@ -29,12 +29,12 @@ Issue creation is the one capability without an agent. It needs to ask the perso
 
 ## Inventory and reconciliation
 
-The maintainer's personal setup had six Claude Code agents (`ticket-implementer`, `issue-orchestrator`, `code-reviewer`, `security-reviewer`, `issue-triager`, `stack-manager`) with skills `create-github-issue`, `create-jira-issue`, `jira-tracker`, `review`, and `write-prose`, and six Codex agents (`issue-implementer`, `task-orchestrator`, `code-reviewer`, `security-reviewer`, `issue-triager`, `stacked-pr-manager`) with skills `create-github-issue` and `write-prose`, plus personal routing in `~/.codex/AGENTS.md`, personal approval rules, and a personal `delivery.py` helper. The repository versions reconcile them as follows.
+The maintainer's personal setup had six Claude Code agents (`ticket-implementer`, `issue-orchestrator`, `code-reviewer`, `security-reviewer`, `issue-triager`, `stack-manager`) with skills `create-github-issue`, `review`, `write-prose`, and two for another tracker, and six Codex agents (`issue-implementer`, `task-orchestrator`, `code-reviewer`, `security-reviewer`, `issue-triager`, `stacked-pr-manager`) with skills `create-github-issue` and `write-prose`, plus personal routing in `~/.codex/AGENTS.md`, personal approval rules, and a personal `delivery.py` helper. The repository versions reconcile them as follows.
 
 | Behavior | Personal Claude | Personal Codex | Repository (both tools) |
 | --- | --- | --- | --- |
 | Naming | generic names | different generic names | `mcc-` prefix; one name per role in both tools |
-| Trackers | GitHub and Jira | GitHub | GitHub only; Jira flows stay personal |
+| Trackers | GitHub and another tracker | GitHub | GitHub Issues only; other tracker flows stay personal |
 | Container delivery | serial by default, parallel on request | serial by default, parallel on request | serial always; sibling leaves never run concurrently |
 | Pre-PR review | always | only above a risk threshold | the `AGENTS.md` threshold (cross-component, contract, security, substantial behavior); a skip is stated in the PR body |
 | Reviewer on an existing PR | never (rework goes to the implementer) | `review_mode=rework` | `review_mode=pre_pr` from the implementer; `review_mode=requested` from `mcc-review-code`, which never posts |

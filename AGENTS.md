@@ -66,7 +66,7 @@ The Terrateam indexer is disabled, so Terrateam plans a root only when a changed
 
 ## Delivery binding
 
-Issue tracker: GitHub Issues. This marker turns on the GitHub issue flows (`implement #N`, GitHub issue filing); without it, agents use Jira. In this repository those flows run through the `mcc-` skills and agents above.
+Issue tracker: GitHub Issues. This marker turns on the GitHub issue flows (`implement #N`, GitHub issue filing), which run through the `mcc-` skills and agents above.
 
 Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://github.com/users/samlevin/projects/1). Discover project field IDs with `gh`.
 

@@ -30,6 +30,8 @@ export function checks({ full, repository, mode }) {
     );
   else if (repository)
     commands.push(
+      // Generated agent definitions must match their sources under .agents/.
+      ['npm', ['run', 'agents:check']],
       [
         'npx',
         [
@@ -40,6 +42,8 @@ export function checks({ full, repository, mode }) {
           'scripts/issue-triage.test.mjs',
           'scripts/branch-name.mjs',
           'scripts/branch-name.test.mjs',
+          'scripts/agent-policy.mjs',
+          'scripts/agent-policy.test.mjs',
           '--max-warnings',
           '0',
         ],
@@ -50,6 +54,7 @@ export function checks({ full, repository, mode }) {
           '--test',
           'scripts/issue-triage.test.mjs',
           'scripts/branch-name.test.mjs',
+          'scripts/agent-policy.test.mjs',
         ],
       ],
     );
