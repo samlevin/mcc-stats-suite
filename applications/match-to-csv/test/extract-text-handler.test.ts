@@ -21,11 +21,12 @@ const source = {
 function dependencies(
   writes: Array<{ key: string; value: any }>,
   analyze: ExtractTextDependencies['analyze'],
+  image: Buffer = Buffer.from('image'),
 ): ExtractTextDependencies {
   let id = 0;
   return {
     async getImage() {
-      return Buffer.from('image');
+      return image;
     },
     async inspectImage() {
       return { format: 'png', width: 1920, height: 1080 };
@@ -131,6 +132,48 @@ t.test(
           write.key.endsWith('/completion.json') &&
           write.value.error.name === 'SourceHashMismatchError',
       ),
+    );
+  },
+);
+
+t.test(
+  'runExtraction enforces the 10,000,000-byte Textract limit',
+  async (t) => {
+    const atLimit = Buffer.alloc(10_000_000);
+    const overLimit = Buffer.alloc(10_000_001);
+    const hash = (image: Buffer) =>
+      createHash('sha256').update(image).digest('hex');
+
+    let analyzed = 0;
+    await runExtraction(
+      { source: { ...source, sha256: hash(atLimit) } },
+      dependencies(
+        [],
+        async () => {
+          analyzed += 1;
+          return { $metadata: {}, Blocks: [] };
+        },
+        atLimit,
+      ),
+    );
+    t.equal(analyzed, 1, 'an image at the limit reaches the provider');
+
+    const writes: Array<{ key: string; value: any }> = [];
+    await t.rejects(
+      runExtraction(
+        { source: { ...source, sha256: hash(overLimit) } },
+        dependencies(
+          writes,
+          async () => {
+            throw new Error('provider must not be called');
+          },
+          overLimit,
+        ),
+      ),
+      { name: 'ImageTooLargeError' },
+    );
+    t.notOk(
+      writes.some((write) => write.key.endsWith('/textract/request.json')),
     );
   },
 );

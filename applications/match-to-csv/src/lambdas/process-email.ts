@@ -16,9 +16,9 @@ import sharp from 'sharp';
 import { bodyToBuffer, namespacedObjectKey, safeObjectName } from '../lib/s3';
 import { log } from '../lib/log';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
+import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 
 const s3 = new S3Client({});
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MIN_IMAGE_WIDTH = 640;
 const MIN_IMAGE_HEIGHT = 360;
 

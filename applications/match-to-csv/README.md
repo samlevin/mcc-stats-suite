@@ -18,7 +18,7 @@ configured SES recipient
 
 The original image is never transformed or replaced. Rejected image attachments are preserved with rejection metadata. Non-image attachments remain available in the retained MIME message.
 
-V1 processing accepts PNG and JPEG images up to 10 MiB with dimensions of at least 640 by 360 pixels. It rejects unreadable images, unsupported formats, oversized images, and small images. A message without a processable screenshot records a rejected submission and fails its workflow execution instead of succeeding without output.
+V1 processing accepts PNG and JPEG images up to 10 MB (10,000,000 bytes, the Textract synchronous limit) with dimensions of at least 640 by 360 pixels. It rejects unreadable images, unsupported formats, oversized images, and small images. A message without a processable screenshot records a rejected submission and fails its workflow execution instead of succeeding without output.
 
 ## Deployment
 

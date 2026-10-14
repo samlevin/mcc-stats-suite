@@ -145,7 +145,7 @@ t.test(
 
 t.test('attachment validation reports independent problems', (t) => {
   t.same(
-    attachmentRejectionCodes(Buffer.alloc(10 * 1024 * 1024 + 1), {
+    attachmentRejectionCodes(Buffer.alloc(10_000_001), {
       format: 'webp',
       width: 100,
       height: 100,
@@ -156,6 +156,15 @@ t.test('attachment validation reports independent problems', (t) => {
     attachmentRejectionCodes(Buffer.from('bad'), {}, new Error('invalid')),
     ['UNREADABLE_IMAGE'],
   );
+  t.end();
+});
+
+t.test('attachment validation uses the 10,000,000-byte Textract limit', (t) => {
+  const metadata = { format: 'png', width: 1920, height: 1080 };
+  t.same(attachmentRejectionCodes(Buffer.alloc(10_000_000), metadata), []);
+  t.same(attachmentRejectionCodes(Buffer.alloc(10_000_001), metadata), [
+    'IMAGE_TOO_LARGE',
+  ]);
   t.end();
 });
 
