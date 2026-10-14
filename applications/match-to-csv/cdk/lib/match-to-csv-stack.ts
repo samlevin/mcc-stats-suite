@@ -5,6 +5,7 @@ import {
   CfnOutput,
   Duration,
   Fn,
+  RemovalPolicy,
   Stack,
   Tags,
   type StackProps,
@@ -23,6 +24,12 @@ import * as sfn from 'aws-cdk-lib/aws-stepfunctions';
 import * as tasks from 'aws-cdk-lib/aws-stepfunctions-tasks';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
+import {
+  bundlingOptions,
+  bundlingRuntime,
+  checkLocalEsbuild,
+  localEsbuildVersion,
+} from './bundling';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -31,10 +38,14 @@ interface MatchToCsvStackProps extends StackProps {
 }
 
 export class MatchToCsvStack extends Stack {
+  private readonly deployment: DeploymentConfig;
+
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
     super(scope, id, props);
 
     const { deployment, gitSha } = props;
+    this.deployment = deployment;
+    if (this.bundlingRequired) checkLocalEsbuild(localEsbuildVersion());
     iam.PermissionsBoundary.of(this).apply(
       iam.ManagedPolicy.fromManagedPolicyName(
         this,
@@ -203,13 +214,10 @@ export class MatchToCsvStack extends Stack {
     });
     processAttachments.itemProcessor(extractTextTask.next(writeCsvTask));
 
-    const logGroup = new logs.LogGroup(this, 'WorkflowLogs', {
-      logGroupName: `/aws/vendedlogs/states/${deployment.resourcePrefix}`,
-      retention:
-        deployment.environment === 'prod'
-          ? logs.RetentionDays.THREE_MONTHS
-          : logs.RetentionDays.TWO_WEEKS,
-    });
+    const logGroup = this.logGroup(
+      'WorkflowLogs',
+      `/aws/vendedlogs/states/${deployment.resourcePrefix}`,
+    );
     const workflow = new sfn.StateMachine(this, 'Workflow', {
       stateMachineName: deployment.resourcePrefix,
       stateMachineType: sfn.StateMachineType.STANDARD,
@@ -331,6 +339,21 @@ export class MatchToCsvStack extends Stack {
     });
   }
 
+  private logGroup(id: string, logGroupName: string): logs.LogGroup {
+    return new logs.LogGroup(this, id, {
+      logGroupName,
+      retention:
+        this.deployment.environment === 'prod'
+          ? logs.RetentionDays.THREE_MONTHS
+          : logs.RetentionDays.TWO_WEEKS,
+      // Stable groups outlive the stack but are cleaned up if their creation rolls back,
+      // so a failed first deploy cannot leave a fixed name behind.
+      removalPolicy: this.deployment.ephemeral
+        ? RemovalPolicy.DESTROY
+        : RemovalPolicy.RETAIN_ON_UPDATE_OR_DELETE,
+    });
+  }
+
   private nodeFunction(
     id: string,
     fileName: string,
@@ -340,25 +363,21 @@ export class MatchToCsvStack extends Stack {
     timeout = Duration.minutes(2),
   ): lambdaNode.NodejsFunction {
     const repositoryRoot = path.join(__dirname, '..', '..', '..', '..');
+    const functionName = `${this.deployment.resourcePrefix}-${id}`;
     return new lambdaNode.NodejsFunction(this, id, {
+      functionName,
       entry: path.join(__dirname, '..', '..', 'src', 'lambdas', fileName),
       handler: 'handler',
-      runtime: lambda.Runtime.NODEJS_22_X,
+      runtime: bundlingRuntime,
       architecture: lambda.Architecture.ARM_64,
       memorySize,
+      logGroup: this.logGroup(`${id}Logs`, `/aws/lambda/${functionName}`),
       timeout,
       tracing: lambda.Tracing.ACTIVE,
       environment,
       projectRoot: repositoryRoot,
       depsLockFilePath: path.join(repositoryRoot, 'package-lock.json'),
-      bundling: {
-        minify: true,
-        sourceMap: true,
-        target: 'node22',
-        nodeModules: includeSharp ? ['sharp'] : undefined,
-        // NodejsFunction builds its Docker image eagerly; skip it when bundling is skipped.
-        forceDockerBundling: includeSharp && this.bundlingRequired,
-      },
+      bundling: bundlingOptions(includeSharp, this.bundlingRequired),
     });
   }
 

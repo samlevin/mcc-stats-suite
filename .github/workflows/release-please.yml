@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   release-please:
+    name: Update release pull request
     runs-on: ubuntu-latest
     steps:
       - name: Create release token
