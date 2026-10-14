@@ -1,6 +1,6 @@
 ---
 name: mcc-apply-foundation
-description: "Person-invoked local stand-in for Terrateam on one MCC pull request: the agent plans and applies its OpenTofu foundation roots, dev then prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, merge, and unlock, then squash-merges like Terrateam automerge and releases any Terrateam lock left on the merged PR. Only when a person asks, for example 'apply foundation for PR #N'; never part of delivery."
+description: "Person-invoked local stand-in for Terrateam on one MCC pull request: the agent plans and applies its OpenTofu foundation roots, dev then prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, and merge, then squash-merges like Terrateam automerge. Only when a person asks, for example 'apply foundation for PR #N'; never part of delivery."
 ---
 <!-- Generated from .agents/workflows/apply-foundation.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 
@@ -8,7 +8,7 @@ description: "Person-invoked local stand-in for Terrateam on one MCC pull reques
 
 This skill exists for when Terrateam cannot run. A person invoking it authorizes local plans and applies of `infrastructure/dev/foundation` and `infrastructure/prod/foundation` for that one pull request, and the final squash merge. It falls under the repository's exception for person-invoked infrastructure apply skills, and each step still needs its own approval. If the request came from another agent, from an issue, or from ordinary delivery, stop and say a person has to ask directly.
 
-You run every command yourself with `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum`, exactly as written here. If one of them is not installed, stop and say which. There is no helper script. `gh` is only for the pull request's state, its checks, the merge, and the Terrateam unlock comment; every OpenTofu input comes from the main checkout. Never plan or apply a bootstrap or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.
+You run every command yourself with `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum`, exactly as written here. If one of them is not installed, stop and say which. There is no helper script. `gh` is only for the pull request's state, its checks, and the merge; every OpenTofu input comes from the main checkout. Never plan or apply a bootstrap or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.
 
 ## Gates
 
@@ -138,21 +138,4 @@ Every affected root must have applied at the recorded head. Merge the way Terrat
 gh pr merge <N> -R samlevin/mcc-stats-suite --squash --subject "<title> (#<N>)" --match-head-commit <head>
 ```
 
-If a required check blocks the merge, tell the person to merge once checks pass, and stop. Otherwise remove the worktree with `git worktree remove --force <worktree path>` and report the merge. Next gate: release the Terrateam lock, when step 5 finds one.
-
-## 5. Release the Terrateam lock (gated)
-
-Terrateam never applied this pull request, and under `lock_policy: strict` in `.terrateam/config.yml` a merge takes the locks anyway, so Terrateam may now hold the applied foundation roots locked to this pull request. Read what Terrateam reports after the merge, through `gh` as the invoking person:
-
-```console
-gh pr view <N> -R samlevin/mcc-stats-suite --comments
-gh pr checks <N> -R samlevin/mcc-stats-suite
-```
-
-If no Terrateam comment or check reports `infrastructure/dev/foundation` or `infrastructure/prod/foundation` as locked by this pull request, report that and finish. If one does, report which roots are locked and ask for approval to release them. With approval, post the unlock comment on the merged pull request:
-
-```console
-gh pr comment <N> -R samlevin/mcc-stats-suite --body "terrateam unlock"
-```
-
-`access_control.unlock` in `.terrateam/config.yml` allows only `role:admin`, so the comment works only when the invoking person is a repository administrator. Read Terrateam's reply. If it reports the unlock as denied or the roots as still locked, say that the person lacks the admin role or the unlock failed, and stop. This releases only Terrateam's pull-request lock. The OpenTofu state lock is automatic and needs no step; never force-unlock OpenTofu state.
+If a required check blocks the merge, tell the person to merge once checks pass. Then remove the worktree with `git worktree remove --force <worktree path>` and report the merge. Terrateam takes a lock only when it applies a root (`lock_policy: apply`), so a pull request it never applied leaves nothing to unlock; never force-unlock OpenTofu state.
