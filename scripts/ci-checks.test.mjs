@@ -130,37 +130,93 @@ test('checks overlap and any failing check rejects the gate after all checks set
 });
 
 test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', () => {
-  const plan = JSON.parse(
-    execFileSync(turbo, [...workspaceArguments('all').slice(1), '--dry=json'], {
-      cwd: root,
-      encoding: 'utf8',
-    }),
+  const dryRun = (job) =>
+    new Map(
+      JSON.parse(
+        execFileSync(
+          turbo,
+          [...workspaceArguments('all', job).slice(1), '--dry=json'],
+          { cwd: root, encoding: 'utf8' },
+        ),
+      ).tasks.map((task) => [task.taskId, task]),
+    );
+  const staticTasks = dryRun('static');
+  const bundleTasks = dryRun('bundle');
+  for (const [tasks, expected] of [
+    [staticTasks, 14],
+    [bundleTasks, 8],
+  ]) {
+    assert.equal(
+      [...tasks.values()].filter((task) => task.command !== '<NONEXISTENT>')
+        .length,
+      expected,
+    );
+  }
+  assert.ok(
+    ![...staticTasks.keys()].some((id) => /synth|verify|typecheck/.test(id)),
   );
-  const tasks = new Map(plan.tasks.map((task) => [task.taskId, task]));
-  assert.equal(
-    plan.tasks.filter((task) => task.command !== '<NONEXISTENT>').length,
-    27,
+  assert.ok(
+    ![...bundleTasks.keys()].some((id) => /#ci:test$|typecheck/.test(id)),
   );
   for (const name of applicationNames) {
     assert.ok(
-      tasks
+      bundleTasks
         .get(`@samlevin/${name}#ci:synth`)
         .dependencies.includes('@samlevin/cdk-config#build'),
     );
+    // Tests run the sources and need only built dependencies, not the package's own build.
     assert.ok(
-      tasks
+      !staticTasks
         .get(`@samlevin/${name}#ci:test`)
         .dependencies.includes(`@samlevin/${name}#build`),
     );
   }
+  // cdk-config tests load the package's own dist.
   assert.ok(
-    tasks
+    staticTasks
+      .get('@samlevin/cdk-config#ci:test')
+      .dependencies.includes('@samlevin/cdk-config#build'),
+  );
+  assert.ok(
+    staticTasks
+      .get('@samlevin/match-to-csv#ci:test')
+      .dependencies.includes('@samlevin/contracts#build'),
+  );
+  assert.ok(
+    bundleTasks
       .get('@samlevin/match-to-csv#ci:synth')
       .dependencies.includes('@samlevin/contracts#build'),
   );
   assert.deepEqual(
-    tasks.get('@samlevin/match-to-csv#verify:bundle').dependencies,
+    bundleTasks.get('@samlevin/match-to-csv#verify:bundle').dependencies,
     ['@samlevin/match-to-csv#ci:synth'],
+  );
+});
+
+test('the bundle job is the only Docker job and runs only synthesis and verification', () => {
+  assert.deepEqual(checks({ full: true, mode: 'all', job: 'bundle' }), [
+    ['npx', workspaceArguments('all', 'bundle')],
+  ]);
+  assert.deepEqual(
+    checks({ full: false, repository: true, job: 'bundle' }),
+    [],
+  );
+  assert.ok(
+    !JSON.stringify(checks({ full: true, mode: 'all' })).match(
+      /synth|bundle|typecheck/,
+    ),
+  );
+  const jobs = loadWorkflow('ci').jobs;
+  const text = (job) => JSON.stringify(job.steps);
+  assert.ok(!text(jobs['application-checks']).includes('docker'));
+  const steps = jobs['application-bundles'].steps;
+  const pull = steps.findIndex((step) => step.run?.includes('docker pull'));
+  assert.ok(
+    pull >= 0 && pull < steps.findIndex((step) => step.run === 'npm ci'),
+  );
+  assert.equal(
+    steps.find((step) => step.run === 'node scripts/ci-checks.mjs').env.CI_JOB,
+    'bundle',
   );
 });
 
@@ -375,6 +431,7 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
     'scope',
     'infrastructure',
     'application-checks',
+    'application-bundles',
   ]);
   assert.equal(parsedWorkflow.jobs.check.if, '${{ !cancelled() }}');
   const dev = readFileSync(
@@ -572,6 +629,10 @@ test('classifier selects independent infrastructure and application gates', () =
       expected.check,
     );
     assert.equal(
+      evaluate(ciWorkflow.jobs['application-bundles'].if, { needs }),
+      expected.check && expected.full,
+    );
+    assert.equal(
       evaluate(ciWorkflow.jobs.infrastructure.if, { needs }),
       expected.infrastructure,
     );
@@ -626,19 +687,25 @@ test('check aggregator requires exactly the selected gates', () => {
       for (const applications of ['true', 'false'])
         for (const infrastructureResult of ['success', 'failure', 'skipped'])
           for (const applicationsResult of ['success', 'failure', 'skipped'])
-            assert.equal(
-              passes({
-                SCOPE_RESULT: scope,
-                SCOPE_INFRASTRUCTURE: infrastructure,
-                SCOPE_APPLICATIONS: applications,
-                INFRASTRUCTURE_RESULT: infrastructureResult,
-                APPLICATIONS_RESULT: applicationsResult,
-              }),
-              scope === 'success' &&
-                (infrastructure === 'false' ||
-                  infrastructureResult === 'success') &&
-                (applications === 'false' || applicationsResult === 'success'),
-            );
+            for (const full of ['true', 'false'])
+              for (const bundlesResult of ['success', 'failure', 'skipped'])
+                assert.equal(
+                  passes({
+                    SCOPE_RESULT: scope,
+                    SCOPE_INFRASTRUCTURE: infrastructure,
+                    SCOPE_APPLICATIONS: applications,
+                    SCOPE_FULL: full,
+                    INFRASTRUCTURE_RESULT: infrastructureResult,
+                    APPLICATIONS_RESULT: applicationsResult,
+                    BUNDLES_RESULT: bundlesResult,
+                  }),
+                  scope === 'success' &&
+                    (infrastructure === 'false' ||
+                      infrastructureResult === 'success') &&
+                    (applications === 'false' ||
+                      (applicationsResult === 'success' &&
+                        (full === 'false' || bundlesResult === 'success'))),
+                );
 });
 
 test('workflow executes gate selection for push, PR, retired baseline, and API failure', async () => {
