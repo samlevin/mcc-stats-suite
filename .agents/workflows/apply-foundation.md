@@ -1,6 +1,6 @@
 ---
 name: apply-foundation
-description: "Person-invoked local stand-in for Terrateam on one {{label}} pull request: the agent plans and applies its OpenTofu foundation roots, dev then prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, and merge, then squash-merges like Terrateam automerge. Only when a person asks, for example 'apply foundation for PR #N'; never part of delivery."
+description: "Person-invoked local stand-in for Terrateam on one {{label}} pull request: the agent plans and applies its OpenTofu foundation roots, dev then prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, merge, and unlock, then squash-merges like Terrateam automerge and releases any Terrateam lock left on the merged PR. Only when a person asks, for example 'apply foundation for PR #N'; never part of delivery."
 argument-hint: "<PR number>"
 claude:
   disable-model-invocation: true
@@ -14,7 +14,7 @@ codex:
 
 This skill exists for when Terrateam cannot run. A person invoking it authorizes local plans and applies of `infrastructure/dev/foundation` and `infrastructure/prod/foundation` for that one pull request, and the final squash merge. It falls under the repository's exception for person-invoked infrastructure apply skills, and each step still needs its own approval. If the request came from another agent, from an issue, or from ordinary delivery, stop and say a person has to ask directly.
 
-You run every command yourself with `gh`, `git`, `aws`, `tofu`, and `direnv`, exactly as written here. There is no helper script. `gh` is only for the pull request's state, its checks, and the merge; every OpenTofu input comes from the main checkout. Never plan or apply a bootstrap or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.
+You run every command yourself with `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum`, exactly as written here. If one of them is not installed, stop and say which. There is no helper script. `gh` is only for the pull request's state, its checks, the merge, and the Terrateam unlock comment; every OpenTofu input comes from the main checkout. Never plan or apply a bootstrap or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.
 
 ## Gates
 
@@ -26,13 +26,14 @@ Keep a short record in the conversation: the PR number, title, head SHA, affecte
 
 1. `gh pr view <N> -R {{repository}} --json title,state,baseRefName,headRefOid,mergeable`. Stop unless the state is `OPEN`, the base is `main`, and `mergeable` is not `CONFLICTING`. Record the title and head SHA.
 2. `gh pr checks <N> -R {{repository}}`. Every check except Terrateam's own must have passed. If one failed or is still running, stop and say so; do not wait for or poll CI.
-3. Pick the affected roots from `gh pr diff <N> -R {{repository}} --name-only`. Only `infrastructure/dev/foundation` and `infrastructure/prod/foundation` are candidates. A root is affected when a changed file matches its `file_patterns` in `.terrateam/config.yml` at the PR head, where `${DIR}` is the root and `*` does not cross `/`. Today that is the root's own `*.tf`, `*.tfvars`, and `*.hcl` files, `infrastructure/modules/foundation/*.tf`, and `.terrateam/config.yml`. If neither root is affected, stop: there is nothing to apply.
-4. Fetch and check freshness. A branch that lacks infrastructure commits already on `main` would revert them, so this list must be empty:
+3. Fetch and check freshness. A branch that lacks infrastructure commits already on `main` would revert them, so this list must be empty:
 
    ```console
    git fetch origin main "refs/pull/<N>/head"
    git diff --name-only "$(git merge-base origin/main <head>)" origin/main -- infrastructure .terrateam
    ```
+
+4. Pick the affected roots from `gh pr diff <N> -R {{repository}} --name-only`. Only `infrastructure/dev/foundation` and `infrastructure/prod/foundation` are candidates. A root is affected when a changed file matches its `file_patterns` in the PR head's `.terrateam/config.yml`, which you read with `git show <head>:.terrateam/config.yml`. In those patterns `${DIR}` is the root and `*` does not cross `/`. Today that is the root's own `*.tf`, `*.tfvars`, and `*.hcl` files, `infrastructure/modules/foundation/*.tf`, and `.terrateam/config.yml`. If neither root is affected, stop: there is nothing to apply.
 
 5. Check that each affected root has its ignored local inputs in the main checkout: `.envrc`, created from the committed `.envrc.example` in that root and allowed with `direnv allow` (it loads the repository-root `.envrc`, created from the root `.envrc.example`), and `backend.hcl`, created from `backend.hcl.example` with the bucket Terrateam uses for that environment. If one is missing, stop and tell the person which file to create from which example. Do not create them.
 
@@ -89,6 +90,12 @@ missing() { echo "$1 is not set by $SRC/.envrc or the repository-root .envrc it 
 [ -n "$REGION" ] || missing TF_VAR_aws_region "the repository-root .envrc.example"
 [ -n "$DOMAIN" ] || missing TF_VAR_email_domain "$SRC/.envrc.example"
 [ -n "$SUBJECT" ] || missing TF_VAR_github_oidc_subject_repository "the repository-root .envrc.example"
+for pair in "MCC_${U}_INFRA_PROFILE=$PROFILE" "TF_VAR_aws_region=$REGION" "TF_VAR_email_domain=$DOMAIN" \
+  "TF_VAR_github_oidc_subject_repository=$SUBJECT"; do
+  case "${pair#*=}" in
+    *REPLACE_WITH_* | *OWNER@OWNER_ID*) echo "${pair%%=*} still holds the example placeholder; set the real value in the .envrc" >&2; exit 1 ;;
+  esac
+done
 CALLER=$(clean AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" aws sts get-caller-identity --query Account --output text) ||
   { echo "AWS profile $PROFILE has no valid credentials; run aws sso login --profile $PROFILE" >&2; exit 1; }
 [ "$CALLER" = "$ACCOUNT" ] ||
@@ -110,7 +117,7 @@ The worktree holds no `*.auto.tfvars`, so like Terrateam the plan sees only thes
 
 ## 2. Plan a root (gated)
 
-Before planning, run `gh pr view <N> -R {{repository}} --json headRefOid -q .headRefOid`. If it differs from the recorded head, the PR moved: remove the worktree (`git worktree remove --force <worktree path>`), forget every plan and approval, and start again at preflight. Prod is planned only after dev has applied at this head, when dev is affected. Repeat the freshness check from preflight step 4 with a fresh `git fetch origin main`; another PR may have merged since.
+Before planning, run `gh pr view <N> -R {{repository}} --json headRefOid -q .headRefOid`. If it differs from the recorded head, the PR moved: remove the worktree (`git worktree remove --force <worktree path>`), forget every plan and approval, and start again at preflight. Prod is planned only after dev has applied at this head, when dev is affected. Repeat the freshness check from preflight step 3 with a fresh `git fetch origin main`; another PR may have merged since.
 
 Append to the root setup block:
 
@@ -145,4 +152,21 @@ Every affected root must have applied at the recorded head. Merge the way Terrat
 gh pr merge <N> -R {{repository}} --squash --subject "<title> (#<N>)" --match-head-commit <head>
 ```
 
-If a required check blocks the merge, tell the person to merge once checks pass. Then remove the worktree with `git worktree remove --force <worktree path>` and report the merge.
+If a required check blocks the merge, tell the person to merge once checks pass, and stop. Otherwise remove the worktree with `git worktree remove --force <worktree path>` and report the merge. Next gate: release the Terrateam lock, when step 5 finds one.
+
+## 5. Release the Terrateam lock (gated)
+
+Terrateam never applied this pull request, and under `lock_policy: strict` in `.terrateam/config.yml` a merge takes the locks anyway, so Terrateam may now hold the applied foundation roots locked to this pull request. Read what Terrateam reports after the merge, through `gh` as the invoking person:
+
+```console
+gh pr view <N> -R {{repository}} --comments
+gh pr checks <N> -R {{repository}}
+```
+
+If no Terrateam comment or check reports `infrastructure/dev/foundation` or `infrastructure/prod/foundation` as locked by this pull request, report that and finish. If one does, report which roots are locked and ask for approval to release them. With approval, post the unlock comment on the merged pull request:
+
+```console
+gh pr comment <N> -R {{repository}} --body "terrateam unlock"
+```
+
+`access_control.unlock` in `.terrateam/config.yml` allows only `role:admin`, so the comment works only when the invoking person is a repository administrator. Read Terrateam's reply. If it reports the unlock as denied or the roots as still locked, say that the person lacks the admin role or the unlock failed, and stop. This releases only Terrateam's pull-request lock. The OpenTofu state lock is automatic and needs no step; never force-unlock OpenTofu state.
