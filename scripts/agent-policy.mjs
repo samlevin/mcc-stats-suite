@@ -6,6 +6,12 @@
 // `generate` writes the Claude Code and Codex definitions from the shared
 // sources under .agents/; `check` fails when a generated file is stale so
 // the two tools cannot drift apart.
+//
+// The sources name no repository. `policy.json` carries a `binding` (the
+// namespace prefix, repository, project, tracker documents, and feature
+// flags), and every `{{placeholder}}` and `{{#feature}}...{{/feature}}`
+// section in a source resolves against it, so another repository reuses the
+// same sources with its own policy file.
 import {
   existsSync,
   mkdirSync,
@@ -20,7 +26,6 @@ import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const TOOLS = ['claude', 'codex'];
-export const PREFIX = 'mcc-';
 // Matches the repository Prettier style so generated YAML passes format:check.
 const YAML_STYLE = { singleQuote: true, lineWidth: 0 };
 // Only generation needs the yaml package; `resolve` must work from a checkout
@@ -43,7 +48,91 @@ const OUTPUTS = {
 };
 
 export function loadPolicy(base = root) {
-  return JSON.parse(readFileSync(join(base, SOURCES.policy), 'utf8'));
+  const policy = JSON.parse(readFileSync(join(base, SOURCES.policy), 'utf8'));
+  binding(policy);
+  return policy;
+}
+
+// The binding is required in full: a missing key would otherwise surface as
+// a literal placeholder inside an agent prompt.
+export function binding(policy) {
+  const value = policy.binding;
+  const missing = (path) => new Error(`policy.json binding is missing ${path}`);
+  if (!value) throw missing('binding');
+  for (const key of ['namespace', 'label', 'repository'])
+    if (typeof value[key] !== 'string' || !value[key]) throw missing(key);
+  if (!/^[a-z][a-z0-9]*$/.test(value.namespace))
+    throw new Error(
+      `policy.json binding.namespace must be lowercase letters and digits, got "${value.namespace}"`,
+    );
+  const project = value.project ?? {};
+  if (typeof project.owner !== 'string' || !project.owner)
+    throw missing('project.owner');
+  if (!Number.isInteger(project.number) || project.number < 1)
+    throw missing('project.number');
+  if (typeof project.name !== 'string' || !project.name)
+    throw missing('project.name');
+  const docs = value.docs ?? {};
+  for (const key of ['triage', 'workflow'])
+    if (typeof docs[key] !== 'string' || !docs[key])
+      throw missing(`docs.${key}`);
+  if (!Array.isArray(docs.guides) || docs.guides.length === 0)
+    throw missing('docs.guides');
+  if (typeof value.features?.infrastructure !== 'boolean')
+    throw missing('features.infrastructure');
+  return value;
+}
+
+export function prefix(policy) {
+  return `${binding(policy).namespace}-`;
+}
+
+function listPhrase(items) {
+  const quoted = items.map((item) => `\`${item}\``);
+  if (quoted.length === 1) return quoted[0];
+  return `${quoted.slice(0, -1).join(', ')}, or ${quoted.at(-1)}`;
+}
+
+// Placeholders a source may use. Anything else is an error, so a typo never
+// reaches a generated prompt.
+export function placeholders(policy) {
+  const value = binding(policy);
+  return {
+    prefix: prefix(policy),
+    label: value.label,
+    repository: value.repository,
+    'project.owner': value.project.owner,
+    'project.number': String(value.project.number),
+    'project.name': value.project.name,
+    'project.url': `https://github.com/users/${value.project.owner}/projects/${value.project.number}`,
+    'docs.triage': value.docs.triage,
+    'docs.workflow': value.docs.workflow,
+    'docs.guides': listPhrase(value.docs.guides),
+  };
+}
+
+// `{{#feature}}...{{/feature}}` keeps its content only when the binding
+// enables that feature; `{{name}}` becomes the bound value; `\{{` is a
+// literal `{{` for text that documents the placeholders themselves.
+export function substitute(text, policy) {
+  const values = placeholders(policy);
+  const features = binding(policy).features;
+  const literal = '\u0000';
+  const sections = text
+    .replaceAll('\\{{', literal)
+    .replace(/\{\{#([a-z]+)\}\}([\s\S]*?)\{\{\/\1\}\}/g, (_, name, content) => {
+      if (!(name in features))
+        throw new Error(`Unknown feature section: ${name}`);
+      return features[name] ? content : '';
+    });
+  if (/\{\{[#/]/.test(sections))
+    throw new Error('Unbalanced feature section in source');
+  return sections
+    .replace(/\{\{([a-z.]+)\}\}/g, (_, name) => {
+      if (!(name in values)) throw new Error(`Unknown placeholder: ${name}`);
+      return values[name];
+    })
+    .replaceAll(literal, '{{');
 }
 
 function supportedEfforts(policy, tool, model) {
@@ -92,12 +181,12 @@ export function resolve(
   resolved.spawn =
     tool === 'claude'
       ? {
-          subagent_type: role ? PREFIX + role : null,
+          subagent_type: role ? prefix(policy) + role : null,
           model: resolved.model,
           effort: resolved.effort,
         }
       : {
-          agent_type: role ? PREFIX + role : null,
+          agent_type: role ? prefix(policy) + role : null,
           model: resolved.model,
           reasoning_effort: resolved.effort,
           fork_turns: 'none',
@@ -154,7 +243,7 @@ function tomlValue(value) {
 }
 
 export function renderRole(policy, name, source, tool) {
-  const { meta, body } = parseSource(source);
+  const { meta, body } = parseSource(substitute(source, policy));
   if (meta.name !== name)
     throw new Error(`Role ${name} declares name ${meta.name}`);
   const settings = resolve(policy, { tool, role: name });
@@ -165,7 +254,7 @@ export function renderRole(policy, name, source, tool) {
     // pinning the policy here keeps the repository default without blocking
     // a prompt override.
     const frontmatter = {
-      name: PREFIX + name,
+      name: prefix(policy) + name,
       description: meta.description,
       ...(meta.claude ?? {}),
       model: settings.model,
@@ -178,9 +267,9 @@ export function renderRole(policy, name, source, tool) {
   // passes the resolved policy to spawn_agent instead.
   const lines = [
     `# ${generated(sourcePath)}`,
-    `# Model and reasoning effort are intentionally absent: mcc skills pass the`,
+    `# Model and reasoning effort are intentionally absent: ${binding(policy).namespace} skills pass the`,
     `# repository policy (${settings.model}, ${settings.effort}) or a prompt override to spawn_agent.`,
-    `name = ${tomlValue(PREFIX + name)}`,
+    `name = ${tomlValue(prefix(policy) + name)}`,
     `description = ${tomlValue(meta.description)}`,
   ];
   for (const [key, value] of Object.entries(meta.codex ?? {}))
@@ -190,7 +279,7 @@ export function renderRole(policy, name, source, tool) {
 }
 
 export function renderWorkflow(policy, name, source, tool) {
-  const { meta, body } = parseSource(source);
+  const { meta, body } = parseSource(substitute(source, policy));
   if (meta.name !== name)
     throw new Error(`Workflow ${name} declares name ${meta.name}`);
   const sourcePath = `${SOURCES.workflows}/${name}.md`;
@@ -198,7 +287,7 @@ export function renderWorkflow(policy, name, source, tool) {
   const files = {};
   if (tool === 'claude') {
     const frontmatter = {
-      name: PREFIX + name,
+      name: prefix(policy) + name,
       description: meta.description,
       ...(meta['argument-hint']
         ? { 'argument-hint': meta['argument-hint'] }
@@ -218,13 +307,14 @@ export function renderWorkflow(policy, name, source, tool) {
   }
   const codex = meta.codex ?? {};
   files['SKILL.md'] =
-    `---\nname: ${PREFIX + name}\ndescription: ${JSON.stringify(meta.description)}\n---\n<!-- ${generated(sourcePath)} -->\n\n${text}`;
+    `---\nname: ${prefix(policy) + name}\ndescription: ${JSON.stringify(meta.description)}\n---\n<!-- ${generated(sourcePath)} -->\n\n${text}`;
   const manifest = {
     interface: {
-      display_name: codex.display_name ?? `MCC: ${name}`,
+      display_name: codex.display_name ?? `${binding(policy).label}: ${name}`,
       short_description: codex.short_description ?? meta.description,
       default_prompt:
-        codex.default_prompt ?? `Use $${PREFIX + name} for this request.`,
+        codex.default_prompt ??
+        `Use $${prefix(policy) + name} for this request.`,
     },
     policy: {
       allow_implicit_invocation: codex.allow_implicit_invocation ?? true,
@@ -271,11 +361,11 @@ export function render(base = root) {
       'utf8',
     );
     files.set(
-      `${OUTPUTS.claude.agents}/${PREFIX}${name}.md`,
+      `${OUTPUTS.claude.agents}/${prefix(policy)}${name}.md`,
       renderRole(policy, name, source, 'claude'),
     );
     files.set(
-      `${OUTPUTS.codex.agents}/${PREFIX}${name}.toml`,
+      `${OUTPUTS.codex.agents}/${prefix(policy)}${name}.toml`,
       renderRole(policy, name, source, 'codex'),
     );
   }
@@ -289,32 +379,34 @@ export function render(base = root) {
     );
     const shared = join(base, SOURCES.workflows, name);
     for (const tool of TOOLS) {
-      const target = `${OUTPUTS[tool].skills}/${PREFIX}${name}`;
+      const target = `${OUTPUTS[tool].skills}/${prefix(policy)}${name}`;
       for (const [file, content] of Object.entries(
         renderWorkflow(policy, name, source, tool),
       ))
         files.set(`${target}/${file}`, content);
-      // Supporting references are copied verbatim into both skills.
+      // Supporting references are copied into both skills with the same
+      // placeholders resolved.
       for (const file of listFiles(shared))
         files.set(
           `${target}/${relative(shared, file)}`,
-          readFileSync(file, 'utf8'),
+          substitute(readFileSync(file, 'utf8'), policy),
         );
     }
   }
   return files;
 }
 
-function ownedFiles(base) {
+function ownedFiles(base, policy) {
   const owned = [];
+  const own = prefix(policy);
   for (const tool of TOOLS) {
     for (const file of listFiles(join(base, OUTPUTS[tool].agents)))
-      if (relative(join(base, OUTPUTS[tool].agents), file).startsWith(PREFIX))
+      if (relative(join(base, OUTPUTS[tool].agents), file).startsWith(own))
         owned.push(relative(base, file));
     const skills = join(base, OUTPUTS[tool].skills);
     if (existsSync(skills))
       for (const entry of readdirSync(skills))
-        if (entry.startsWith(PREFIX))
+        if (entry.startsWith(own))
           for (const file of listFiles(join(skills, entry)))
             owned.push(relative(base, file));
   }
@@ -323,7 +415,7 @@ function ownedFiles(base) {
 
 export function generate(base = root) {
   const files = render(base);
-  for (const path of ownedFiles(base))
+  for (const path of ownedFiles(base, loadPolicy(base)))
     if (!files.has(path)) rmSync(join(base, path));
   for (const [path, content] of files) {
     mkdirSync(dirname(join(base, path)), { recursive: true });
@@ -340,7 +432,8 @@ export function check(base = root) {
     if (!existsSync(target) || readFileSync(target, 'utf8') !== content)
       stale.push(path);
   }
-  for (const path of ownedFiles(base)) if (!files.has(path)) stale.push(path);
+  for (const path of ownedFiles(base, loadPolicy(base)))
+    if (!files.has(path)) stale.push(path);
   return stale.sort();
 }
 

@@ -12,7 +12,7 @@ You orchestrate delivery of one container issue or epic in `samlevin/mcc-stats-s
 
 Handoff packet: container URL, trunk `main`, a fresh `origin/main` SHA, accepted decisions, and a `Policy:` line naming the model and effort you were dispatched with plus any prompt overrides that target handoffs (`implementer model ...`, `implementer effort ...`, `reviewer ...`, `stack ...`). Echo the `Policy:` line in your result.
 
-Setup: the repository `AGENTS.md` is loaded; read `git show origin/main:AGENTS.md` if the checkout may be stale. Do not read leaf code, `TESTING.md`, or the PR template; those belong to the implementer. You do not edit the repository; read-only use of the human checkout is fine, never mutate it.
+Setup: the repository `AGENTS.md` is loaded; read `git show origin/main:AGENTS.md` if the checkout may be stale. Do not read leaf code, the contributor guides, or the PR template; those belong to the implementer. You do not edit the repository; read-only use of the human checkout is fine, never mutate it.
 
 Plan: fetch the container body, comments, all native sub-issues recursively (paginate `subIssues`), native blocked-by edges, project fields, existing claims, branches, and PRs, so you resume and never duplicate. Detect cycles and inaccessible children; do not silently drop any. Any issue with children is a container: no branch, no PR, no acceptance criteria. Dispatch only executable leaves. Before dispatch, verify each leaf has one logical outcome, testable acceptance criteria, validation, satisfied dependencies, and size XS, S, or M. An L leaf needs planning or decomposition first, through the mcc-create-github-issue skill within the accepted scope. Never create an epic implicitly.
 
