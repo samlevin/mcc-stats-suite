@@ -22,7 +22,13 @@ import {
   runScript,
   workflow as loadWorkflow,
 } from './workflow-test-helpers.mjs';
-import { checks, runChecks, workspaceArguments } from './ci-checks.mjs';
+import {
+  automationTests,
+  buildTests,
+  checks,
+  runChecks,
+  workspaceArguments,
+} from './ci-checks.mjs';
 
 const root = new URL('../', import.meta.url);
 const turbo = new URL('../node_modules/.bin/turbo', import.meta.url).pathname;
@@ -124,17 +130,49 @@ test('agent workflow sources and generated definitions select the repository sco
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {
   const commands = checks({ full: true, mode: 'all' });
-  for (const command of [
-    'format:check',
-    'eslint',
-    'release:check',
-    'scripts/*.test.mjs',
-  ]) {
+  for (const command of ['format:check', 'eslint', 'release:check']) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
+  assert.deepEqual(
+    commands.find(([command]) => command === 'node'),
+    ['node', ['--test', ...buildTests()]],
+  );
   assert.ok(!JSON.stringify(commands).includes('tofu'));
   assert.ok(!workspaceArguments('all').includes('--affected'));
   assert.ok(workspaceArguments('affected').includes('--affected'));
+});
+
+test('automation script tests run only in the repository scope', () => {
+  const build = buildTests();
+  assert.ok(build.includes('scripts/ci-checks.test.mjs'));
+  assert.ok(build.includes('scripts/deployment-workflows.test.mjs'));
+  for (const path of automationTests) {
+    assert.ok(!build.includes(path), path);
+    assert.equal(classify(path), 'repository', path);
+    assert.equal(classify(path.replace('.test.mjs', '.mjs')), 'repository');
+  }
+  for (const path of [
+    '.github/workflows/pr-issue-metadata.yml',
+    '.github/workflows/pr-issue-status.yml',
+  ])
+    assert.equal(classify(path), 'repository', path);
+  const application = selectScopes(
+    ['applications/match-to-csv/src/index.ts'],
+    'pull_request',
+  );
+  assert.equal(application.repository, false);
+  const full = JSON.stringify(checks({ full: true, mode: 'affected' }));
+  for (const path of automationTests) assert.ok(!full.includes(path), path);
+  const both = checks({ full: true, repository: true, mode: 'all' });
+  assert.ok(
+    both.some(
+      ([command, args]) =>
+        command === 'node' &&
+        JSON.stringify(args) === JSON.stringify(['--test', ...automationTests]),
+    ),
+  );
+  // The full gate's eslint . already covers the automation scripts.
+  assert.equal(both.filter(([, args]) => args[0] === 'eslint').length, 1);
 });
 
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {

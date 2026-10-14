@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { appendFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { appendFileSync, readdirSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 // `build` already type-checks every source and test file, so CI skips the
 // separate `typecheck` task that local `npm run check` keeps.
@@ -9,6 +9,39 @@ const jobTasks = {
   // Only this job needs Docker: it synthesizes and verifies the ARM64 bundles.
   bundle: ['ci:synth', 'verify:bundle'],
 };
+
+// GitHub automation scripts never feed a build or deployment, so their tests
+// run only when the repository scope selects them, not on every full gate.
+export const automationTests = [
+  'scripts/issue-triage.test.mjs',
+  'scripts/issue-pr-metadata.test.mjs',
+  'scripts/issue-pr-status.test.mjs',
+  'scripts/branch-name.test.mjs',
+  'scripts/agent-policy.test.mjs',
+];
+
+const automationLintTargets = [
+  'scripts/ci-scope.mjs',
+  'scripts/issue-triage.mjs',
+  'scripts/issue-containers.mjs',
+  'scripts/issue-pr-metadata.mjs',
+  'scripts/issue-pr-status.mjs',
+  'scripts/branch-name.mjs',
+  'scripts/agent-policy.mjs',
+  ...automationTests,
+];
+
+// Every other scripts/*.test.mjs belongs to the full gate. Listing the
+// directory keeps new build and deployment tests in it without editing here.
+export function buildTests(
+  directory = fileURLToPath(new URL('.', import.meta.url)),
+) {
+  return readdirSync(directory)
+    .filter((name) => name.endsWith('.test.mjs'))
+    .map((name) => `scripts/${name}`)
+    .filter((path) => !automationTests.includes(path))
+    .sort();
+}
 
 export function workspaceArguments(mode, job = 'static') {
   return [
@@ -29,41 +62,20 @@ export function checks({ full, repository, mode, job = 'static' }) {
     commands.push(
       ['npx', ['eslint', '.', '--max-warnings', '0']],
       ['npm', ['run', 'release:check']],
-      // Node expands the glob itself, so every scripts/*.test.mjs runs without
-      // a hand-maintained list here or in package.json.
-      ['node', ['--test', 'scripts/*.test.mjs']],
+      ['node', ['--test', ...buildTests()]],
       ['npx', workspaceArguments(mode)],
     );
-  else if (repository)
-    commands.push(
-      // Generated agent definitions must match their sources under .agents/.
-      ['npm', ['run', 'agents:check']],
-      [
+  if (repository) {
+    // Generated agent definitions must match their sources under .agents/.
+    commands.push(['npm', ['run', 'agents:check']]);
+    // The full gate already lints every file.
+    if (!full)
+      commands.push([
         'npx',
-        [
-          'eslint',
-          'scripts/ci-scope.mjs',
-          'scripts/issue-triage.mjs',
-          'scripts/issue-containers.mjs',
-          'scripts/issue-triage.test.mjs',
-          'scripts/branch-name.mjs',
-          'scripts/branch-name.test.mjs',
-          'scripts/agent-policy.mjs',
-          'scripts/agent-policy.test.mjs',
-          '--max-warnings',
-          '0',
-        ],
-      ],
-      [
-        'node',
-        [
-          '--test',
-          'scripts/issue-triage.test.mjs',
-          'scripts/branch-name.test.mjs',
-          'scripts/agent-policy.test.mjs',
-        ],
-      ],
-    );
+        ['eslint', ...automationLintTargets, '--max-warnings', '0'],
+      ]);
+    commands.push(['node', ['--test', ...automationTests]]);
+  }
   return commands;
 }
 
