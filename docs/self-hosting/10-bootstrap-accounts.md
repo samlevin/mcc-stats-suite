@@ -5,7 +5,7 @@ Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/
 - an encrypted, versioned, deletion-protected S3 state bucket;
 - the GitHub Actions OIDC provider, unless the account already has one;
 - `mcc-stats-suite-<environment>-terrateam`, trusted only by this repository's Terrateam workflow;
-- `mcc-stats-suite-<environment>-github-cdk-deploy`, trusted only by the deployment workflow on `main` in the matching GitHub Environment;
+- `mcc-stats-suite-<environment>-github-cdk-deploy`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
 - an inline Terrateam grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role; and
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
 
@@ -78,6 +78,23 @@ tofu -chdir=infrastructure/dev/bootstrap test -test-directory=../../modules/boot
 ```
 
 Then run `tofu plan` in each bootstrap root and apply only the reviewed change.
+
+### Trusted deployment workflows
+
+The CDK entry role trusts a GitHub OIDC token only when its `workflow` claim matches an entry in `cdk_workflow_names` in `infrastructure/modules/bootstrap/variables.tf`. GitHub sets that claim to the `name:` of the top-level workflow that started the run, never to the name of a reusable workflow it calls. The list therefore names every workflow that calls `.github/workflows/_deploy-aws-application.yml`: `deploy-applications` for continuous delivery and `rollback-aws-application` for production rollback. `node --test scripts/deployment-workflows.test.mjs` fails when the list and those workflows disagree.
+
+When you rename one of those workflows, or add a workflow that calls the reusable deployment workflow, update the list in the same pull request. After it merges, re-apply bootstrap from the `main` checkout, dev first and then prod:
+
+```console
+cd infrastructure/dev/bootstrap
+aws sso login --profile "$AWS_PROFILE"
+aws sts get-caller-identity --profile "$AWS_PROFILE"
+tofu init -backend-config=backend.hcl
+tofu plan -out=bootstrap.tfplan
+tofu apply bootstrap.tfplan
+```
+
+Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. Until both accounts are re-applied, a renamed or new workflow fails at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Afterwards, re-run the failed workflow.
 
 ## Disposable developer accounts
 
