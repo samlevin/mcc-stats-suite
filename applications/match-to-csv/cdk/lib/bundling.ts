@@ -2,9 +2,29 @@ import { spawnSync } from 'child_process';
 import { readFileSync } from 'fs';
 import * as path from 'path';
 import { version as esbuildVersion } from 'esbuild/package.json';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
 import type * as lambdaNode from 'aws-cdk-lib/aws-lambda-nodejs';
 
 export { esbuildVersion };
+
+/**
+ * SAM build image digest for Node.js 22 (multi-architecture index), so CI and
+ * deployments bundle with the same image. CDK overwrites a `buildArgs.IMAGE`
+ * option, so the pin travels on the runtime instead.
+ *
+ * To update: run `docker buildx imagetools inspect
+ * public.ecr.aws/sam/build-nodejs22.x:latest`, copy the top-level `Digest`
+ * here, then run `npm run verify:bundle --workspace @samlevin/match-to-csv`.
+ */
+export const BUNDLING_IMAGE =
+  'public.ecr.aws/sam/build-nodejs22.x@sha256:8c7d07d694ff713755c4722e1123629fdb19edb6b3937ebe4e789f4eb678959a';
+
+/** The Node.js 22 Lambda runtime with a digest-pinned bundling image. */
+export const bundlingRuntime = new lambda.Runtime(
+  lambda.Runtime.NODEJS_22_X.name,
+  lambda.RuntimeFamily.NODEJS,
+  { bundlingDockerImage: BUNDLING_IMAGE },
+);
 
 /** Bundling options shared by every match-to-csv function. */
 export function bundlingOptions(

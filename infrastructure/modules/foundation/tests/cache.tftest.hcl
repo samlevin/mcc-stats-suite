@@ -347,3 +347,45 @@ run "prod_github_cache_role" {
     error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
   }
 }
+
+# The ephemeral lifecycle does not read the environment, so one run covers dev and prod.
+run "ephemeral_expiry" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables { environment = "dev" }
+
+  override_resource {
+    target = aws_s3_bucket.attachments
+    values = { id = "test-attachments" }
+  }
+
+  override_resource {
+    target = aws_s3_bucket.output
+    values = { id = "test-output" }
+  }
+
+  override_resource {
+    target = aws_s3_bucket.evidence
+    values = { id = "test-evidence" }
+  }
+
+  assert {
+    condition = (
+      aws_s3_bucket_lifecycle_configuration.ephemeral["attachments"].bucket == "test-attachments" &&
+      aws_s3_bucket_lifecycle_configuration.ephemeral["output"].bucket == "test-output" &&
+      aws_s3_bucket_lifecycle_configuration.ephemeral["evidence"].bucket == "test-evidence" &&
+      alltrue([for name, lifecycle in aws_s3_bucket_lifecycle_configuration.ephemeral :
+        length(lifecycle.rule) == 2 && alltrue([for rule in lifecycle.rule :
+          rule.status == "Enabled" && rule.filter[0].prefix == "ephemeral/" && (rule.id == "expire-ephemeral" ?
+            rule.expiration[0].days == (name == "evidence" ? 366 : 30) &&
+            rule.noncurrent_version_expiration[0].noncurrent_days == 30 &&
+            rule.abort_incomplete_multipart_upload[0].days_after_initiation == 7 :
+            rule.id == "remove-ephemeral-delete-markers" && rule.expiration[0].expired_object_delete_marker
+          )
+        ])
+      ])
+    )
+    error_message = "Only ephemeral/ objects may expire: attachments and output after 30 days, evidence after its 365-day lock, with delete-marker and multipart cleanup."
+  }
+}

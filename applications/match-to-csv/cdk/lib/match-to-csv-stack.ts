@@ -26,6 +26,7 @@ import * as sqs from 'aws-cdk-lib/aws-sqs';
 import * as ssm from 'aws-cdk-lib/aws-ssm';
 import {
   bundlingOptions,
+  bundlingRuntime,
   checkLocalEsbuild,
   localEsbuildVersion,
 } from './bundling';
@@ -367,7 +368,7 @@ export class MatchToCsvStack extends Stack {
       functionName,
       entry: path.join(__dirname, '..', '..', 'src', 'lambdas', fileName),
       handler: 'handler',
-      runtime: lambda.Runtime.NODEJS_22_X,
+      runtime: bundlingRuntime,
       architecture: lambda.Architecture.ARM_64,
       memorySize,
       logGroup: this.logGroup(`${id}Logs`, `/aws/lambda/${functionName}`),

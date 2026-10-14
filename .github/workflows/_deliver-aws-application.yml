@@ -28,6 +28,7 @@ jobs:
       source: main
 
   approval-prompt:
+    name: Post production approval prompt
     needs: dev
     if: needs.dev.result == 'success'
     runs-on: ubuntu-latest

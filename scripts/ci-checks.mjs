@@ -2,22 +2,28 @@ import { spawn } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export function workspaceArguments(mode) {
+// `build` already type-checks every source and test file, so CI skips the
+// separate `typecheck` task that local `npm run check` keeps.
+const jobTasks = {
+  static: ['build', 'ci:test'],
+  // Only this job needs Docker: it synthesizes and verifies the ARM64 bundles.
+  bundle: ['ci:synth', 'verify:bundle'],
+};
+
+export function workspaceArguments(mode, job = 'static') {
   return [
     'turbo',
     'run',
-    'build',
-    'typecheck',
-    'ci:test',
-    'ci:synth',
-    'verify:bundle',
+    ...jobTasks[job],
     '--concurrency=4',
     '--summarize',
     ...(mode === 'affected' ? ['--affected'] : []),
   ];
 }
 
-export function checks({ full, repository, mode }) {
+export function checks({ full, repository, mode, job = 'static' }) {
+  if (job === 'bundle')
+    return full ? [['npx', workspaceArguments(mode, 'bundle')]] : [];
   const commands = [['npm', ['run', 'format:check']]];
   if (full)
     commands.push(
@@ -100,17 +106,19 @@ async function main() {
     throw new Error('Expected an explicit workspace mode');
   process.env.TURBO_SCM_BASE = base;
   process.env.TURBO_SCM_HEAD = head;
-  console.log(`Workspace validation: ${full ? mode : 'none'}`);
-  if (full) {
+  const job = process.env.CI_JOB ?? 'static';
+  if (!(job in jobTasks)) throw new Error('Expected a known CI job');
+  console.log(`Workspace validation (${job}): ${full ? mode : 'none'}`);
+  if (full && job === 'static') {
     // Lint reads shared declarations. Build them once before concurrent readers.
     if ((await runCommand('npm', ['run', 'build:shared'])) !== 0)
       throw new Error('Shared build failed');
   }
-  await runChecks(checks({ full, repository, mode }));
+  await runChecks(checks({ full, repository, mode, job }));
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
-      `Workspace validation: ${full ? mode : 'none'}; all selected checks passed.\n`,
+      `Workspace validation (${job}): ${full ? mode : 'none'}; all selected checks passed.\n`,
     );
 }
 
