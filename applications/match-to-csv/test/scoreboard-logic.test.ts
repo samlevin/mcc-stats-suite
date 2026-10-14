@@ -11,7 +11,8 @@
 //   1) Simple 2-team match (Red vs Blue) with clear color separation.
 //   2) Free-for-all match where all row colors are the same (no teams).
 //   3) Three-team match (Red vs Blue vs Green) with uneven team sizes.
-//   4) Filtering of non-player rows (e.g. mis-detected header, blank rows).
+//   4) Filtering of non-player rows (e.g. mis-detected header, blank rows),
+//      and ignoring header and non-player row colors when assigning teams.
 //   5) Header fallback logic when Textract can't read headers clearly.
 
 import t from 'tap';
@@ -542,6 +543,67 @@ t.test('processScoreboardImage: filters out non-player rows', (t) => {
 
   t.end();
 });
+
+/**
+ * Test 4b:
+ * Header and non-player row colors must not create team clusters.
+ *
+ * - The header row (RowIndex 1) and a "Total" row (RowIndex 4) are shaded
+ *   differently from the two player rows, which share one color.
+ * - Only player rows count toward team clustering, so the board stays FFA.
+ */
+t.test(
+  'processScoreboardImage: header and non-player row colors do not create teams',
+  (t) => {
+    const blocks: TextractBlockLite[] = [
+      table('hc-tbl', [
+        'hc-c-h-player',
+        'hc-c-h-score',
+        'hc-c-p1-player',
+        'hc-c-p1-score',
+        'hc-c-p2-player',
+        'hc-c-p2-score',
+        'hc-c-total-player',
+        'hc-c-total-score',
+      ]),
+      word('hc-w-h-player', 'PLAYERS'),
+      word('hc-w-h-score', 'SCORE'),
+      word('hc-w-p1', 'PlayerOne'),
+      word('hc-w-p1-score', '15'),
+      word('hc-w-p2', 'PlayerTwo'),
+      word('hc-w-p2-score', '9'),
+      word('hc-w-total', 'Total'),
+      word('hc-w-total-score', 'N/A'),
+      cell('hc-c-h-player', 1, 1, 'hc-w-h-player'),
+      cell('hc-c-h-score', 1, 2, 'hc-w-h-score'),
+      cell('hc-c-p1-player', 2, 1, 'hc-w-p1'),
+      cell('hc-c-p1-score', 2, 2, 'hc-w-p1-score'),
+      cell('hc-c-p2-player', 3, 1, 'hc-w-p2'),
+      cell('hc-c-p2-score', 3, 2, 'hc-w-p2-score'),
+      cell('hc-c-total-player', 4, 1, 'hc-w-total'),
+      cell('hc-c-total-score', 4, 2, 'hc-w-total-score'),
+    ];
+
+    const rowColors: RowColor[] = [
+      { rowIndex: 1, r: 30, g: 30, b: 30 }, // dark header
+      { rowIndex: 2, r: 120, g: 120, b: 120 },
+      { rowIndex: 3, r: 120, g: 120, b: 120 },
+      { rowIndex: 4, r: 20, g: 20, b: 230 }, // blue-tinted footer
+    ];
+
+    const rows = processScoreboardImage(blocks, rowColors);
+    t.same(
+      rows.map((r) => [r.player, r.team, r.win, r.loss]),
+      [
+        ['PlayerOne', '', 1, 0],
+        ['PlayerTwo', '', 0, 1],
+      ],
+      'player rows should be FFA with only the top row winning',
+    );
+
+    t.end();
+  },
+);
 
 /**
  * Test 5:
