@@ -80,11 +80,16 @@ Bootstrap changes are separate; see [Update bootstrap later](10-bootstrap-accoun
 
 ## Change an external input
 
-The email domain is set in one place, the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. Terrateam writes it to AWS, including the SSM parameter that local `.envrc` files and application deploys read. A secret is invisible to Terrateam's change detection, so a change to it, or to any other secret that feeds a foundation root, goes through a pull request:
+The email domain is set in one place, the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. Terrateam writes it to AWS, including the SSM parameter that local `.envrc` files and application deploys read. Terrateam's change detection cannot see a secret, so a change to the domain, or to any other secret that feeds a foundation root, goes through a pull request. To switch an environment to a new domain:
 
-1. Update the secret, for example `gh secret set PROD_MCC_EMAIL_DOMAIN`.
-2. Open a pull request that adds a line with the date and the reason to `infrastructure/<environment>/foundation/external-inputs.revision`. Never write the value or a hash of it there.
-3. Comment `terrateam plan`, review the `(sensitive value)` changes, and apply as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam).
+1. Prepare the new domain in that environment's account and workload Region, as in [Inbound email](00-prerequisites.md#inbound-email). Its SES identity must show `Success`, and its MX record must point at `inbound-smtp.<region>.amazonaws.com`. Without both, mail to the new domain never arrives, and every `match-to-csv` deploy fails its identity and MX checks.
+2. Update the secret, for example `gh secret set PROD_MCC_EMAIL_DOMAIN`.
+3. Open a pull request that adds a line with the date and the reason to `infrastructure/<environment>/foundation/external-inputs.revision`. Never write the value or a hash of it there.
+4. Comment `terrateam plan`, review the `(sensitive value)` changes, and apply as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam). The apply moves the shared `submit@` receipt rule and the SSM parameter to the new domain.
+5. Redeploy `match-to-csv` in that environment. The deploy reads the domain from SSM and checks that its SES identity is verified and that its MX record points at SES inbound in the deployment Region, which confirms the switch. The shared stacks redeploy with the next change that affects `match-to-csv`, through [Merge to production](50-deploy-and-release-applications.md#merge-to-production), and receive mail before then because the foundation owns the shared rule. Each dev [ephemeral stack](50-deploy-and-release-applications.md#ephemeral-stacks) keeps its `submit+<name>@` rule on the old domain until its next deploy.
+6. In each foundation root you plan from locally, run `direnv reload`, after `aws sso login --profile "$AWS_PROFILE"` if the session has expired. The `.envrc` reads the domain from SSM only when the directory loads. Until you reload it, a local plan proposes changing the domain back.
+
+Steps 2 to 4 apply to every secret that feeds a foundation root.
 
 Terrateam checks the foundation roots for drift daily and never reconciles, so a secret changed without a revision pull request shows up as a drift issue within a day and is never applied without review.
 
