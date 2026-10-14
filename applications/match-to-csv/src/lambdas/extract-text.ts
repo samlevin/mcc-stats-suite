@@ -15,6 +15,7 @@ import { bodyToBuffer, processingRunPrefix } from '../lib/s3';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 import { log } from '../lib/log';
+import { publishExtractionMetrics } from '../lib/metrics';
 import {
   processScoreboardImage,
   type RowColor,
@@ -55,6 +56,8 @@ export interface ExtractTextDependencies {
     key: string,
     value: unknown,
   ): Promise<S3ObjectReference>;
+  /** Publishes the extracted row count, which alarms on zero-row runs. */
+  publishExtractionMetrics(rowCount: number): void;
   id(): string;
   timestamp(): string;
   build: { gitSha: string; environment: string };
@@ -80,6 +83,7 @@ const defaultDependencies: ExtractTextDependencies = {
   },
   calculateRowColors: computeRowColors,
   writeJson: putJson,
+  publishExtractionMetrics: (rowCount) => publishExtractionMetrics(rowCount),
   id: evidenceId,
   timestamp: now,
   build: {
@@ -210,6 +214,7 @@ export async function runExtraction(
       runId,
       rowCount: rows.length,
     });
+    dependencies.publishExtractionMetrics(rows.length);
     return { runId, source, rows, normalizedArtifact };
   } catch (error) {
     const failure = errorSummary(error);

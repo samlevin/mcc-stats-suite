@@ -43,6 +43,12 @@ npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 
 Ephemeral deployments read the domain for their `submit+<name>@` rule from `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds it. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
 
+## Alarms
+
+Stable stacks publish CloudWatch alarms to the `match-to-csv-<environment>-alarms` SNS topic. An alarm fires on any failed or timed-out execution of either state machine, any message in the `-events-dlq` queue, any Lambda error, and any screenshot whose extraction succeeds with no rows. `extract-text` reports the row count as the `ZeroRowExtractions` and `ExtractedRows` metrics in the `MCC/MatchToCsv` namespace, using the CloudWatch embedded metric format. Ephemeral stacks create no alarms or topic.
+
+To receive alarm email, create a `String` parameter named `/mcc/<environment>/match-to-csv/alarm-email` that holds the address, then redeploy. The deploy workflow subscribes the address only when the parameter exists, and CloudFormation reads the value at deploy time, so the address stays out of the repository, the template, and the workflow logs. SNS sends a confirmation email, and the subscription delivers alarms only after someone confirms it.
+
 ## Evidence layout
 
 Stable stacks start at `submissions/`. Ephemeral stacks place the entire tree under `ephemeral/<name>/`.
