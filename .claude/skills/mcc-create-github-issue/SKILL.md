@@ -26,7 +26,7 @@ Search for duplicates first (`gh issue list --search`). Well-scoped requests go 
 
 ## Triage
 
-Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Spawn one `mcc-issue-triager` for the batch with the resolved model and effort. Send only the drafts (ref, title, body), accepted decisions, the discovered label and option lists, and the `Policy:` line (`Policy: tool=<tool> role=mcc-issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, and labels. On SPLIT_REQUIRED, split and re-triage only the affected drafts. There is no second pass otherwise. Never triage yourself in place of the triager.
+Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Spawn one `mcc-issue-triager` for the batch with the resolved model and effort. Send only the drafts (ref, title, body), accepted decisions, the discovered label and option lists, and the `Policy:` line (`Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, and labels. On SPLIT_REQUIRED, split and re-triage only the affected drafts. There is no second pass otherwise. Never triage yourself in place of the triager.
 
 Spawn with the Agent tool: `subagent_type: mcc-issue-triager`, passing `model` and `effort` from the resolver explicitly.
 
@@ -38,4 +38,4 @@ Order: parents, then children, then native parent links, then blocked-by edges (
 
 ## Verify and return
 
-Read back bodies, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, the triager's `Policy:` line, and any partial result or uncertainty, compactly.
+Read back bodies, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, the triager's `Requested settings: Policy: <as dispatched>` line, and any partial result or uncertainty, compactly.

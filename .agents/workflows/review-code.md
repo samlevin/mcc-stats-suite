@@ -23,7 +23,7 @@ You gather the inputs and dispatch `{{prefix}}code-reviewer`; you do not review 
 
 ## Dispatch
 
-Run `node scripts/agent-policy.mjs resolve --tool <tool> --role code-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role={{prefix}}code-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
+Run `node scripts/agent-policy.mjs resolve --tool <tool> --role code-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role=code-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
 
 Packet: `review_mode=requested`, repo, PR URL (for a PR target), issue URL (or `none` when the criteria come from the request), acceptance criteria, remote branch, base SHA, head SHA, the worktree path, and the `Policy:` line. Leave out your own opinion of the change.
 
@@ -36,4 +36,4 @@ Use `spawn_agent` with `agent_type: {{prefix}}code-reviewer`, `model` and `reaso
 
 ## Report
 
-Print the reviewer's verdict, acceptance lines, findings, limits, and its `Policy:` and `Runtime:` lines verbatim. If the runtime model differs from the dispatched one, say so. Posting a review, replying on the PR, approving, or editing code requires a separate explicit request; this skill does none of it.
+Print the reviewer's verdict, acceptance lines, findings, limits, and `Requested settings: Policy: <as dispatched>` line verbatim. Posting a review, replying on the PR, approving, or editing code requires a separate explicit request; this skill does none of it.
