@@ -23,7 +23,7 @@ runs:
         [[ "$CACHE_ACCOUNT" =~ ^[0-9]{12}$ ]]
     - name: Assume dedicated cache role
       id: credentials
-      uses: aws-actions/configure-aws-credentials@v5
+      uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
       with:
         role-to-assume: arn:aws:iam::${{ inputs.account-id }}:role/mcc-stats-suite-${{ inputs.environment }}-github-turbo-cache
         aws-region: ${{ inputs.region }}
@@ -47,7 +47,7 @@ runs:
         echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
     - name: Start S3 remote cache
       # v2.5.1 is the published v2 release; upstream has no floating v2 ref.
-      uses: rharkor/caching-for-turbo@v2.5.1
+      uses: rharkor/caching-for-turbo@2238fae6eb9a9936f92356f54cb3660200d105e7 # v2.5.1
       with:
         provider: s3
         s3-bucket: ${{ steps.contracts.outputs.bucket }}
