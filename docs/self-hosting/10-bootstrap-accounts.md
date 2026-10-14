@@ -4,12 +4,11 @@ Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/
 
 - an encrypted, versioned, deletion-protected S3 state bucket;
 - the GitHub Actions OIDC provider, unless the account already has one;
-- `mcc-stats-suite-<environment>-terrateam`, trusted only by this repository's Terrateam workflow;
+- optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md), with an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role;
 - `mcc-stats-suite-<environment>-github-cdk-deploy`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
-- an inline Terrateam grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role; and
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
 
-Bootstrap stays local so that CI identities cannot rewrite their own trust. Terrateam ignores both bootstrap roots.
+Bootstrap stays local so that CI identities cannot rewrite their own trust. Never let infrastructure CI/CD apply the bootstrap roots.
 
 ## Configure local inputs
 
@@ -20,7 +19,11 @@ cp .envrc.example .envrc
 direnv allow
 ```
 
-The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is not local configuration, except in a disposable sandbox account (see below) and in each foundation root's ignored `.envrc` for a local apply through `mcc-apply-foundation` (see [Change the foundation](40-change-foundation.md)): Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` and `PROD_MCC_EMAIL_DOMAIN` secrets described in [Configure GitHub](30-configure-github.md), and the foundation publishes it in SSM for CDK. Repositories created recently use immutable OIDC subjects. If yours does, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`. A rename or transfer changes the subject and needs a bootstrap update.
+The root `.envrc` sets the workload Region, your GitHub owner and repository, and the dev profile and account ID. The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it. Set `MCC_AWS_REGION` to your workload Region.
+
+Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `MCC_GITHUB_OIDC_SUBJECT_REPOSITORY` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise delete that line and the `TF_VAR_github_oidc_subject_repository` line. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
+
+The root `.envrc` defaults `AWS_PROFILE` to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
 
 ## Bootstrap dev
 
@@ -33,7 +36,7 @@ aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. Leave both CI-role flags in `bootstrap.auto.tfvars` set to `true`. If the account already has a GitHub OIDC provider, also set `github_oidc_provider_arn` there.
+Stop unless STS reports the dev account. In `bootstrap.auto.tfvars`, keep `create_cdk_deploy_role = true` and keep the `create_terrateam_role = false` line unless you use Terrateam. Do not delete that line: the variable defaults to `true`. If the account already has a GitHub OIDC provider, also set `github_oidc_provider_arn` there.
 
 Create the resources with temporary local state:
 
@@ -58,7 +61,6 @@ Approve the migration. The final plan must report no changes. Keep these outputs
 ```console
 tofu output -raw aws_account_id
 tofu output -raw state_bucket_name
-tofu output -raw terrateam_role_arn
 tofu output -raw cdk_deploy_role_arn
 ```
 
@@ -68,7 +70,7 @@ Repeat the dev procedure from `infrastructure/prod/bootstrap`. Its `.envrc` sele
 
 ## Update bootstrap later
 
-Terrateam cannot change bootstrap resources, so apply every change to `infrastructure/modules/bootstrap` or the bootstrap roots locally, in dev first and then prod, from the same administrator sessions. Apply a bootstrap change before any foundation change that depends on it. For example, the foundation's Turbo cache role needs the bootstrap cache-role grant first.
+CI never changes bootstrap resources, so apply every change to `infrastructure/modules/bootstrap` or the bootstrap roots locally, in dev first and then prod, from the same administrator sessions. Apply a bootstrap change before any foundation change that depends on it. For example, with the Terrateam role, the foundation's Turbo cache role needs the bootstrap cache-role grant first.
 
 Run the AWS-free bootstrap contract tests before applying:
 
@@ -98,6 +100,12 @@ tofu apply bootstrap.tfplan
 
 Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. Until both accounts are re-applied, a renamed or new workflow fails at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Afterwards, re-run the failed workflow.
 
+## CI roles for the foundation
+
+The bootstrap creates no generic CI role for the foundation. To apply it from CI/CD, give that system its own role in each account. It needs to manage the foundation's resources, including the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, and to read and write the state bucket. Treat that role, and the workflow it trusts, as production access.
+
+`create_terrateam_role = true` creates a role that only Terrateam can assume. See [Apply the foundation with Terrateam](70-optional-terrateam.md#bootstrap-the-terrateam-role).
+
 ## Disposable developer accounts
 
 A personal sandbox account can reuse the dev bootstrap root without trusting GitHub. Use a separate checkout so its ignored backend files and `.terraform` directory can never be confused with dev, and set both flags to `false` in `bootstrap.auto.tfvars`:
@@ -107,7 +115,7 @@ create_terrateam_role  = false
 create_cdk_deploy_role = false
 ```
 
-The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain`: set it in the ignored `dev.auto.tfvars` or export `TF_VAR_email_domain`, using a lowercase domain verified for SES in that account. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to Terrateam or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
+The root then creates state and the workload boundary only. Apply the dev foundation against that account's state bucket and bootstrap CDK from your own SSO session. The foundation needs `email_domain`: set it in the ignored `dev.auto.tfvars` or export `TF_VAR_email_domain`, using a lowercase domain verified for SES in that account. The apply makes `mcc-inbound-dev` the account's active receipt rule set. Do not add the account to your infrastructure CI/CD or GitHub Environments. Destroy CDK stacks and the foundation before recycling it.
 
 ## Keep local files untracked
 

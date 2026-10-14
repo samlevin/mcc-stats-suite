@@ -19,20 +19,20 @@ This usually means OpenTofu ran without its S3 backend, so the resources exist i
 1. Read the complete apply logs and list every resource that was created.
 2. Confirm the state bucket and Region variables point at the intended environment, and check whether the environment's state object already holds those resources. Never import one AWS object to two addresses.
 3. Add declarative `import` blocks for the existing resources in a pull request. Confirm the new dev plan initializes the S3 backend and imports the resources instead of creating them.
-4. Apply dev with `terrateam apply dev and foundation`, then require an empty dev plan.
-5. Repeat for prod from the same commit with `terrateam plan prod and foundation` and `terrateam apply prod and foundation`, and require an empty prod plan.
+4. Apply dev, then require an empty dev plan.
+5. Repeat for prod from the same commit: plan, apply, and require an empty prod plan.
 
 A failed apply can leave unmanaged duplicates, such as a KMS key created before its alias failed. Before scheduling deletion of a duplicate key, confirm no alias, SSM parameter, bucket encryption setting, application configuration, or stored object references it. Keep the full KMS waiting period, and do not add the duplicate to state.
 
-## Foundation drift issue
+## Foundation drift
 
-Terrateam checks the dev and prod foundation roots weekly and opens a GitHub issue when its plan finds drift. It does not reconcile drift automatically.
+When a scheduled or manual `tofu plan` shows changes that no pending pull request explains, the root has drifted.
 
-1. Identify the affected root and inspect every planned action in the issue.
+1. Identify the affected root and inspect every planned action.
 2. Decide whether AWS changed outside OpenTofu or the repository no longer describes the intended state.
 3. If the external change is intended, open a pull request that records it in OpenTofu.
-4. If it is not intended, open a pull request to get a fresh plan for that root, and apply it from the pull request only after confirming the plan restores repository state without touching unrelated resources.
-5. Close the drift issue after a later plan is empty.
+4. If it is not intended, plan that root from current `main` and apply only after confirming the plan restores repository state without touching unrelated resources.
+5. Confirm a later plan is empty.
 
 Do not enable unattended reconciliation to silence drift, and do not edit state by hand.
 
