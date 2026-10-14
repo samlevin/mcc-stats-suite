@@ -13,8 +13,9 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 - squash-merges the pull request with its title once every planned root has applied without error, never after a failed apply;
 - lets repository writers apply dev and only administrators apply prod;
 - requires an administrator for changes to Terrateam's workflow or configuration;
-- never touches the bootstrap, module, or inactive data-platform directories; and
-- checks both foundation roots for drift weekly and opens an issue instead of reconciling.
+- never touches the bootstrap, module, or inactive data-platform directories;
+- treats a change to a foundation root's `external-inputs.revision` file as a change to that root, which is how a changed secret reaches AWS (see [Change an external input](40-change-foundation.md#change-an-external-input)); and
+- checks both foundation roots for drift daily and opens an issue instead of reconciling.
 
 A root is affected only when a changed file matches that root's `file_patterns`. Module calls are not discovered, so every local module a root calls needs its own pattern. [AGENTS.md](../../AGENTS.md#terrateam-module-mapping) describes the mapping rules.
 
@@ -77,6 +78,6 @@ For [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-t
 
 ## Drift issues
 
-Terrateam's weekly drift check opens a GitHub issue when a foundation plan is not empty. Handle it as in [Foundation drift](60-recover-and-troubleshoot.md#foundation-drift), and close the issue after a later plan is empty.
+Terrateam's daily drift check opens a GitHub issue when a foundation plan is not empty. Handle it as in [Foundation drift](60-recover-and-troubleshoot.md#foundation-drift), and close the issue after a later plan is empty.
 
 A fork needs its own Terrateam installation, GitHub Environments, values from the table above, and bootstrap roles. [Configure GitHub](30-configure-github.md#changes-a-fork-needs) lists the other fork changes.

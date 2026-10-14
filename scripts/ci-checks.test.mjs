@@ -724,6 +724,18 @@ test('classifier selects independent infrastructure and application gates', () =
     classify('infrastructure/dev/backend.tfvars.example'),
     'documentation',
   );
+  for (const environment of ['dev', 'prod']) {
+    assert.equal(
+      classify(
+        `infrastructure/${environment}/foundation/external-inputs.revision`,
+      ),
+      'documentation',
+    );
+  }
+  assert.equal(
+    classify('infrastructure/dev/foundation/other.revision'),
+    'full',
+  );
   assert.equal(classify('.terrateam/config.yml'), 'full');
   assert.equal(classify('.terrateam/other.yml'), 'full');
   assert.equal(

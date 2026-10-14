@@ -1,0 +1,5 @@
+# Bump this file in a pull request after changing a GitHub secret that feeds
+# this root, such as DEV_MCC_EMAIL_DOMAIN. The change makes Terrateam plan
+# infrastructure/dev/foundation, so the new value is applied only after review.
+# Add one line with the date and the reason. Never write the value or a hash of it.
+2026-10-14 Email domain read from the DEV_MCC_EMAIL_DOMAIN repository secret.

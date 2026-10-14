@@ -35,7 +35,7 @@ Keep a short record in the conversation: the PR number, title, head SHA, affecte
 
 4. Pick the affected roots from `gh pr diff <N> -R {{repository}} --name-only`. Only `infrastructure/dev/foundation` and `infrastructure/prod/foundation` are candidates. A root is affected when a changed file matches its `file_patterns` in the PR head's `.terrateam/config.yml`, which you read with `git show <head>:.terrateam/config.yml`. In those patterns `${DIR}` is the root and `*` does not cross `/`. Today that is the root's own `*.tf`, `*.tfvars`, and `*.hcl` files, `infrastructure/modules/foundation/*.tf`, and `.terrateam/config.yml`. If neither root is affected, stop: there is nothing to apply.
 
-5. Check that each affected root has its ignored local input in the main checkout: `.envrc`, created from the committed `.envrc.example` in that root and allowed with `direnv allow`. It is self-contained and derives the account, Region, and state bucket from its AWS profile. If it is missing, stop and tell the person to create it from that root's `.envrc.example`. Do not create it.
+5. Check that each affected root has its ignored local input in the main checkout: `.envrc`, created from the committed `.envrc.example` in that root and allowed with `direnv allow`. It is self-contained and derives the account, Region, and state bucket from its AWS profile, and reads the email domain from the applied foundation's SSM parameter, so nobody types the domain. If it is missing, stop and tell the person to create it from that root's `.envrc.example`. Do not create it.
 
    ```console
    MAIN="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
@@ -61,7 +61,7 @@ Report the title, head SHA, CI result, affected roots, and worktree path. Gate: 
 
 ## Root setup
 
-Shell state does not carry between commands, so every plan and apply runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`) and the worktree path. The block reads inputs only from the root's local `.envrc` in the main checkout, through `direnv`: `AWS_PROFILE`, `TF_VAR_aws_region`, `TF_CLI_ARGS_init` (the state bucket and Region), `TF_VAR_email_domain`, and `TF_VAR_github_oidc_subject_repository`. Terrateam builds the same values from the repository secrets and variables and the bootstrap naming rules. The block removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from each `direnv`, `aws`, and `tofu` command, then passes exactly the loaded values. It checks that the state bucket follows the bootstrap naming rule `mcc-stats-suite-tofu-state-<account>-<region>` for the loaded Region, checks that the profile's account equals the account in that bucket name, checks that the bucket's `Environment` tag equals `<env>`, and initializes the root against the committed lock file and that bucket. It prints none of the values.
+Shell state does not carry between commands, so every plan and apply runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`) and the worktree path. The block reads inputs only from the root's local `.envrc` in the main checkout, through `direnv`: `AWS_PROFILE`, `TF_VAR_aws_region`, `TF_CLI_ARGS_init` (the state bucket and Region), `TF_VAR_email_domain`, and `TF_VAR_github_oidc_subject_repository`. The `.envrc` reads `TF_VAR_email_domain` from the `/mcc/<env>/match-to-csv/email-domain` SSM parameter with the root's profile, so a local plan sees the applied domain; only an environment whose foundation never applied uses its one-time `email_domain_override`. Terrateam builds the same values from the repository secrets and variables and the bootstrap naming rules. The block removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value from each `direnv`, `aws`, and `tofu` command, then passes exactly the loaded values. It checks that the state bucket follows the bootstrap naming rule `mcc-stats-suite-tofu-state-<account>-<region>` for the loaded Region, checks that the profile's account equals the account in that bucket name, checks that the bucket's `Environment` tag equals `<env>`, and initializes the root against the committed lock file and that bucket. It prints none of the values.
 
 ```console
 bash <<'EOF'
@@ -84,7 +84,7 @@ LOCAL=$(clean DIRENV_LOG_FORMAT= direnv exec "$SRC" bash -c \
 eval "$LOCAL"
 missing() { echo "$1 is not set by $SRC/.envrc; see $SRC/.envrc.example" >&2; exit 1; }
 [ -n "$PROFILE" ] || missing AWS_PROFILE
-[ -n "$DOMAIN" ] || missing TF_VAR_email_domain
+[ -n "$DOMAIN" ] || { echo "TF_VAR_email_domain is not set: $SRC/.envrc reads /mcc/$E/match-to-csv/email-domain with profile $PROFILE. Run aws sso login --profile $PROFILE, or set its email_domain_override for an environment whose foundation never applied" >&2; exit 1; }
 [ -n "$SUBJECT" ] || missing TF_VAR_github_oidc_subject_repository
 for pair in "TF_VAR_email_domain=$DOMAIN" "TF_VAR_github_oidc_subject_repository=$SUBJECT"; do
   case "${pair#*=}" in
@@ -132,7 +132,7 @@ tf show -json "$E.tfplan" | jq -r '.resource_changes[]? | select(.change.actions
 shasum -a 256 "$R/$E.tfplan"
 ```
 
-The plan file stays in the root's directory inside the worktree, where `.gitignore` already covers `*.tfplan`. Record the digest. Present the root, profile, head SHA, counts, every action, and the digest. Read `tf show -no-color "$E.tfplan"` when an action needs detail. Call out every destroy, replacement, IAM or policy change, import, and any change the PR diff does not explain, which may be drift. Stop entirely if the plan proposes recreating the foundation or creating named resources that already exist; that means the wrong backend or account. For a prod plan, compare it with the applied dev plan, allowing for environment names, account IDs, and values. Gate: apply this root.
+The plan file stays in the root's directory inside the worktree, where `.gitignore` already covers `*.tfplan`. Record the digest. Present the root, profile, head SHA, counts, every action, and the digest. Read `tf show -no-color "$E.tfplan"` when an action needs detail. Call out every destroy, replacement, IAM or policy change, import, and any change the PR diff does not explain, which may be drift. The domain comes from the applied parameter, so a `(sensitive value)` change to the SES or SSM resources means the `.envrc` used `email_domain_override` or the parameter changed outside OpenTofu; call it out. Stop entirely if the plan proposes recreating the foundation or creating named resources that already exist; that means the wrong backend or account. For a prod plan, compare it with the applied dev plan, allowing for environment names, account IDs, and values. Gate: apply this root.
 
 A "no changes" plan still gets its gate. Applying it is harmless, and the merge requires every affected root to have applied.
 

@@ -1097,26 +1097,30 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
       'TF_VAR_github_organization',
       'TF_VAR_github_oidc_subject_repository',
     ],
-    foundation: [
-      'AWS_PROFILE',
-      'TF_VAR_email_domain',
-      'TF_VAR_github_oidc_subject_repository',
-    ],
+    foundation: ['AWS_PROFILE', 'TF_VAR_github_oidc_subject_repository'],
     'data-platform': ['AWS_PROFILE'],
   };
-  const exported = (text) =>
-    [...text.matchAll(/^export ([A-Za-z_][A-Za-z0-9_]*)=/gm)].map(
-      ([, name]) => name,
-    );
+  const exported = (text) => [
+    ...new Set(
+      [...text.matchAll(/^\s*export ([A-Za-z_][A-Za-z0-9_]*)=/gm)].map(
+        ([, name]) => name,
+      ),
+    ),
+  ];
   assert.deepEqual(exported(repositoryFile('.envrc.example')), ['AWS_PROFILE']);
   const bin = mkdtempSync(join(tmpdir(), 'mcc-envrc-'));
+  const calls = join(bin, 'calls.log');
   writeFileSync(
     join(bin, 'aws'),
     [
       '#!/usr/bin/env bash',
+      `echo "aws $*" >> "${calls}"`,
       'case "$*" in',
       '  "configure get sso_account_id") echo "${STUB_ACCOUNT}" ;;',
       '  "configure get region") echo "${STUB_REGION}" ;;',
+      '  "ssm get-parameter "*)',
+      '    [ -n "${STUB_DOMAIN:-}" ] || { echo "ParameterNotFound" >&2; exit 254; }',
+      '    echo "${STUB_DOMAIN}" ;;',
       '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
       'esac',
     ].join('\n'),
@@ -1125,11 +1129,17 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
   for (const environment of ['dev', 'prod']) {
     for (const [root, names] of Object.entries(editable)) {
       const directory = `infrastructure/${environment}/${root}`;
+      const foundation = root === 'foundation';
       const text = repositoryFile(`${directory}/.envrc.example`);
       assert.doesNotMatch(text, /source_up|source_env/, directory);
       assert.deepEqual(
         exported(text),
-        [...names, 'TF_VAR_aws_region', 'TF_CLI_ARGS_init'],
+        [
+          ...names,
+          'TF_VAR_aws_region',
+          'TF_CLI_ARGS_init',
+          ...(foundation ? ['TF_VAR_email_domain'] : []),
+        ],
         directory,
       );
       assert.ok(
@@ -1138,14 +1148,15 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
         ),
         directory,
       );
-      const load = (env) =>
-        spawnSync(
+      const load = (env) => {
+        writeFileSync(calls, '');
+        const result = spawnSync(
           'bash',
           [
             '-euo',
             'pipefail',
             '-c',
-            `source "$1"; printf '%s\\n' "$AWS_PROFILE" "$TF_VAR_aws_region" "$TF_CLI_ARGS_init"`,
+            `source "$1"; printf '%s\\n' "$AWS_PROFILE" "$TF_VAR_aws_region" "$TF_CLI_ARGS_init" "\${TF_VAR_email_domain-<unset>}"`,
             '_',
             new URL(`../${directory}/.envrc.example`, import.meta.url).pathname,
           ],
@@ -1154,26 +1165,66 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
             env: { PATH: `${bin}:${process.env.PATH}`, ...env },
           },
         );
-      const fromProfile = load({
+        return {
+          ...result,
+          lines: result.stdout.trim().split('\n'),
+          calls: readFileSync(calls, 'utf8').trim().split('\n'),
+        };
+      };
+      const profile = {
         STUB_ACCOUNT: '111111111111',
         STUB_REGION: 'us-east-2',
-      });
+      };
+      const parameter = `/mcc/${environment}/match-to-csv/email-domain`;
+      const fromProfile = load({ ...profile, STUB_DOMAIN: 'mail.example.com' });
       assert.equal(fromProfile.status, 0, fromProfile.stderr);
-      assert.deepEqual(fromProfile.stdout.trim().split('\n'), [
+      assert.equal(fromProfile.stderr, '');
+      assert.deepEqual(fromProfile.lines, [
         `mcc-${environment}-admin`,
         'us-east-2',
         '-backend-config=bucket=mcc-stats-suite-tofu-state-111111111111-us-east-2 -backend-config=region=us-east-2',
+        foundation ? 'mail.example.com' : '<unset>',
+      ]);
+      assert.deepEqual(fromProfile.calls, [
+        'aws configure get sso_account_id',
+        'aws configure get region',
+        ...(foundation
+          ? [
+              `aws ssm get-parameter --name ${parameter} --region us-east-2 --query Parameter.Value --output text`,
+            ]
+          : []),
       ]);
       // AWS_REGION wins over the profile, as it does for the AWS CLI.
-      const override = load({
-        STUB_ACCOUNT: '111111111111',
-        STUB_REGION: 'us-east-2',
-        AWS_REGION: 'eu-west-1',
-      });
+      const override = load({ ...profile, AWS_REGION: 'eu-west-1' });
       assert.match(override.stdout, /tofu-state-111111111111-eu-west-1 /);
       const unset = load({ STUB_ACCOUNT: '', STUB_REGION: '' });
       assert.equal(unset.status, 0, unset.stderr);
       assert.match(unset.stderr, /Set sso_account_id and region/);
+      if (!foundation) continue;
+      assert.match(
+        text,
+        /^# email_domain_override="REPLACE_WITH_VERIFIED_DOMAIN"$/m,
+      );
+      // A failed read warns with the parameter and profile, leaves the input
+      // unset, and never prints a domain.
+      const unreadable = load(profile);
+      assert.equal(unreadable.status, 0, unreadable.stderr);
+      assert.equal(unreadable.lines[3], '<unset>');
+      assert.ok(unreadable.stderr.includes(parameter), unreadable.stderr);
+      assert.ok(
+        unreadable.stderr.includes(`mcc-${environment}-admin`),
+        unreadable.stderr,
+      );
+      assert.doesNotMatch(unreadable.stderr, /ParameterNotFound/);
+      // The one-time override wins and skips the parameter read.
+      const firstApply = load({
+        ...profile,
+        STUB_DOMAIN: 'mail.example.com',
+        email_domain_override: 'new.example.com',
+      });
+      assert.equal(firstApply.lines[3], 'new.example.com');
+      assert.ok(!firstApply.calls.some((call) => call.includes(' ssm ')));
+      assert.equal(firstApply.stderr, '');
     }
     const backend = repositoryFile(
       `infrastructure/${environment}/bootstrap/backend.tf.example`,
@@ -1186,4 +1237,31 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
     assert.match(backend, /use_lockfile += true/);
     assert.doesNotMatch(backend, /^\s*(bucket|region)\s*=/m);
   }
+});
+
+test('a foundation revision file triggers its root and drift reports daily without reconciling', () => {
+  const config = parse(repositoryFile('.terrateam/config.yml'));
+  for (const environment of ['dev', 'prod']) {
+    const root = `infrastructure/${environment}/foundation`;
+    assert.ok(
+      config.dirs[root].when_modified.file_patterns.includes(
+        '${DIR}/external-inputs.revision',
+      ),
+      root,
+    );
+    const revision = repositoryFile(`${root}/external-inputs.revision`);
+    const entries = revision
+      .split('\n')
+      .filter((line) => line && !line.startsWith('#'));
+    assert.ok(entries.length > 0, root);
+    for (const entry of entries) {
+      assert.match(entry, /^\d{4}-\d{2}-\d{2} \S/, root);
+    }
+  }
+  assert.equal(config.drift.enabled, true);
+  assert.deepEqual(config.drift.schedules, {
+    foundation: { tag_query: 'foundation', schedule: 'daily' },
+  });
+  assert.ok(!JSON.stringify(config.drift).includes('reconcile'));
+  assert.deepEqual(config.hooks.plan.post, [{ type: 'drift_create_issue' }]);
 });

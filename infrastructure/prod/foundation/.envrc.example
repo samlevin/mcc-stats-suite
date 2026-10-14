@@ -10,8 +10,11 @@
 
 # Edit these.
 export AWS_PROFILE="mcc-prod-admin"
-# Lowercase domain verified for SES in prod. Never commit it.
-export TF_VAR_email_domain="REPLACE_WITH_VERIFIED_DOMAIN"
+# The email domain is read below from the SSM parameter the applied
+# foundation owns. Only for the first apply in a new environment, before
+# that parameter exists, uncomment this line with the lowercase domain
+# verified for SES, then remove it after the apply. Never commit it.
+# email_domain_override="REPLACE_WITH_VERIFIED_DOMAIN"
 # OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID for immutable GitHub OIDC subjects,
 # otherwise OWNER/REPOSITORY. Get the IDs with:
 #   gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'
@@ -27,3 +30,17 @@ if [[ -z "$account_id" || -z "$region" ]]; then
 fi
 export TF_VAR_aws_region="$region"
 export TF_CLI_ARGS_init="-backend-config=bucket=mcc-stats-suite-tofu-state-${account_id}-${region} -backend-config=region=${region}"
+
+# The email domain comes from the SSM parameter the applied foundation owns, so
+# a local plan sees the applied value and never changes it. This is the one
+# derived value that needs a network call and a signed-in profile. The value is
+# never printed.
+email_domain_parameter="/mcc/prod/match-to-csv/email-domain"
+if [[ -n "${email_domain_override:-}" ]]; then
+  export TF_VAR_email_domain="$email_domain_override"
+elif email_domain="$(aws ssm get-parameter --name "$email_domain_parameter" --region "$region" \
+  --query Parameter.Value --output text 2>/dev/null)"; then
+  export TF_VAR_email_domain="$email_domain"
+else
+  echo "Cannot read $email_domain_parameter with profile $AWS_PROFILE; TF_VAR_email_domain is unset. Run aws sso login, or set email_domain_override for a new environment" >&2
+fi

@@ -9,12 +9,15 @@ destination_branches:
 indexer:
   enabled: false
 
+# Drift runs daily and never reconciles. A secret that feeds a foundation root
+# and changed without an external-inputs.revision pull request shows up as a
+# drift issue within a day and is never applied without review.
 drift:
   enabled: true
   schedules:
     foundation:
       tag_query: 'foundation'
-      schedule: weekly
+      schedule: daily
 
 # Foundation roots run only on request. Opening or updating a pull request plans
 # nothing; a `terrateam plan` comment plans dev, and dev is applied by comment.
@@ -106,6 +109,7 @@ dirs:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
         - '${DIR}/*.hcl'
+        - '${DIR}/external-inputs.revision'
         - 'infrastructure/modules/foundation/*.tf'
         - '.terrateam/config.yml'
 
@@ -120,6 +124,7 @@ dirs:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
         - '${DIR}/*.hcl'
+        - '${DIR}/external-inputs.revision'
         - 'infrastructure/modules/foundation/*.tf'
         - '.terrateam/config.yml'
 

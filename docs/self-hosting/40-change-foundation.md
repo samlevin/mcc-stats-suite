@@ -17,7 +17,7 @@ Each root's ignored `.envrc`, created from the `.envrc.example` in that director
 | --- | --- | --- |
 | Backend `bucket` and `region` | `TF_CLI_ARGS_init`, derived from the profile | `mcc-stats-suite-tofu-state-<account>-<region>`, the bucket the bootstrap created. The key, `operational/foundation.tfstate`, is in `versions.tf`. |
 | `aws_region` | `TF_VAR_aws_region`, derived from the profile | The profile's Region, or `AWS_REGION` when the profile has none. |
-| `email_domain` | `TF_VAR_email_domain`, which you edit | Verified SES domain for that environment, in lowercase. Required and sensitive. In CI/CD, store it as a secret, never a plain variable, and never commit it. |
+| `email_domain` | `TF_VAR_email_domain`, read from the SSM parameter `/mcc/<environment>/match-to-csv/email-domain` | Verified SES domain for that environment, in lowercase. Required and sensitive. The applied foundation owns the parameter, so a local plan sees the applied domain and never changes it. The read needs a signed-in profile; when it fails, the `.envrc` warns and leaves the input unset. In CI/CD, store the domain as a secret, never a plain variable, and never commit it. |
 | `github_oidc_subject_repository` | `TF_VAR_github_oidc_subject_repository`, which you edit | `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, or `OWNER/REPOSITORY` with mutable OIDC subjects, matching the bootstrap. The Turbo cache role trusts only this repository, and a root without it creates no cache role. |
 | `force_destroy` | variable default | `true` in dev, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
@@ -41,7 +41,7 @@ aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity --profile "$AWS_PROFILE"
 ```
 
-Stop unless STS reports the dev account. Then plan and apply:
+Stop unless STS reports the dev account. Run `direnv reload` after signing in, so the `.envrc` can read the email domain. The first apply in a new environment has no parameter to read yet: for that apply only, set `email_domain_override` in the `.envrc` to the lowercase domain verified for SES, and remove it afterwards. Then plan and apply:
 
 ```console
 tofu init
@@ -77,6 +77,16 @@ Apply from the pull request before merging, or from `main` right after merging. 
 If initialization reports a missing backend or a plan proposes recreating the foundation, stop and follow [Recover and troubleshoot](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist).
 
 Bootstrap changes are separate; see [Update bootstrap later](10-bootstrap-accounts.md#update-bootstrap-later).
+
+## Change an external input
+
+The email domain is set in one place, the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. Terrateam writes it to AWS, including the SSM parameter that local `.envrc` files and application deploys read. A secret is invisible to Terrateam's change detection, so a change to it, or to any other secret that feeds a foundation root, goes through a pull request:
+
+1. Update the secret, for example `gh secret set PROD_MCC_EMAIL_DOMAIN`.
+2. Open a pull request that adds a line with the date and the reason to `infrastructure/<environment>/foundation/external-inputs.revision`. Never write the value or a hash of it there.
+3. Comment `terrateam plan`, review the `(sensitive value)` changes, and apply as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam).
+
+Terrateam checks the foundation roots for drift daily and never reconciles, so a secret changed without a revision pull request shows up as a drift issue within a day and is never applied without review.
 
 ## Detect drift
 

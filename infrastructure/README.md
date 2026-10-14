@@ -62,7 +62,7 @@ Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/s
 
 ## Inbound email contract
 
-Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input; keep it out of version control and out of plain CI variables. A local apply, including one through `mcc-apply-foundation`, reads it from the root's ignored `.envrc`. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
+Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input; keep it out of version control and out of plain CI variables. Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. A local apply, including one through `mcc-apply-foundation`, reads the applied value back from the SSM parameter through the root's ignored `.envrc`. After changing the secret, bump `<environment>/foundation/external-inputs.revision` in a pull request so Terrateam plans the root. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
 
 ## Turborepo cache storage contract
 
