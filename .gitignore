@@ -38,6 +38,10 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Agent-owned linked worktrees (Claude Code and the MCC Codex workflows)
+.claude/worktrees/
+.codex/worktrees/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db

@@ -38,11 +38,11 @@ People name their branch `<login>/<issue>-<slug>` with their GitHub login as the
 
 ## Pull requests and review
 
-People open their PR directly. Agents push the branch and get an `APPROVE` from `code-reviewer` before opening the PR. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over.
+People open their PR directly. Agents push the branch and get an `APPROVE` from `mcc-code-reviewer` before opening the PR for changes across components, shared contracts, security boundaries, or other substantial behavior; a localized low-risk, documentation, or mechanical change may skip that review and says so in the PR body. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over. The repository ships these agents for Claude Code and Codex; `AGENTS.md` lists the entry points.
 
 The final PR for a leaf closes it with `Closes #N` and references its parent. Titles follow the Conventional Commits rules in [CONTRIBUTING.md](CONTRIBUTING.md). When the PR opens, `pr-issue-status.yml` moves each closing issue to In review: from In progress for any author, and also from Ready for the owner and collaborators. Its run logs every skip with the reason; move the issue yourself only if it was skipped. Issues reach Done on merge, not when an agent hands off.
 
-Security review by `security-reviewer` happens only when a person asks for it.
+Security review by `mcc-security-reviewer` happens only when a person asks for it (`/mcc-review-security` in Claude Code, `$mcc-review-security` in Codex).
 
 ## Size and stacks
 

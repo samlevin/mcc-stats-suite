@@ -56,7 +56,7 @@ Use `npm run format` and `npm run lint:fix` for automatic corrections. Add or up
 
 ## Submit a change
 
-Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) and follow [WORKFLOW.md](WORKFLOW.md) to claim one. Implement only executable leaf issues; a parent with sub-issues is a container with no branch or PR. Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
+Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) and follow [WORKFLOW.md](WORKFLOW.md) to claim one. If you work with Claude Code or Codex, the repository's own `mcc-` agents and skills run this workflow for you without touching your personal agent configuration; [.agents/README.md](.agents/README.md) explains how to invoke them and what each tool needs. Implement only executable leaf issues; a parent with sub-issues is a container with no branch or PR. Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
 
 Pull-request titles must follow Conventional Commits because Release Please derives versions and release notes from them. Common forms are:
 
