@@ -13,6 +13,7 @@ import type {
 import sharp from 'sharp';
 import { bodyToBuffer, processingRunPrefix } from '../lib/s3';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
+import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 import { log } from '../lib/log';
 import {
   processScoreboardImage,
@@ -22,7 +23,6 @@ import {
 
 const s3 = new S3Client({});
 const textract = new TextractClient({});
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
 const versions = {
   pipelineVersion: '1.0.0',
