@@ -1,0 +1,872 @@
+# OCR Quality: Technical Specification
+
+**Status:** Draft; not implemented
+
+**Version:** 2.0-draft (rewrites the original OCR quality specification on the specification template; see §1)
+
+**Date:** October 15, 2026
+
+**Component:** `applications/ocr-quality`, with shared result types in `packages/contracts` and one change to `infrastructure/modules/foundation`
+
+**Runtime:** TypeScript, Node.js 22 on AWS Lambda (ARM64), orchestrated by one AWS Step Functions Standard workflow
+
+**Deployment:** one AWS CDK stack per stable environment (`dev`, `prod`) from GitHub Actions, plus ephemeral developer stacks in the dev account, through the same guarded wrapper as match-to-csv
+
+**Input:** the `normalized-ocr/v2` evidence that match-to-csv writes for every successful processing run ([spec 1](1-mcc-analytics-engine.md) §5, §7.2)
+
+**Persistent state:** quality evidence under each processing run in the OpenTofu-owned evidence bucket; from Phase 4, a rebuildable DynamoDB baseline cache owned by the application stack
+
+**External dependencies at runtime:** S3, EventBridge, Step Functions, Lambda, KMS, SSM Parameter Store, SQS; DynamoDB from Phase 4
+
+**Out of scope:** correcting OCR text, human review and correction capture (spec 3), any API or user interface, model training or calibrated probabilities, match records
+
+Match-to-csv records every OCR cell with its text, confidence, geometry and semantic field, and flags a few obvious problems. This component reads each successful run and scores every cell of every scoreboard table for how likely it is to be wrong, with structured reasons. Spec 3's reviewers use the scores to look at the worst cells first, and the scores are the starting point for a later supervised model.
+
+**Changes in 2.0-draft:** the original text predates match-to-csv. It defined its own bucket, OCR manifest, identifiers, tenant model, normalized table contract and a `OcrRuns` DynamoDB table, and it included a human correction workflow with its own API. This revision consumes match-to-csv evidence as built, writes results beside the run they score, drops the correction workflow in favor of spec 3, replaces seven Lambdas and a run table with one scoring Lambda behind conditional S3 writes, limits Halo rules to fields match-to-csv extracts, and moves cross-run baselines to a later phase that waits for spec 3's verified labels. §1 records each decision.
+
+**Readiness:** this revision authorizes filing Phases 0 to 3. Phase 4 waits until spec 3 writes adjudications. Contracts in §5.3 and §10.1 freeze when P0.2 merges.
+
+---
+
+## 1. Resolved requirement decisions
+
+| Original requirement | Decision | Reason |
+| --- | --- | --- |
+| Own bucket `ocr-quality-{account}-{region}-{environment}` with `runs/yyyy/mm/dd/{run_id}/` | No bucket. Results are written under the scored run's prefix in the existing evidence bucket (§5.1). | The evidence already lives there, under Object Lock and the foundation key. A second bucket duplicates screenshots and provider output. |
+| OCR writes `manifest.json` last to signal completion; workflow triggers on it | Trigger on match-to-csv's run `completion.json` and score only `SUCCEEDED` runs (§4.1). | Match-to-csv writes its manifest when a run starts. Its completion is the only marker of a finished run (spec 1 §18.6). |
+| Inputs `raw-output.json`, `table-structure.json`, `extracted.csv` | Read `normalized/observations.json` (`normalized-ocr/v2`) only. Its `parser.rows` holds the CSV rows. | `normalized-ocr/v2` already carries cells with confidence, geometry and semantic location. `extracted-table/v1` and `extracted.csv` are written after the run completion, so they may not exist when scoring starts. |
+| Canonical normalized table contract and `NormalizeTables` stage | Removed. Rules and statistics read `normalized-ocr/v2` cells directly. | Re-normalizing a normalized artifact adds a contract and a stage with nothing to do. |
+| Run, table and cell IDs as UUIDv7 or ULID, cells as `r{row}_c{col}` | Use match-to-csv identifiers: `evidenceId()` for new IDs and `cellObservationId` / `tableObservationId` for observations. | Results must join to evidence and to spec 3 adjudications without a mapping table. |
+| OCR confidence from 0 to 1 with a 0.70 threshold | Textract confidence from 0 to 100, as stored. | The stored value is the provider value. |
+| `tenant_id` on records, keys and API calls | Removed. | The system has no tenants. |
+| Step 1: `CorrectionEvents`, correction and verification API, reviewed materialization, comparison UI | Removed. Spec 3 owns review and correction. This component reads spec 3 adjudications only to build baselines (§8.3). | Two designs for the same reviewer decisions with different vocabularies would split the labels. Spec 3 already defines the immutable adjudication and its projection. |
+| Standard workflow with seven Lambdas, a `Parallel` state and SDK integrations for DynamoDB and EventBridge | One Standard workflow with one `ScoreRun` task (§6.1). Profiling, rules, anomalies and scoring are pure library functions inside it. | Each run scores one table of about 50 cells in milliseconds. Separate states add IAM roles, payload plumbing and failure paths without isolating anything. |
+| `OcrRuns` table with `ClaimRun`, ownership checks and status updates | Removed. A create-only claim object per run and quality version gives idempotency (§5.2). Status lives in the quality run's `outcome.json`. | S3 conditional writes already enforce write-once evidence. A second store for status can disagree with the evidence. |
+| `quality/v1/` output prefix keyed by version | Each scoring creates a quality run with its own `qualityRunId` (§5.1). | A re-score under the same version would otherwise overwrite or collide. |
+| Generic type inference across `INTEGER`, `CURRENCY`, `DATE` and others | Removed. Types come from `semanticLocation.field`: `PLAYER` is a name, the other mapped fields are integers. | Match-to-csv already maps the five fields it extracts. Inference from eight values is unreliable. |
+| Rules `C001_REQUIRED_EMPTY`, `C002_TYPE_PARSE_FAILURE`, `C005_LOW_OCR_CONFIDENCE` | Import match-to-csv's validation flags as signals (§7.1) instead of re-evaluating them. | One definition per check. A change to match-to-csv validation changes its `validationRulesVersion`, which every quality result records. |
+| Halo rules for team totals, placement, medals and ratios; template-specific schemas | Only rules over extracted fields (§7.3). No template IDs. Tables classified `UNKNOWN` are not assessed (§7.4). | Match-to-csv extracts player, score, kills, assists and deaths, and classifies tables only as `SCOREBOARD` or `UNKNOWN`. |
+| `ColumnBaselines` table updated with mergeable statistics | Phase 4: rebuild immutable baseline snapshots from spec 3 labels, load them into a DynamoDB cache behind a `BaselineSource` port, and record `baselineVersion` in every result (§8.3). | Incremental merges depend on update order and cannot be rebuilt exactly. A snapshot can be rebuilt and replaced by another source later. |
+| Configuration as versioned JSON in S3 | Versioned JSON bundled with the Lambda (§13.1). | The configuration changes only with a deploy, and the bundled file is reviewed with the code. |
+| Completion and failure events on EventBridge | Not in v1. Consumers read `outcome.json` (backlog P5.2). | No consumer exists yet. |
+| Retention moves screenshots and OCR output to Intelligent-Tiering after 30 days | Removed. Retention is the foundation's concern. | The evidence bucket is under Object Lock and its lifecycle belongs to OpenTofu. |
+| AWS CDK in Python with `infra/` and `services/` | TypeScript in the `applications/ocr-quality` workspace (§12). | The repository is a TypeScript monorepo. |
+| `snake_case` JSON fields | `camelCase`, as in every other evidence document. | One convention across evidence. |
+
+**Additional capabilities included:** a re-score entry point that creates a new quality run beside earlier ones, and run-level signals for runs with no scoreboard table or more than one.
+
+## 2. Goals and non-goals
+
+### 2.1 Goals
+
+1. Score every successful match-to-csv run within one minute of its completion, with no operator action.
+2. Give every cell in a scoreboard table a `suspicionScore`, a `reviewPriority` and the structured signals behind them, and summarize them per row, table and run.
+3. Write results as immutable evidence beside the run, so any score can be traced to its input hash, code commit and stage versions.
+4. Re-score a run under new rules or configuration without changing earlier results.
+5. Keep the scoring contract stable when cross-run baselines and, later, a calibrated model are added.
+
+### 2.2 Non-goals
+
+- Changing OCR text. Scores flag values; they never edit them.
+- Review, correction, verification or labeling of cells. Spec 3 owns those.
+- Any API or user interface. Spec 3 and later admin features read `result.json`.
+- Calibrated probabilities. `suspicionScore` is a heuristic and is never presented as `P(correct)`.
+- Assessing tables classified `UNKNOWN`, or fields match-to-csv does not extract.
+- Exactly-once scoring. Duplicate match-to-csv runs are each scored, and a re-score is always a new quality run.
+
+## 3. Runtime architecture
+
+```text
+match-to-csv extract-text
+  |  writes runs/{runId}/completion.json (create-only)
+  v
+Evidence bucket (EventBridge notifications, enabled by P1.1)
+  |
+  v
+EventBridge rule: Object Created, key matches the run completion pattern (§4.1)  --(failed delivery)--> SQS DLQ
+  |
+  v
+Step Functions Standard workflow <stack>
+  |
+  +-- Score run   (ScoreRun Lambda)
+        read completion, manifest and normalized observations
+        claim the run for the quality version (create-only)
+        profile -> rules -> anomalies -> score   (pure libraries)
+        write quality manifest, profiles, signals, result, outcome
+  |
+  v
+Evidence bucket: runs/{runId}/quality/{qualityRunId}/
+
+Phase 4:
+BuildBaselines Lambda (operator-invoked)
+  read spec 3 adjudications and normalized cells -> write baseline snapshot -> load BaselineCache table
+ScoreRun reads the current baseline through BaselineSource
+```
+
+**Ownership rules:** `score-run` owns claims and everything under `quality/{qualityRunId}/`. `build-baselines` owns `baselines/` and the `BaselineCache` table. Neither writes anything match-to-csv or spec 3 owns. `profiles`, `rules`, `anomalies` and `scoring` are pure and perform no I/O. Only Lambda entry points construct AWS SDK clients; each core function receives an injected dependencies object.
+
+**Packaging:** the `@mcc/ocr-quality` workspace with Lambda sources under `src/lambdas/`, pure libraries under `src/lib/`, bundled configuration under `config/` and the CDK app under `cdk/`. The read-side types for `normalized-ocr/v2` and the quality result types live in `@mcc/contracts`, because spec 3 reads both.
+
+**Orchestration decision:** one Step Functions task is kept, rather than an EventBridge target that invokes the Lambda directly, for declared retries, execution history, redrive, and one operator entry point (`mode: RESCORE`) with the same retry policy as automatic scoring. A second task is justified only when one stage needs different retries or concurrency than the others, such as a provider call.
+
+### 3.1 Execution policy
+
+- One run completion object is one execution and at most one quality run per attempt.
+- Only runs whose completion has `status: SUCCEEDED` are scored. Failed runs and runs with no completion are never scored.
+- In `AUTOMATIC` mode, a run is scored once per `qualityVersion`. A second execution for the same run and version finds the claim and succeeds without writing (§5.2).
+- In `RESCORE` mode, the claim is skipped and a new quality run is always written.
+- Every write uses `If-None-Match: *`. Each attempt writes under a new `qualityRunId`, so a retry never collides with a failed attempt's partial output.
+- The workflow never deletes, moves or rewrites evidence, and never reads or writes outside its namespace (`ephemeral/<name>/` for ephemeral stacks).
+
+## 4. Trigger and operator interface
+
+### 4.1 Trigger
+
+The stack's EventBridge rule matches `aws.s3` `Object Created` events from the evidence bucket whose key matches:
+
+| Deployment | Key pattern (EventBridge `wildcard`) |
+| --- | --- |
+| Stable `dev` or `prod` | `submissions/*/screenshots/*/runs/*/completion.json` |
+| Ephemeral `<name>` | `ephemeral/<name>/submissions/*/screenshots/*/runs/*/completion.json` |
+
+The rule starts the workflow with `{ "runCompletion": { "bucket": <bucket>, "key": <key> }, "mode": "AUTOMATIC" }`. EventBridge retries delivery up to three times within two hours, then sends the event to `<stack>-events-dlq` (SQS-managed encryption, 14-day retention).
+
+The wildcard also matches deeper keys, so `ScoreRun` re-checks the key against `^(ephemeral/[a-z0-9][a-z0-9-]{0,19}/)?submissions/[^/]+/screenshots/[^/]+/runs/[^/]+/completion\.json$` and against its own namespace, and fails with `InvalidRunCompletionKeyError` otherwise. This component never writes an object named `completion.json`, so its own output cannot start it.
+
+An ephemeral ocr-quality stack scores only runs from the ephemeral match-to-csv stack of the same name.
+
+### 4.2 Operator re-score
+
+An operator starts the same workflow with `mode: "RESCORE"` and the key of a run's `completion.json`. The execution skips the claim and writes a new quality run with `trigger.mode: RESCORE`. Starting `AUTOMATIC` executions for a list of completions is the backfill path after a `qualityVersion` change, and stays idempotent.
+
+### 4.3 Input validation and skips
+
+| Condition | Result | Writes |
+| --- | --- | --- |
+| Key fails the pattern or namespace check | `InvalidRunCompletionKeyError`; execution fails | nothing |
+| Completion `schemaVersion` is not `processing-run-completion/v1` | `UnsupportedSchemaError`; execution fails | nothing |
+| Completion `status` is not `SUCCEEDED` | succeeds with `skipped: SOURCE_RUN_NOT_SUCCEEDED` | nothing |
+| `AUTOMATIC` and a claim by another execution exists | succeeds with `skipped: ALREADY_CLAIMED` | nothing |
+| `normalized/observations.json` missing or not `normalized-ocr/v2` | `MissingArtifactError` or `UnsupportedSchemaError`; execution fails | claim, quality `manifest.json`, `FAILED` outcome |
+
+## 5. Quality evidence
+
+### 5.1 Layout
+
+```text
+[ephemeral/<name>/]submissions/{submissionId}/screenshots/{screenshotId}/runs/{runId}/
+  quality/
+    claims/{qualityVersion}.json
+    {qualityRunId}/
+      manifest.json
+      profiles.json
+      signals.json
+      result.json
+      outcome.json
+[ephemeral/<name>/]baselines/{baselineVersion}/       (Phase 4)
+  manifest.json
+  snapshot.json
+```
+
+`qualityRunId` and `baselineVersion` are `evidenceId()` values (spec 1 §5.1), so the latest quality run of a run sorts last.
+
+### 5.2 Rules
+
+1. Quality evidence is immutable. Every object is written once with `If-None-Match: *`.
+2. The claim is written before any analysis. In `AUTOMATIC` mode a 412 on the claim reads the existing claim. When its `executionArn` equals the current execution (a Lambda retry or a redrive), scoring continues. Otherwise the execution succeeds as a no-op.
+3. Every attempt creates a new `qualityRunId` and writes `manifest.json` first. On any error after that, it writes a `FAILED` `outcome.json` with the error name and message, then rethrows. A failure to record the failure is logged at `ERROR` and does not mask the original error.
+4. `outcome.json` is written last. A quality run without a `SUCCEEDED` outcome is incomplete, and consumers ignore it.
+5. The latest quality result of a run is the `SUCCEEDED` quality run with the greatest `qualityRunId`.
+6. Every quality run records the input artifact's SHA-256, the source run's stage versions, the deployed commit and every quality stage version (§5.4).
+7. Signals flag values; they never change `observedText`.
+
+### 5.3 Document schemas
+
+| Object | `schemaVersion` | Writer | Contents |
+| --- | --- | --- | --- |
+| `claims/{qualityVersion}.json` | `quality-claim/v1` | `score-run` | `runId`, `qualityVersion`, `executionArn`, `claimedAt` |
+| `manifest.json` | `quality-run/v1` | `score-run` | `qualityRunId`, `runId`, `screenshotId`, `trigger` (`mode`, `executionArn`), `input` (completion, run manifest and normalized references, normalized SHA-256), `sourceVersions` (the run manifest's `versions`), `versions` (§5.4), `build` (`gitSha`, `environment`), `startedAt` |
+| `profiles.json` | `quality-profiles/v1` | `score-run` | one `FieldProfile` per assessed table and mapped field (§8.1) |
+| `signals.json` | `quality-signals/v1` | `score-run` | every signal before scoring, grouped by run, table and cell |
+| `result.json` | `quality-result/v1` | `score-run` | `QualityResult` (§10.1) |
+| `outcome.json` | `quality-run-outcome/v1` | `score-run` | `status` (`SUCCEEDED` or `FAILED`), `completedAt`; on success `result` reference and `summary`; on failure `error` |
+| baseline `manifest.json` | `baseline-build/v1` | `build-baselines` | `baselineVersion`, `builderVersion`, `builtAt`, `adjudicationCount`, `adjudicationSetSha256`, `build` |
+| baseline `snapshot.json` | `baseline-snapshot/v1` | `build-baselines` | one `FieldBaseline` per field (§8.3) |
+
+### 5.4 Stage versions
+
+`qualityVersion` names the combination below. Any change to a stage's behavior bumps that stage's version and `qualityVersion` in the same delivery.
+
+| Key | v1 value |
+| --- | --- |
+| `qualityVersion` | `quality-v1` |
+| `profileVersion` | `field-profile-v1` |
+| `rulesetVersion` | `quality-rules-v1` |
+| `anomalyVersion` | `within-table-anomaly-v1` |
+| `scoringVersion` | `noisy-or-v1` |
+| `configVersion` | `quality-config-v1` |
+| `baselineVersion` | `none` until Phase 4; then the snapshot's version |
+
+`baselineVersion` is recorded per quality run but is not part of `qualityVersion`, so a new snapshot does not re-score old runs automatically.
+
+## 6. Scoring workflow
+
+### 6.1 Main workflow
+
+`<stack>` is a Standard state machine with a 5-minute timeout, X-Ray tracing and `ALL`-level logging with execution data. Its payloads hold only S3 references, modes and counts.
+
+1. **Score run** invokes `ScoreRun` with the execution input plus `executionArn` from `$$.Execution.Id`, and ends with its output (`ScoreRunOutput`).
+
+### 6.2 `ScoreRun` steps
+
+`scoreRun(input, dependencies)`:
+
+1. Validate the key (§4.1). Read `completion.json`. Return a skip when it is not `SUCCEEDED` (§4.3).
+2. In `AUTOMATIC` mode, write the claim, or resolve an existing one (§5.2).
+3. Create a `qualityRunId`. Read the run `manifest.json` and `normalized/observations.json`, hash the normalized bytes, and write the quality `manifest.json`.
+4. Load the current baseline through `BaselineSource` (`none` before Phase 4).
+5. Build field profiles (§8.1), evaluate rules (§7) and anomalies (§8.2, §8.3), and combine signals (§9). Write `profiles.json`, `signals.json` and `result.json`.
+6. Write a `SUCCEEDED` `outcome.json`, log `Run scored` with counts and priority, and return `ScoreRunOutput`.
+
+### 6.3 Retries and failure
+
+The task disables the default service-exception retry and declares one policy: an initial interval of 2 seconds, a backoff rate of 2 and at most 3 attempts, for `Lambda.ClientExecutionTimeoutException`, `Lambda.ServiceException`, `Lambda.AWSLambdaException`, `Lambda.SdkClientException`, `Lambda.TooManyRequestsException`, `InternalError`, `SlowDown` and `ServiceUnavailable`. `InvalidRunCompletionKeyError`, `UnsupportedSchemaError`, `MissingArtifactError` and `InvalidQualityConfigError` are not retried. A retried attempt reuses the claim and writes a new `qualityRunId`; the failed attempt's `FAILED` outcome stays.
+
+## 7. Rules
+
+Rules run only on assessed tables (§7.4), except run-level rules. Each produces `QualitySignal` records (§10.1) with a stable `id`, a `group` for scoring (§9.2), a `severity`, a `messageCode` and structured `evidence`. Severities are defaults from `config/quality-config-v1.json`.
+
+### 7.1 Imported match-to-csv validation
+
+Each cell's `validation.flags` (spec 1 §7.3) becomes a signal with `source: VALIDATION`:
+
+| Flag | Imported when | Severity | Group |
+| --- | --- | --- | --- |
+| `EMPTY_REQUIRED_CELL` | `DATA` row and a mapped field (`PLAYER`, `SCORE`, `KILLS`, `ASSISTS`, `DEATHS`) | `HIGH` | `EMPTY` |
+| `LOW_TEXTRACT_CONFIDENCE` | always | `MEDIUM` when `actual` is below `confidenceMediumBelow` (80), otherwise `LOW` | `OCR_CONFIDENCE` |
+| `INVALID_INTEGER` | always | `HIGH` | `TYPE_PARSE` |
+
+Empty cells in header rows and unmapped columns are ignored, which removes the noise in spec 1 §18.11.
+
+### 7.2 Structural and content rules
+
+| ID | Scope | Condition | Severity | Group |
+| --- | --- | --- | --- | --- |
+| `R001_NO_SCOREBOARD_TABLE` | run | no table is classified `SCOREBOARD` | `HIGH` | `STRUCTURE` |
+| `R002_MULTIPLE_SCOREBOARD_TABLES` | run | more than one table is `SCOREBOARD`; only one became CSV (spec 1 §18.4) | `MEDIUM` | `STRUCTURE` |
+| `T001_DUPLICATE_CELL_LOCATION` | table, cells | two cells share table, row and column index | `CRITICAL` | `STRUCTURE` |
+| `T002_MISSING_FIELD` | table | a `SCOREBOARD` table maps no header to one of `SCORE`, `KILLS`, `ASSISTS`, `DEATHS`, so the parser fell back to column order | `HIGH` | `STRUCTURE` |
+| `T003_CELL_OUTSIDE_TABLE` | cell | the cell's bounding box extends beyond its table's by more than `geometryTolerance` (0.01) | `MEDIUM` | `GEOMETRY` |
+| `C001_SUSPICIOUS_GLYPH` | cell | a `DATA` cell in an integer field fails `INVALID_INTEGER` and becomes all digits after the substitutions `O o Q D -> 0`, `I l i \| ! -> 1`, `Z z -> 2`, `S s $ -> 5`, `G b -> 6`, `T -> 7`, `B -> 8`, `g q -> 9`; evidence holds the candidate value | `MEDIUM` | `TYPE_PARSE` |
+| `C002_DIGIT_LIMIT` | cell | an integer field has more digits than `maxDigits` (`SCORE` 6, `KILLS` 3, `ASSISTS` 3, `DEATHS` 3) | `HIGH` | `LENGTH` |
+| `C003_PLAYER_NAME_CHARACTERS` | cell | after removing one leading `[tag]` and collapsing whitespace, a `PLAYER` cell does not match `playerNamePattern` (`^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$`) | `LOW` | `CHARACTER_COMPOSITION` |
+
+`C001` and `INVALID_INTEGER` share a group, so the glyph signal adds a candidate value without raising the score above the parse failure (§9.2).
+
+### 7.3 Halo rules
+
+These use only fields match-to-csv extracts. They live in `src/lib/rules/halo.ts`, apart from the generic rules.
+
+| ID | Scope | Condition | Severity | Group |
+| --- | --- | --- | --- | --- |
+| `H001_DUPLICATE_PLAYER` | cells | two `DATA` rows of one table have the same player name after tag removal, whitespace collapse and case folding | `HIGH` | `IDENTITY` |
+| `H002_ROSTER_SIZE` | table | a table has more `DATA` rows with a non-empty player than `maxRosterSize` (16) | `HIGH` | `STRUCTURE` |
+
+Team totals, placement, medals and derived ratios need fields match-to-csv does not extract (backlog P5.4).
+
+### 7.4 Unknown layouts
+
+A table classified `UNKNOWN` is not assessed: it gets `assessed: false`, no cell entries, no signals and `reviewPriority: NONE` in `result.json`. Its presence is still counted in the run summary (`unassessedTableCount`), and `R001` flags a run with no assessed table.
+
+## 8. Profiles, anomalies and baselines
+
+### 8.1 Field profiles
+
+For each assessed table and each mapped field, `profileTable` computes over `DATA` cells: `cellCount`, `nonEmptyCount`, `parseSuccessCount`, and for integer fields `values` statistics (`count`, `median`, `mad`, `min`, `max`) over parsed integers, plus digit-length `median` and `mad`. `mad` is the median absolute deviation. Profiles are deterministic for identical input and are written to `profiles.json`.
+
+### 8.2 Within-table anomalies
+
+Within-table statistics on about eight rows are weak, so in v1 every within-table anomaly is capped at `withinTableMaxSeverity` (`LOW`). Signals have `source: ANOMALY`.
+
+| ID | Condition | Group |
+| --- | --- | --- |
+| `A001_NUMERIC_ROBUST_Z` | integer field with at least `minSampleSize` (5) parsed values and `mad > 0`; `abs(0.6745 * (value - median) / mad) >= robustZThreshold` (4.0). With `mad = 0` the check does not fire, and the profile records `madZero: true`. | `NUMERIC_DISTRIBUTION` |
+| `A002_DIGIT_LENGTH` | integer field with at least 5 parsed values; the value's digit count differs from the field's median digit count by 2 or more | `LENGTH` |
+| `A003_ROW_ALIGNMENT` | the cell's vertical centre differs from its row's median centre by more than half the row's median cell height | `GEOMETRY` |
+| `A004_COLUMN_ALIGNMENT` | the cell's horizontal centre differs from its column's median centre by more than half the column's median cell width | `GEOMETRY` |
+
+### 8.3 Cross-run baselines (Phase 4)
+
+Baselines compare a value with every verified value of the same field, which is where most of the anomaly signal is at this table size. They need spec 3's labels, so they start after spec 3 writes adjudications.
+
+**Source of truth.** Spec 3 `cell-adjudication/v1` objects under each run's `adjudications/` prefix, resolved with spec 3's supersession rules. A cell counts when its current decision is `ACCEPTED` (value: `observedTextAtReview`) or `CORRECTED` (value: `submittedValue`), it is a `DATA` cell of a `SCOREBOARD` table, and its field is mapped. `UNREADABLE` and `SKIPPED` cells are excluded.
+
+**Build.** `BuildBaselines` is invoked by an operator. It lists adjudications under the namespace, resolves them, reads the matching cells from each run's normalized observations, computes one `FieldBaseline` per field, writes `snapshot.json` and then `manifest.json` under a new `baselineVersion`, loads the snapshot into the `BaselineCache` table, and finally moves the table's `CURRENT` pointer with a conditional write. A field with fewer than `minBaselineObservations` (200) values gets `usable: false`. `adjudicationSetSha256` hashes the sorted adjudication keys, so two builds over the same labels are recognizable.
+
+**Read.** `ScoreRun` reads the current baseline once per execution through the `BaselineSource` port. `DynamoBaselineSource` reads the pointer and the field items. `NoBaselineSource` returns `none`. The quality manifest and result record the `baselineVersion` used.
+
+| ID | Condition | Severity | Group |
+| --- | --- | --- | --- |
+| `B001_FIELD_RANGE` | integer value outside the field's baseline `[p005, p995]` | `MEDIUM` | `NUMERIC_DISTRIBUTION` |
+| `B002_FIELD_DIGITS` | digit count outside the baseline's observed digit-length range | `MEDIUM` | `LENGTH` |
+
+**Migration.** The S3 snapshots are the record and the table is a cache: deleting the table and rebuilding from the latest snapshot loses nothing. Moving baselines to the data platform means adding a `BaselineSource` implementation that reads there and producing snapshots from it. Scoring code, signal IDs and the result contract do not change, and old results stay reproducible because each names its `baselineVersion`.
+
+## 9. Scoring and results
+
+### 9.1 Score types
+
+- `suspicionScore`: a deterministic composite from 0 to 1. It is a heuristic, not a probability.
+- `reviewPriority`: `NONE`, `LOW`, `MEDIUM`, `HIGH` or `CRITICAL`.
+- `needsReview`: true for `MEDIUM`, `HIGH` and `CRITICAL`.
+- `signals`: the structured reasons.
+
+The names `pCorrect` and `confidenceInterval` are reserved for a calibrated model (backlog P5.5). That model trains on spec 3 labels joined with each cell's OCR text, confidence, geometry, profile and signals from `signals.json`, and adds its fields beside `suspicionScore` without changing the trigger, the evidence layout or the existing result fields.
+
+### 9.2 Cell score
+
+Each severity maps to a signal score: `CRITICAL` 0.98, `HIGH` 0.75, `MEDIUM` 0.40, `LOW` 0.15. Within one group, the cell takes the highest signal score. Across groups:
+
+```text
+suspicionScore = 1 - product over groups of (1 - groupScore)
+```
+
+Groups: `TYPE_PARSE`, `EMPTY`, `CHARACTER_COMPOSITION`, `LENGTH`, `OCR_CONFIDENCE`, `NUMERIC_DISTRIBUTION`, `GEOMETRY`, `STRUCTURE`, `IDENTITY`. Scores are rounded to four decimal places.
+
+### 9.3 Priority
+
+| Priority | Condition |
+| --- | --- |
+| `CRITICAL` | any `CRITICAL` signal |
+| `HIGH` | `suspicionScore >= 0.75` |
+| `MEDIUM` | `suspicionScore >= 0.45` |
+| `LOW` | `suspicionScore >= 0.20` |
+| `NONE` | otherwise |
+
+Thresholds are configuration (§13.1).
+
+### 9.4 Row, table and run summaries
+
+- Row: `maxSuspicion`, `expectedIssueCount` (sum of cell scores) and `hasCritical`. Rows sort by `hasCritical`, then `maxSuspicion`, then `expectedIssueCount`, all descending.
+- Table: `cellCount`, `flaggedCellCount` (cells with `needsReview`), `criticalCellCount`, `meanSuspicion`, `maxSuspicion`, `estimatedIssueCount` and `reviewPriority`, the highest of its cell priorities and the priorities of its table signals.
+- Run: the same counts across assessed tables, `assessedTableCount`, `unassessedTableCount`, and `reviewPriority`, the highest of its table priorities and run signals.
+
+`estimatedIssueCount` is a heuristic until scores are calibrated, and consumers must label it that way.
+
+### 9.5 Stored messages
+
+Results store `messageCode` and structured `evidence`, never prose, so a UI can word and translate messages itself.
+
+## 10. Typed domain model
+
+### 10.1 Shared contracts
+
+`@mcc/contracts` exports the read-side view of `normalized-ocr/v2` that this component and spec 3 consume (`NormalizedObservations`, `NormalizedTable`, `NormalizedCell`, `ValidationFlag`, `SemanticField`), moved from `extract-text` in P0.2 so match-to-csv writes the same type. It also exports:
+
+```typescript
+type Severity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+type ReviewPriority = 'NONE' | Severity;
+type SignalSource = 'VALIDATION' | 'RULE' | 'ANOMALY' | 'BASELINE';
+type SignalGroup =
+  | 'TYPE_PARSE' | 'EMPTY' | 'CHARACTER_COMPOSITION' | 'LENGTH' | 'OCR_CONFIDENCE'
+  | 'NUMERIC_DISTRIBUTION' | 'GEOMETRY' | 'STRUCTURE' | 'IDENTITY';
+
+interface QualitySignal {
+  source: SignalSource;
+  id: string;                 // e.g. 'C001_SUSPICIOUS_GLYPH' or 'INVALID_INTEGER'
+  group: SignalGroup;
+  severity: Severity;
+  score: number;
+  messageCode: string;
+  evidence: Readonly<Record<string, string | number | boolean | null>>;
+}
+
+interface QualityVersions {
+  qualityVersion: string; profileVersion: string; rulesetVersion: string;
+  anomalyVersion: string; scoringVersion: string; configVersion: string;
+  baselineVersion: string;    // 'none' before Phase 4
+}
+
+interface CellQuality {
+  cellObservationId: string;
+  rowIndex: number;
+  columnIndex: number;
+  field: SemanticField;
+  observedText: string;
+  suspicionScore: number;
+  reviewPriority: ReviewPriority;
+  needsReview: boolean;
+  signals: readonly QualitySignal[];
+}
+
+interface RowQuality { rowIndex: number; maxSuspicion: number; expectedIssueCount: number; hasCritical: boolean }
+
+interface QualitySummary {
+  cellCount: number; flaggedCellCount: number; criticalCellCount: number;
+  meanSuspicion: number; maxSuspicion: number; estimatedIssueCount: number;
+  reviewPriority: ReviewPriority;
+}
+
+interface TableQuality {
+  tableObservationId: string;
+  tableIndex: number;
+  classification: 'SCOREBOARD' | 'UNKNOWN';
+  assessed: boolean;
+  summary: QualitySummary;
+  tableSignals: readonly QualitySignal[];
+  rows: readonly RowQuality[];   // sorted per §9.4
+  cells: readonly CellQuality[]; // empty when not assessed
+}
+
+interface QualityResult {
+  schemaVersion: 'quality-result/v1';
+  qualityRunId: string;
+  runId: string;
+  screenshotId: string;
+  generatedAt: string;
+  versions: QualityVersions;
+  summary: QualitySummary & { assessedTableCount: number; unassessedTableCount: number };
+  runSignals: readonly QualitySignal[];
+  tables: readonly TableQuality[];
+}
+
+type ScoreRunMode = 'AUTOMATIC' | 'RESCORE';
+interface ScoreRunInput { runCompletion: S3ObjectReference; mode: ScoreRunMode }
+
+type ScoreRunOutput =
+  | { qualityRunId: string; runId: string; result: S3ObjectReference; reviewPriority: ReviewPriority }
+  | { runId?: string; skipped: 'SOURCE_RUN_NOT_SUCCEEDED' | 'ALREADY_CLAIMED' };
+```
+
+Workflow inputs are validated at the trust boundary in `score-run` before any read. `observedText` is copied from evidence and is never interpreted; rules cap the text they inspect at 256 characters.
+
+### 10.2 Internal types
+
+`src/lib/` defines `FieldProfile`, `QualityConfig`, `FieldBaseline` and `BaselineSnapshot`, and the port:
+
+```typescript
+interface BaselineSource {
+  current(): Promise<BaselineSnapshot | undefined>; // undefined means baselineVersion 'none'
+}
+```
+
+### 10.3 Relationships
+
+```text
+Processing run 1 -> 0..many quality runs (automatic, retries, re-scores)
+Processing run 1 -> 0..1 claim per qualityVersion
+Quality run 1 -> 1 manifest, 0..1 profiles, 0..1 signals, 0..1 result, 0..1 outcome
+Quality result 1 -> many tables -> many cells -> many signals
+Quality run many -> 0..1 baseline snapshot (by baselineVersion)
+Baseline snapshot 1 -> many spec 3 adjudications (by adjudicationSetSha256)
+```
+
+## 11. Module and function catalog
+
+Every handler exports `handler` for Lambda and a core function that takes an injected dependencies object. Only the default dependencies construct SDK clients.
+
+### 11.1 Lambda entry points
+
+| File | Public functions | Purpose |
+| --- | --- | --- |
+| `src/lambdas/score-run.ts` | `handler(event)`; `scoreRun(input, dependencies)` | Score one run (§6.2). Records `GIT_SHA` and `DEPLOYMENT_ENVIRONMENT`. |
+| `src/lambdas/build-baselines.ts` | `handler(event)`; `buildBaselines(input, dependencies)` | Build and load a baseline snapshot (§8.3). Phase 4. |
+
+### 11.2 Libraries
+
+| File | Public functions | Purpose |
+| --- | --- | --- |
+| `src/lib/run-keys.ts` | `parseRunCompletionKey(key, objectPrefix)`; `qualityRunPrefix(runPrefix, qualityRunId)`; `claimKey(runPrefix, qualityVersion)` | Key validation and construction. |
+| `src/lib/evidence.ts` | `evidenceId()`; `sha256(bytes)`; `putJsonOnce(bucket, key, value)`; `now()` | Identifiers in the spec 1 format and create-only writes. |
+| `src/lib/config.ts` | `loadQualityConfig()` | Read and validate the bundled configuration. |
+| `src/lib/profiles.ts` | `profileTable(table, cells)` | Field profiles (§8.1). |
+| `src/lib/rules/generic.ts` | `evaluateRunRules(observations, config)`; `evaluateTableRules(table, cells, config)` | §7.1, §7.2. |
+| `src/lib/rules/halo.ts` | `evaluateHaloRules(table, cells, config)` | §7.3. |
+| `src/lib/anomalies.ts` | `evaluateAnomalies(table, cells, profiles, baseline, config)` | §8.2, §8.3 checks. |
+| `src/lib/scoring.ts` | `scoreCell(signals, config)`; `priorityFor(score, signals, config)`; `assembleResult(...)` | §9. |
+| `src/lib/baseline-source.ts` | `NoBaselineSource`; `DynamoBaselineSource` | The `BaselineSource` port. |
+| `src/lib/log.ts` | `log(level, message, details?)` | One JSON log line per call. |
+
+### 11.3 Infrastructure code
+
+| File | Public API | Purpose |
+| --- | --- | --- |
+| `cdk/lib/app.ts` | `createOcrQualityApp(props?, environmentVariables?)` | Build the stack exactly as deployment does. |
+| `cdk/lib/ocr-quality-stack.ts` | `OcrQualityStack` | All compute resources (§13.3). |
+
+## 12. Directory structure and ownership
+
+```text
+mcc-stats-suite/
+  applications/ocr-quality/
+    cdk.json
+    package.json                     # @mcc/ocr-quality; build, typecheck, test
+    TESTING.md
+    config/quality-config-v1.json    # Bundled, immutable once released
+    cdk/
+      bin/ocr-quality.ts
+      lib/{app,ocr-quality-stack}.ts
+    src/
+      lambdas/{score-run,build-baselines}.ts
+      lib/{run-keys,evidence,config,profiles,anomalies,scoring,baseline-source,log}.ts
+      lib/rules/{generic,halo}.ts
+    test/
+      *.test.ts
+      fixtures/*.fixture.json        # Reduced normalized-ocr/v2 artifacts with expected signals
+  packages/contracts/src/index.ts    # normalized-ocr/v2 read types, quality result types
+  infrastructure/modules/foundation/main.tf   # evidence bucket EventBridge notifications
+```
+
+`ocr-quality` imports only `@mcc/contracts` and `@mcc/cdk-config` from the monorepo and never imports `match-to-csv` code.
+
+## 13. Configuration and infrastructure
+
+### 13.1 Configuration schema
+
+```json
+{
+  "configVersion": "quality-config-v1",
+  "severityScores": { "CRITICAL": 0.98, "HIGH": 0.75, "MEDIUM": 0.40, "LOW": 0.15 },
+  "priorityThresholds": { "HIGH": 0.75, "MEDIUM": 0.45, "LOW": 0.20 },
+  "needsReviewFrom": "MEDIUM",
+  "confidenceMediumBelow": 80,
+  "geometryTolerance": 0.01,
+  "maxDigits": { "SCORE": 6, "KILLS": 3, "ASSISTS": 3, "DEATHS": 3 },
+  "playerNamePattern": "^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$",
+  "maxRosterSize": 16,
+  "minSampleSize": 5,
+  "robustZThreshold": 4.0,
+  "withinTableMaxSeverity": "LOW",
+  "minBaselineObservations": 200
+}
+```
+
+The file is bundled into the Lambda. `loadQualityConfig` validates every key and range at cold start and throws `InvalidQualityConfigError` on any problem. A released configuration file is never edited; a change adds `quality-config-v2.json` and bumps `configVersion` and `qualityVersion`.
+
+### 13.2 Persistent resources
+
+| Resource | Owner | Configuration |
+| --- | --- | --- |
+| Evidence bucket | OpenTofu foundation | Existing (spec 1 §13.1). P1.1 adds `aws_s3_bucket_notification` with `eventbridge = true`. |
+| KMS key and SSM parameters | OpenTofu foundation | Existing. The stack reads `/mcc/<env>/match-to-csv/evidence-bucket-name` and `/mcc/<env>/match-to-csv/data-key-arn`. |
+
+### 13.3 Application resources
+
+| Resource | Configuration |
+| --- | --- |
+| `ScoreRun` | Node.js 22, ARM64, 1,024 MB, 1-minute timeout, X-Ray, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `GIT_SHA`, `DEPLOYMENT_ENVIRONMENT`, and from Phase 4 `BASELINE_TABLE` |
+| `BuildBaselines` (Phase 4) | Node.js 22, ARM64, 2,048 MB, 10-minute timeout, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `BASELINE_TABLE` |
+| State machine `<stack>` | §6.1 |
+| EventBridge rule and DLQ | §4.1 |
+| `BaselineCache` table (Phase 4) | On-demand, partition key `pk` (`CURRENT` or `baselineVersion`), sort key `sk` (field), encrypted with the foundation data key, removed with the stack because it is rebuildable from snapshots |
+| Outputs | `StateMachineArn`, `BuildBaselinesFunctionName` (Phase 4), `ObjectPrefix` |
+
+Log groups follow match-to-csv: three months in prod, two weeks otherwise, retained for stable stacks and destroyed with ephemeral ones.
+
+### 13.4 Permissions
+
+| Principal | Evidence bucket | KMS data key | `BaselineCache` |
+| --- | --- | --- | --- |
+| `ScoreRun` | `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/quality/*` | decrypt, encrypt | `GetItem`, `Query` (Phase 4) |
+| `BuildBaselines` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>baselines/*` | decrypt, encrypt | `PutItem`, `BatchWriteItem`, `UpdateItem` |
+| State machine role | none | none | none; `lambda:InvokeFunction` on `ScoreRun` only |
+
+`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject` or any bucket-configuration permission.
+
+### 13.5 Deployment
+
+The stack deploys through `scripts/cdk-app.mjs` exactly like match-to-csv: stable stacks from GitHub Actions on `main`, dev then prod with a required reviewer; ephemeral stacks from a local shell with `--environment dev --ephemeral <name>`. The deploy preflight fails when either SSM parameter in §13.2 is missing. Post-deploy verification checks that the stack is complete, `ScoreRun` is `Active` and the state machine is `ACTIVE`. P1.1 must be applied to an environment before its stack can receive events.
+
+## 14. Security and privacy
+
+1. OCR text is untrusted player-supplied content. It is never evaluated, used in keys or used to build regular expressions, and rules inspect at most 256 characters of it.
+2. Workflow input is untrusted: keys are validated against the run completion pattern and the stack namespace before any read (§4.1).
+3. Quality evidence contains gamertags copied from OCR. It lives only in the evidence bucket under the foundation key.
+4. Workflow payloads and logs carry keys, IDs, counts and priorities, never `observedText`.
+5. Create-only writes and Object Lock prevent this component from altering any evidence, including its own.
+6. Ephemeral stacks read and write only under `ephemeral/<name>/`, enforced by key validation and IAM resource patterns.
+
+## 15. Observability
+
+- Lambdas log JSON lines with `level`, `message` and context fields: `runId`, `qualityRunId`, `mode`, counts, `reviewPriority`, durations and error names.
+- Step Functions logs every state with execution data, which holds only references (§14).
+- X-Ray tracing is active on every function and the state machine.
+- The audit record for "what happened to this run" is its `quality/` prefix: the claim names the owning execution, and each quality run's manifest and outcome record inputs, versions and errors.
+- Undeliverable trigger events wait in the DLQ for 14 days. Alarms follow the observability approach chosen for match-to-csv (backlog P5.6).
+
+## 16. Testing, CI and release
+
+### 16.1 Tests
+
+Tests use `tap`, run from `applications/ocr-quality/test/*.test.ts`, and never call AWS. The command fails below 80% statements, 65% branches, 80% lines or 60% functions.
+
+| File | Covers |
+| --- | --- |
+| `run-keys.test.ts` | stable and ephemeral completion keys accepted; submission completions, deeper keys and other namespaces rejected |
+| `config.test.ts` | bundled config loads; missing keys and out-of-range values throw |
+| `profiles.test.ts` | medians and MAD; `madZero`; empty and unparsed cells; determinism |
+| `rules.test.ts` | every rule in §7 fires on a seeded case and stays quiet on a clean table; imported flags respect §7.1 scoping; `UNKNOWN` tables produce no signals |
+| `anomalies.test.ts` | robust z with and without zero MAD; small samples; alignment checks; within-table cap |
+| `scoring.test.ts` | noisy-OR across groups; max within a group; priority thresholds; `CRITICAL` override; row ordering; summaries |
+| `score-run.test.ts` | complete automatic run writes claim, manifest, profiles, signals, result and outcome in order; `FAILED` source skipped with no writes; foreign claim no-op; own claim continues; re-score skips the claim; artifact error writes `FAILED` outcome and rethrows |
+| `fixtures.test.ts` | every fixture produces its expected signals and priorities; at least one fixture per rule |
+| `app.test.ts` | stack synthesizes for stable and ephemeral deployments; IAM resource patterns per §13.4; EventBridge wildcard per §4.1 |
+| `baseline.test.ts` (Phase 4) | resolution of superseding adjudications; `usable: false` below the minimum; snapshot hash stability; pointer moves only after the load |
+
+A fixture is a reduced `normalized-ocr/v2` artifact with player data replaced, plus `expectedSignals` and `expectedPriorities`.
+
+### 16.2 CI and release
+
+CI runs format, lint, typecheck and tests for affected workspaces, and synthesizes `ocr-quality` with `-c environment=dev -c ephemeral=ci`. Release Please versions the application and `@mcc/contracts`; a contracts change bumps every dependent application.
+
+### 16.3 Live validation
+
+After a change reaches dev, an operator sends a representative screenshot to the dev match-to-csv address, confirms one `ocr-quality` execution succeeded, and checks that the run's `quality/` prefix holds a claim and a quality run with every §5.1 object and a `SUCCEEDED` outcome. Starting a `RESCORE` for the same completion creates a second quality run and leaves the first unchanged.
+
+## 17. Acceptance criteria
+
+v1 (Phases 0 to 3) is complete when:
+
+1. A successful match-to-csv run in dev produces, within one minute, a quality run with every §5.1 object, a `SUCCEEDED` outcome and a `result.json` that validates as `quality-result/v1`.
+2. A failed match-to-csv run produces no quality evidence.
+3. Delivering the same completion event twice produces one claim and one quality run.
+4. A `RESCORE` creates a second quality run and changes nothing in the first.
+5. A fixture seeded with `I6` at confidence 99 in a kills cell yields `INVALID_INTEGER` and `C001_SUSPICIOUS_GLYPH` with candidate `16`, `reviewPriority: HIGH`, and a score of 0.75.
+6. A run whose only table is `UNKNOWN` yields `R001_NO_SCOREBOARD_TABLE`, `assessed: false` for the table, and run priority `HIGH`.
+7. Every result records `qualityVersion`, the normalized artifact's SHA-256, the source run's stage versions, `gitSha` and `baselineVersion: none`.
+8. An ephemeral stack scores only runs under its own `ephemeral/<name>/` namespace.
+9. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
+
+Phase 4 is complete when a baseline built from at least 200 labeled values per field changes `baselineVersion` in new results, `B001` fires on a seeded out-of-range value, and deleting and rebuilding the cache reproduces the same snapshot hash.
+
+## 18. Risks and accepted limitations
+
+1. **Scores are not probabilities.** Severity scores and thresholds are judgment, not fitted to data. Accepted until labels exist; P5.5 calibrates them.
+2. **Within-table statistics are weak.** Eight rows make robust z-scores noisy, and kills legitimately vary. Accepted by capping them at `LOW` (§8.2); Phase 4 adds baselines.
+3. **The player name pattern is unverified.** `playerNamePattern` is not checked against a labeled corpus and may flag valid names. It is `LOW` severity and configurable.
+4. **New quality versions do not backfill.** A `qualityVersion` bump scores new runs only. Operators backfill with `AUTOMATIC` executions (§4.2).
+5. **Duplicate source runs are scored separately.** Match-to-csv retries can create two runs of one screenshot (spec 1 §18.6), and each gets its own quality run. Consumers group by screenshot.
+6. **The export may lag the score.** Scoring starts at run completion, before match-to-csv writes the CSV, so a quality result can exist for a run whose export later fails. Rows are judged from `normalized-ocr/v2`, which is complete at completion.
+7. **The evidence bucket sends every object event to EventBridge.** Only the stack rules match run completions. Accepted because S3 events on the default bus have no delivery charge and the bucket's write rate is low.
+8. **Baseline builds scan every adjudication.** `BuildBaselines` lists the whole namespace, so build time grows with label count. Accepted at league scale; P5.3 moves baselines to the data platform behind the same port.
+9. **Rules know only five fields.** Team totals, placements and medals are not checked until match-to-csv extracts them (P5.4).
+10. **Ephemeral pairing is by name.** An ephemeral ocr-quality stack sees only the ephemeral match-to-csv stack of the same name, and nothing enforces that the second one exists.
+11. **The SSM parameters live under `match-to-csv`.** The stack reads foundation parameters named for another application. Accepted to avoid duplicating foundation outputs; renaming them is a foundation change for every consumer.
+
+## 19. Reference documentation
+
+- S3 events in EventBridge: https://docs.aws.amazon.com/AmazonS3/latest/userguide/EventBridge.html
+- EventBridge content filtering (wildcard matching): https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-create-pattern-operators.html
+- EventBridge dead-letter queues: https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-dlq.html
+- S3 conditional writes: https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html
+- Step Functions error handling: https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html
+- Step Functions redrive: https://docs.aws.amazon.com/step-functions/latest/dg/redrive-executions.html
+- Step Functions workflow types: https://docs.aws.amazon.com/step-functions/latest/dg/choosing-workflow-type.html
+- DynamoDB conditional writes: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithItems.html#WorkingWithItems.ConditionalUpdate
+- Median absolute deviation: https://www.itl.nist.gov/div898/handbook/eda/section3/eda35h.htm
+
+## 20. Delivery plan: phases and slices
+
+This section is the backlog source for building the component. It is written to be turned directly into GitHub issues.
+
+### 20.1 How to file this plan
+
+- Each **phase** becomes one epic, titled with the phase title, with its goal and exit criteria as the body. Create epics only when someone explicitly asks for filing.
+- Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. File with `/mcc-create-github-issue`.
+- **Size** is XS, S or M. Split a slice by independently testable behavior when it outgrows one reviewable PR; the original Plan ID becomes the container.
+- **Blocked by** lists Plan IDs. Create native blocked-by links after every issue in the batch exists. Blockers in earlier phases still apply.
+- **Acceptance** bullets become the issue's acceptance criteria verbatim. Every slice also inherits §20.3.
+- **Spec** lists the sections the implementer must read. Link them; this document stays the source of truth.
+- Plan IDs are stable. Deferred slices keep their IDs and move to the backlog phase; new slices take the next free number in their phase.
+- Phase 4 is filed only after spec 3's adjudication writer merges. Phase 5 is backlog.
+
+### 20.2 Seam contracts
+
+| Contract | Defined in | Main consumers |
+| --- | --- | --- |
+| `normalized-ocr/v2` read types in `@mcc/contracts` | P0.2 | match-to-csv `extract-text`, this component, spec 3 |
+| Quality result types and `ScoreRunInput` (§10.1) | P0.2 | `score-run`, spec 3, later admin features |
+| Quality key layout and claim rule (§5.1, §5.2) | P3.1 | `score-run`, spec 3 queue ordering (P5.1) |
+| Signal IDs, groups and `messageCode` values (§7, §8) | P2.2, P2.3 | consumers that display reasons |
+| `BaselineSource` port and `baseline-snapshot/v1` | P4.1 | `score-run`, `build-baselines`, P5.3 |
+| Spec 3 `cell-adjudication/v1` and its supersession rules | spec 3 | `build-baselines` |
+
+A change to a contract updates every consumer in the same PR.
+
+### 20.3 Definition of done for every slice
+
+- Handlers keep I/O behind an injected dependencies object; only default dependencies construct SDK clients. Rules, anomalies and scoring stay pure.
+- New behavior has `tap` tests that run without AWS, and the workspace stays above its coverage thresholds.
+- `npm run check` passes. Slices that touch CDK also pass `npm run app:synth -- ocr-quality --environment dev`. Slices that touch `infrastructure/` pass `npm run tofu:check`.
+- Any change to a stage's behavior bumps that stage's version and `qualityVersion` (§5.4).
+- No domain, address, account ID or real player data appears in code, fixtures, logs or docs.
+- Operator-visible changes update `applications/ocr-quality/TESTING.md` or a README in the workspace.
+
+### Phase 0: Workspace and contracts
+
+**Goal:** a TypeScript workspace with a test gate, and the shared types this component reads and writes.
+**Exit criteria:** the workspace builds and tests in CI, and match-to-csv writes `normalized-ocr/v2` through the shared type.
+
+#### P0.1 Workspace and test gate (S)
+
+- **Blocked by:** none
+- **Spec:** §3, §12, §16.1
+- **Files:** `applications/ocr-quality/{package.json,tsconfig.json,TESTING.md}`, `test/`
+- **Provides:** `build`, `typecheck` and `test` scripts with `tap` and coverage thresholds
+- **Acceptance:**
+  - `npm test --workspace @mcc/ocr-quality` runs every `test/*.test.ts` with `tap` and fails below 80% statements, 65% branches, 80% lines or 60% functions.
+  - The workspace depends only on `@mcc/contracts` and `@mcc/cdk-config` from the monorepo.
+  - The existing boundary test is converted to TypeScript and still passes.
+
+#### P0.2 Normalized observation and quality contracts (S)
+
+- **Blocked by:** none
+- **Spec:** §10.1, §20.2
+- **Files:** `packages/contracts/src/index.ts`, `applications/match-to-csv/src/lambdas/extract-text.ts`
+- **Provides:** `NormalizedObservations` and related read types; every quality type in §10.1
+- **Acceptance:**
+  - `extract-text` builds its normalized artifact as `NormalizedObservations`, and its output is unchanged byte for byte on the existing tests and fixtures.
+  - The quality types compile and are exported.
+  - `npm run release:check` passes.
+
+### Phase 1: Foundation
+
+**Goal:** run completions reach EventBridge.
+**Exit criteria:** P1.1 is applied in dev and prod.
+
+#### P1.1 Evidence bucket EventBridge notifications (XS)
+
+- **Blocked by:** none
+- **Spec:** §4.1, §13.2, §18.7
+- **Files:** `infrastructure/modules/foundation/main.tf`
+- **Provides:** `Object Created` events from the evidence bucket on the default bus
+- **Acceptance:**
+  - The evidence bucket has an `aws_s3_bucket_notification` with `eventbridge = true`, and no other bucket setting changes.
+  - `npm run tofu:check` passes and the plan shows only the notification resource.
+  - The PR states that applying it needs a person's approval.
+
+### Phase 2: Scoring library
+
+**Goal:** pure functions that turn one normalized artifact into a quality result.
+**Exit criteria:** every rule, anomaly and score in §7 to §9 is implemented and covered by fixtures.
+
+#### P2.1 Keys, configuration and profiles (S)
+
+- **Blocked by:** P0.1, P0.2
+- **Spec:** §4.1, §5.1, §8.1, §13.1
+- **Files:** `src/lib/{run-keys,evidence,config,profiles}.ts`, `config/quality-config-v1.json`
+- **Provides:** `parseRunCompletionKey`, `loadQualityConfig`, `profileTable`
+- **Acceptance:**
+  - Key validation accepts stable and ephemeral run completion keys and rejects every other key in `run-keys.test.ts`.
+  - Invalid configuration throws `InvalidQualityConfigError`.
+  - Profiles match hand-computed medians and MAD, and record `madZero`.
+
+#### P2.2 Rules (M)
+
+- **Blocked by:** P2.1
+- **Spec:** §7
+- **Files:** `src/lib/rules/{generic,halo}.ts`, `test/fixtures/`
+- **Provides:** `evaluateRunRules`, `evaluateTableRules`, `evaluateHaloRules`
+- **Acceptance:**
+  - Each rule in §7.1 to §7.3 fires on a seeded fixture and stays quiet on a clean one.
+  - Imported flags follow the §7.1 scoping, and `UNKNOWN` tables produce no table or cell signals.
+  - `C001` reports the candidate value.
+
+#### P2.3 Within-table anomalies (S)
+
+- **Blocked by:** P2.1
+- **Spec:** §8.2
+- **Files:** `src/lib/anomalies.ts`
+- **Provides:** `evaluateAnomalies` with a `none` baseline
+- **Acceptance:**
+  - `A001` to `A004` fire on seeded outliers and never above `withinTableMaxSeverity`.
+  - Zero MAD and samples under `minSampleSize` produce no `A001` or `A002` signal.
+
+#### P2.4 Scoring and result assembly (S)
+
+- **Blocked by:** P2.2, P2.3
+- **Spec:** §9, §10.1
+- **Files:** `src/lib/scoring.ts`
+- **Provides:** `assembleResult`
+- **Acceptance:**
+  - Cell scores, priorities, row ordering and summaries match §9 on fixtures, including acceptance criterion 5 in §17.
+  - Results validate as `quality-result/v1`.
+
+### Phase 3: Workflow and deployment
+
+**Goal:** every successful run in dev and prod is scored automatically.
+**Exit criteria:** §17 criteria 1 to 9 hold in dev, and prod deploys.
+
+#### P3.1 `ScoreRun` handler (M)
+
+- **Blocked by:** P2.4
+- **Spec:** §4.3, §5, §6.2, §6.3
+- **Files:** `src/lambdas/score-run.ts`, `src/lib/{baseline-source,log}.ts`
+- **Provides:** `scoreRun`, `NoBaselineSource`
+- **Acceptance:**
+  - Every case in the `score-run.test.ts` row of §16.1 passes with injected dependencies.
+  - Writes happen in the §6.2 order, and every write is create-only.
+
+#### P3.2 Stack, trigger and IAM (M)
+
+- **Blocked by:** P3.1, P1.1
+- **Spec:** §4.1, §6.1, §13.3, §13.4, §13.5
+- **Files:** `cdk/lib/{app,ocr-quality-stack}.ts`, `cdk/bin/ocr-quality.ts`
+- **Provides:** the deployable stack
+- **Acceptance:**
+  - Synthesis produces the function, state machine, rule and DLQ in §13.3 with the IAM in §13.4, for stable and ephemeral deployments.
+  - The rule's wildcard pattern matches §4.1 for each deployment type.
+  - The deploy preflight fails when either SSM parameter is missing.
+
+#### P3.3 Fixture corpus and live validation (S)
+
+- **Blocked by:** P3.2
+- **Spec:** §16.1, §16.3, §17
+- **Files:** `test/fixtures/`, `applications/ocr-quality/TESTING.md`
+- **Provides:** a reduced fixture per rule and the operator validation steps
+- **Acceptance:**
+  - `fixtures.test.ts` covers every signal ID in §7 and §8.2.
+  - `TESTING.md` lists the §16.3 steps, and they pass in dev.
+
+### Phase 4: Cross-run baselines
+
+**Goal:** values are compared with every verified value of their field.
+**Exit criteria:** the Phase 4 criteria in §17 hold in dev.
+
+#### P4.1 Baseline snapshot builder (M)
+
+- **Blocked by:** P3.2; spec 3's adjudication writer
+- **Spec:** §8.3, §5.3, §13.4
+- **Files:** `src/lambdas/build-baselines.ts`, `cdk/lib/ocr-quality-stack.ts`
+- **Provides:** `baseline-snapshot/v1`, the `BaselineCache` table, `BuildBaselines`
+- **Acceptance:**
+  - A build over fixture adjudications resolves supersession like spec 3 and counts only `ACCEPTED` and `CORRECTED` cells of mapped fields.
+  - Two builds over the same adjudications produce the same `adjudicationSetSha256` and statistics.
+  - The `CURRENT` pointer moves only after every field item is loaded.
+
+#### P4.2 Baseline signals in scoring (S)
+
+- **Blocked by:** P4.1
+- **Spec:** §8.3, §5.4
+- **Files:** `src/lib/{baseline-source,anomalies}.ts`, `src/lambdas/score-run.ts`
+- **Provides:** `DynamoBaselineSource`, `B001`, `B002`
+- **Acceptance:**
+  - Results record the `baselineVersion` read at the start of the execution.
+  - `B001` and `B002` fire on seeded values and never for fields with `usable: false`.
+  - With no `CURRENT` pointer, scoring behaves exactly as in Phase 3 with `baselineVersion: none`.
+
+### Phase 5: Backlog (not filed with v1)
+
+| ID | Slice | Size | Note |
+| --- | --- | --- | --- |
+| P5.1 | Spec 3's review queue orders runs and cells by the latest `reviewPriority` | S | Blocked by P3.2 and spec 3's queue. Belongs to whichever spec ships second. |
+| P5.2 | Publish `OCR Quality Assessed` and `OCR Quality Failed` events | XS | When a consumer needs push notification instead of reading `outcome.json`. |
+| P5.3 | Data-platform `BaselineSource` | M | §18.8; needs the data platform. |
+| P5.4 | Rules for team totals, placement and medals | M | §18.9; needs match-to-csv to extract those fields. |
+| P5.5 | Calibrated per-cell probability from spec 3 labels | M | §18.1; adds `pCorrect` beside `suspicionScore`. |
+| P5.6 | Alarms for failed executions and DLQ depth | S | Follow the match-to-csv observability approach. |
+| P5.7 | Scheduled baseline rebuild | XS | When manual builds become a chore. |
+
+### 20.4 Dependency order and parallel lanes
+
+P0.1, P0.2 and P1.1 can start together. P2.2 and P2.3 run in parallel after P2.1. The critical path is P0.1 -> P2.1 -> P2.2 -> P2.4 -> P3.1 -> P3.2 -> P3.3. The first real feedback is P3.2 in dev, when live runs start producing priorities that can be compared with screenshots.
