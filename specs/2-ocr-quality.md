@@ -436,7 +436,7 @@ The goal is to send as few cells to people as possible while keeping errors in t
 
 **Success measure.** The gate for stage 3 is stated in terms the data from stage 1 can measure: at the chosen threshold, the error rate among cells the model would auto-accept, at the upper bound of its 95% confidence interval, is below a target the risk model specification sets (for example 0.1%), and the review rate is as low as that allows. Errors are rare, so measuring a rate that low needs tens of thousands of labeled cells. Review-all labeling from the first screenshot is what makes that sample exist.
 
-**Blind labels.** Reviewers see the heuristic priority, so errors they miss will concentrate in `NONE` and `LOW` cells, which is the population a model would auto-accept, and a gate measured on those labels underestimates the error rate. The stage 3 gate is therefore measured on labels collected blind: spec 3's double-review sample, reviewed without the first decision or any priority, and adjudications whose `priorityShown` is false. In stage 3 the audit sample of auto-accepted cells is reviewed without the model's decision or score.
+**Blind labels.** Reviewers see the heuristic priority, so errors they miss will concentrate in `NONE` and `LOW` cells, which is the population a model would auto-accept, and a gate measured on those labels underestimates the error rate. The stage 3 gate is therefore measured on labels collected blind: spec 3's double-review sample, reviewed without the first decision or any priority, and adjudications whose `priorityShown` and `priorDecisionsShown` are both false ([spec 3](3-cell-labeling.md) §7.6). In stage 3 the audit sample of auto-accepted cells is reviewed without the model's decision or score.
 
 **Prerequisites this specification guarantees for the risk model:** cell, row and table feature rows for every table of every scored run (§8.4); stable join keys (`cellObservationId`, `runId`, `screenshotId`) shared with spec 3; recorded heuristic scores as the comparison baseline; versioned features, configuration and baselines; and re-scoring to produce new feature schemas for old runs. Spec 3 owns the label-side prerequisites: an explicit decision on every cell, row and table, `selectionReason`, the shown `qualityRunId` and whether a priority was shown (`priorityShown`), error types, a blind double-review sample, and labels keyed to the parser's exported field as well as the semantic field.
 
@@ -812,7 +812,7 @@ This section is the backlog source for building the component. It is written to 
 | Training example selection and eligibility (§8.5) | this specification | the risk model specification's dataset builder; spec 3 records the shown `qualityRunId` it depends on |
 | `baseline-member/v1` and per-screenshot baseline selection (§8.3) | P4.1, P4.2 | `score-run`, the training dataset builder |
 | Reserved `riskModel` fields (§9.6) | P0.2 | spec 3, the risk model specification |
-| Spec 3 `selectionReason`, shown `qualityRunId`, `priorityShown` and the blind double-review sample | spec 3 (#158) | the risk model specification's gate (§9.6) |
+| Spec 3 `selectionReason`, shown `qualityRunId`, `priorityShown`, `priorDecisionsShown` and the blind double-review sample | spec 3 (#158) | the risk model specification's gate (§9.6) |
 | `BaselineSource` port and `baseline-snapshot/v1` | P4.1 | `score-run`, `build-baselines`, P5.3 |
 | Spec 3 `cell-adjudication/v1` and its supersession rules | spec 3 | `build-baselines` |
 

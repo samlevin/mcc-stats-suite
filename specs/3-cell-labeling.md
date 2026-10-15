@@ -280,10 +280,10 @@ A bulk accept performs steps 1 to 5 for each listed cell in column order, with o
 `evaluateRun(runPrefix, dependencies)` runs after every primary-track write, once at enqueue (§6.1), and in every rebuild:
 
 1. List the run's `adjudications/` prefix and resolve every chain (§8.1). S3 listings are strongly consistent, so the listing includes the write that triggered the evaluation.
-2. Compute the review scope and completion (§7.1, §8.3). Update the `META` counts and status. When the run is incomplete, stop.
-3. Compute `adjudicationSetSha256` over the listed keys (§8.5). List `validated/` and read the latest version. Adjudication keys are only ever added, so two listings of one run differ only by keys added between them. When the latest version's `lineage.adjudicationCount` is at least the number of listed keys, it was built from this listing's set or a later one, and the evaluation stops.
-4. Build the validated table (§8.4) as version `n + 1` and write it create-only. On 412, another writer has written that version: return to step 1, at most 3 times, then log `VALIDATED_WRITE_CONTENDED` at `WARN` and leave the write to the next evaluation.
-5. On the run's first validated version, add every sampled cell in scope (§7.6) to the blind queue.
+2. Compute the review scope and completion (§7.1, §8.3). Update the `META` counts, status and `evaluatedAdjudicationCount` (the number of listed keys) with the condition that `evaluatedAdjudicationCount` does not decrease, so an evaluation with an older listing never overwrites a newer one. When the condition fails, a newer evaluation has run and this one stops. When the run is incomplete, stop.
+3. Add every sampled cell in scope (§7.6) that has neither a blind adjudication nor a blind queue entry to the blind queue, with a conditional put on its `CELL` item. The step is idempotent and runs on every evaluation of a complete run, so cells of a table added to the scope later, and cells missed by an evaluation that stopped early, are queued by the next evaluation.
+4. Compute `adjudicationSetSha256` over the listed keys (§8.5). List `validated/` and read the latest version. Adjudication keys are only ever added, so two listings of one run differ only by keys added between them. When the latest version's `lineage.adjudicationCount` is at least the number of listed keys, it was built from this listing's set or a later one, and the evaluation stops.
+5. Build the validated table (§8.4) as version `n + 1` and write it create-only. On 412, another writer has written that version: return to step 1, at most 3 times, then log `VALIDATED_WRITE_CONTENDED` at `WARN` and leave the write to the next evaluation.
 
 A table decision that adds a table to the scope can make a complete run incomplete again (§8.3). Its earlier validated versions stay, and the next version is written when the run is complete again.
 
@@ -375,7 +375,7 @@ The server copies whether the parser selected the table and the parser's `column
 `enqueue-run` decides both samples once per run and records them in the review plan. With `h(x)` the first four bytes of `sha256(x)` read as an unsigned big-endian integer:
 
 - **Display mode.** The run is `PRIORITY_HIDDEN` when `h(samplingSeed + "\0hidden\0" + runId) mod 10000 < priorityHiddenShare * 10000`, otherwise `PRIORITY_SHOWN`. In a hidden run the API returns no priority, score or signal for any item (§4.1), and every adjudication records `priorityShown: false`.
-- **Blind sample.** A cell is sampled when `h(samplingSeed + "\0blind\0" + cellObservationId) mod 10000 < blindDoubleReviewShare * 10000`. The plan lists the sampled cells of every table, and those in scope enter the blind queue when the run first completes (§6.3).
+- **Blind sample.** A cell is sampled when `h(samplingSeed + "\0blind\0" + cellObservationId) mod 10000 < blindDoubleReviewShare * 10000`. The plan lists the sampled cells of every table, and those in scope enter the blind queue once the run is complete (§6.3 step 3).
 
 In a shown run, `priorityShown` is `true` on every `PRIMARY` adjudication. `BLIND_DOUBLE` and `DISAGREEMENT_RESOLUTION` adjudications always record `priorityShown: false`, because their screens never show a priority (§9.3). `shownPriority` is the item's own priority from the quality result named by `qualityRunId`: the cell's `reviewPriority`, the table's `summary.reviewPriority`, or for a row the highest `reviewPriority` of its cells, which is what the reviewer interface displays on a row. It is `null` when the item has no priority, such as a cell of an unassessed table, and always `null` when `priorityShown` is false.
 
@@ -411,7 +411,7 @@ The read routes use only these attributes and never list the bucket:
 
 | Item | Attributes | Written by |
 | --- | --- | --- |
-| `META` | `runPrefix`, `screenshotId`, `displayMode`, `latestQualityRunId`, `status` (`OPEN` or `COMPLETE`), required and resolved counts per item kind, `latestValidatedVersion` and `latestValidatedTableId`, `openDisagreementCount`, queue keys | `enqueue-run` (§6.1), `evaluateRun` (§6.3), the disagreement check (§6.4), `rebuild-review-state` |
+| `META` | `runPrefix`, `screenshotId`, `displayMode`, `latestQualityRunId`, `status` (`OPEN` or `COMPLETE`), required and resolved counts per item kind, `evaluatedAdjudicationCount`, `latestValidatedVersion` and `latestValidatedTableId`, `openDisagreementCount`, queue keys | `enqueue-run` (§6.1), `evaluateRun` (§6.3), the disagreement check (§6.4), `rebuild-review-state` |
 | `CELL#<blockId>` | the `CellResolution` fields, `primaryReviewerIds` (the `sub` of every reviewer with an adjudication in the cell's primary chain), `blindSampled`, the blind chain's head and `chainLength`, `blindReviewerId`, `disagreementOpen`, blind queue keys | `review-write`, `evaluateRun`, `rebuild-review-state` |
 | `ROW#...`, `TABLE#...` | the row or table resolution and `chainLength` | `review-write`, `rebuild-review-state` |
 
@@ -456,7 +456,7 @@ The first validated version of a run is written when it first becomes review-com
 Each version's `lineage` records:
 
 - `adjudicationSetSha256`: spec 2 §8.3's definition, the SHA-256 of the UTF-8 adjudication object keys, sorted bytewise and joined with `\n`, over every key under the run's `adjudications/` prefix at build time. The set includes superseded adjudications and excludes `blind-adjudications/`, because resolution depends on the whole chain and the blind track never changes values. A spec 2 baseline built from exactly the same keys carries the same value.
-- `adjudicationCount` and `qualityRunIds`, the sorted distinct quality runs the adjudications were reviewed against.
+- `adjudicationCount`, the number of keys in that same set, and `qualityRunIds`, the sorted distinct quality runs the adjudications were reviewed against. §6.3 step 4 compares `adjudicationCount` with a new listing, so it counts exactly the keys hashed.
 - `normalizedSha256`, the run manifest's `versions` as `sourceVersions`, and its `build` as `sourceBuild`.
 - `reviewVersions`: `reviewPolicyVersion`, `reviewConfigVersion`, `validatedTableBuilderVersion` and the sorted distinct `reviewToolVersion` values of the adjudications.
 - `build`: the writer's `gitSha` and `environment`.
@@ -736,6 +736,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | `src/lib/scope.ts` | `reviewScope(observations, tableResolutions)` | §7.1. Pure. |
 | `src/lib/completion.ts` | `evaluateCompletion(scope, resolutions)` | §8.3. Pure. |
 | `src/lib/sampling.ts` | `buildReviewPlan(observations, qualityRunId, config)` | §7.6. Pure. |
+| `src/lib/run-evaluation.ts` | `evaluateRun(runPrefix, dependencies)` | §6.3. Shared by `review-write`, `enqueue-run` and `rebuild-review-state`, so no Lambda imports another. |
 | `src/lib/validated-table.ts` | `buildValidatedTable(evidence, resolutions, previous, versions)`; `adjudicationSetSha256(keys)` | §8.4, §8.5. Pure. |
 | `src/lib/review-state.ts` | `DynamoReviewStateStore` | Projections and queues (§8.2, §13.3). |
 | `src/lib/config.ts` | `loadReviewConfig()` | Read and validate the bundled configuration. |
@@ -772,7 +773,7 @@ mcc-stats-suite/
       lib/{app,admin-stack}.ts
     src/
       lambdas/{review-read,review-write,enqueue-run,rebuild-review-state}.ts
-      lib/{keys,evidence,auth,run-evidence,chains,decisions,scope,completion,sampling,validated-table,review-state,config,log}.ts
+      lib/{keys,evidence,auth,run-evidence,run-evaluation,chains,decisions,scope,completion,sampling,validated-table,review-state,config,log}.ts
     test/
       *.test.ts
       fixtures/*.fixture.json          # Reduced runs with quality results, adjudications and expected outcomes
@@ -890,7 +891,7 @@ Lambda and library tests use `tap`, run from `applications/admin/test/*.test.ts`
 | `review-write.test.ts` | create-only chain writes; `STALE_RESOLUTION` on a second successor and on a predecessor that is not in the chain; replay by `clientRequestId`, including a retry after a write that succeeded but returned `503`; bulk accept with partial failure and replay of the written cells; the current adjudication taken from the S3 chain when the projection lags; server-owned fields ignore body values, including `priorityShown`, `selectionReason` and `reviewerId`; `shownPriority` for cells, rows and tables; blind and disagreement rules; validated version written on completion, not rewritten for an unchanged set, retried on 412; no write outside the permitted prefixes |
 | `review-read.test.ts` | hidden runs and blind views omit every priority, score, signal and decision; image URL key and TTL; `NOT_A_LABELER`; `RUN_NOT_FOUND`; queue filtering of the caller's own cells |
 | `enqueue-run.test.ts` | a `SUCCEEDED` outcome writes a plan and `META`; failed outcomes and runs without provenance are skipped; a re-score moves `latestQualityRunId` without a new plan; a run with no table is completed with a validated table that has no rows |
-| `validated-race.test.ts` | an evaluation that listed fewer keys than the latest version's `adjudicationCount` writes nothing, so an older set never becomes the latest version |
+| `validated-race.test.ts` | an evaluation that listed fewer keys than the latest version's `adjudicationCount` writes nothing, so an older set never becomes the latest version; an evaluation with an older listing never overwrites newer `META` counts or status; sampled cells of a table added to the scope after version 1, and cells missed by an evaluation that stopped after its validated write, are queued for blind review by the next evaluation |
 | `rebuild.test.ts` | a rebuild after deleting the table equals the incremental projections; a missing validated version is written; runs without a plan are enqueued; resolved disagreements stay closed and open ones are restored |
 | `app.test.ts` | stable and ephemeral synthesis; no CORS configuration on the API; CloudFront behaviors and headers in §13.3; IAM resource patterns in §13.4; the EventBridge pattern in §4.4 |
 | `web/test/*.test.tsx` | each step renders evidence as text; correction requires an error type; hidden mode renders no priority; stale resolution reloads the item |
@@ -1104,7 +1105,7 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** P2.1, P2.2, P2.3
 - **Spec:** §4.2, §4.3, §6.2 to §6.4, §8.2
-- **Files:** `src/lambdas/review-write.ts`, `src/lib/{auth,run-evidence,review-state,log}.ts`
+- **Files:** `src/lambdas/review-write.ts`, `src/lib/{auth,run-evidence,run-evaluation,review-state,log}.ts`
 - **Provides:** `writeAdjudication`, `bulkAccept`, `evaluateRun`, `DynamoReviewStateStore`
 - **Acceptance:**
   - Every case in the `review-write.test.ts` and `validated-race.test.ts` rows of §16.1 passes with injected dependencies.
