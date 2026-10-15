@@ -548,8 +548,16 @@ test('cache uses dedicated session credentials and environment contracts without
   }
   assert.match(action, /allowed-account-ids:/);
   assert.match(action, /aws sts get-caller-identity/);
-  assert.match(action, /turbo-cache\/bucket-name/);
-  assert.match(action, /turbo-cache\/data-key-arn/);
+  // CI contracts stay outside /mcc/<environment>/, which holds only application config.
+  assert.match(
+    action,
+    /"\/mcc-ci\/\$CACHE_ENVIRONMENT\/turbo-cache\/bucket-name"/,
+  );
+  assert.match(
+    action,
+    /"\/mcc-ci\/\$CACHE_ENVIRONMENT\/turbo-cache\/data-key-arn"/,
+  );
+  assert.ok(!action.includes('/mcc/'));
   assert.match(action, /s3-prefix: turbogha\/\$\{\{ inputs.environment \}\}/);
   assert.ok(!/max-age:|max-files:|max-size:/.test(action));
   assert.match(action, /AWS_SESSION_TOKEN=" >> "\$GITHUB_ENV/);

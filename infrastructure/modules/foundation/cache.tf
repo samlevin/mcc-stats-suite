@@ -156,13 +156,13 @@ data "aws_iam_policy_document" "turbo_cache_service" {
 }
 
 resource "aws_ssm_parameter" "turbo_cache_bucket_name" {
-  name  = "/mcc/${var.environment}/turbo-cache/bucket-name"
+  name  = "/mcc-ci/${var.environment}/turbo-cache/bucket-name"
   type  = "String"
   value = aws_s3_bucket.turbo_cache.id
 }
 
 resource "aws_ssm_parameter" "turbo_cache_key_arn" {
-  name  = "/mcc/${var.environment}/turbo-cache/data-key-arn"
+  name  = "/mcc-ci/${var.environment}/turbo-cache/data-key-arn"
   type  = "String"
   value = aws_kms_key.data.arn
 }

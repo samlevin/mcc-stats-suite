@@ -333,7 +333,7 @@ test('deployment executes the local change set by name or ARN only', () => {
 test('deployment and execution read only bootstrap and application parameters', () => {
   for (const name of [
     'cdk-bootstrap/mcclocal1/version',
-    'mcc/dev/match-to-csv/evidence-bucket-name',
+    ...APPLICATIONS.map((app) => `mcc/dev/${app}/evidence-bucket-name`),
   ]) {
     for (const action of ['ssm:GetParameter', 'ssm:GetParameters']) {
       assert.equal(allowed(deployment, action, parameter(name)), true, name);
@@ -341,7 +341,8 @@ test('deployment and execution read only bootstrap and application parameters', 
     }
   }
   for (const name of [
-    'mcc/dev/turbo-cache/bucket-name',
+    'mcc-ci/dev/turbo-cache/bucket-name',
+    'mcc-ci/dev/turbo-cache/data-key-arn',
     'mcc/prod/match-to-csv/evidence-bucket-name',
     'cdk-bootstrap/hnb659fds/version',
   ]) {
@@ -609,6 +610,7 @@ test('runtime reads only dev application parameters, one at a time', () => {
     'mcc/dev/match-to-csv/sender-allowlist',
     'mcc/dev/match-to-csv/email-alias',
     'mcc/dev/match-to-csv/email-domain',
+    ...APPLICATIONS.map((app) => `mcc/dev/${app}/config`),
   ]) {
     assert.equal(
       allowed(runtime, 'ssm:GetParameter', parameter(name)),
@@ -616,13 +618,38 @@ test('runtime reads only dev application parameters, one at a time', () => {
       name,
     );
   }
+  // The boundary is one ARN, so it stays the same size as applications are added.
+  const parameterStatements = runtime.Statement.filter((entry) =>
+    [entry.Action].flat().some((action) => action.startsWith('ssm:')),
+  );
+  assert.deepEqual(
+    parameterStatements.map((entry) => [
+      entry.Sid,
+      entry.Effect,
+      entry.Action,
+      resolve(entry.Resource),
+    ]),
+    [
+      [
+        'ReadApplicationParameters',
+        'Allow',
+        'ssm:GetParameter',
+        parameter('mcc/dev/*'),
+      ],
+    ],
+  );
   for (const [action, name] of [
     ['ssm:GetParameter', 'mcc/prod/match-to-csv/email-alias'],
-    ['ssm:GetParameter', 'mcc/dev/turbo-cache/bucket-name'],
+    ['ssm:GetParameter', 'mcc/prod/admin/config'],
+    ['ssm:GetParameter', 'mcc-ci/dev/turbo-cache/bucket-name'],
+    ['ssm:GetParameter', 'mcc-ci/dev/turbo-cache/data-key-arn'],
+    ['ssm:GetParameter', 'mcc-ci/prod/turbo-cache/bucket-name'],
     ['ssm:GetParameter', 'cdk-bootstrap/mcclocal1/version'],
+    ['ssm:GetParameter', 'cdk-bootstrap/hnb659fds/version'],
     ['ssm:GetParameters', 'mcc/dev/match-to-csv/email-alias'],
     ['ssm:GetParametersByPath', 'mcc/dev/match-to-csv'],
     ['ssm:PutParameter', 'mcc/dev/match-to-csv/email-alias'],
+    ['ssm:DeleteParameter', 'mcc/dev/match-to-csv/email-alias'],
   ]) {
     assert.equal(
       allowed(runtime, action, parameter(name)),
