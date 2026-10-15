@@ -16,6 +16,25 @@ export interface SourceScreenshot extends S3ObjectReference {
   heightPx: number;
 }
 
+/**
+ * Why a person should check an extracted value against the screenshot.
+ *
+ * - `LOW_WORD_CONFIDENCE`: a word of the value has a very low Textract WORD
+ *   confidence.
+ * - `SPLIT_TRAILING_DIGITS`: the value ends in a digits-only word that follows
+ *   a word ending in a letter, and Textract read one of the two with low
+ *   confidence, so the space between them may be a misread.
+ */
+export type RowReviewCode = 'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS';
+
+/** A deterministic review flag on one field of an extracted row. */
+export interface RowReviewFlag {
+  field: 'player';
+  code: RowReviewCode;
+  /** Lowest Textract WORD confidence, 0 to 100, among the words the rule read. */
+  wordConfidence: number;
+}
+
 export interface CsvRow {
   team: string;
   player: string;
@@ -25,6 +44,11 @@ export interface CsvRow {
   deaths: string;
   win: number;
   loss: number;
+  /**
+   * Present only when a rule flags the row. Flags never change the values,
+   * which stay as read. The CSV file does not include them.
+   */
+  reviewFlags?: RowReviewFlag[];
 }
 
 export type ProcessEmailInput = S3ObjectReference;
