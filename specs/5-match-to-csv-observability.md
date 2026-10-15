@@ -2,7 +2,7 @@
 
 **Status:** Draft
 
-**Version:** 1.2-draft (revised after review round 2)
+**Version:** 1.3-draft (revised after review round 3)
 
 **Date:** October 15, 2026
 
@@ -21,6 +21,8 @@
 **Out of scope:** tail sampling, an OpenTelemetry collector, a state store or status table for uploads, Lambda Insights, CloudWatch Application Signals, high-resolution metrics, log metric filters, anomaly-detection alarms, any user-facing progress UI, and any metric, alarm, saved query or dashboard in an ephemeral stack.
 
 The operator of match-to-csv needs to answer three questions without a full-stack application: what happened to one emailed submission, where each recent upload is now, and whether the pipeline is slow or producing poor OCR. This spec answers them with one structured log record per pipeline stage. In dev and prod the record is also a CloudWatch metric (through EMF). Logs Insights queries join the records by submission and by Step Functions execution. The design adds nine custom metrics and two alarms, so its fixed cost is a few dollars a month. Ephemeral developer stacks only write the log records, and developers read them with a scoped grant on the local deployer permission set.
+
+**Changes in 1.3:** P1.2 is blocked by P1.3, so ephemeral stacks turn metrics off before they emit stage events (§20.4).
 
 **Changes in 1.2:** `EMF_METRICS_ENABLED` now defaults to on and only ephemeral stacks set it to `false`, so no slice can stop the existing metrics before its configuration ships (§3.1, §20.3). The developer grant scopes `GetQueryResults` to ephemeral log groups, adds `GetLogGroupFields` for console queries, and drops `DescribeQueries` (§8.2). P1.4 adds console and negative checks.
 
@@ -596,12 +598,13 @@ File each slice as a leaf issue with `/mcc-create-github-issue`, with `Plan ID: 
 
 #### P1.2 Emit stage events from the three pipeline Lambdas (M)
 
-- **Blocked by:** P0.2, P1.1
+- **Blocked by:** P0.2, P1.1, P1.3
 - **Spec:** §3.1, §6, §7.2, §14
 - **Files:** `src/lambdas/process-email.ts`, `src/lambdas/extract-text.ts`, `src/lambdas/write-extracted-csv.ts`, their tests
 - **Acceptance:**
   - One event per invocation for `OK`, `REJECTED` and `ERROR`, including `process-email` failures before `submissionId` exists.
   - Partial attachment rejections and multiple rejection codes appear in full.
+  - In an ephemeral stack, no stage event carries an `_aws` block, while a non-ephemeral synth still publishes `ExtractedRows` and `ZeroRowExtractions`.
   - A publisher failure does not fail the invocation.
   - No event contains the content §14 excludes.
 
@@ -650,4 +653,4 @@ File each slice as a leaf issue with `/mcc-create-github-issue`, with `Plan ID: 
 
 ### 20.4 Dependency order
 
-P0.1 comes first, and P1.4 can run at any time. P0.2 and P1.1 need P0.1. P1.3 needs P0.2. P1.2 needs P0.2 and P1.1. P2.1 needs P1.2 and P1.3 and comes last. The first useful milestone is P1.2 with P1.4, when a developer can run Q1 and Q2 against their own stack.
+P0.1 comes first, and P1.4 can run at any time. P0.2 and P1.1 need P0.1. P1.3 needs P0.2. P1.2 needs P0.2, P1.1 and P1.3, so ephemeral stacks have metrics turned off before any of them emits a stage event. P2.1 needs P1.2 and P1.3 and comes last. The first useful milestone is P1.2 with P1.4, when a developer can run Q1 and Q2 against their own stack.
