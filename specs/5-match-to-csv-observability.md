@@ -2,7 +2,7 @@
 
 **Status:** Draft
 
-**Version:** 1.1-draft (revised after review round 1 and the ephemeral logging decision)
+**Version:** 1.2-draft (revised after review round 2)
 
 **Date:** October 15, 2026
 
@@ -21,6 +21,8 @@
 **Out of scope:** tail sampling, an OpenTelemetry collector, a state store or status table for uploads, Lambda Insights, CloudWatch Application Signals, high-resolution metrics, log metric filters, anomaly-detection alarms, any user-facing progress UI, and any metric, alarm, saved query or dashboard in an ephemeral stack.
 
 The operator of match-to-csv needs to answer three questions without a full-stack application: what happened to one emailed submission, where each recent upload is now, and whether the pipeline is slow or producing poor OCR. This spec answers them with one structured log record per pipeline stage. In dev and prod the record is also a CloudWatch metric (through EMF). Logs Insights queries join the records by submission and by Step Functions execution. The design adds nine custom metrics and two alarms, so its fixed cost is a few dollars a month. Ephemeral developer stacks only write the log records, and developers read them with a scoped grant on the local deployer permission set.
+
+**Changes in 1.2:** `EMF_METRICS_ENABLED` now defaults to on and only ephemeral stacks set it to `false`, so no slice can stop the existing metrics before its configuration ships (§3.1, §20.3). The developer grant scopes `GetQueryResults` to ephemeral log groups, adds `GetLogGroupFields` for console queries, and drops `DescribeQueries` (§8.2). P1.4 adds console and negative checks.
 
 **Changes in 1.1:** Ephemeral stacks publish no EMF metrics, new or existing, and get no alarms, saved queries or dashboard (§7.1, §13.2). The local deployer permission set gains read access to ephemeral log groups only (§8.2, P1.4). Upload status is computed per execution by comparing exported screenshots with the expected count, and it reads Step Functions failure records, so it covers failures before `submissionId` exists and invocations that wrote no event (§8.1, Q2). Q5 reports failed attempts and every rejection, including partial attachment rejections, and no longer claims to find final failures. `rejectionCodes` and `attachmentRejectionCodes` are sorted comma-joined strings, and `write-csv` adds `exportedScreenshotId` (§6.1). P0.2 now depends on P0.1 and P2.1 on P1.3, and P2.1 validates the queries against real logs (§20).
 
@@ -90,7 +92,7 @@ X-Ray: Lambda and Step Functions segments, linked from events by xrayTraceId
 ### 3.1 Execution policy
 
 - Each Lambda invocation writes exactly one stage event, on success and on failure, before it returns or rethrows. This includes failures before `submissionId` exists, such as a raw email read, MIME parse or SSM read failure.
-- When `EMF_METRICS_ENABLED` is not `true`, the event has no `_aws` block and no metric members, and `publishExtractionMetrics` writes nothing. The CDK stack sets it to `true` in dev and prod and `false` in ephemeral stacks. Local runs and tests leave it unset.
+- Metrics are on unless `EMF_METRICS_ENABLED` is exactly `false`. When it is `false`, the event has no `_aws` block and no metric members, and `publishExtractionMetrics` writes nothing. The CDK stack sets `false` in ephemeral stacks only. Dev and prod leave it unset, so functions deployed before the variable exists keep publishing `ExtractedRows` and `ZeroRowExtractions`, and no slice can silence them on its own.
 - A failure to build or write the event never fails the invocation. The handler catches it and logs an `ERROR` line.
 - Telemetry never changes evidence. Events are not written to S3, and no evidence write depends on telemetry.
 - Events never contain screenshot bytes, OCR text, extracted rows, email bodies, subjects, sender addresses or recipient addresses (§14).
@@ -203,7 +205,7 @@ Metric values are top-level members named after the metric, as EMF requires, so 
 
 ### 7.1 EMF rules
 
-1. Metrics are published only when `EMF_METRICS_ENABLED` is `true` (§3.1). Every rule below applies to dev and prod.
+1. Metrics are published unless `EMF_METRICS_ENABLED` is `false` (§3.1), which only ephemeral stacks set. Every rule below applies to dev and prod.
 2. Namespace `MCC/MatchToCsv`, the existing `METRIC_NAMESPACE`.
 3. New metrics use `Dimensions: [["Stage"]]` and nothing else.
 4. Records are written with `process.stdout.write`, never `console.log`, so the runtime cannot prefix or wrap them (the reason recorded in `src/lib/metrics.ts`).
@@ -280,6 +282,8 @@ Ephemeral stacks write logs and nothing else. A developer reads them with the `m
     "logs:DescribeLogStreams",
     "logs:FilterLogEvents",
     "logs:GetLogEvents",
+    "logs:GetLogGroupFields",
+    "logs:GetQueryResults",
     "logs:StartLiveTail",
     "logs:StartQuery"
   ],
@@ -292,7 +296,9 @@ Ephemeral stacks write logs and nothing else. A developer reads them with the `m
 }
 ```
 
-A second statement allows `logs:DescribeLogGroups`, `logs:DescribeQueries`, `logs:GetQueryResults` and `logs:StopQuery` on `*`, because those actions do not support resource-level permissions. `DescribeLogGroups` reveals log group names in the dev account, not their contents.
+The `:*` resources cover log streams, which `GetLogEvents` authorizes against. `GetQueryResults` sits in this statement because it authorizes against the queried log groups, so a developer cannot read the results of a query over stable dev logs even with its query ID. `GetLogGroupFields` is what the Logs Insights console calls to list fields, and console queries fail without it.
+
+A second statement allows `logs:DescribeLogGroups` and `logs:StopQuery` on `*`, because those actions support no resource type. `DescribeLogGroups` reveals log group names in the dev account, not their contents. `logs:DescribeQueries` is not granted, because it would list every query ID in the account. The console's query history is unavailable as a result.
 
 With that access, a developer tails one function or runs a query:
 
@@ -398,7 +404,7 @@ invocation 1 -> 1 stage event
 
 | File | Public functions | Change |
 | --- | --- | --- |
-| `src/lib/metrics.ts` | `stageEventRecord(event, context): Record<string, unknown>`, `publishStageEvent(event, write?, environment?, timestamp?)` | New. Builds the §6 record, adds the `_aws` block and metric members only when `EMF_METRICS_ENABLED` is `true`, and writes it with `process.stdout.write`. Reads `_X_AMZN_TRACE_ID`, `GIT_SHA`, `DEPLOYMENT_ENVIRONMENT` and `EMF_METRICS_ENABLED`. `publishExtractionMetrics` writes nothing unless `EMF_METRICS_ENABLED` is `true`. |
+| `src/lib/metrics.ts` | `stageEventRecord(event, context): Record<string, unknown>`, `publishStageEvent(event, write?, environment?, timestamp?)` | New. Builds the §6 record, adds the `_aws` block and metric members unless `EMF_METRICS_ENABLED` is `false`, and writes it with `process.stdout.write`. Reads `_X_AMZN_TRACE_ID`, `GIT_SHA`, `DEPLOYMENT_ENVIRONMENT` and `EMF_METRICS_ENABLED`. `publishExtractionMetrics` writes nothing when `EMF_METRICS_ENABLED` is `false`. |
 | `src/lib/log.ts` | `log(level, message, details)` | Drops records below `AWS_LAMBDA_LOG_LEVEL` (default `INFO`). Keeps writing one self-formatted JSON line. |
 | `src/lambdas/process-email.ts` | `handler`, `processEmail` | Copies `receivedAt` into each `SourceScreenshot` and publishes one event per invocation, including failures before `submissionId` exists. |
 | `src/lambdas/extract-text.ts` | `handler`, `runExtraction` | Times the Textract call, computes `meanConfidence` and `reviewRequiredCells`, passes `trace` to its output, and publishes one event. |
@@ -423,7 +429,7 @@ No new directories. The spec lives at `specs/5-match-to-csv-observability.md`.
 
 | Resource | Change |
 | --- | --- |
-| All five Lambdas | `loggingFormat: JSON`, `applicationLogLevelV2: INFO`, `systemLogLevelV2: INFO`, the existing `buildEnvironment` (`GIT_SHA`, `DEPLOYMENT_ENVIRONMENT`), which today only `extract-text` receives, and `EMF_METRICS_ENABLED` (`true` in dev and prod, `false` in ephemeral stacks) |
+| All five Lambdas | `loggingFormat: JSON`, `applicationLogLevelV2: INFO`, `systemLogLevelV2: INFO`, the existing `buildEnvironment` (`GIT_SHA`, `DEPLOYMENT_ENVIRONMENT`), which today only `extract-text` receives, and `EMF_METRICS_ENABLED: 'false'` in ephemeral stacks only (unset in dev and prod) |
 | Ingest workflow | `logs.level: ERROR`, `includeExecutionData: false` |
 | Replay workflow | unchanged (no logging configured today) |
 | `EndToEndLatencyAlarm`, `OcrMeanConfidenceAlarm` | §9.1, dev and prod only |
@@ -464,11 +470,11 @@ This whole spec is the observability design. The audit record for "what happened
 
 | Layer or file | Covers |
 | --- | --- |
-| `metrics` unit tests | Record shape matches §6 and §7.1. `Dimensions` is exactly `[["Stage"]]`. No ID, code or `workflow` appears as a dimension. Absent fields are omitted. Codes are sorted and comma-joined. With `EMF_METRICS_ENABLED` unset or `false`, the event has no `_aws` block or metric members and `publishExtractionMetrics` writes nothing. The line ends in a newline and is written with the injected writer. |
+| `metrics` unit tests | Record shape matches §6 and §7.1. `Dimensions` is exactly `[["Stage"]]`. No ID, code or `workflow` appears as a dimension. Absent fields are omitted. Codes are sorted and comma-joined. With `EMF_METRICS_ENABLED` unset, both records carry their metrics as today. With it `false`, the event has no `_aws` block or metric members and `publishExtractionMetrics` writes nothing. The line ends in a newline and is written with the injected writer. |
 | `log` unit tests | Records below `AWS_LAMBDA_LOG_LEVEL` are dropped. `INFO` is the default. |
 | Handler tests | One event per invocation for `OK`, `REJECTED` and `ERROR`. `process-email` writes an `ERROR` event with `executionId` and without `submissionId` when the raw email read, the MIME parse or the SSM read fails. An accepted submission with rejected attachments is `OK` with `attachmentRejectionCodes`. A submission with several rejection codes lists all of them. The event is written before a rethrow, a publisher failure does not fail the handler, `endToEndMs` appears only for `INGEST` with `receivedAt`, `exportedScreenshotId` appears only on a `write-csv` `OK`, and no event holds subject, address or row content. |
-| CDK assertion tests | Lambda `LoggingConfig`, `EMF_METRICS_ENABLED` `true` in a non-ephemeral stack and `false` in an ephemeral one, Step Functions `LoggingConfiguration.Level` `ERROR` with `IncludeExecutionData` false, task payloads containing `trace`, the EventBridge input containing `receivedAt`, and the alarms, query definitions and dashboard present in a non-ephemeral stack and absent in an ephemeral one. |
-| Policy template test | The template parses as JSON and its logs statements name only `match-to-csv-e-*` log groups. |
+| CDK assertion tests | Lambda `LoggingConfig`, `EMF_METRICS_ENABLED` absent in a non-ephemeral stack and `false` in an ephemeral one, Step Functions `LoggingConfiguration.Level` `ERROR` with `IncludeExecutionData` false, task payloads containing `trace`, the EventBridge input containing `receivedAt`, and the alarms, query definitions and dashboard present in a non-ephemeral stack and absent in an ephemeral one. |
+| Policy template test | The template parses as JSON. Every logs action except `DescribeLogGroups` and `StopQuery` names only `match-to-csv-e-*` log groups, `GetQueryResults` and `GetLogGroupFields` are among them, and `DescribeQueries` appears nowhere. |
 | Contract tests | Old `SourceScreenshot` and `ProcessingRunInput` documents without the new fields still parse. |
 
 Tests never call AWS.
@@ -496,7 +502,8 @@ After the first deploy to dev, an operator checks that `MCC/MatchToCsv` metrics 
 - [ ] Every `process-email`, `extract-text` and `write-extracted-csv` invocation writes exactly one §6 event, including `process-email` failures before `submissionId` exists.
 - [ ] In dev and prod the metrics in §7.2 appear with only the `Stage` dimension, and `ExtractedRows`, `ZeroRowExtractions` and the zero-row alarm are unchanged.
 - [ ] Ephemeral stacks publish no EMF metrics and create no alarms, query definitions or dashboard.
-- [ ] A developer with the `mcc-dev` profile can tail and query an ephemeral stack's log groups, and cannot read stable dev log groups.
+- [ ] A developer with the `mcc-dev` profile can tail and query an ephemeral stack's log groups from the CLI and the console, and cannot read stable dev log groups or the results of queries over them.
+- [ ] Deploying any single slice to dev or prod keeps `ExtractedRows` and `ZeroRowExtractions` publishing.
 - [ ] Q2 reports each §16.3 case with the status §8.1 gives it.
 - [ ] The ingest workflow logs at `ERROR` without execution data.
 - [ ] No event contains the content §14 excludes.
@@ -518,7 +525,7 @@ After the first deploy to dev, an operator checks that `MCC/MatchToCsv` metrics 
 - CloudWatch embedded metric format specification: https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format_Specification.html
 - CloudWatch metric identity (namespace, name and dimensions): https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_concepts.html
 - Logs Insights query syntax: https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_QuerySyntax.html
-- CloudWatch Logs actions and resource types: https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazoncloudwatchlogs.html
+- CloudWatch Logs actions and resource types: https://docs.aws.amazon.com/service-authorization/latest/reference/list_logs.html
 - Lambda advanced logging controls: https://docs.aws.amazon.com/lambda/latest/dg/monitoring-cloudwatchlogs-advanced.html
 - Step Functions context object: https://docs.aws.amazon.com/step-functions/latest/dg/input-output-contextobject.html
 - Step Functions log levels: https://docs.aws.amazon.com/step-functions/latest/dg/cw-logs.html
@@ -543,6 +550,7 @@ File each slice as a leaf issue with `/mcc-create-github-issue`, with `Plan ID: 
 - Tests from §16.1 for the slice's behavior.
 - The `AGENTS.md` checks for the changed paths, including `app:synth` and `verify:bundle` for CDK changes.
 - No real addresses, IDs or screenshots in fixtures.
+- Deployed alone to dev or prod, the slice keeps `ExtractedRows` and `ZeroRowExtractions` publishing. Every slice that touches `src/lib/metrics.ts` or Lambda environment variables has a test with `EMF_METRICS_ENABLED` unset that asserts both metrics are still written.
 
 ### Phase 0: Contracts and helpers
 
@@ -567,7 +575,8 @@ File each slice as a leaf issue with `/mcc-create-github-issue`, with `Plan ID: 
 - **Provides:** `stageEventRecord`, `publishStageEvent`, the `EMF_METRICS_ENABLED` switch, the log level gate
 - **Acceptance:**
   - Records match §6, with `[["Stage"]]` as the only dimension set.
-  - With `EMF_METRICS_ENABLED` unset or `false`, no record carries an `_aws` block and `publishExtractionMetrics` writes nothing.
+  - With `EMF_METRICS_ENABLED` unset, `ExtractedRows` and `ZeroRowExtractions` are published exactly as before.
+  - With `EMF_METRICS_ENABLED` set to `false`, no record carries an `_aws` block and `publishExtractionMetrics` writes nothing.
   - `log` drops records below `AWS_LAMBDA_LOG_LEVEL`.
 
 ### Phase 1: Emit events
@@ -604,7 +613,7 @@ File each slice as a leaf issue with `/mcc-create-github-issue`, with `Plan ID: 
 - **Acceptance:**
   - The ingest workflow logs at `ERROR` without execution data.
   - All five Lambdas use the JSON log format with `INFO` levels and receive `GIT_SHA` and `DEPLOYMENT_ENVIRONMENT`.
-  - `EMF_METRICS_ENABLED` is `true` in non-ephemeral stacks and `false` in ephemeral ones.
+  - `EMF_METRICS_ENABLED` is `false` in ephemeral stacks and absent in non-ephemeral ones.
 
 #### P1.4 Let developers read ephemeral match-to-csv logs (XS)
 
@@ -612,8 +621,10 @@ File each slice as a leaf issue with `/mcc-create-github-issue`, with `Plan ID: 
 - **Spec:** §8.2, §14
 - **Files:** `docs/self-hosting/policies/local-cdk-deployer-dev.json.template`, the "Grant local deploy access" step in `docs/self-hosting/20-bootstrap-cdk.md`
 - **Acceptance:**
-  - The template holds the two §8.2 statements, with logs read actions scoped to `match-to-csv-e-*` log groups.
+  - The template holds the two §8.2 statements. Every logs action that supports a resource type, including `GetQueryResults` and `GetLogGroupFields`, is scoped to `match-to-csv-e-*` log groups, and `DescribeQueries` is not granted.
   - The bootstrap guide's description of the policy names the new access.
+  - After an operator applies the policy, a developer with `mcc-dev` runs Q1 from the Logs Insights console and from the CLI against an ephemeral stack and gets results.
+  - `aws logs get-query-results` with `mcc-dev`, given the ID of a query an operator ran over a stable dev log group, is denied.
   - Needs independent review, because it changes a permission set.
 
 ### Phase 2: Operate
