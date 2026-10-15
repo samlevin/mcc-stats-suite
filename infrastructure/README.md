@@ -54,7 +54,7 @@ Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundati
 
 Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role when `github_oidc_subject_repository` is set. `github_turbo_cache_role_arn` publishes its ARN. See [Turbo cache](../docs/self-hosting/30-configure-github.md#turbo-cache) for activation and repository settings, and [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later) for the prerequisite bootstrap grant when using Terrateam.
 
-To empty a populated cache bucket manually, use an approved service workload role with a separately reviewed deletion grant, or wait for lifecycle expiry. A deployment role cannot bypass the data denial with `force_destroy`.
+To empty a populated cache bucket manually, use an approved service workload role with a separately reviewed deletion grant, or wait for lifecycle expiry.
 
 Run the AWS-free contract tests with fake provider credentials and local-plan overrides:
 

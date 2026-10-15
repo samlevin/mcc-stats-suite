@@ -35,4 +35,3 @@ Use a disposable dev account with the dev foundation applied, and never run dest
 4. Run `cdk bootstrap --qualifier mcclocal1 --toolkit-stack-name CDKToolkitLocal` without `--template` and confirm the stack policy rejects the update.
 
 After setting up local access, verify that a merge to `main` still deploys shared dev through GitHub Actions. The AWS-free tests in `scripts/local-cdk-bootstrap.test.mjs` evaluate the generated policies and synthesize every application; they do not replace this live validation.
-
