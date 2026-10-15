@@ -121,8 +121,8 @@ test('ephemeral stacks add one rule to the foundation rule set', () => {
     StopAction: { Scope: 'RuleSet' },
   });
 
-  // process-email checks each recipient against the current parameters, so a
-  // rule left on an old alias or domain accepts nothing.
+  // process-email requires the current address among the SES recipients, so
+  // a rule left on an old alias or domain accepts nothing.
   const variables = processEmailVariables(template, 'e-sam');
   assert.equal(
     variables.EMAIL_ALIAS_PARAMETER,

@@ -134,7 +134,7 @@ Evidence bucket (SSE-KMS, versioned, Object Lock GOVERNANCE 365 days)
 | Ephemeral `<name>` in dev | `<alias>+<name>@<domain>` | Ephemeral stack (`StoreRawEmail`, rule named after the stack) | `incoming/<name>/` | `ephemeral/<name>/` |
 
 - A Region has one active receipt rule set, so the foundation creates `mcc-inbound-<env>`, activates it only after the shared rule exists, and publishes its name, the alias, and the domain in SSM. The alias and domain come from `<ENV>_MCC_EMAIL_ALIAS` and `<ENV>_MCC_EMAIL_DOMAIN` repository secrets. Stacks read them; nothing in source control holds either. The rule named `submit` keeps that AWS name whatever the alias is.
-- An ephemeral rule keeps the alias and domain from its last deploy. Its `process-email` reads both parameters for every message and rejects one whose SES recipient, from the `for` clause of the topmost `Received` header, is not the current `<alias>+<name>@<domain>`. It records the rejection code `RECIPIENT_NOT_ALLOWED`, stores no attachment, and keeps the raw MIME. A stale rule therefore accepts nothing.
+- An ephemeral rule keeps the alias and domain from its last deploy. Its `process-email` reads both parameters for every message and rejects one whose SES recipients, from the `for` clause of the topmost `Received` header, do not include the current `<alias>+<name>@<domain>`. SES lists only recipients a rule accepted, so a stale rule never lists the current address. It records the rejection code `RECIPIENT_NOT_ALLOWED`, stores no attachment, and keeps the raw MIME. A stale rule therefore accepts nothing.
 - Every rule enables SES spam and virus scanning, accepts optional TLS, writes the raw MIME message with an S3 action, then stops rule-set evaluation.
 - The foundation ignores rule ordering (`after`) on the shared rule so ephemeral rules can be added to the set without drift.
 
@@ -544,7 +544,7 @@ mcc-stats-suite/
 | SES | Rule set `mcc-inbound-<env>`, the `submit` rule (§4.1) and its activation. |
 | SSM parameters under `/mcc/<env>/match-to-csv/` | `raw-email-bucket-name`, `evidence-bucket-name`, `attachments-bucket-name`, `output-bucket-name`, `data-key-arn`, `receipt-rule-set-name`, `email-domain`, `email-alias` |
 
-The `email_domain` and `email_alias` variables are sensitive, so plans posted to the public repository redact them and the recipients built from them. The domain must be a lowercase bare domain. The alias must be at most 64 lowercase letters, digits, `_` or `-`, with single dots between them and no `+`.
+The `email_domain` and `email_alias` variables are sensitive, so plans posted to the public repository redact them and the recipients built from them. The domain must be a lowercase bare domain. The alias must be at most 43 lowercase letters, digits, `_` or `-`, with single dots between them and no `+`.
 
 ### 13.2 Application stack (CDK)
 

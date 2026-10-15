@@ -30,6 +30,15 @@ override_resource {
   values = { arn = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000" }
 }
 
+// The published alias matches the configured one unless a run overrides it.
+override_data {
+  target = data.aws_ssm_parameters_by_path.match_to_csv
+  values = {
+    names  = ["/mcc/dev/match-to-csv/email-alias", "/mcc/prod/match-to-csv/email-alias"]
+    values = ["example-alias", "example-alias"]
+  }
+}
+
 variables {
   email_alias  = "example-alias"
   email_domain = "mail.example.com"

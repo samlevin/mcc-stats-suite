@@ -3,6 +3,7 @@ import { afterEach, test } from 'node:test';
 import type { S3ObjectReference } from '@mcc/contracts';
 import {
   attachmentRejectionCodes,
+  createParameterReader,
   parseSenderAllowlist,
   parseSesRecipients,
   parseSesVerdicts,
@@ -309,6 +310,31 @@ test('processEmail accepts an ephemeral message sent to the current alias and do
   assert.deepEqual(run.event.detail.recipientCheck, recipientCheck);
 });
 
+for (const [label, forClause] of [
+  [
+    'also names the shared address',
+    'example-alias@mail.example.com, Example-Alias+Sam@mail.example.com',
+  ],
+  [
+    "also names another stack's address",
+    '<example-alias+bob@mail.example.com>, <example-alias+sam@mail.example.com>',
+  ],
+  ['adds a comment', '<example-alias+sam@mail.example.com> (single recipient)'],
+] as const) {
+  test(`processEmail accepts an ephemeral message whose Received header ${label}`, async () => {
+    const run = await runScreening({
+      headerLines: [sesReceived(forClause), ...sesHeaders('PASS', 'PASS')],
+      fromAddresses: ['player@example.test'],
+      ephemeral: current,
+    });
+
+    assert.equal(run.error, undefined);
+    assert.equal(run.ingestion.recipientCheck.status, 'ALLOWED');
+    const recipients = run.ingestion.recipientCheck.recipients as string[];
+    assert.ok(recipients.includes('example-alias+sam@mail.example.com'));
+  });
+}
+
 for (const [label, headerLines, ephemeral] of [
   [
     'a stale rule on an old alias',
@@ -326,8 +352,8 @@ for (const [label, headerLines, ephemeral] of [
     current,
   ],
   [
-    'a message that also names another recipient',
-    [sesReceived('example-alias+sam@mail.example.com, other@mail.example.com')],
+    'a message to the shared address only',
+    [sesReceived('example-alias@mail.example.com')],
     current,
   ],
   ['a message without a Received header', [], current],
@@ -436,6 +462,11 @@ test('SES recipients come from the end of the topmost Received header', () => {
     ['a@example.test', 'b@example.test'],
   );
   assert.deepEqual(
+    parseSesRecipients([sesReceived('<a@example.test> (comment, b@x.test)')]),
+    ['a@example.test'],
+    'comments and non-address tokens are ignored',
+  );
+  assert.deepEqual(
     parseSesRecipients([
       {
         key: 'received',
@@ -447,6 +478,39 @@ test('SES recipients come from the end of the topmost Received header', () => {
     'a lower header written by the sender never supplies the recipient',
   );
   assert.deepEqual(parseSesRecipients([]), []);
+});
+
+test('parameter reads are cached for the TTL, including a missing parameter', async () => {
+  let time = 0;
+  const reads: string[] = [];
+  const read = createParameterReader(
+    async (name) => {
+      reads.push(name);
+      return name === 'missing' ? undefined : `${name}-${reads.length}`;
+    },
+    1000,
+    () => time,
+  );
+
+  assert.equal(await read('alias'), 'alias-1');
+  assert.equal(await read('missing'), undefined);
+  time = 999;
+  assert.equal(await read('alias'), 'alias-1');
+  assert.equal(await read('missing'), undefined);
+  assert.deepEqual(reads, ['alias', 'missing']);
+  time = 1000;
+  assert.equal(await read('alias'), 'alias-3', 'an expired value is re-read');
+});
+
+test('parameter read errors are not cached', async () => {
+  let calls = 0;
+  const read = createParameterReader(async () => {
+    calls += 1;
+    if (calls === 1) throw new Error('throttled');
+    return 'value';
+  });
+  await assert.rejects(read('alias'), { message: 'throttled' });
+  assert.equal(await read('alias'), 'value');
 });
 
 test('processEmail writes no evidence when the allowlist read fails', async () => {

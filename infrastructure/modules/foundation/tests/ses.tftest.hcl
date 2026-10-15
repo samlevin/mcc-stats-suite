@@ -30,6 +30,15 @@ override_resource {
   values = { arn = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000" }
 }
 
+// The published alias matches the configured one unless a run overrides it.
+override_data {
+  target = data.aws_ssm_parameters_by_path.match_to_csv
+  values = {
+    names  = ["/mcc/dev/match-to-csv/email-alias", "/mcc/prod/match-to-csv/email-alias"]
+    values = ["example-alias", "example-alias"]
+  }
+}
+
 variables {
   email_alias  = "example-alias"
   email_domain = "mail.example.com"
@@ -139,6 +148,13 @@ run "accept_dotted_alias" {
     environment = "dev"
     email_alias = "example.alias_1-x"
   }
+  override_data {
+    target = data.aws_ssm_parameters_by_path.match_to_csv
+    values = {
+      names  = ["/mcc/dev/match-to-csv/email-alias"]
+      values = ["example.alias_1-x"]
+    }
+  }
 
   assert {
     condition     = contains(aws_ses_receipt_rule.store_raw_email.recipients, "example.alias_1-x@mail.example.com")
@@ -219,7 +235,67 @@ run "reject_long_alias" {
   module { source = "../../modules/foundation" }
   variables {
     environment = "dev"
-    email_alias = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    email_alias = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   }
   expect_failures = [var.email_alias]
+}
+
+// <alias>+<name> must fit in 64 characters with a 20-character name.
+run "accept_longest_alias" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+  override_data {
+    target = data.aws_ssm_parameters_by_path.match_to_csv
+    values = {
+      names  = ["/mcc/dev/match-to-csv/email-alias"]
+      values = ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
+    }
+  }
+}
+
+// Before the first apply publishes the alias, the shared address was submit@.
+run "keep_submit_before_first_publish" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment = "dev"
+    email_alias = "submit"
+  }
+  override_data {
+    target = data.aws_ssm_parameters_by_path.match_to_csv
+    values = { names = [], values = [] }
+  }
+}
+
+run "warn_when_alias_changes_before_first_publish" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables { environment = "dev" }
+  override_data {
+    target = data.aws_ssm_parameters_by_path.match_to_csv
+    values = { names = [], values = [] }
+  }
+  expect_failures = [check.shared_address_unchanged]
+}
+
+run "warn_when_published_alias_changes" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables { environment = "dev" }
+  override_data {
+    target = data.aws_ssm_parameters_by_path.match_to_csv
+    values = {
+      names  = ["/mcc/dev/match-to-csv/email-domain", "/mcc/dev/match-to-csv/email-alias"]
+      values = ["mail.example.com", "old-alias"]
+    }
+  }
+  expect_failures = [check.shared_address_unchanged]
 }

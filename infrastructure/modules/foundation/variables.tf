@@ -59,9 +59,11 @@ variable "email_alias" {
   sensitive   = true
   // Lowercase for the same reason as the domain. No +, which ephemeral
   // addresses use to separate the alias from the stack name, and only
-  // characters that never need quoting before an @.
+  // characters that never need quoting before an @. At most 43 characters, so
+  // <alias>+<name> with a 20-character ephemeral name stays within the
+  // 64-character local part that RFC 5321 allows.
   validation {
-    condition     = length(var.email_alias) <= 64 && can(regex("^[a-z0-9_-]+(\\.[a-z0-9_-]+)*$", var.email_alias))
-    error_message = "email_alias must be a lowercase local part of at most 64 characters: letters, digits, _ or -, with single dots between them and no +."
+    condition     = length(var.email_alias) <= 43 && can(regex("^[a-z0-9_-]+(\\.[a-z0-9_-]+)*$", var.email_alias))
+    error_message = "email_alias must be a lowercase local part of at most 43 characters: letters, digits, _ or -, with single dots between them and no +."
   }
 }

@@ -76,15 +76,6 @@ export interface RecipientDecision {
   recipients: string[];
 }
 
-/**
- * The plus-addressed recipient an ephemeral stack accepts, built from the
- * current alias and domain parameters. Undefined when either parameter does
- * not exist, which denies every message.
- */
-export interface RecipientCheck {
-  expectedRecipient: string | undefined;
-}
-
 export interface SubmissionScreening {
   sesVerdicts: SesVerdicts;
   senderAllowlist: SenderAllowlistDecision;
@@ -154,7 +145,7 @@ const defaultDependencies: ProcessEmailDependencies = {
     const value = await readParameter(parameterName);
     return value === undefined ? undefined : parseSenderAllowlist(value);
   },
-  getParameter: readParameter,
+  getParameter: (parameterName) => readParameter(parameterName),
   async inspectImage(content) {
     return sharp(content, { failOn: 'none' }).metadata();
   },
@@ -174,9 +165,34 @@ const defaultDependencies: ProcessEmailDependencies = {
   timestamp: now,
 };
 
-async function readParameter(
-  parameterName: string,
-): Promise<string | undefined> {
+/** How long a warm Lambda reuses a parameter value it has read. */
+const PARAMETER_CACHE_MS = 60_000;
+
+/**
+ * Returns a reader for String parameters that caches each value, including a
+ * missing parameter, for `ttlMs`, so a burst of messages does not repeat the
+ * same SSM reads. A change reaches warm Lambdas within `ttlMs`. Errors are not
+ * cached.
+ */
+export function createParameterReader(
+  getValue: (parameterName: string) => Promise<string | undefined>,
+  ttlMs = PARAMETER_CACHE_MS,
+  clock: () => number = Date.now,
+): (parameterName: string) => Promise<string | undefined> {
+  const cache = new Map<
+    string,
+    { value: string | undefined; expires: number }
+  >();
+  return async (parameterName) => {
+    const cached = cache.get(parameterName);
+    if (cached && cached.expires > clock()) return cached.value;
+    const value = await getValue(parameterName);
+    cache.set(parameterName, { value, expires: clock() + ttlMs });
+    return value;
+  };
+}
+
+const readParameter = createParameterReader(async (parameterName) => {
   try {
     const response = await ssm.send(
       new GetParameterCommand({ Name: parameterName }),
@@ -186,9 +202,20 @@ async function readParameter(
     if (error instanceof Error && error.name === 'ParameterNotFound') {
       return undefined;
     }
+    if (error instanceof Error && error.name === 'AccessDeniedException') {
+      // Ephemeral roles are capped by the local CDK bootstrap's boundary, and
+      // a bootstrap from before runtime parameter reads denies every read.
+      throw Object.assign(
+        new Error(
+          `Cannot read SSM parameter ${parameterName}: ${error.message}. For an ephemeral stack, re-run the local CDK bootstrap (docs/self-hosting/20-bootstrap-cdk.md) so its boundary allows ssm:GetParameter.`,
+          { cause: error },
+        ),
+        { name: error.name },
+      );
+    }
     throw error;
   }
-}
+});
 
 export async function handler(
   event: ProcessEmailInput,
@@ -212,17 +239,17 @@ export async function processEmail(
   // Read every parameter before writing evidence, so a transient SSM error
   // fails the invocation cleanly and a retry starts from scratch.
   const allowlistParameter = process.env.SENDER_ALLOWLIST_PARAMETER || null;
-  const [allowlist, recipientCheck] = await Promise.all([
+  const [allowlist, expectedRecipient] = await Promise.all([
     allowlistParameter
       ? dependencies.getSenderAllowlist(allowlistParameter)
       : undefined,
-    readRecipientCheck(dependencies),
+    readExpectedRecipient(dependencies),
   ]);
   const screening = screenSubmission(
     parsed,
     allowlistParameter,
     allowlist,
-    recipientCheck,
+    expectedRecipient,
   );
   const submissionId = dependencies.id();
   const submissionPrefix = namespacedObjectKey(`submissions/${submissionId}`);
@@ -423,10 +450,12 @@ export async function processEmail(
  * An ephemeral stack names its alias and domain parameters and its own name.
  * Its receipt rule keeps the alias and domain from its last deploy, so the
  * recipient is checked against the values the foundation publishes now.
+ * Returns undefined for a stable stack, which checks no recipient, and null
+ * when either parameter does not exist, which denies every message.
  */
-async function readRecipientCheck(
+async function readExpectedRecipient(
   dependencies: ProcessEmailDependencies,
-): Promise<RecipientCheck | undefined> {
+): Promise<string | null | undefined> {
   const aliasParameter = process.env.EMAIL_ALIAS_PARAMETER;
   const domainParameter = process.env.EMAIL_DOMAIN_PARAMETER;
   const subaddress = process.env.RECIPIENT_SUBADDRESS;
@@ -440,24 +469,22 @@ async function readRecipientCheck(
     dependencies.getParameter(aliasParameter),
     dependencies.getParameter(domainParameter),
   ]);
-  return {
-    expectedRecipient:
-      alias && domain ? `${alias}+${subaddress}@${domain}` : undefined,
-  };
+  return alias && domain ? `${alias}+${subaddress}@${domain}` : null;
 }
 
 /**
  * Decides whether a message may be processed at all. A FAIL spam or virus
  * verdict rejects it, and so does a configured allowlist that does not list
- * every `From` address. For an ephemeral stack, so does an SES recipient other
- * than the current `<alias>+<name>@<domain>`. SPF and DKIM verdicts are
- * recorded, not enforced.
+ * every `From` address. For an ephemeral stack, so does a message whose SES
+ * recipients do not include the current `<alias>+<name>@<domain>`: undefined
+ * `expectedRecipient` skips that check, and null denies every message. SPF
+ * and DKIM verdicts are recorded, not enforced.
  */
 export function screenSubmission(
   email: Pick<ParsedEmail, 'headerLines' | 'fromAddresses'>,
   allowlistParameter: string | null,
   allowlist: string[] | undefined,
-  recipientCheck?: RecipientCheck,
+  expectedRecipient?: string | null,
 ): SubmissionScreening {
   const sesVerdicts = parseSesVerdicts(email.headerLines ?? []);
   const fromAddresses = (email.fromAddresses ?? []).map((address) =>
@@ -480,12 +507,13 @@ export function screenSubmission(
 
   const recipients = parseSesRecipients(email.headerLines ?? []);
   let recipientStatus: RecipientDecision['status'] = 'NOT_CONFIGURED';
-  if (recipientCheck) {
-    const expected = recipientCheck.expectedRecipient?.toLowerCase();
+  if (expectedRecipient !== undefined) {
+    // SES lists only recipients that a rule in the set accepted, so a rule
+    // left on an old alias or domain never lists the current address. Other
+    // recipients, such as the shared address or another stack, are expected.
     recipientStatus =
-      expected !== undefined &&
-      recipients.length > 0 &&
-      recipients.every((recipient) => recipient === expected)
+      expectedRecipient !== null &&
+      recipients.includes(expectedRecipient.toLowerCase())
         ? 'ALLOWED'
         : 'DENIED';
     if (recipientStatus === 'DENIED') {
@@ -511,20 +539,15 @@ export function screenSubmission(
  * `Received: from ... by inbound-smtp.<region>.amazonaws.com with SMTP id ...
  * for alias+name@example.com; <date>`. The clause is read only at the end of
  * the header, just before the date, so text the sending server chose earlier
- * in the header, such as its HELO name, cannot supply it. Returns no
- * recipients when the header or the clause is missing.
+ * in the header, such as its HELO name, cannot supply it. Comments and
+ * anything that is not an address are ignored. Returns no recipients when the
+ * header or the clause is missing.
  */
 export function parseSesRecipients(
   headerLines: readonly HeaderLine[],
 ): string[] {
-  const line = headerLines.find(
-    (candidate) => candidate.key.toLowerCase() === 'received',
-  )?.line;
-  if (line === undefined) return [];
-  const value = line
-    .slice(line.indexOf(':') + 1)
-    .replace(/\r?\n[ \t]+/g, ' ')
-    .trim();
+  const value = topmostHeaderValue(headerLines, 'received');
+  if (value === undefined) return [];
   const end = value.lastIndexOf(';');
   // The greedy prefix makes the last ` for ` win.
   const clause = /^.*\sfor\s+(.+?)\s*$/is.exec(
@@ -532,9 +555,28 @@ export function parseSesRecipients(
   )?.[1];
   if (clause === undefined) return [];
   return clause
+    .replace(/\([^)]*\)/g, ' ')
     .split(/[\s,]+/)
     .map((entry) => entry.replace(/^<|>$/g, '').toLowerCase())
-    .filter((entry) => entry.length > 0);
+    .filter((entry) => /^[^@<>]+@[^@<>]+$/.test(entry));
+}
+
+/**
+ * The unfolded value of the first (topmost) header with this lowercase name.
+ * SES prepends its own headers, so a copy the sender wrote further down cannot
+ * override it.
+ */
+function topmostHeaderValue(
+  headerLines: readonly HeaderLine[],
+  name: string,
+): string | undefined {
+  const line = headerLines.find(
+    (candidate) => candidate.key.toLowerCase() === name,
+  )?.line;
+  return line
+    ?.slice(line.indexOf(':') + 1)
+    .replace(/\r?\n[ \t]+/g, ' ')
+    .trim();
 }
 
 /**
@@ -551,15 +593,8 @@ export function parseSesVerdicts(
     dkim: null,
   };
   for (const name of Object.keys(VERDICT_HEADERS) as Array<keyof SesVerdicts>) {
-    const line = headerLines.find(
-      (candidate) => candidate.key.toLowerCase() === VERDICT_HEADERS[name],
-    )?.line;
-    if (line === undefined) continue;
-    verdicts[name] = line
-      .slice(line.indexOf(':') + 1)
-      .replace(/\r?\n[ \t]+/g, ' ')
-      .trim()
-      .toUpperCase();
+    const value = topmostHeaderValue(headerLines, VERDICT_HEADERS[name]);
+    if (value !== undefined) verdicts[name] = value.toUpperCase();
   }
   return verdicts;
 }
