@@ -1,5 +1,5 @@
 import { App, DefaultStackSynthesizer, type AppProps } from 'aws-cdk-lib';
-import { resolveDeployment } from '@samlevin/cdk-config';
+import { resolveDeployment } from '@mcc/cdk-config';
 import { MatchToCsvStack } from './match-to-csv-stack';
 
 /**

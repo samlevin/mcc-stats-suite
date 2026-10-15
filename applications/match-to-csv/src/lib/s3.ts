@@ -1,5 +1,5 @@
 import type { GetObjectOutput } from '@aws-sdk/client-s3';
-import type { SourceScreenshot } from '@samlevin/contracts';
+import type { SourceScreenshot } from '@mcc/contracts';
 
 export async function bodyToBuffer(
   body: GetObjectOutput['Body'],

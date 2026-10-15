@@ -11,37 +11,37 @@
     "packages/cdk-config": {
       "component": "cdk-config",
       "release-type": "node",
-      "package-name": "@samlevin/cdk-config"
+      "package-name": "@mcc/cdk-config"
     },
     "packages/contracts": {
       "component": "contracts",
       "release-type": "node",
-      "package-name": "@samlevin/contracts"
+      "package-name": "@mcc/contracts"
     },
     "applications/match-to-csv": {
       "component": "match-to-csv",
       "release-type": "node",
-      "package-name": "@samlevin/match-to-csv"
+      "package-name": "@mcc/match-to-csv"
     },
     "applications/ocr-quality": {
       "component": "ocr-quality",
       "release-type": "node",
-      "package-name": "@samlevin/ocr-quality"
+      "package-name": "@mcc/ocr-quality"
     },
     "applications/admin": {
       "component": "admin",
       "release-type": "node",
-      "package-name": "@samlevin/admin"
+      "package-name": "@mcc/admin"
     },
     "applications/data-pipeline": {
       "component": "data-pipeline",
       "release-type": "node",
-      "package-name": "@samlevin/data-pipeline"
+      "package-name": "@mcc/data-pipeline"
     },
     "applications/player": {
       "component": "player",
       "release-type": "node",
-      "package-name": "@samlevin/player"
+      "package-name": "@mcc/player"
     }
   }
 }

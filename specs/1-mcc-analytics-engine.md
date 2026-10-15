@@ -113,7 +113,7 @@ Evidence bucket (SSE-KMS, versioned, Object Lock GOVERNANCE 365 days)
 
 **Ownership rules:** `process-email` owns submissions and source screenshots. `extract-text` owns processing runs, the Textract request and response, normalized observations and the run completion. `write-extracted-csv` owns the run's export artifacts. `compare-runs` and `materialize-training-data` only read runs and write their own new objects. `scoreboard-logic` and `csv` are pure and perform no I/O. Only Lambda entry points construct AWS SDK clients; every handler's core function receives its I/O as an injected dependencies object so tests run without AWS.
 
-**Packaging:** one npm workspace, `@samlevin/match-to-csv`, with Lambda sources under `src/lambdas/`, pure libraries under `src/lib/`, and the CDK app under `cdk/`. The payload types that cross Lambda and state-machine boundaries live in `@samlevin/contracts` so later applications can read the same evidence.
+**Packaging:** one npm workspace, `@mcc/match-to-csv`, with Lambda sources under `src/lambdas/`, pure libraries under `src/lib/`, and the CDK app under `cdk/`. The payload types that cross Lambda and state-machine boundaries live in `@mcc/contracts` so later applications can read the same evidence.
 
 ### 3.1 Execution policy
 
@@ -376,7 +376,7 @@ The `MaterializeTrainingData` Lambda (exported as `TrainingDataMaterializerFunct
 
 ### 10.1 Shared contracts
 
-`@samlevin/contracts` exports the payloads that cross Lambda, state-machine and application boundaries:
+`@mcc/contracts` exports the payloads that cross Lambda, state-machine and application boundaries:
 
 ```typescript
 interface S3ObjectReference { bucket: string; key: string }
@@ -447,7 +447,7 @@ interface MaterializeTrainingDataOutput {
 
 ### 10.2 Internal types
 
-`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@samlevin/cdk-config` defines `DeploymentConfig` (§13.3).
+`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@mcc/cdk-config` defines `DeploymentConfig` (§13.3).
 
 ### 10.3 Relationships
 
@@ -502,7 +502,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 mcc-stats-suite/
   applications/match-to-csv/
     cdk.json                          # CDK app entry: cdk/bin/match-to-csv.ts
-    package.json                      # @samlevin/match-to-csv; build, typecheck, test, verify:bundle
+    package.json                      # @mcc/match-to-csv; build, typecheck, test, verify:bundle
     tsconfig.json
     README.md                         # Pipeline, evidence layout, replay, materialization
     TESTING.md
@@ -527,7 +527,7 @@ mcc-stats-suite/
   .github/workflows/{ci,deploy-dev,_deliver-aws-application,_deploy-aws-application,deploy-aws}.yml
 ```
 
-`match-to-csv` imports only `@samlevin/contracts` and `@samlevin/cdk-config` from the monorepo. The foundation never references CDK resources; CDK reads the foundation through SSM parameters.
+`match-to-csv` imports only `@mcc/contracts` and `@mcc/cdk-config` from the monorepo. The foundation never references CDK resources; CDK reads the foundation through SSM parameters.
 
 ## 13. Infrastructure and deployment
 
@@ -721,7 +721,7 @@ This section is the backlog source for building the component. It is written to 
 
 | Contract | Defined in | Main consumers |
 | --- | --- | --- |
-| Payload types in `@samlevin/contracts` (§10.1) | P0.2 | every Lambda, the state machines, later applications |
+| Payload types in `@mcc/contracts` (§10.1) | P0.2 | every Lambda, the state machines, later applications |
 | `DeploymentConfig` and `resolveDeployment` | P0.3 | the stack, the CDK wrapper, every application |
 | Foundation SSM parameter names (§13.1) | P1.1, P1.2 | the stack, the deploy preflight |
 | Evidence key layout and create-only writes (§5) | P2.1 | every Lambda, comparison, materialization, specs 2 and 3 |
@@ -735,7 +735,7 @@ A change to a contract updates every consumer in the same PR.
 
 - Handlers keep I/O behind an injected dependencies object; only default dependencies construct SDK clients.
 - New behavior has `tap` tests that run without AWS, and the workspace stays above its coverage thresholds.
-- `npm run check` passes. Slices that touch CDK or bundling also pass `npm run app:synth -- match-to-csv --environment dev` and `npm run verify:bundle --workspace @samlevin/match-to-csv`. Slices that touch `infrastructure/` pass `npm run tofu:check`.
+- `npm run check` passes. Slices that touch CDK or bundling also pass `npm run app:synth -- match-to-csv --environment dev` and `npm run verify:bundle --workspace @mcc/match-to-csv`. Slices that touch `infrastructure/` pass `npm run tofu:check`.
 - Any change to a stage's behavior bumps that stage's version (§5.4).
 - No domain, address, account ID, real message or player data appears in code, fixtures, logs or docs.
 - Operator-visible changes update `applications/match-to-csv/README.md` or the self-hosting guide.
@@ -752,8 +752,8 @@ A change to a contract updates every consumer in the same PR.
 - **Files:** `applications/match-to-csv/{package.json,tsconfig.json,cdk.json,TESTING.md}`, `cdk/bin/match-to-csv.ts`
 - **Provides:** `build`, `typecheck`, `test` and `verify:bundle` scripts
 - **Acceptance:**
-  - `npm test --workspace @samlevin/match-to-csv` runs every `test/*.test.ts` with `tap` and fails below 80% statements, 65% branches, 80% lines or 60% functions.
-  - The workspace depends only on `@samlevin/contracts` and `@samlevin/cdk-config` from the monorepo.
+  - `npm test --workspace @mcc/match-to-csv` runs every `test/*.test.ts` with `tap` and fails below 80% statements, 65% branches, 80% lines or 60% functions.
+  - The workspace depends only on `@mcc/contracts` and `@mcc/cdk-config` from the monorepo.
   - CI runs the workspace's typecheck and tests on affecting changes.
 
 #### P0.2 Shared payload contracts (XS)

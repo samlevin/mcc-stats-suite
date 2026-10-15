@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import 'source-map-support/register';
 import { App, DefaultStackSynthesizer } from 'aws-cdk-lib';
-import { resolveDeployment } from '@samlevin/cdk-config';
+import { resolveDeployment } from '@mcc/cdk-config';
 import { PlayerStack } from '../lib/player-stack';
 
 const app = new App();

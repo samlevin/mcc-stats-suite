@@ -226,35 +226,35 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   for (const name of applicationNames) {
     assert.ok(
       bundleTasks
-        .get(`@samlevin/${name}#ci:synth`)
-        .dependencies.includes('@samlevin/cdk-config#build'),
+        .get(`@mcc/${name}#ci:synth`)
+        .dependencies.includes('@mcc/cdk-config#build'),
     );
     // Tests run the sources and need only built dependencies, not the package's own build.
     assert.ok(
       !staticTasks
-        .get(`@samlevin/${name}#ci:test`)
-        .dependencies.includes(`@samlevin/${name}#build`),
+        .get(`@mcc/${name}#ci:test`)
+        .dependencies.includes(`@mcc/${name}#build`),
     );
   }
   // cdk-config tests load the package's own dist.
   assert.ok(
     staticTasks
-      .get('@samlevin/cdk-config#ci:test')
-      .dependencies.includes('@samlevin/cdk-config#build'),
+      .get('@mcc/cdk-config#ci:test')
+      .dependencies.includes('@mcc/cdk-config#build'),
   );
   assert.ok(
     staticTasks
-      .get('@samlevin/match-to-csv#ci:test')
-      .dependencies.includes('@samlevin/contracts#build'),
+      .get('@mcc/match-to-csv#ci:test')
+      .dependencies.includes('@mcc/contracts#build'),
   );
   assert.ok(
     bundleTasks
-      .get('@samlevin/match-to-csv#ci:synth')
-      .dependencies.includes('@samlevin/contracts#build'),
+      .get('@mcc/match-to-csv#ci:synth')
+      .dependencies.includes('@mcc/contracts#build'),
   );
   assert.deepEqual(
-    bundleTasks.get('@samlevin/match-to-csv#verify:bundle').dependencies,
-    ['@samlevin/match-to-csv#ci:synth'],
+    bundleTasks.get('@mcc/match-to-csv#verify:bundle').dependencies,
+    ['@mcc/match-to-csv#ci:synth'],
   );
 });
 
@@ -337,15 +337,12 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
     for (const [workspace, expected] of [
       ...applicationNames.map((name) => [
         `applications/${name}`,
-        [`@samlevin/${name}`],
+        [`@mcc/${name}`],
       ]),
-      ['packages/contracts', ['@samlevin/contracts', '@samlevin/match-to-csv']],
+      ['packages/contracts', ['@mcc/contracts', '@mcc/match-to-csv']],
       [
         'packages/cdk-config',
-        [
-          '@samlevin/cdk-config',
-          ...applicationNames.map((name) => `@samlevin/${name}`),
-        ],
+        ['@mcc/cdk-config', ...applicationNames.map((name) => `@mcc/${name}`)],
       ],
     ]) {
       writeFileSync(
@@ -394,7 +391,7 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
           .sort(),
         expected
           .filter((name) =>
-            applicationNames.includes(name.replace('@samlevin/', '')),
+            applicationNames.includes(name.replace('@mcc/', '')),
           )
           .sort(),
       );
@@ -628,7 +625,7 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
     JSON.parse(
       execFileSync(
         turbo,
-        ['run', 'build', '--filter=@samlevin/contracts', '--dry=json'],
+        ['run', 'build', '--filter=@mcc/contracts', '--dry=json'],
         {
           cwd: root,
           encoding: 'utf8',

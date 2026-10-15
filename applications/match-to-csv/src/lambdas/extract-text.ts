@@ -9,7 +9,7 @@ import type {
   ExtractTextOutput,
   ProcessingRunInput,
   S3ObjectReference,
-} from '@samlevin/contracts';
+} from '@mcc/contracts';
 import sharp from 'sharp';
 import { bodyToBuffer, processingRunPrefix } from '../lib/s3';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';

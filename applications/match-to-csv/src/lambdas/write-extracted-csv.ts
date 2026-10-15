@@ -2,7 +2,7 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import type {
   ExtractTextOutput,
   WriteExtractedCsvOutput,
-} from '@samlevin/contracts';
+} from '@mcc/contracts';
 import { rowsToCsv } from '../lib/csv';
 import { processingRunPrefix } from '../lib/s3';
 

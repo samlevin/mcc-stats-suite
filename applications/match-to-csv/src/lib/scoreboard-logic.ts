@@ -51,8 +51,8 @@ export interface TextractBlockLite {
 /**
  * Final row we will write to the CSV.
  */
-export type { CsvRow } from '@samlevin/contracts';
-import type { CsvRow } from '@samlevin/contracts';
+export type { CsvRow } from '@mcc/contracts';
+import type { CsvRow } from '@mcc/contracts';
 
 /**
  * Average background color for one table row.

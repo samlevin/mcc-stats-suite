@@ -12,7 +12,7 @@ import type {
   S3ObjectReference,
   SourceScreenshot,
   SubmissionRejectionCode,
-} from '@samlevin/contracts';
+} from '@mcc/contracts';
 import { simpleParser } from 'mailparser';
 import sharp from 'sharp';
 import { bodyToBuffer, namespacedObjectKey, safeObjectName } from '../lib/s3';

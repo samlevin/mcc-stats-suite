@@ -1021,7 +1021,7 @@ test('the wrapper adds local bootstrap options only to ephemeral deploys', () =>
     'run',
     'cdk:deploy',
     '--workspace',
-    '@samlevin/match-to-csv',
+    '@mcc/match-to-csv',
     '--',
     '-c',
     'environment=dev',
