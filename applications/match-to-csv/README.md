@@ -78,6 +78,8 @@ Processing manifests include the deployed Git commit, deployment environment, so
 
 The semantic mapper evaluates each detected table independently. Recognized columns map to `PLAYER`, `SCORE`, `KILLS`, `ASSISTS`, and `DEATHS`, while each cell is identified as a header or data cell. Numeric validation applies only to data cells. Invalid integers and low-confidence values require review. Unknown layouts remain `UNKNOWN`; the pipeline does not silently correct OCR text.
 
+The scoreboard parser supports Halo 3 only. Its Halo 3 two-team layout was validated against real Textract captures of two Team Slayer post-game screens, red against blue, four players a side. The fixtures `halo3-two-team-capture-1` and `halo3-two-team-capture-2` hold those captures with gamertags replaced, and their expected rows were transcribed from the screenshots. Textract misread two gamertags in the second capture, so its player names are a known mismatch tracked in #161. Free-for-all and three-team layouts have not been validated against real captures. To capture a new screenshot, see [test/fixtures/README.md](test/fixtures/README.md).
+
 ## Replay and comparison
 
 The main state machine handles new messages. The replay state machine accepts an existing `SourceScreenshot` and creates a new processing run without changing prior evidence:

@@ -225,7 +225,7 @@ Every run manifest records these values. A change to a stage's behavior changes 
 | `preprocessingVersion` | `none-v1` |
 | `textractConfigurationVersion` | `textract-tables-v1` |
 | `textractNormalizerVersion` | `textract-normalizer-v2` |
-| `tableParserVersion` | `scoreboard-parser-v2` |
+| `tableParserVersion` | `scoreboard-parser-v3` |
 | `semanticMapperVersion` | `scoreboard-semantic-v2` |
 | `validationRulesVersion` | `scoreboard-validation-v2` |
 

@@ -343,14 +343,19 @@ function tableHeaderScore(
 
 /**
  * Clean up the raw player name.
- * - Trim whitespace
+ * - Drop words with no letter, digit, or clan-tag bracket. Gamertags hold
+ *   only letters, digits, and spaces, so such a word is an icon Textract read
+ *   as text, like the chat bubble MCC draws over the player column as "...".
  * - Remove clan tags like "[UNSC] "
  * - Replace multiple spaces with a single space
  */
 function tidyPlayerName(raw: string): string {
-  let t = raw.trim();
-  t = t.replace(/^\[[^\]]+]\s*/, '');
-  return t.replace(/\s+/g, ' ');
+  const t = raw
+    .trim()
+    .split(/\s+/)
+    .filter((word) => /[\p{L}\p{N}[\]]/u.test(word))
+    .join(' ');
+  return t.replace(/^\[[^\]]+]\s*/, '');
 }
 
 /**

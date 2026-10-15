@@ -5,5 +5,5 @@
     "rootDir": ".",
     "types": ["node", "aws-lambda"]
   },
-  "include": ["cdk/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
+  "include": ["cdk/**/*.ts", "scripts/**/*.ts", "src/**/*.ts", "test/**/*.ts"]
 }
