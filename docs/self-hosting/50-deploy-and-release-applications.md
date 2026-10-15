@@ -35,10 +35,10 @@ npm run app:destroy -- <application> --environment dev --ephemeral <name>
 ## Merge to production
 
 1. Merge the pull request after its checks pass.
-2. `ci` validates the merge commit and records which applications it affects. A shared-package change affects every consumer, and an empty selection deploys nothing.
-3. `deploy-applications` starts at that exact commit and runs one sequence per affected application. Each sequence deploys and verifies the application's `-dev` stack, then queues its `-prod` job.
+2. `CI: checks` validates the merge commit and records which applications it affects. A shared-package change affects every consumer, and an empty selection deploys nothing.
+3. `Delivery: deploy to dev then prod` starts at that exact commit and runs one sequence per affected application. Each sequence deploys and verifies the application's `-dev` stack, then queues its `-prod` job.
 4. The production job waits for approval on the `prod` environment. Finish the application's smoke test in dev first; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv).
-5. Open the deployment run from the merged pull request’s approval comment or the Actions page. In the run, choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Approve production: <application>`. Rejecting leaves production unchanged.
+5. Open the deployment run from the merged pull request’s approval comment or the Actions page. In the run, choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Deploy <application> to prod (waits for approval)`. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.
 
 Each application's production job depends only on its own successful dev job. A failed, cancelled, or skipped dev job blocks that application and nothing else. GitHub records every deployment, with its commit, application version, and shared-package versions, on the repository's Deployments page.
@@ -129,7 +129,7 @@ A release does not gate deployment. The release commit deploys like any other me
 Rollback redeploys a previous release of one application to prod. It does not reset `main` or touch other applications.
 
 1. Find the most recent known-good release tag for the application and confirm it appears in its production deployment history.
-2. Run **Actions -> rollback-aws-application -> Run workflow** from `main`.
+2. Run **Actions -> Delivery: roll back prod -> Run workflow** from `main`.
 3. Select the application, enter the tag and the incident reason, and run it.
 4. Approve the production job, review the CDK diff, and check production health.
 

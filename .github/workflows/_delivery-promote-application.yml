@@ -1,4 +1,4 @@
-name: deliver-aws-application-reusable
+name: 'Delivery: promote application (reusable)'
 
 on:
   workflow_call:
@@ -22,8 +22,9 @@ permissions:
   id-token: write
 
 jobs:
-  dev:
-    uses: ./.github/workflows/_deploy-aws-application.yml
+  deploy-dev:
+    name: Deploy to dev
+    uses: ./.github/workflows/_delivery-deploy-environment.yml
     with:
       application: ${{ inputs.application }}
       environment: dev
@@ -33,10 +34,10 @@ jobs:
     secrets:
       DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
 
-  approval-prompt:
-    name: Post production approval prompt
-    needs: dev
-    if: needs.dev.result == 'success'
+  request-prod-approval:
+    name: Request prod approval
+    needs: deploy-dev
+    if: needs.deploy-dev.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -44,7 +45,7 @@ jobs:
       pull-requests: read
       issues: write
     steps:
-      - name: Prompt for production approval
+      - name: Ask prod reviewers to approve
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           APPLICATION: ${{ inputs.application }}
@@ -97,10 +98,11 @@ jobs:
               core.warning(`Could not post production approval prompt: ${error.message}`);
             }
 
-  prod:
-    needs: dev
-    if: needs.dev.result == 'success'
-    uses: ./.github/workflows/_deploy-aws-application.yml
+  deploy-prod:
+    name: Deploy to prod
+    needs: deploy-dev
+    if: needs.deploy-dev.result == 'success'
+    uses: ./.github/workflows/_delivery-deploy-environment.yml
     with:
       application: ${{ inputs.application }}
       environment: prod

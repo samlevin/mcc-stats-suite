@@ -1,4 +1,4 @@
-name: ci
+name: 'CI: checks'
 
 on:
   pull_request:
@@ -14,8 +14,8 @@ permissions:
   contents: read
 
 jobs:
-  scope:
-    name: Detect change scope
+  detect-changes:
+    name: Detect changed areas
     runs-on: ubuntu-latest
     outputs:
       full: ${{ steps.scope.outputs.full }}
@@ -86,36 +86,39 @@ jobs:
             for (const [name, value] of Object.entries({ ...scopes, base, head }))
               core.setOutput(name, value);
 
-  infrastructure:
-    name: Validate infrastructure
-    needs: scope
-    if: needs.scope.outputs.infrastructure != 'false'
+  check-infrastructure:
+    name: Check OpenTofu roots and modules
+    needs: detect-changes
+    if: needs.detect-changes.outputs.infrastructure != 'false'
     runs-on: ubuntu-latest
     env:
       AWS_EC2_METADATA_DISABLED: 'true'
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Read pinned OpenTofu version
         id: tofu-version
         run: |
           version="$(./scripts/tofu-checks.sh --pinned-version)"
           echo "version=$version" >> "$GITHUB_OUTPUT"
-      - uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@9d84900f3238fab8cd84ce47d658d25dd008be2f # v1
         with:
           tofu_version: ${{ steps.tofu-version.outputs.version }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      - name: Restore OpenTofu provider cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ github.workspace }}/.tofu-plugin-cache
           key: tofu-provider-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infrastructure/**/.terraform.lock.hcl') }}
           restore-keys: tofu-provider-${{ runner.os }}-${{ runner.arch }}-
-      - name: Check OpenTofu roots
+      - name: Check OpenTofu formatting, roots, and module tests
         run: ./scripts/tofu-checks.sh
 
-  application-checks:
-    name: Validate applications
-    needs: scope
-    if: needs.scope.outputs.check != 'false'
+  check-workspaces:
+    name: Build and test affected workspaces
+    needs: detect-changes
+    if: needs.detect-changes.outputs.check != 'false'
     # Static checks do no Docker work. They stay on the ARM64 runner pool so
     # tests run on the architecture Lambda uses.
     runs-on: ubuntu-24.04-arm
@@ -127,34 +130,37 @@ jobs:
     outputs:
       applications: ${{ steps.affected.outputs.applications }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.16.0'
           cache: npm
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
       - name: Start trusted dev Turbo cache
         # Opt-in per repository; a repository without MCC_TURBO_CACHE runs uncached.
-        if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.scope.outputs.full == 'true'
+        if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.detect-changes.outputs.full == 'true'
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
           account-id: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
           region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
-      - name: Run independent checks concurrently
+      - name: Run format, lint, release, agent, build, and test checks
         env:
-          CI_BASE: ${{ needs.scope.outputs.base }}
-          CI_HEAD: ${{ needs.scope.outputs.head }}
-          CI_FULL: ${{ needs.scope.outputs.full }}
-          CI_REPOSITORY: ${{ needs.scope.outputs.repository }}
-          CI_MODE: ${{ needs.scope.outputs.mode }}
+          CI_BASE: ${{ needs.detect-changes.outputs.base }}
+          CI_HEAD: ${{ needs.detect-changes.outputs.head }}
+          CI_FULL: ${{ needs.detect-changes.outputs.full }}
+          CI_REPOSITORY: ${{ needs.detect-changes.outputs.repository }}
+          CI_MODE: ${{ needs.detect-changes.outputs.mode }}
           CI_JOB: static
         run: node scripts/ci-checks.mjs
       - name: Find affected deployable applications
         id: affected
-        if: github.event_name == 'push' && needs.scope.outputs.full == 'true'
+        if: github.event_name == 'push' && needs.detect-changes.outputs.full == 'true'
         env:
           TURBO_SCM_BASE: ${{ github.event.before }}
           TURBO_SCM_HEAD: ${{ github.sha }}
@@ -171,9 +177,11 @@ jobs:
               | sub("^@mcc/"; "")]
             | unique')"
           echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
-  application-bundles:
-    needs: scope
-    if: needs.scope.outputs.check != 'false' && needs.scope.outputs.full == 'true'
+
+  check-bundles:
+    name: Synthesize CDK stacks and verify Lambda bundles
+    needs: detect-changes
+    if: needs.detect-changes.outputs.check != 'false' && needs.detect-changes.outputs.full == 'true'
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
@@ -183,7 +191,8 @@ jobs:
     env:
       MCC_BUILD_ENVIRONMENT: dev
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Start pulling the CDK bundling image
@@ -193,11 +202,13 @@ jobs:
           IMAGE="$(grep -oE 'public\.ecr\.aws/sam/build-nodejs[0-9.]+x@sha256:[0-9a-f]{64}' applications/match-to-csv/cdk/lib/bundling.ts)"
           test -n "${IMAGE}"
           nohup docker pull --platform linux/arm64 "${IMAGE}" > "${RUNNER_TEMP}/image-pull.log" 2>&1 &
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22.16.0'
           cache: npm
-      - run: npm ci
+      - name: Install dependencies
+        run: npm ci
       - name: Start trusted dev Turbo cache
         if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: ./.github/actions/turbo-s3-cache
@@ -205,31 +216,36 @@ jobs:
           environment: dev
           account-id: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
           region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
-      - name: Synthesize stacks and verify native bundles
+      - name: Synthesize CDK stacks and verify Lambda bundles
         env:
-          CI_BASE: ${{ needs.scope.outputs.base }}
-          CI_HEAD: ${{ needs.scope.outputs.head }}
-          CI_FULL: ${{ needs.scope.outputs.full }}
-          CI_REPOSITORY: ${{ needs.scope.outputs.repository }}
-          CI_MODE: ${{ needs.scope.outputs.mode }}
+          CI_BASE: ${{ needs.detect-changes.outputs.base }}
+          CI_HEAD: ${{ needs.detect-changes.outputs.head }}
+          CI_FULL: ${{ needs.detect-changes.outputs.full }}
+          CI_REPOSITORY: ${{ needs.detect-changes.outputs.repository }}
+          CI_MODE: ${{ needs.detect-changes.outputs.mode }}
           CI_JOB: bundle
         run: node scripts/ci-checks.mjs
-  check:
-    needs: [scope, infrastructure, application-checks, application-bundles]
+
+  # The main ruleset requires this job's name. Skipped jobs cannot be required,
+  # so this job always runs and fails unless every selected check passed.
+  require-scoped-checks:
+    name: Require every check selected for the changed files
+    needs:
+      [detect-changes, check-infrastructure, check-workspaces, check-bundles]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     outputs:
-      applications: ${{ needs.application-checks.outputs.applications }}
+      applications: ${{ needs.check-workspaces.outputs.applications }}
     steps:
-      - name: Require every selected gate
+      - name: Fail unless every selected check passed
         env:
-          SCOPE_RESULT: ${{ needs.scope.result }}
-          SCOPE_INFRASTRUCTURE: ${{ needs.scope.outputs.infrastructure }}
-          SCOPE_APPLICATIONS: ${{ needs.scope.outputs.check }}
-          INFRASTRUCTURE_RESULT: ${{ needs.infrastructure.result }}
-          SCOPE_FULL: ${{ needs.scope.outputs.full }}
-          APPLICATIONS_RESULT: ${{ needs.application-checks.result }}
-          BUNDLES_RESULT: ${{ needs.application-bundles.result }}
+          SCOPE_RESULT: ${{ needs.detect-changes.result }}
+          SCOPE_INFRASTRUCTURE: ${{ needs.detect-changes.outputs.infrastructure }}
+          SCOPE_APPLICATIONS: ${{ needs.detect-changes.outputs.check }}
+          INFRASTRUCTURE_RESULT: ${{ needs.check-infrastructure.result }}
+          SCOPE_FULL: ${{ needs.detect-changes.outputs.full }}
+          APPLICATIONS_RESULT: ${{ needs.check-workspaces.result }}
+          BUNDLES_RESULT: ${{ needs.check-bundles.result }}
         run: |
           test "$SCOPE_RESULT" = success
           if [[ "$SCOPE_INFRASTRUCTURE" != false ]]; then
@@ -242,21 +258,22 @@ jobs:
             fi
           fi
 
-  select-deployment:
-    name: Select applications to deploy
-    needs: check
+  select-applications:
+    name: Select applications to deliver
+    needs: require-scoped-checks
     # The implicit success() fails when either gate was skipped upstream of
-    # check, so require check's own result instead.
-    if: ${{ !cancelled() && needs.check.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    # require-scoped-checks, so require that job's own result instead.
+    if: ${{ !cancelled() && needs.require-scoped-checks.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - name: Save application selection
         env:
-          APPLICATIONS: ${{ needs.check.outputs.applications || '[]' }}
+          APPLICATIONS: ${{ needs.require-scoped-checks.outputs.applications || '[]' }}
         run: |
           mkdir -p "${RUNNER_TEMP}/deploy-selection"
           printf '%s\n' "${APPLICATIONS}" > "${RUNNER_TEMP}/deploy-selection/applications.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - name: Upload application selection
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: deploy-applications-${{ github.run_id }}
           path: ${{ runner.temp }}/deploy-selection/applications.json

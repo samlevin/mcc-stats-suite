@@ -13,22 +13,24 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 import { evaluate, runScript, workflow } from './workflow-test-helpers.mjs';
-const ci = workflow('ci');
-const orchestration = workflow('deploy-dev');
-const delivery = workflow('_deliver-aws-application');
-const deployment = workflow('_deploy-aws-application');
+const ci = workflow('ci-checks');
+const orchestration = workflow('delivery-deploy');
+const delivery = workflow('_delivery-promote-application');
+const deployment = workflow('_delivery-deploy-environment');
+const selection = orchestration.jobs['select-applications'];
 
 test('only successful trusted main push CI qualifies stable delivery', () => {
   assert.deepEqual(orchestration.on.workflow_run, {
-    workflows: ['ci'],
+    workflows: [ci.name],
     types: ['completed'],
     branches: ['main'],
   });
+  assert.equal(ci.name, 'CI: checks');
   for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
     for (const conclusion of ['success', 'failure', 'cancelled', 'skipped']) {
       for (const head_branch of ['main', 'other']) {
         for (const repository of ['owner/repo', 'fork/repo']) {
-          const allowed = evaluate(orchestration.jobs.qualify.if, {
+          const allowed = evaluate(selection.if, {
             github: {
               repository: 'owner/repo',
               event: {
@@ -59,7 +61,7 @@ test('only successful trusted main push CI qualifies stable delivery', () => {
 });
 
 test('artifact belongs to qualifying CI run and deployment uses that CI SHA', () => {
-  const download = orchestration.jobs.qualify.steps.find((step) =>
+  const download = selection.steps.find((step) =>
     step.uses?.startsWith('actions/download-artifact'),
   );
   assert.equal(download.with['run-id'], '${{ github.event.workflow_run.id }}');
@@ -68,14 +70,17 @@ test('artifact belongs to qualifying CI run and deployment uses that CI SHA', ()
     'deploy-applications-${{ github.event.workflow_run.id }}',
   );
   assert.equal(
-    orchestration.jobs.qualify.outputs.sha,
+    selection.outputs.sha,
     '${{ github.event.workflow_run.head_sha }}',
   );
   assert.equal(
-    orchestration.jobs.deploy.with.sha,
-    '${{ needs.qualify.outputs.sha }}',
+    orchestration.jobs.deliver.with.sha,
+    '${{ needs.select-applications.outputs.sha }}',
   );
-  for (const job of [delivery.jobs.dev, delivery.jobs.prod]) {
+  for (const job of [
+    delivery.jobs['deploy-dev'],
+    delivery.jobs['deploy-prod'],
+  ]) {
     assert.equal(job.with.sha, '${{ inputs.sha }}');
     assert.equal(job.with.application, '${{ inputs.application }}');
   }
@@ -88,26 +93,30 @@ test('artifact belongs to qualifying CI run and deployment uses that CI SHA', ()
 });
 
 test('each application promotes only after its own successful dev verification', () => {
-  assert.equal(orchestration.jobs.deploy.strategy['fail-fast'], false);
+  assert.equal(orchestration.jobs.deliver.strategy['fail-fast'], false);
   assert.equal(
-    orchestration.jobs.deploy.uses,
-    './.github/workflows/_deliver-aws-application.yml',
+    orchestration.jobs.deliver.uses,
+    './.github/workflows/_delivery-promote-application.yml',
   );
-  assert.equal(delivery.jobs.prod.needs, 'dev');
+  assert.equal(delivery.jobs['deploy-prod'].needs, 'deploy-dev');
   for (const result of ['success', 'failure', 'cancelled', 'skipped']) {
     assert.equal(
-      evaluate(delivery.jobs.prod.if, { needs: { dev: { result } } }),
+      evaluate(delivery.jobs['deploy-prod'].if, {
+        needs: { 'deploy-dev': { result } },
+      }),
       result === 'success',
     );
   }
-  assert.equal(delivery.jobs.dev.with.environment, 'dev');
-  assert.equal(delivery.jobs.prod.with.environment, 'prod');
-  assert.equal(
-    evaluate(orchestration.jobs.deploy.if, {
-      needs: { qualify: { outputs: { applications: '[]' } } },
-    }),
-    false,
-  );
+  assert.equal(delivery.jobs['deploy-dev'].with.environment, 'dev');
+  assert.equal(delivery.jobs['deploy-prod'].with.environment, 'prod');
+  for (const applications of ['[]', '["admin"]']) {
+    assert.equal(
+      evaluate(orchestration.jobs.deliver.if, {
+        needs: { 'select-applications': { outputs: { applications } } },
+      }),
+      applications !== '[]',
+    );
+  }
   const finish = deployment.jobs.deploy.steps.find(
     (step) => step.name === 'Finish deployment record',
   );
@@ -118,13 +127,25 @@ test('each application promotes only after its own successful dev verification',
 });
 
 test('production requires reviewers and disabled bypass before protected job', async () => {
-  const guard = deployment.jobs['qualify-production'];
+  const guard = deployment.jobs['verify-prod-protection'];
   assert.equal(guard.if, "inputs.environment == 'prod'");
-  assert.equal(deployment.jobs.deploy.needs, 'qualify-production');
-  assert.match(
-    deployment.jobs.deploy.if,
-    /needs.qualify-production.result == 'success'/,
-  );
+  assert.equal(deployment.jobs.deploy.needs, 'verify-prod-protection');
+  for (const environment of ['dev', 'prod']) {
+    for (const result of ['success', 'failure', 'skipped']) {
+      assert.equal(
+        evaluate(
+          deployment.jobs.deploy.if.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
+          {
+            always: () => true,
+            cancelled: () => false,
+            inputs: { environment },
+            needs: { 'verify-prod-protection': { result } },
+          },
+        ),
+        environment === 'dev' || result === 'success',
+      );
+    }
+  }
   assert.equal(
     deployment.jobs.deploy.environment.name,
     '${{ inputs.environment }}',
@@ -177,9 +198,7 @@ test('production requires reviewers and disabled bypass before protected job', a
 });
 
 test('selection rejects shared packages and unknown applications and accepts no affected apps', () => {
-  const script = orchestration.jobs.qualify.steps.find(
-    (step) => step.id === 'selection',
-  ).run;
+  const script = selection.steps.find((step) => step.id === 'selection').run;
   const body = script.match(/node -e '([\s\S]*)'/)[1];
   const run = new Function('require', 'process', body);
   for (const [applications, allowed] of [
@@ -232,9 +251,9 @@ test('workspaces install locally without a package registry or token', () => {
 });
 
 test('approval prompt uses the qualified application and SHA with comment permissions', () => {
-  const prompt = delivery.jobs['approval-prompt'];
-  assert.equal(prompt.needs, 'dev');
-  assert.equal(prompt.if, delivery.jobs.prod.if);
+  const prompt = delivery.jobs['request-prod-approval'];
+  assert.equal(prompt.needs, 'deploy-dev');
+  assert.equal(prompt.if, delivery.jobs['deploy-prod'].if);
   assert.equal(prompt.environment, undefined);
   assert.deepEqual(prompt.permissions, {
     actions: 'read',
@@ -242,21 +261,51 @@ test('approval prompt uses the qualified application and SHA with comment permis
     'pull-requests': 'read',
     issues: 'write',
   });
-  assert.equal(orchestration.jobs.deploy.permissions.issues, 'write');
-  assert.equal(orchestration.jobs.deploy.permissions['pull-requests'], 'read');
+  assert.equal(orchestration.jobs.deliver.permissions.issues, 'write');
+  assert.equal(orchestration.jobs.deliver.permissions['pull-requests'], 'read');
   assert.deepEqual(prompt.steps[0].env, {
     APPLICATION: '${{ inputs.application }}',
     TARGET_SHA: '${{ inputs.sha }}',
   });
   assert.equal(prompt.steps[0].with['github-token'], undefined);
-  assert.equal(delivery.jobs.prod.name, undefined);
   assert.equal(delivery.permissions.issues, undefined);
   assert.equal(delivery.permissions['pull-requests'], undefined);
-  assert.match(deployment.jobs.deploy.name, /Approve production:/);
+});
+
+test('delivery job names show the application, environment, and approval wait', () => {
+  const format = (template, ...args) =>
+    template.replace(/\{(\d+)\}/g, (_, index) => args[index]);
+  const name = (job, values) =>
+    job.name.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, inner) =>
+      evaluate(inner, { format, ...values }),
+    );
+  assert.equal(
+    name(orchestration.jobs.deliver, { matrix: { application: 'admin' } }),
+    'Deliver admin',
+  );
+  assert.equal(delivery.jobs['deploy-dev'].name, 'Deploy to dev');
+  assert.equal(delivery.jobs['deploy-prod'].name, 'Deploy to prod');
+  for (const [environment, expected] of [
+    ['dev', 'Deploy match-to-csv to dev'],
+    ['prod', 'Deploy match-to-csv to prod (waits for approval)'],
+  ]) {
+    assert.equal(
+      name(deployment.jobs.deploy, {
+        inputs: { application: 'match-to-csv', environment },
+      }),
+      expected,
+    );
+  }
+  assert.equal(
+    name(workflow('delivery-rollback').jobs['rollback-prod'], {
+      inputs: { application: 'player' },
+    }),
+    'Roll back player in prod',
+  );
 });
 
 test('approval prompt notifies configured reviewers per run and tolerates API failures', async () => {
-  const script = delivery.jobs['approval-prompt'].steps[0].with.script;
+  const script = delivery.jobs['request-prod-approval'].steps[0].with.script;
   const sha = 'a'.repeat(40);
   const marker = '<!-- production-approval:match-to-csv:run:123 -->';
   for (const scenario of [
@@ -578,7 +627,8 @@ for (const [name, stub, message] of [
 }
 
 test('one deployment selector publishes the application selection after the required gate', () => {
-  const select = ci.jobs['select-deployment'];
+  const select = ci.jobs['select-applications'];
+  const gate = ci.jobs['require-scoped-checks'];
   const save = select.steps.find(
     (step) => step.name === 'Save application selection',
   );
@@ -588,29 +638,30 @@ test('one deployment selector publishes the application selection after the requ
     ),
   );
   assert.equal(uploads.length, 1);
-  assert.equal(select.needs, 'check');
-  // A skipped gate upstream of check must not suppress the selection.
+  assert.equal(select.needs, 'require-scoped-checks');
+  // A skipped gate upstream of require-scoped-checks must not suppress the
+  // selection.
   const selectIf = select.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
   assert.match(
     selectIf,
-    /^!cancelled\(\) && needs\.check\.result == 'success'/,
+    /^!cancelled\(\) && needs\.require-scoped-checks\.result == 'success'/,
   );
   assert.match(
     save.env.APPLICATIONS,
-    /needs\.check\.outputs\.applications \|\| '\[\]'/,
+    /needs\.require-scoped-checks\.outputs\.applications \|\| '\[\]'/,
   );
   assert.equal(
-    ci.jobs.check.outputs.applications,
-    '${{ needs.application-checks.outputs.applications }}',
+    gate.outputs.applications,
+    '${{ needs.check-workspaces.outputs.applications }}',
   );
-  assert.match(ci.jobs.check.steps[0].run, /INFRASTRUCTURE_RESULT/);
-  assert.match(ci.jobs.check.steps[0].run, /APPLICATIONS_RESULT/);
+  assert.match(gate.steps[0].run, /INFRASTRUCTURE_RESULT/);
+  assert.match(gate.steps[0].run, /APPLICATIONS_RESULT/);
   for (const event_name of ['push', 'pull_request']) {
     for (const result of ['success', 'failure', 'skipped']) {
       const values = {
         cancelled: () => false,
         github: { event_name, ref: 'refs/heads/main' },
-        needs: { check: { result } },
+        needs: { 'require-scoped-checks': { result } },
       };
       assert.equal(
         evaluate(selectIf, values),
@@ -629,8 +680,8 @@ test('one deployment selector publishes the application selection after the requ
     '${{ runner.temp }}/deploy-selection/applications.json',
   );
   assert.equal(
-    evaluate(orchestration.jobs.deploy.if, {
-      needs: { qualify: { outputs: { applications: '[]' } } },
+    evaluate(orchestration.jobs.deliver.if, {
+      needs: { 'select-applications': { outputs: { applications: '[]' } } },
     }),
     false,
   );
@@ -667,7 +718,7 @@ const deploymentCallerNames = () => {
     .filter(
       ([file, definition]) =>
         !triggers(definition).includes('workflow_call') &&
-        reaches(file, '_deploy-aws-application.yml'),
+        reaches(file, '_delivery-deploy-environment.yml'),
     )
     .map(([, definition]) => definition.name)
     .sort();
@@ -686,22 +737,18 @@ const trustedWorkflowNames = () => {
   return [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort();
 };
 
-test('CDK entry role trusts current callers and only the approved future names', () => {
+test('CDK entry role trusts the current callers and only the retired pre-rename names', () => {
   const callers = deploymentCallerNames();
   assert.deepEqual(callers, [
-    'deploy-applications',
-    'rollback-aws-application',
+    'Delivery: deploy to dev then prod',
+    'Delivery: roll back prod',
   ]);
   const trusted = trustedWorkflowNames();
-  // Add and apply trust before issue #133 renames either caller. Retain the
-  // current names until a follow-up removes them after the rename.
+  // Bootstrap trusted the new names before issue #133 renamed both callers.
+  // It keeps the names from before the rename until a follow-up removes them.
   assert.deepEqual(
     trusted,
-    [
-      ...callers,
-      'Delivery: deploy to dev then prod',
-      'Delivery: roll back prod',
-    ].sort(),
+    [...callers, 'deploy-applications', 'rollback-aws-application'].sort(),
   );
   assert.ok(!trusted.includes(deployment.name));
   // The bootstrap roots must use the module default, which this test pins.
@@ -785,7 +832,7 @@ test('workflows read only the repository account, Region, and release names', ()
       assert.ok(!text.includes(retired), `${name} names ${retired}`);
     }
   }
-  for (const job of ['application-checks', 'application-bundles']) {
+  for (const job of ['check-workspaces', 'check-bundles']) {
     const cache = ci.jobs[job].steps.find((step) =>
       step.uses?.endsWith('/actions/turbo-s3-cache'),
     );
@@ -880,19 +927,22 @@ test('deployment selects the account and Region by environment and builds the ro
 });
 
 test('each deployment caller passes only the account secrets it deploys to', () => {
-  assert.deepEqual(delivery.jobs.dev.secrets, {
+  assert.deepEqual(delivery.jobs['deploy-dev'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
   });
-  assert.deepEqual(delivery.jobs.prod.secrets, {
+  assert.deepEqual(delivery.jobs['deploy-prod'].secrets, {
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
   });
-  assert.deepEqual(orchestration.jobs.deploy.secrets, {
+  assert.deepEqual(orchestration.jobs.deliver.secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
   });
-  assert.deepEqual(workflow('deploy-aws').jobs['deploy-prod'].secrets, {
-    PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
-  });
+  assert.deepEqual(
+    workflow('delivery-rollback').jobs['rollback-prod'].secrets,
+    {
+      PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+    },
+  );
 });
 
 test('no condition, job output, or deployment URL depends on a masked value', () => {
