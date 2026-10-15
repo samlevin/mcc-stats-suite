@@ -35,6 +35,9 @@ Match-to-csv records every OCR cell with its text, confidence, geometry and sema
 | Own bucket `ocr-quality-{account}-{region}-{environment}` with `runs/yyyy/mm/dd/{run_id}/` | No bucket. Results are written under the scored run's prefix in the existing evidence bucket (§5.1). | The evidence already lives there, under Object Lock and the foundation key. A second bucket duplicates screenshots and provider output. |
 | OCR writes `manifest.json` last to signal completion; workflow triggers on it | Trigger on match-to-csv's run `completion.json` and score only `SUCCEEDED` runs (§4.1). | Match-to-csv writes its manifest when a run starts. Its completion is the only marker of a finished run (spec 1 §18.6). |
 | Inputs `raw-output.json`, `table-structure.json`, `extracted.csv` | Read `normalized/observations.json` (`normalized-ocr/v2`) only. Its `parser.rows` holds the CSV rows. | `normalized-ocr/v2` already carries cells with confidence, geometry and semantic location. `extracted-table/v1` and `extracted.csv` are written after the run completion, so they may not exist when scoring starts. |
+| Scorer reads only OCR artifacts | `ScoreRun` also reads `source/metadata.json`, the submission `ingestion.json`, the run `completion.json` and `textract/raw-response.json`, for image, submission and provider-model fields (§8.4). | Textract changes its model without notice, and `AnalyzeDocumentModelVersion` in the raw response is the only record of which model read a run. Image hash, format and submission timing belong in every feature row from the first run. |
+| Parser decisions are visible only as CSV rows | P0.3 adds parser provenance to `normalized-ocr/v2`: the selected table, the field each column was exported under, and the table row of each exported row. | Features, spec 3 labels and lakehouse values must describe a cell the same way. Without provenance, a column the parser exports by position fallback is `UNKNOWN` in the normalized cell but kills or deaths in the CSV. |
+| Three shapes of training example: spec 1 `ocr-cell-example/v1`, the current spec 3 labeled export, and these feature rows | Labeled training data come only from the dataset builder rules in §8.5. Spec 1's materializer stays for unlabeled exports until the risk model's builder exists, then is retired (P5.8). Spec 3 does not define its own labeled export. | One labeled dataset definition, so datasets cannot diverge. |
 | Canonical normalized table contract and `NormalizeTables` stage | Removed. Rules and statistics read `normalized-ocr/v2` cells directly. | Re-normalizing a normalized artifact adds a contract and a stage with nothing to do. |
 | Run, table and cell IDs as UUIDv7 or ULID, cells as `r{row}_c{col}` | Use match-to-csv identifiers: `evidenceId()` for new IDs and `cellObservationId` / `tableObservationId` for observations. | Results must join to evidence and to spec 3 adjudications without a mapping table. |
 | OCR confidence from 0 to 1 with a 0.70 threshold | Textract confidence from 0 to 100, as stored. | The stored value is the provider value. |
@@ -167,6 +170,8 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
       profiles.json
       signals.json
       features.jsonl
+      row-features.jsonl
+      table-features.jsonl
       result.json
       outcome.json
 [ephemeral/<name>/]baselines/{baselineVersion}/       (Phase 4)
@@ -196,10 +201,12 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 | `profiles.json` | `quality-profiles/v1` | `score-run` | one `FieldProfile` per assessed table and mapped field (§8.1) |
 | `signals.json` | `quality-signals/v1` | `score-run` | every signal before scoring, grouped by run, table and cell |
 | `features.jsonl` | `cell-feature-row/v1` on every line | `score-run` | one `CellFeatureRow` per cell of every table, assessed or not (§8.4) |
+| `row-features.jsonl` | `row-feature-row/v1` on every line | `score-run` | one `RowFeatureRow` per row of every table (§8.4) |
+| `table-features.jsonl` | `table-feature-row/v1` on every line | `score-run` | one `TableFeatureRow` per table (§8.4) |
 | `result.json` | `quality-result/v1` | `score-run` | `QualityResult` (§10.1) |
 | `outcome.json` | `quality-run-outcome/v1` | `score-run` | `status` (`SUCCEEDED` or `FAILED`), `completedAt`; on success `result` reference and `summary`; on failure `error` |
 | baseline `manifest.json` | `baseline-build/v1` | `build-baselines` | `baselineVersion`, `builderVersion`, `builtAt`, `labelCutoff`, `adjudicationCount`, `memberScreenshotCount`, `adjudicationSetSha256`, `membersSha256`, `build` |
-| baseline `members.jsonl` | `baseline-member/v1` on every line | `build-baselines` | `screenshotId`, `runId`, `adjudicationCount` for every run that contributed a value |
+| baseline `members.jsonl` | `baseline-member/v1` on every line | `build-baselines` | `screenshotId`, `imageSha256`, `submissionId`, `runId`, `adjudicationCount` for every run that contributed a value |
 | baseline `snapshot.json` | `baseline-snapshot/v1` | `build-baselines` | one `FieldBaseline` per field (§8.3) |
 
 ### 5.4 Stage versions
@@ -214,7 +221,7 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 | `anomalyVersion` | `within-table-anomaly-v1` |
 | `scoringVersion` | `noisy-or-v1` |
 | `configVersion` | `quality-config-v1` |
-| `featureSchemaVersion` | `cell-features-v1` |
+| `featureSchemaVersion` | `features-v1` |
 | `baselineVersion` | `none` until Phase 4; then the snapshot's version |
 
 `baselineVersion` is recorded per quality run but is not part of `qualityVersion`, so a new snapshot does not re-score old runs automatically.
@@ -233,9 +240,9 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 
 1. Validate the key (§4.1). Read `completion.json`. Return a skip when it is not `SUCCEEDED` (§4.3).
 2. In `AUTOMATIC` mode, write the claim, or resolve an existing one (§5.2).
-3. Create a `qualityRunId`. Read the run `manifest.json` and `normalized/observations.json`, hash the normalized bytes, and write the quality `manifest.json`.
+3. Create a `qualityRunId`. Read the run `manifest.json`, `normalized/observations.json`, `textract/raw-response.json`, the screenshot's `source/metadata.json` and the submission's `ingestion.json`. Hash the normalized bytes, and write the quality `manifest.json`.
 4. Load the current baseline through `BaselineSource` (`none` before Phase 4).
-5. Build field profiles (§8.1), evaluate rules (§7) and anomalies (§8.2, §8.3), and combine signals (§9). Build one feature row per cell of every table (§8.4). Write `profiles.json`, `signals.json`, `features.jsonl` and `result.json`.
+5. Build field profiles (§8.1), evaluate rules (§7) and anomalies (§8.2, §8.3), and combine signals (§9). Build cell, row and table feature rows for every table (§8.4). Write `profiles.json`, `signals.json`, the three feature files and `result.json`.
 6. Write a `SUCCEEDED` `outcome.json`, log `Run scored` with counts and priority, and return `ScoreRunOutput`.
 
 ### 6.3 Retries and failure
@@ -256,7 +263,7 @@ Each cell's `validation.flags` (spec 1 §7.3) becomes a signal with `source: VAL
 | `LOW_TEXTRACT_CONFIDENCE` | always | `MEDIUM` when `actual` is below `confidenceMediumBelow` (80), otherwise `LOW` | `OCR_CONFIDENCE` |
 | `INVALID_INTEGER` | always | `HIGH` | `TYPE_PARSE` |
 
-Empty cells in header rows and unmapped columns are ignored, which removes the noise in spec 1 §18.11.
+Empty cells in header rows and unmapped columns are ignored, which removes the noise in spec 1 §18.11. `LOW_TEXTRACT_CONFIDENCE` uses the `CELL` block's confidence, which describes table structure. Textract reports text-recognition confidence on `WORD` tokens, so `C004` (§7.2) adds a word-based check.
 
 ### 7.2 Structural and content rules
 
@@ -270,6 +277,7 @@ Empty cells in header rows and unmapped columns are ignored, which removes the n
 | `C001_SUSPICIOUS_GLYPH` | cell | a `DATA` cell in an integer field fails `INVALID_INTEGER` and becomes all digits after the substitutions `O o Q D -> 0`, `I l i \| ! -> 1`, `Z z -> 2`, `S s $ -> 5`, `G b -> 6`, `T -> 7`, `B -> 8`, `g q -> 9`; evidence holds the candidate value | `MEDIUM` | `TYPE_PARSE` |
 | `C002_DIGIT_LIMIT` | cell | an integer field has more digits than `maxDigits` (`SCORE` 6, `KILLS` 3, `ASSISTS` 3, `DEATHS` 3) | `HIGH` | `LENGTH` |
 | `C003_PLAYER_NAME_CHARACTERS` | cell | after removing one leading `[tag]` and collapsing whitespace, a `PLAYER` cell does not match `playerNamePattern` (`^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$`) | `LOW` | `CHARACTER_COMPOSITION` |
+| `C004_LOW_WORD_CONFIDENCE` | cell | the lowest `WORD` confidence in the cell is below `wordConfidenceLowBelow` (90); `MEDIUM` below `confidenceMediumBelow` (80) | `LOW` | `OCR_CONFIDENCE` |
 
 `C001` and `INVALID_INTEGER` share a group, so the glyph signal adds a candidate value without raising the score above the parse failure (§9.2).
 
@@ -311,9 +319,9 @@ Baselines compare a value with every verified value of the same field, which is 
 
 **Source of truth.** Spec 3 `cell-adjudication/v1` objects under each run's `adjudications/` prefix, resolved with spec 3's supersession rules. A cell counts when its current decision is `ACCEPTED` (value: `observedTextAtReview`) or `CORRECTED` (value: `submittedValue`), it is a `DATA` cell of a `SCOREBOARD` table, and its field is mapped. `UNREADABLE` and `SKIPPED` cells are excluded.
 
-**Build.** `BuildBaselines` is invoked by an operator. It lists adjudications under the namespace, resolves them, reads the matching cells from each run's normalized observations, computes one `FieldBaseline` per field, writes `members.jsonl`, `snapshot.json` and then `manifest.json` under a new `baselineVersion`, loads the snapshot and its membership into the `BaselineCache` table, and finally moves the table's `CURRENT` pointer with a conditional write. `members.jsonl` lists every `screenshotId` and `runId` that contributed a value, and the manifest records `labelCutoff`, the latest `reviewedAt` among the adjudications used. Membership is by screenshot, so a reviewed sibling run of the same screenshot makes the screenshot a member. A field with fewer than `minBaselineObservations` (200) values gets `usable: false`. `adjudicationSetSha256` hashes the sorted adjudication keys, so two builds over the same labels are recognizable.
+**Build.** `BuildBaselines` is invoked by an operator. It lists adjudications under the namespace, resolves them, reads the matching cells from each run's normalized observations, computes one `FieldBaseline` per field, writes `members.jsonl`, `snapshot.json` and then `manifest.json` under a new `baselineVersion`, loads the snapshot and its membership into the `BaselineCache` table, and finally moves the table's `CURRENT` pointer with a conditional write. `members.jsonl` lists the `screenshotId`, `imageSha256`, `submissionId` and `runId` of every run that contributed a value, and the manifest records `labelCutoff`, the latest `reviewedAt` among the adjudications used. Membership is by screenshot and by image hash, so a reviewed sibling run of the same screenshot, or the same image emailed again under another screenshot ID, makes the scored image a member. A field with fewer than `minBaselineObservations` (200) values gets `usable: false`. `adjudicationSetSha256` is the SHA-256 of the UTF-8 adjudication object keys, sorted bytewise and joined with `\n`, so two builds over the same labels are recognizable. Spec 3's validated-table lineage hash uses the same definition, so a baseline and a validated table built from the same labels carry the same value.
 
-**Read.** `ScoreRun` asks the `BaselineSource` port once per execution for the baseline to use for the run's screenshot: the newest snapshot whose members do not include that `screenshotId`. A baseline therefore never contains a label of the screenshot being scored, whether scoring happens before review, after review through `RESCORE` or a backfill, or after a sibling run was reviewed. `DynamoBaselineSource` reads the snapshot versions newest first and the screenshot's `MEMBER` items, and picks the first version that is not among them. `NoBaselineSource` returns `none`, as does a source with no qualifying snapshot. The quality manifest, result and every feature row record the `baselineVersion` used and its `labelCutoff`.
+**Read.** `ScoreRun` asks the `BaselineSource` port once per execution for the baseline to use for the run's screenshot: the newest snapshot whose members include neither that `screenshotId` nor its `imageSha256`. A baseline therefore never contains a label of the screenshot being scored, whether scoring happens before review, after review through `RESCORE` or a backfill, or after a sibling run was reviewed. `DynamoBaselineSource` reads the snapshot versions newest first and the `MEMBER` items for the screenshot ID and the image hash, and picks the first version that is not among them. `NoBaselineSource` returns `none`, as does a source with no qualifying snapshot. The quality manifest, result and every feature row record the `baselineVersion` used and its `labelCutoff`.
 
 | ID | Condition | Severity | Group |
 | --- | --- | --- | --- |
@@ -322,31 +330,40 @@ Baselines compare a value with every verified value of the same field, which is 
 
 **Migration.** The S3 snapshots are the record and the table is a cache: deleting the table and rebuilding from the latest snapshot loses nothing. Moving baselines to the data platform means adding a `BaselineSource` implementation that reads there and producing snapshots from it. Scoring code, signal IDs and the result contract do not change, and old results stay reproducible because each names its `baselineVersion`.
 
-### 8.4 Cell features
+### 8.4 Feature rows
 
-Every quality run writes `features.jsonl`: one flat JSON line per cell of every table, assessed or not, in table and cell order. A line is the complete model input for that cell as it was at scoring time. Training selects feature rows by `(qualityRunId, cellObservationId)` under §8.5; it never recomputes features with newer code. Values that do not apply are `null`, never omitted.
+Every quality run writes three feature files, one flat JSON line per unit, in table, row and cell order: `features.jsonl` with one `cell-feature-row/v1` line per cell of every table, `row-features.jsonl` with one `row-feature-row/v1` line per table row, and `table-features.jsonl` with one `table-feature-row/v1` line per table. Every table is included, assessed or not. A line is the complete model input for that unit as it was at scoring time. Training selects rows by `(qualityRunId, <unit key>)` under §8.5; it never recomputes features with newer code. Values that do not apply are `null`, never omitted. All three files share one `featureSchemaVersion` (`features-v1`).
 
-| Group | Fields (`cell-features-v1`) |
+**Sources.** Image and submission fields come from the run `manifest.json` (`inputArtifact`, the `SourceScreenshot`), `source/metadata.json` and the submission `ingestion.json`. `textractModelVersion` comes from `AnalyzeDocumentModelVersion` in `textract/raw-response.json`, which the normalizer does not keep, and `textractRequestId` from the run `completion.json`. Parser fields come from the `parser` section of `normalized/observations.json`, including the provenance P0.3 adds; for runs written before P0.3 they are `null`. Everything else comes from the normalized cells, tables and tokens.
+
+**Cell rows (`features.jsonl`).**
+
+| Group | Fields |
 | --- | --- |
-| Identity and lineage | `schemaVersion`, `featureSchemaVersion`, `cellObservationId`, `tableObservationId`, `runId`, `screenshotId`, `qualityRunId`, `qualityVersion`, `textractNormalizerVersion`, `tableParserVersion`, `validationRulesVersion` |
-| Image | `imageWidthPx`, `imageHeightPx`, `imageAspectRatio`, `acquisitionType`, `contentType` |
-| Table | `tableIndex`, `tableClassification`, `tableConfidence`, `tableRowCount`, `tableColumnCount`, `scoreboardTableCount`, `mappedFieldCount` |
-| Position | `field`, `rowRole`, `rowIndex`, `columnIndex`, `rowSpan`, `columnSpan`, `relativeRowPosition` (row index over row count) |
-| OCR | `cellConfidence`, `tokenCount`, `tokenConfidenceMin`, `tokenConfidenceMean`, `tokenConfidenceMax`, `wordCount` |
+| Identity and lineage | `schemaVersion`, `featureSchemaVersion`, `cellObservationId`, `tableObservationId`, `runId`, `screenshotId`, `submissionId`, `qualityRunId`, `qualityVersion`, `imageSha256`, `textractModelVersion`, `textractRequestId`, `textractNormalizerVersion`, `tableParserVersion`, `validationRulesVersion`, `receivedAt`, `runStartedAt` |
+| Image | `imageWidthPx`, `imageHeightPx`, `imageAspectRatio`, `imageFormat`, `fileSizeBytes`, `acquisitionType`, `contentType` |
+| Table | `tableIndex`, `tableClassification`, `tableConfidence`, `tableRowCount`, `tableColumnCount`, `tableLeft`, `tableTop`, `tableWidth`, `tableHeight`, `scoreboardTableCount`, `mappedFieldCount`, `selectedByParser` |
+| Position | `semanticField` (from the header), `exportedField` (the field the parser exported the column under, including its column-order fallback; `null` when the table is not the parser's selected table), `headerText`, `rowRole`, `rowIndex`, `columnIndex`, `rowSpan`, `columnSpan`, `relativeRowPosition` (row index over row count) |
+| OCR | `cellConfidence` (the `CELL` block), `wordCount`, `wordConfidenceMin`, `wordConfidenceMean`, `wordConfidenceMax` (from `WORD` tokens), `printedWordFraction` (share of words with `TextType` `PRINTED`), `entityTypes`, `neighborConfidenceAbove`, `neighborConfidenceBelow`, `neighborConfidenceLeft`, `neighborConfidenceRight` |
 | Text | `observedText`, `textLength`, `digitCount`, `letterCount`, `upperCount`, `spaceCount`, `otherCount`, `isEmpty`, `parseSucceeded`, `integerValue`, `glyphCandidate`, `glyphSubstitutionCount` |
-| Geometry | `bboxLeft`, `bboxTop`, `bboxWidth`, `bboxHeight`, `rowCenterOffset` and `columnCenterOffset` (in units of the median cell height and width), `outsideTableDistance` |
-| Context | `fieldMedian`, `fieldMad`, `fieldCount`, `robustZ`, `digitLengthDeviation`, `rowEmptyCellCount`, `rowSignalCount`, `rowPlayerDuplicate`, `rosterSize` |
+| Geometry | `bboxLeft`, `bboxTop`, `bboxWidth`, `bboxHeight`, `cellHeightPx`, `skewDegrees` (angle of the polygon's top edge), `rowCenterOffset` and `columnCenterOffset` (in units of the median cell height and width), `outsideTableDistance` |
+| Row context | `rowColorR`, `rowColorG`, `rowColorB`, `rowLuminance`, `rowColorDistanceToTeamMean` (RGB distance to the mean colour of rows the parser put on the same team; `null` in free-for-all), `parserKeptRow`, `parserTeam` |
+| Statistics | `fieldMedian`, `fieldMad`, `fieldCount`, `robustZ`, `digitLengthDeviation`, `rowEmptyCellCount`, `rowSignalCount`, `rowPlayerDuplicate`, `rosterSize` |
 | Validation and rules | `flagEmptyRequiredCell`, `flagLowTextractConfidence`, `flagInvalidInteger`, `signalIds` (sorted), `heuristicSuspicionScore`, `heuristicReviewPriority` |
 | Baseline | `baselineVersion`, `baselineLabelCutoff`, `baselineP005`, `baselineP995`, `baselineDistance`, `baselineUsable` (all `null` before Phase 4) |
 
+**Row rows (`row-features.jsonl`).** Keyed by `tableObservationId` and `rowIndex`, with the identity and lineage fields of a cell row except the cell ID, plus: `rowRole`, `cellCount`, `emptyCellCount`, `mappedEmptyCellCount`, `meanCellConfidence`, `minWordConfidence`, `signalCount`, `maxCellSuspicion`, `rowColorR`, `rowColorG`, `rowColorB`, `rowLuminance`, `rowColorDistanceToTeamMean`, `parserKeptRow`, `parserTeam`, `parserWin`, `parserLoss`, `playerText`, `rowPlayerDuplicate`, `rowTop`, `rowHeight`, `gapAbove` and `gapBelow` (in median row heights), `isFirstDataRow`, `isLastRow`. These are the inputs for row labels in spec 3: missing, extra, wrong team and wrong win or loss.
+
+**Table rows (`table-features.jsonl`).** Keyed by `tableObservationId`, with the identity, lineage and image fields, plus: `tableIndex`, `classification`, `tableConfidence`, table bounding box, `rowCount`, `columnCount`, `mappedFieldCount`, `headerTexts`, `selectedByParser`, `parserTableScore` (the spec 1 §8.1 score), `parserRowCount`, `droppedDataRowCount`, `teamCount`, `isFreeForAll`, `rowGapMedian`, `rowGapMax`, `scoreboardTableCount`, `tableSignalIds`. These are the inputs for table labels in spec 3: wrong table and wrong column mapping.
+
 Rules for the feature rows:
 
-1. **No leakage.** No feature comes from a spec 3 adjudication, a resolution, reviewer behavior, a later run of the same screenshot, or anything written after the quality run started. Labels are joined at training time only.
+1. **No leakage.** No feature comes from a spec 3 adjudication, a resolution, reviewer behavior, a later run of the same screenshot, or anything written after the quality run started. Parser outputs are features, not labels: they are what the reviewer checks. Labels are joined at training time only.
 2. **Baselines exclude the target screenshot.** A baseline feature comes from the newest snapshot that has no member from the scored screenshot (§8.3), never from the current snapshot unconditionally. The snapshot's `members.jsonl` is the evidence a training job uses to verify this.
 3. **Schema changes are versioned.** Adding, removing or redefining a field bumps `featureSchemaVersion` and `qualityVersion`. Old runs get the new schema only through an `AUTOMATIC` backfill or `RESCORE` (§4.2), which writes a new quality run and leaves the old feature rows in place.
-4. **Flat and typed.** Each value is a string, number, boolean, `null` or, for `signalIds`, an array of strings, so the rows load into a columnar table without reshaping.
+4. **Flat and typed.** Each value is a string, number, boolean, `null` or, for `signalIds`, `tableSignalIds`, `entityTypes` and `headerTexts`, an array of strings, so the rows load into a columnar table without reshaping.
 
-The fields are candidates for a gradient-boosted classifier. Recording a field that later proves useless costs bytes; missing a field that proves useful costs every label collected before it existed.
+The fields are candidates for a gradient-boosted classifier, and the schema is expected to change. The stored inputs are the complete record: the original image, the full Textract response, the normalized observations and the submission and screenshot metadata are immutable evidence. Any feature derivable from them can be added later under a new `featureSchemaVersion` by re-scoring, and those rows train (§8.5). What cannot be recovered later is an input nobody stores and the label-side context spec 3 captures at review time.
 
 ### 8.5 Training example selection
 
@@ -356,7 +373,9 @@ A cell can have several feature rows: the automatic scoring, retries, re-scores 
 2. **Eligibility.** A feature row is eligible when its quality run has a `SUCCEEDED` outcome, its `featureSchemaVersion` is the one the dataset requests, and its baseline, if any, has no member from the cell's screenshot, checked against that snapshot's `members.jsonl`. Ineligible rows are skipped and counted in the dataset manifest.
 3. **One row per label.** For each labeled cell the builder picks one eligible row, keyed by `(qualityRunId, cellObservationId)`: the row from the quality run the reviewer was shown (spec 3 records that `qualityRunId` on the adjudication) when it is eligible, otherwise the eligible row with the greatest `qualityRunId`. The dataset records, per example, the chosen `qualityRunId` and which rule chose it (`SHOWN` or `LATEST_ELIGIBLE`).
 4. **Backfills qualify for training, not for routing analysis.** A row from a `RESCORE` or schema backfill written after review is eligible for training, because its features read only match-to-csv evidence and a baseline that excludes the screenshot. Any analysis of what the reviewer saw, such as the effect of the shown priority or the heuristic's routing performance, uses only `SHOWN` rows, and cells without one are left out of it.
-5. **Labels attach to the reviewed run.** Adjudications name a `cellObservationId`, which belongs to one processing run. Cells of a sibling run of the same screenshot are different observations and are never labeled by another run's adjudications.
+5. **Rows and tables use the same rules.** Spec 3 row labels select from `row-features.jsonl` by `(qualityRunId, tableObservationId, rowIndex)`, and table labels from `table-features.jsonl` by `(qualityRunId, tableObservationId)`.
+6. **Splits group duplicates.** The same image can arrive twice under two screenshot IDs, and several players can submit the same match. Train, validation and test splits assign whole groups: screenshots sharing an `imageSha256` or a `submissionId` form one group, transitively. When the stats lakehouse (#159) defines a match identity, the dataset also groups by it; the dataset manifest records the grouping it used.
+7. **Labels attach to the reviewed run.** Adjudications name a `cellObservationId`, which belongs to one processing run. Cells of a sibling run of the same screenshot are different observations and are never labeled by another run's adjudications.
 
 ## 9. Scoring and results
 
@@ -417,7 +436,9 @@ The goal is to send as few cells to people as possible while keeping errors in t
 
 **Success measure.** The gate for stage 3 is stated in terms the data from stage 1 can measure: at the chosen threshold, the error rate among cells the model would auto-accept, at the upper bound of its 95% confidence interval, is below a target the risk model specification sets (for example 0.1%), and the review rate is as low as that allows. Errors are rare, so measuring a rate that low needs tens of thousands of labeled cells. Review-all labeling from the first screenshot is what makes that sample exist.
 
-**Prerequisites this specification guarantees for the risk model:** a feature row for every cell of every scored run (§8.4); stable join keys (`cellObservationId`, `runId`, `screenshotId`) shared with spec 3; recorded heuristic scores as the comparison baseline; versioned features, configuration and baselines; and re-scoring to produce new feature schemas for old runs. Spec 3 owns the label-side prerequisites: an explicit decision on every cell and row, `selectionReason`, what the reviewer was shown, and error types.
+**Blind labels.** Reviewers see the heuristic priority, so errors they miss will concentrate in `NONE` and `LOW` cells, which is the population a model would auto-accept, and a gate measured on those labels underestimates the error rate. The stage 3 gate is therefore measured on labels collected blind: spec 3's double-review sample, reviewed without the first decision or any priority, and adjudications whose `priorityShown` is false. In stage 3 the audit sample of auto-accepted cells is reviewed without the model's decision or score.
+
+**Prerequisites this specification guarantees for the risk model:** cell, row and table feature rows for every table of every scored run (§8.4); stable join keys (`cellObservationId`, `runId`, `screenshotId`) shared with spec 3; recorded heuristic scores as the comparison baseline; versioned features, configuration and baselines; and re-scoring to produce new feature schemas for old runs. Spec 3 owns the label-side prerequisites: an explicit decision on every cell, row and table, `selectionReason`, the shown `qualityRunId` and whether a priority was shown (`priorityShown`), error types, a blind double-review sample, and labels keyed to the parser's exported field as well as the semantic field.
 
 ## 10. Typed domain model
 
@@ -463,15 +484,16 @@ interface RiskModelAssessment {
 }
 
 // One line of features.jsonl (§8.4). Every field is present; inapplicable values are null.
+// RowFeatureRow ('row-feature-row/v1') and TableFeatureRow ('table-feature-row/v1') follow the same pattern.
 interface CellFeatureRow {
   schemaVersion: 'cell-feature-row/v1';
-  featureSchemaVersion: 'cell-features-v1';
+  featureSchemaVersion: 'features-v1';
   cellObservationId: string;
   runId: string;
   screenshotId: string;
   qualityRunId: string;
   // ...every remaining field listed in §8.4, typed string | number | boolean | null,
-  // except signalIds: string[]
+  // except the array fields named in §8.4 rule 4
 }
 
 interface CellQuality {
@@ -573,7 +595,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | `src/lib/rules/halo.ts` | `evaluateHaloRules(table, cells, config)` | §7.3. |
 | `src/lib/anomalies.ts` | `evaluateAnomalies(table, cells, profiles, baseline, config)` | §8.2, §8.3 checks. |
 | `src/lib/scoring.ts` | `scoreCell(signals, config)`; `priorityFor(score, signals, config)`; `assembleResult(...)` | §9. |
-| `src/lib/features.ts` | `buildFeatureRows(observations, source, profiles, signals, scores, baseline, versions)` | §8.4. Pure; one row per cell of every table. |
+| `src/lib/features.ts` | `buildFeatureRows(inputs, profiles, signals, scores, baseline, versions)` returning cell, row and table rows | §8.4. Pure; covers every table. |
 | `src/lib/baseline-source.ts` | `NoBaselineSource`; `DynamoBaselineSource` | The `BaselineSource` port. |
 | `src/lib/log.ts` | `log(level, message, details?)` | One JSON log line per call. |
 
@@ -620,6 +642,7 @@ mcc-stats-suite/
   "priorityThresholds": { "HIGH": 0.75, "MEDIUM": 0.45, "LOW": 0.20 },
   "needsReviewFrom": "MEDIUM",
   "confidenceMediumBelow": 80,
+  "wordConfidenceLowBelow": 90,
   "geometryTolerance": 0.01,
   "maxDigits": { "SCORE": 6, "KILLS": 3, "ASSISTS": 3, "DEATHS": 3 },
   "playerNamePattern": "^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$",
@@ -648,7 +671,7 @@ The file is bundled into the Lambda. `loadQualityConfig` validates every key and
 | `BuildBaselines` (Phase 4) | Node.js 22, ARM64, 2,048 MB, 10-minute timeout, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `BASELINE_TABLE` |
 | State machine `<stack>` | §6.1 |
 | EventBridge rule and DLQ | §4.1 |
-| `BaselineCache` table (Phase 4) | On-demand, partition key `pk` (`VERSIONS`, `baselineVersion` or `MEMBER#<screenshotId>`), sort key `sk` (`baselineVersion` or field), encrypted with the foundation data key, removed with the stack because it is rebuildable from snapshots |
+| `BaselineCache` table (Phase 4) | On-demand, partition key `pk` (`VERSIONS`, `baselineVersion` or `MEMBER#screenshot#<id>` or `MEMBER#image#<sha256>`), sort key `sk` (`baselineVersion` or field), encrypted with the foundation data key, removed with the stack because it is rebuildable from snapshots |
 | Outputs | `StateMachineArn`, `BuildBaselinesFunctionName` (Phase 4), `ObjectPrefix` |
 
 Log groups follow match-to-csv: three months in prod, two weeks otherwise, retained for stable stacks and destroyed with ephemeral ones.
@@ -682,7 +705,7 @@ The stack deploys through `scripts/cdk-app.mjs` exactly like match-to-csv: stabl
 - Step Functions logs every state with execution data, which holds only references (§14).
 - X-Ray tracing is active on every function and the state machine.
 - The audit record for "what happened to this run" is its `quality/` prefix: the claim names the owning execution, and each quality run's manifest and outcome record inputs, versions and errors.
-- Undeliverable trigger events wait in the DLQ for 14 days. Alarms follow the observability approach chosen for match-to-csv (backlog P5.6).
+- Undeliverable trigger events wait in the DLQ for 14 days. Alarms follow match-to-csv's observability specification ([spec 5](5-match-to-csv-observability.md); backlog P5.6).
 
 ## 16. Testing, CI and release
 
@@ -697,7 +720,7 @@ Tests use `tap`, run from `applications/ocr-quality/test/*.test.ts`, and never c
 | `profiles.test.ts` | medians and MAD; `madZero`; empty and unparsed cells; determinism |
 | `rules.test.ts` | every rule in §7 fires on a seeded case and stays quiet on a clean table; imported flags respect §7.1 scoping; `UNKNOWN` tables produce no signals |
 | `anomalies.test.ts` | robust z with and without zero MAD; small samples; alignment checks; within-table cap |
-| `features.test.ts` | one row per cell of every table, `UNKNOWN` tables included; every §8.4 field present with `null` where inapplicable; no field read from adjudications or resolutions; values match fixtures; rows are flat |
+| `features.test.ts` | one cell row per cell, one row row per table row and one table row per table, `UNKNOWN` tables included; every §8.4 field present with `null` where inapplicable; parser fields `null` without P0.3 provenance; `textractModelVersion` taken from the raw response; no field read from adjudications or resolutions; values match fixtures; rows are flat |
 | `scoring.test.ts` | noisy-OR across groups; max within a group; priority thresholds; `CRITICAL` override; row ordering; summaries |
 | `score-run.test.ts` | complete automatic run writes claim, manifest, profiles, signals, features, result and outcome in order; `FAILED` source skipped with no writes; foreign claim no-op; own claim continues; re-score skips the claim; artifact error writes `FAILED` outcome and rethrows |
 | `fixtures.test.ts` | every fixture produces its expected signals and priorities; at least one fixture per rule |
@@ -722,10 +745,10 @@ v1 (Phases 0 to 3) is complete when:
 2. A failed match-to-csv run produces no quality evidence.
 3. Delivering the same completion event twice produces one claim and one quality run.
 4. A `RESCORE` creates a second quality run and changes nothing in the first.
-5. A fixture seeded with `I6` at confidence 99 in a kills cell yields `INVALID_INTEGER` and `C001_SUSPICIOUS_GLYPH` with candidate `16`, `reviewPriority: HIGH`, and a score of 0.75.
+5. A fixture seeded with `I6` at cell and word confidence 99 in a kills cell yields `INVALID_INTEGER` and `C001_SUSPICIOUS_GLYPH` with candidate `16`, `reviewPriority: HIGH`, and a score of 0.75.
 6. A run whose only table is `UNKNOWN` yields `R001_NO_SCOREBOARD_TABLE`, `assessed: false` for the table, and run priority `HIGH`.
 7. Every result records `qualityVersion`, the normalized artifact's SHA-256, the source run's stage versions, `gitSha` and `baselineVersion: none`.
-8. `features.jsonl` has exactly one `cell-features-v1` row for every cell in `normalized/observations.json`, including cells of `UNKNOWN` tables, and no `result.json` cell carries `riskModel`.
+8. The three feature files hold exactly one row per cell, table row and table in `normalized/observations.json`, including `UNKNOWN` tables, every row records `textractModelVersion` and `imageSha256`, and no `result.json` cell carries `riskModel`.
 9. An ephemeral stack scores only runs under its own `ephemeral/<name>/` namespace.
 10. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
 
@@ -744,7 +767,7 @@ Phase 4 is complete when a baseline built from at least 200 labeled values per f
 9. **Baseline builds scan every adjudication.** `BuildBaselines` lists the whole namespace, so build time grows with label count. Accepted at league scale; P5.3 moves baselines to the data platform behind the same port.
 10. **Rules know only five fields.** Team totals, placements and medals are not checked until match-to-csv extracts them (P5.4).
 11. **Ephemeral pairing is by name.** An ephemeral ocr-quality stack sees only the ephemeral match-to-csv stack of the same name, and nothing enforces that the second one exists.
-12. **Feature choice is a guess until a model is trained.** A feature that matters but is missing from `cell-features-v1` cannot be added to past rows except by re-scoring, and re-scoring cannot recover inputs match-to-csv never stored. Accepted because §8.4 records every input match-to-csv keeps, and re-scoring covers features derived from them.
+12. **Feature choice is a guess until a model is trained.** The first schema will miss features that matter. Accepted because every input is stored evidence: re-scoring under a new `featureSchemaVersion` recovers any feature derivable from it for every past run, and those rows are eligible for training (§8.5).
 13. **Runs scored before this component exists have no features.** Runs completed before P3.2 deploys are scored only by an `AUTOMATIC` backfill (§4.2). P3.3 includes that backfill in dev and prod.
 14. **The SSM parameters live under `match-to-csv`.** The stack reads foundation parameters named for another application. Accepted to avoid duplicating foundation outputs; renaming them is a foundation change for every consumer.
 
@@ -783,11 +806,13 @@ This section is the backlog source for building the component. It is written to 
 | Quality result types and `ScoreRunInput` (§10.1) | P0.2 | `score-run`, spec 3, later admin features |
 | Quality key layout and claim rule (§5.1, §5.2) | P3.1 | `score-run`, spec 3 queue ordering (P5.1) |
 | Signal IDs, groups and `messageCode` values (§7, §8) | P2.2, P2.3 | consumers that display reasons |
-| `cell-feature-row/v1` and `cell-features-v1` (§8.4) | P2.5 | the risk model specification, its training dataset builder |
+| `cell-feature-row/v1`, `row-feature-row/v1`, `table-feature-row/v1` and `features-v1` (§8.4) | P2.5 | the risk model specification, its training dataset builder |
+| Parser provenance in `normalized-ocr/v2` (selected table, exported field per column, table row per exported row) | P0.3 | this component, spec 3 labels (#158), the stats lakehouse (#159) |
+| `adjudicationSetSha256` definition (§8.3) | this specification | `build-baselines`, spec 3's validated-table lineage hash |
 | Training example selection and eligibility (§8.5) | this specification | the risk model specification's dataset builder; spec 3 records the shown `qualityRunId` it depends on |
 | `baseline-member/v1` and per-screenshot baseline selection (§8.3) | P4.1, P4.2 | `score-run`, the training dataset builder |
 | Reserved `riskModel` fields (§9.6) | P0.2 | spec 3, the risk model specification |
-| Spec 3 `selectionReason` and shown-priority fields | spec 3 (#158) | the risk model specification |
+| Spec 3 `selectionReason`, shown `qualityRunId`, `priorityShown` and the blind double-review sample | spec 3 (#158) | the risk model specification's gate (§9.6) |
 | `BaselineSource` port and `baseline-snapshot/v1` | P4.1 | `score-run`, `build-baselines`, P5.3 |
 | Spec 3 `cell-adjudication/v1` and its supersession rules | spec 3 | `build-baselines` |
 
@@ -805,7 +830,7 @@ A change to a contract updates every consumer in the same PR.
 ### Phase 0: Workspace and contracts
 
 **Goal:** a TypeScript workspace with a test gate, and the shared types this component reads and writes.
-**Exit criteria:** the workspace builds and tests in CI, and match-to-csv writes `normalized-ocr/v2` through the shared type.
+**Exit criteria:** the workspace builds and tests in CI, and match-to-csv writes `normalized-ocr/v2` through the shared type with parser provenance.
 
 #### P0.1 Workspace and test gate (S)
 
@@ -828,6 +853,17 @@ A change to a contract updates every consumer in the same PR.
   - `extract-text` builds its normalized artifact as `NormalizedObservations`, and its output is unchanged byte for byte on the existing tests and fixtures.
   - The quality types compile and are exported.
   - `npm run release:check` passes.
+
+#### P0.3 Parser provenance in normalized observations (S)
+
+- **Blocked by:** P0.2
+- **Spec:** §1, §8.4; spec 1 §7.2, §8
+- **Files:** `applications/match-to-csv/src/lib/scoreboard-logic.ts`, `applications/match-to-csv/src/lambdas/extract-text.ts`, `packages/contracts/src/index.ts`
+- **Provides:** `parser.provenance` in `normalized-ocr/v2`: `selectedTableIndex`, `columnFields` (column index to exported field, including the column-order fallback) and `rowIndexes` (the table row of each exported row, in CSV order)
+- **Acceptance:**
+  - A fixture whose kills header is unreadable records the kills column in `columnFields` through the fallback while the normalized cell keeps `semanticLocation.field: UNKNOWN`.
+  - `rowIndexes` has one entry per exported row and identifies skipped total and footer rows by their absence.
+  - CSV output is unchanged on every existing fixture, and `tableParserVersion` is bumped.
 
 ### Phase 1: Foundation
 
@@ -897,15 +933,16 @@ A change to a contract updates every consumer in the same PR.
 **Goal:** every successful run in dev and prod is scored automatically.
 **Exit criteria:** §17 criteria 1 to 10 hold in dev, and prod deploys.
 
-#### P2.5 Cell feature rows (S)
+#### P2.5 Feature rows (M)
 
-- **Blocked by:** P2.4
+- **Blocked by:** P2.4, P0.3
 - **Spec:** §8.4, §9.6
 - **Files:** `src/lib/features.ts`
-- **Provides:** `buildFeatureRows`
+- **Provides:** `buildFeatureRows` for cells, rows and tables
 - **Acceptance:**
-  - Every cell of every table, `UNKNOWN` tables included, produces one row with every `cell-features-v1` field, `null` where inapplicable.
-  - Feature values match hand-computed values on fixtures, including token confidence statistics and alignment offsets.
+  - Every cell, table row and table, `UNKNOWN` tables included, produces one row in its file with every `features-v1` field, `null` where inapplicable.
+  - Lineage fields include `textractModelVersion` from the raw response, `imageSha256`, `submissionId` and `receivedAt`; parser fields come from P0.3 provenance and are `null` without it.
+  - Feature values match hand-computed values on fixtures, including word confidence statistics, neighbor confidences, skew, row colour distance and row gaps.
   - A test proves no feature reads spec 3 adjudications or resolutions.
 
 #### P3.1 `ScoreRun` handler (M)
@@ -955,7 +992,7 @@ A change to a contract updates every consumer in the same PR.
   - A build over fixture adjudications resolves supersession like spec 3 and counts only `ACCEPTED` and `CORRECTED` cells of mapped fields.
   - Two builds over the same adjudications produce the same `adjudicationSetSha256` and statistics.
   - The `CURRENT` pointer moves only after every field and member item is loaded.
-  - `members.jsonl` lists every contributing screenshot and run, including runs that are siblings of other members, and the manifest records `labelCutoff` and `membersSha256`.
+  - `members.jsonl` lists every contributing screenshot, image hash, submission and run, including runs that are siblings of other members, and the manifest records `labelCutoff` and `membersSha256`.
 
 #### P4.2 Baseline signals in scoring (S)
 
@@ -978,9 +1015,10 @@ A change to a contract updates every consumer in the same PR.
 | P5.3 | Data-platform `BaselineSource` | M | §18.9; needs the data platform. |
 | P5.4 | Rules for team totals, placement and medals | M | §18.10; needs match-to-csv to extract those fields. |
 | P5.5 | Risk model specification: training dataset builder (feature rows joined with spec 3 labels, split by screenshot), gradient-boosted training, evaluation gate against the heuristic, shadow mode, then routing with an audit sample | M | §9.6. A separate specification; it fills the reserved `riskModel` fields. |
-| P5.6 | Alarms for failed executions and DLQ depth | S | Follow the match-to-csv observability approach. |
+| P5.6 | Alarms for failed executions and DLQ depth | S | Follow [spec 5](5-match-to-csv-observability.md). |
+| P5.8 | Retire spec 1's `materialize-training-data` once the risk model's dataset builder exists | XS | §1; one labeled dataset definition. |
 | P5.7 | Scheduled baseline rebuild | XS | When manual builds become a chore. |
 
 ### 20.4 Dependency order and parallel lanes
 
-P0.1, P0.2 and P1.1 can start together. P2.2 and P2.3 run in parallel after P2.1. The critical path is P0.1 -> P2.1 -> P2.2 -> P2.4 -> P2.5 -> P3.1 -> P3.2 -> P3.3. Feature rows ship with the first deployment, so every run spec 3 labels has features from the start. The first real feedback is P3.2 in dev, when live runs start producing priorities that can be compared with screenshots.
+P0.1, P0.2 and P1.1 can start together, and P0.3 follows P0.2. P2.2 and P2.3 run in parallel after P2.1. The critical path is P0.1 -> P2.1 -> P2.2 -> P2.4 -> P2.5 -> P3.1 -> P3.2 -> P3.3, with P0.3 joining at P2.5. Feature rows ship with the first deployment, so every run spec 3 labels has features from the start. The first real feedback is P3.2 in dev, when live runs start producing priorities that can be compared with screenshots.
