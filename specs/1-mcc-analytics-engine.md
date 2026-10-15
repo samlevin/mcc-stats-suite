@@ -225,7 +225,7 @@ Every run manifest records these values. A change to a stage's behavior changes 
 | `preprocessingVersion` | `none-v1` |
 | `textractConfigurationVersion` | `textract-tables-v1` |
 | `textractNormalizerVersion` | `textract-normalizer-v2` |
-| `tableParserVersion` | `scoreboard-parser-v2` |
+| `tableParserVersion` | `scoreboard-parser-v3` |
 | `semanticMapperVersion` | `scoreboard-semantic-v2` |
 | `validationRulesVersion` | `scoreboard-validation-v2` |
 
@@ -314,12 +314,12 @@ Each `TABLE` block is scored on its row-1 cells: 3 points for a header containin
 1. Build a row-by-column grid of cell text, joining `WORD` children with spaces.
 2. The lowest row index is the header. Map recognized headers to `player`, `score`, `kills`, `assists` and `deaths`.
 3. Any field left unmapped falls back to the header's columns in order: player first, then score, kills, assists and deaths.
-4. For each later row, tidy the player name: trim, remove one leading clan tag in square brackets, and collapse runs of whitespace. Skip rows with an empty name.
+4. For each later row, tidy the player name: drop words that hold no letter, digit or square bracket, remove one leading clan tag in square brackets, and collapse runs of whitespace. Gamertags hold only letters, digits and spaces, so a dropped word is an icon Textract read as text, such as the chat bubble MCC draws as `...`. Skip rows with an empty name.
 5. Skip rows where neither score nor kills is all digits. This drops totals, footers and other non-player rows.
 
 ### 8.3 Row colour sampling
 
-`extract-text` computes one `RowColor` per table row index found in `CELL` blocks. For each row it takes the union of its cells' vertical extents, samples a band one pixel high at the row's vertical midpoint from 10% to 40% of the image width, and records the mean red, green and blue from Sharp statistics. Dimensions come from the original image. With unknown dimensions there are no colours.
+`computeRowColors` in `src/lib/textract-analysis.ts` computes one `RowColor` per table row index found in `CELL` blocks. `extract-text` and the fixture capture script both call it. For each row it takes the union of its cells' vertical extents, decodes a band one pixel high at the row's vertical midpoint from 10% to 40% of the image width, and records the band's mean red, green and blue. Sharp's `stats()` reads the whole image and ignores `extract()`, so the band is averaged from its raw pixels. Dimensions come from the original image. With unknown dimensions there are no colours.
 
 ### 8.4 Team detection and naming
 
@@ -481,6 +481,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | File | Public functions | Purpose |
 | --- | --- | --- |
 | `src/lib/scoreboard-logic.ts` | `processScoreboardImage(blocks, rowColors)` | Pure scoreboard parser (§8). |
+| `src/lib/textract-analysis.ts` | `analyzeDocumentInput(image)`; `toLiteBlock(block)`; `computeRowColors(image, width, height, blocks)` | The `AnalyzeDocument` request, parser block projection and row colour sampling (§8.3), shared by `extract-text` and `scripts/capture-textract.ts`. |
 | `src/lib/csv.ts` | `rowsToCsv(rows)` | Quoted CSV serializer (§8.6). |
 | `src/lib/evidence.ts` | `evidenceId()`; `sha256(bytes)`; `putJson(bucket, key, value)`; `now()` | Identifiers, hashing, create-only JSON writes and timestamps. |
 | `src/lib/s3.ts` | `bodyToBuffer(body)`; `safeObjectName(value)`; `namespacedObjectKey(key)`; `sourceScreenshotPrefix(source)`; `processingRunPrefix(source, runId)` | S3 body handling and key construction. `namespacedObjectKey` prepends `OBJECT_PREFIX`. |
@@ -635,7 +636,7 @@ Tests use `tap`, run from `applications/match-to-csv/test/*.test.ts`, and never 
 | File | Covers |
 | --- | --- |
 | `scoreboard-logic.test.ts` | two-team match, FFA, three uneven teams, non-player row filtering, header fallback, choosing the scoreboard over an earlier decoy table, win/loss |
-| `scoreboard-fixtures.test.ts` | every `*.fixture.json` produces its `expectedRows`; the directory holds at least one fixture |
+| `scoreboard-fixtures.test.ts` | every `*.fixture.json` produces its `expectedRows`, except the fields a `knownIssue` lists, which run as a `todo` test; the directory holds at least one fixture |
 | `normalization.test.ts` | semantic header mapping; independent mapping per table; invalid integer flags |
 | `extract-text-handler.test.ts` | a complete successful run; provider failure records and rethrow; hash mismatch never calls the provider |
 | `process-email.test.ts` | multiple attachments with an ephemeral prefix; rejected submission; independent rejection codes; failed completion when storage fails |
@@ -648,7 +649,7 @@ Tests use `tap`, run from `applications/match-to-csv/test/*.test.ts`, and never 
 | `app.test.ts` | termination protection by stack type; `GIT_SHA` precedence over `GITHUB_SHA` |
 | `bundling.test.ts` | locked esbuild for Docker bundling; Docker forced only for Sharp functions; local esbuild check; pinned image |
 
-A fixture is a JSON file with `name`, `blocks`, `rowColors` and `expectedRows`. Each fixture covers one behavior, preferably a real Textract output reduced to the smallest failing case with player data replaced.
+A fixture is a JSON file with `name`, `blocks`, `rowColors` and `expectedRows`, plus an optional `knownIssue` naming a tracked mismatch and the fields it affects. Each fixture covers one behavior, preferably a real Textract output reduced to the smallest failing case with player data replaced. `test/fixtures/README.md` describes capturing a screenshot with `scripts/capture-textract.ts` and reducing it with `scripts/reduce-capture.ts`.
 
 ### 16.2 CI and release
 

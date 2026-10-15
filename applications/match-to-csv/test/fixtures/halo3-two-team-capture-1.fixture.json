@@ -1,0 +1,2312 @@
+{
+  "name": "halo3 two-team capture 1",
+  "blocks": [
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.970703125,
+      "Text": "PLAYERS",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.04221580550074577,
+          "Height": 0.01445679645985365,
+          "Left": 0.054399117827415466,
+          "Top": 0.13712918758392334
+        }
+      },
+      "Id": "a9c18dcd-c632-47f9-b88d-2f824ae603d9"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 80.58832550048828,
+      "Text": "SCORE®",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.032765958458185196,
+          "Height": 0.014599923975765705,
+          "Left": 0.4495020806789398,
+          "Top": 0.13700248301029205
+        }
+      },
+      "Id": "f9abaecb-4f35-4e78-b1ca-84ce1feeba49"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.1796875,
+      "Text": "KILLS",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.024950208142399788,
+          "Height": 0.013947726227343082,
+          "Left": 0.5691004395484924,
+          "Top": 0.13674962520599365
+        }
+      },
+      "Id": "18d0fd38-4703-4ed3-9857-16a2649ff71d"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 74.0284194946289,
+      "Text": "ASSI",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02365933358669281,
+          "Height": 0.015283743850886822,
+          "Left": 0.6885581016540527,
+          "Top": 0.1370052844285965
+        }
+      },
+      "Id": "5d590d76-0c94-4ad6-a1f6-add5a5b3623a"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 79.06070709228516,
+      "Text": "[CLAN1]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.05490855500102043,
+          "Height": 0.016475021839141846,
+          "Left": 0.08529572188854218,
+          "Top": 0.17366637289524078
+        }
+      },
+      "Id": "e871dce6-083a-4562-8aaf-208b4b982a34"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.951171875,
+      "Text": "22",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012628049589693546,
+          "Height": 0.014984031207859516,
+          "Left": 0.547852635383606,
+          "Top": 0.18149492144584656
+        }
+      },
+      "Id": "3915f988-9cce-4aa9-bd2a-5cd5de279e1d"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.970703125,
+      "Text": "22",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012396327219903469,
+          "Height": 0.015133611857891083,
+          "Left": 0.6682412624359131,
+          "Top": 0.18238431215286255
+        }
+      },
+      "Id": "3f4c2781-6eee-49a7-847d-ccc23322f9bf"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.69567108154297,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005773870274424553,
+          "Height": 0.014852989464998245,
+          "Left": 0.7947474718093872,
+          "Top": 0.18174399435520172
+        }
+      },
+      "Id": "40585cbe-5880-4a7f-a669-e419a5662acc"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.67613983154297,
+      "Text": "8",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005740858148783445,
+          "Height": 0.015250323340296745,
+          "Left": 0.9146453142166138,
+          "Top": 0.18203924596309662
+        }
+      },
+      "Id": "3c6b542a-0724-47d6-8b91-988b5b7eec3a"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 98.3506088256836,
+      "Text": "Player01",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.033245984464883804,
+          "Height": 0.013592533767223358,
+          "Left": 0.0854252502322197,
+          "Top": 0.19225002825260162
+        }
+      },
+      "Id": "ae6e5a8d-bf35-4495-b35e-63b847ff2a08"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.2115707397461,
+      "Text": "A",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.015024318359792233,
+          "Height": 0.01578994281589985,
+          "Left": 0.12158715724945068,
+          "Top": 0.19255521893501282
+        }
+      },
+      "Id": "8a85cc45-e6ca-4bfa-b704-57e647c58396"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 98.56086730957031,
+      "Text": "[CLAN2]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022424576804041862,
+          "Height": 0.013334601186215878,
+          "Left": 0.08529586344957352,
+          "Top": 0.22108325362205505
+        }
+      },
+      "Id": "65d63acd-906f-429c-9276-d7f238f585ca"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.93083953857422,
+      "Text": "17",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011740733869373798,
+          "Height": 0.01563066616654396,
+          "Left": 0.5485368371009827,
+          "Top": 0.22840535640716553
+        }
+      },
+      "Id": "5a37a89d-df70-431c-8728-279074964729"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.93083953857422,
+      "Text": "17",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011832168325781822,
+          "Height": 0.015316052362322807,
+          "Left": 0.6685270667076111,
+          "Top": 0.22947904467582703
+        }
+      },
+      "Id": "845e245c-c4ca-4235-ba24-7b1a32dfd093"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.79332733154297,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005832906812429428,
+          "Height": 0.01519430335611105,
+          "Left": 0.7946246862411499,
+          "Top": 0.22873663902282715
+        }
+      },
+      "Id": "5ba5927d-1e1e-4193-aac9-a9d928ba9313"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.63229370117188,
+      "Text": "11",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011473407968878746,
+          "Height": 0.0156585481017828,
+          "Left": 0.9085049629211426,
+          "Top": 0.22878512740135193
+        }
+      },
+      "Id": "78133848-132c-44d8-a6a3-38842bf55714"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.09378814697266,
+      "Text": "Player02",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.042501166462898254,
+          "Height": 0.016362344846129417,
+          "Left": 0.08569591492414474,
+          "Top": 0.23964600265026093
+        }
+      },
+      "Id": "067c6ef0-9a0f-41c9-9528-787fffef003a"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.09378814697266,
+      "Text": "[CLAN3]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.025365270674228668,
+          "Height": 0.01306153554469347,
+          "Left": 0.08550388365983963,
+          "Top": 0.26840755343437195
+        }
+      },
+      "Id": "e44e801b-4c79-4510-889f-a8b1fc759544"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.81285858154297,
+      "Text": "6",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.006131747737526894,
+          "Height": 0.015429733321070671,
+          "Left": 0.5542557239532471,
+          "Top": 0.275810182094574
+        }
+      },
+      "Id": "5fa551ec-7f70-4fed-9070-7e42963adbbd"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.47444915771484,
+      "Text": "6",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005731765180826187,
+          "Height": 0.015670645982027054,
+          "Left": 0.6749701499938965,
+          "Top": 0.27662593126296997
+        }
+      },
+      "Id": "fcd52799-ab88-44fa-b596-485f275ebc70"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.68590545654297,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005951466504484415,
+          "Height": 0.015105229802429676,
+          "Left": 0.7946048378944397,
+          "Top": 0.2759513258934021
+        }
+      },
+      "Id": "34f763a3-874f-4f73-b345-c2d25e23a7dd"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.69168090820312,
+      "Text": "11",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011464199982583523,
+          "Height": 0.015536398626863956,
+          "Left": 0.9084932208061218,
+          "Top": 0.2759281098842621
+        }
+      },
+      "Id": "4dc68d21-d80f-4394-8cbb-28aa8ea819df"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.56871795654297,
+      "Text": "Player03",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.04453367367386818,
+          "Height": 0.013607724569737911,
+          "Left": 0.0853176862001419,
+          "Top": 0.28670069575309753
+        }
+      },
+      "Id": "24de8614-a112-42d0-83ac-b2fed24cb65f"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.35327911376953,
+      "Text": "[CLAN4]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.029458818957209587,
+          "Height": 0.013302764855325222,
+          "Left": 0.08542593568563461,
+          "Top": 0.31535130739212036
+        }
+      },
+      "Id": "f2ee77d2-598f-451f-9668-2f4cd1b0e6f5"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.68669891357422,
+      "Text": "5",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005964766256511211,
+          "Height": 0.015052484348416328,
+          "Left": 0.554444432258606,
+          "Top": 0.32336243987083435
+        }
+      },
+      "Id": "08e8cf7c-c1b2-4b32-a13f-99fa548a64a2"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.77379608154297,
+      "Text": "5",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005822269711643457,
+          "Height": 0.015348992310464382,
+          "Left": 0.6749281883239746,
+          "Top": 0.3241831660270691
+        }
+      },
+      "Id": "44486732-ded7-449f-a629-e7d322182742"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 93.15210723876953,
+      "Text": "3",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005501396022737026,
+          "Height": 0.01519308052957058,
+          "Left": 0.7948241233825684,
+          "Top": 0.32343485951423645
+        }
+      },
+      "Id": "4d953a1d-e710-46f0-9a25-c2dbcaaf116f"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.970703125,
+      "Text": "18",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011945774778723717,
+          "Height": 0.015769943594932556,
+          "Left": 0.9083735942840576,
+          "Top": 0.3232607841491699
+        }
+      },
+      "Id": "d957ec4c-ff66-4b62-a0ac-518d1991930a"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.81365966796875,
+      "Text": "Player04",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.05708056688308716,
+          "Height": 0.01624666526913643,
+          "Left": 0.08525153249502182,
+          "Top": 0.33404603600502014
+        }
+      },
+      "Id": "92b3a397-9f25-4821-a393-e6d1cddb51ed"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 97.79874420166016,
+      "Text": "[CLAN5]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02904629521071911,
+          "Height": 0.0135540422052145,
+          "Left": 0.08549631386995316,
+          "Top": 0.36262214183807373
+        }
+      },
+      "Id": "1f1e2504-f955-4d90-b789-b81cc1c16a4d"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.80149841308594,
+      "Text": "16",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.01177793089300394,
+          "Height": 0.015865080058574677,
+          "Left": 0.5487308502197266,
+          "Top": 0.3701498806476593
+        }
+      },
+      "Id": "2f2aa0e2-7b49-4028-9e46-06d4206b30ff"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.76164245605469,
+      "Text": "16",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012360883876681328,
+          "Height": 0.01589236781001091,
+          "Left": 0.6684523224830627,
+          "Top": 0.3711502254009247
+        }
+      },
+      "Id": "42cf550f-a3e0-4678-b0fd-7f0b186fdc54"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.84215545654297,
+      "Text": "6",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005842508748173714,
+          "Height": 0.01555150467902422,
+          "Left": 0.7946831583976746,
+          "Top": 0.3701731264591217
+        }
+      },
+      "Id": "19eb43fc-74a9-43a8-9830-f28f75f75205"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.970703125,
+      "Text": "10",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012420504353940487,
+          "Height": 0.015222161076962948,
+          "Left": 0.9084163904190063,
+          "Top": 0.3708970248699188
+        }
+      },
+      "Id": "95bb967a-d9ec-4859-a909-61c31b0977ef"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 52.09502410888672,
+      "Text": "Player05",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.046914659440517426,
+          "Height": 0.016377732157707214,
+          "Left": 0.08577974140644073,
+          "Top": 0.38108426332473755
+        }
+      },
+      "Id": "61076012-809b-4609-8ae8-5af79e30306c"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.81126403808594,
+      "Text": "[CLAN6]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.029886377975344658,
+          "Height": 0.01344506349414587,
+          "Left": 0.08561227470636368,
+          "Top": 0.4098263680934906
+        }
+      },
+      "Id": "097b356e-d19f-4eb0-bd6c-5d1e76fa0625"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 90.5127944946289,
+      "Text": "...",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.01527160033583641,
+          "Height": 0.008944973349571228,
+          "Left": 0.24817079305648804,
+          "Top": 0.4165511727333069
+        }
+      },
+      "Id": "0fd2c1cd-8e52-4dfe-bc46-b8db4d5cbafa"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.93083953857422,
+      "Text": "13",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011876372620463371,
+          "Height": 0.015602268278598785,
+          "Left": 0.5485276579856873,
+          "Top": 0.41738834977149963
+        }
+      },
+      "Id": "0e39b52b-07e4-43bd-a4a0-bac1204de9b6"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.970703125,
+      "Text": "13",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.0124403927475214,
+          "Height": 0.01568114571273327,
+          "Left": 0.668396532535553,
+          "Top": 0.41820865869522095
+        }
+      },
+      "Id": "74d74bc4-862f-4e56-a926-1886aa239086"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.80388641357422,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.005653094500303268,
+          "Height": 0.015054753981530666,
+          "Left": 0.7946863174438477,
+          "Top": 0.41762346029281616
+        }
+      },
+      "Id": "c799bb5c-9e83-43ff-bb76-6a6273009239"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.95037078857422,
+      "Text": "14",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012482142075896263,
+          "Height": 0.015481163747608662,
+          "Left": 0.908440887928009,
+          "Top": 0.41791173815727234
+        }
+      },
+      "Id": "e5df07b7-61de-417d-9b70-33717e23522f"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 95.38663482666016,
+      "Text": "A",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.007896631956100464,
+          "Height": 0.01687881164252758,
+          "Left": 0.9357151389122009,
+          "Top": 0.4158923327922821
+        }
+      },
+      "Id": "2b7a8c0b-3d41-48d5-a099-6f5dfed90985"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 86.2414321899414,
+      "Text": "Player06",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.05902687460184097,
+          "Height": 0.01402695570141077,
+          "Left": 0.08543851971626282,
+          "Top": 0.42812493443489075
+        }
+      },
+      "Id": "c6c2d33a-0974-4205-9146-eeb5ec6a158a"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.91051483154297,
+      "Text": "[CLAN6]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02994498424232006,
+          "Height": 0.013538256287574768,
+          "Left": 0.08554565906524658,
+          "Top": 0.45714449882507324
+        }
+      },
+      "Id": "b22d6b8b-5d98-481a-a111-0979e4b6c9db"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.69168090820312,
+      "Text": "11",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011467378586530685,
+          "Height": 0.0154979033395648,
+          "Left": 0.5485793948173523,
+          "Top": 0.46457818150520325
+        }
+      },
+      "Id": "3bcd6cb1-9d95-470f-b3e6-1dda68a6b50a"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.87145233154297,
+      "Text": "12",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.011825582012534142,
+          "Height": 0.01545003242790699,
+          "Left": 0.6689308881759644,
+          "Top": 0.4655040502548218
+        }
+      },
+      "Id": "53869163-9d52-460c-9c6f-1a9ae53911b8"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 98.47795867919922,
+      "Text": "8",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.006712585687637329,
+          "Height": 0.015236021019518375,
+          "Left": 0.7943987846374512,
+          "Top": 0.46445924043655396
+        }
+      },
+      "Id": "5ea80809-0d05-4206-a664-1f5dce59942d"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.91131591796875,
+      "Text": "12",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012195338495075703,
+          "Height": 0.015566462650895119,
+          "Left": 0.9084108471870422,
+          "Top": 0.4648987054824829
+        }
+      },
+      "Id": "ac127e51-cee7-4173-9b76-05d8490177c8"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.85271453857422,
+      "Text": "Player07",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02240785025060177,
+          "Height": 0.016474362462759018,
+          "Left": 0.08467023074626923,
+          "Top": 0.47566983103752136
+        }
+      },
+      "Id": "d0cc1520-59a4-4789-a055-fdae6949fabd"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 97.45694732666016,
+      "Text": "[CLAN7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.0234733447432518,
+          "Height": 0.014023522846400738,
+          "Left": 0.08542836457490921,
+          "Top": 0.5039604306221008
+        }
+      },
+      "Id": "bba878d6-c4e1-4d29-91b4-bc9477077847"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.1270751953125,
+      "Text": "X]",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.024893078953027725,
+          "Height": 0.01624910719692707,
+          "Left": 0.11126957088708878,
+          "Top": 0.5040504336357117
+        }
+      },
+      "Id": "939a2657-f695-4f65-a1cc-95f384f5e4a9"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.88201141357422,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.0061662583611905575,
+          "Height": 0.015487630851566792,
+          "Left": 0.5541327595710754,
+          "Top": 0.5119706988334656
+        }
+      },
+      "Id": "173b39e0-5cc0-4b88-a68c-14073749ea90"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.77379608154297,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.006097779609262943,
+          "Height": 0.015543614514172077,
+          "Left": 0.6746839880943298,
+          "Top": 0.5126603841781616
+        }
+      },
+      "Id": "09df2639-3478-4e9e-b31e-8c0a4f54c991"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.81365966796875,
+      "Text": "7",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.00571139482781291,
+          "Height": 0.015357980504631996,
+          "Left": 0.7946047186851501,
+          "Top": 0.5119814276695251
+        }
+      },
+      "Id": "c027d735-aaf7-4d69-8777-643e51bd914b"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 99.990234375,
+      "Text": "15",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.012394187040627003,
+          "Height": 0.016071785241365433,
+          "Left": 0.9082938432693481,
+          "Top": 0.5120721459388733
+        }
+      },
+      "Id": "e820ebd4-1fe4-4192-a1e9-bbbe00dd1281"
+    },
+    {
+      "BlockType": "WORD",
+      "Confidence": 62.396366119384766,
+      "Text": "Player08",
+      "TextType": "PRINTED",
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.069607675075531,
+          "Height": 0.016881585121154785,
+          "Left": 0.08544453233480453,
+          "Top": 0.5227036476135254
+        }
+      },
+      "Id": "bbca547f-4f87-4fdc-a8d7-4e689af6ba5c"
+    },
+    {
+      "BlockType": "TABLE",
+      "Confidence": 99.462890625,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.8986169099807739,
+          "Height": 0.41994708776474,
+          "Left": 0.05144228786230087,
+          "Top": 0.1240527331829071
+        }
+      },
+      "Id": "dc2d7960-80e8-4ade-8895-aa1526e92bdb",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "ec47be78-314b-44bc-bd89-2a60210035ca",
+            "54ece814-8ed0-4c6b-be9d-6b2c5d8f7968",
+            "659d0db0-75b6-47bf-a758-10584ca66374",
+            "b3513384-cb0f-4314-8257-d79ae18c4e95",
+            "28559032-da0b-4a9f-bf17-9f209445380b",
+            "c249c462-8501-41ae-bc23-20fa652c4b65",
+            "bee0415e-e4bd-4723-b895-c045899fd406",
+            "50c94fef-f1c3-47f3-9dea-8ed6361b4fec",
+            "5bd2c647-cd8a-4b54-a3a8-5caa320f7063",
+            "ef69c780-c273-491e-b67f-12668d2b52c3",
+            "c292069d-dc91-429f-acfd-fc2ec96fe5c5",
+            "747fa8f1-982a-4814-be9b-4e2a9870e06a",
+            "dd4201d7-75fa-4a3a-a2c4-2720eebfcabd",
+            "5c35c923-03a3-4f3d-a383-1d25d16bb711",
+            "52bc4745-0971-4a14-ae56-56a894a1e3bf",
+            "c0452e49-8ab3-46ec-aa39-e230024b3965",
+            "25b07648-c335-493a-9d58-940d21b2663c",
+            "a9a4eae8-5871-4d0e-a2b4-c3942f6b5ae3",
+            "f08c6e70-32f7-44ff-b9fc-32cd026d664d",
+            "f6ab7e00-41c7-4670-a470-3d1aea5d97d6",
+            "bdb67081-aaba-4504-b2f0-8d4ec39cfc89",
+            "8b30214a-e601-4429-b18e-db68461c65bb",
+            "b4321497-197a-4b0a-a2c1-678ab5b7e5ef",
+            "cbfd060b-f821-4865-9d5c-c2f502102c02",
+            "0996f18d-dd4f-495d-bc9c-af0c5b20ce25",
+            "8c946428-cc73-478a-827b-6831cc72b9da",
+            "cd6ada63-ef76-4beb-a030-a207c8b00187",
+            "1bf09f9c-85b2-4a5c-b494-273f7d713e09",
+            "09e49c9f-64b9-43f0-beea-ac1cc9eb4bc6",
+            "f42ac7ba-ead2-489a-a147-889f52d3b432",
+            "7c41deba-c7c9-4bb8-9b0e-41ff01d336b4",
+            "41140019-bad9-4c04-af32-0c2ca357cbc9",
+            "93a2c192-f58b-46aa-98d8-0433365fea04",
+            "f9a3e63b-9579-403d-9133-8feceb118988",
+            "0b15b34b-cdc9-4d19-b1ed-8d6618be6f45",
+            "e62116a9-d556-4532-99fd-e4381143ca9b",
+            "7e6e5d02-ad92-4acc-ac69-4f09c2052137",
+            "c0afb69f-32ff-4e84-b2f6-1ba0ccb74895",
+            "d91c9a58-4968-4cdf-ac9e-607c8abd117b",
+            "372164db-7de5-461e-9059-3d62a692d5b9",
+            "e4e82a3f-7011-4dd0-9953-58e1882d5681",
+            "b5ee036e-5b3c-4f72-903c-298fc7de6f00",
+            "4091a10b-c2f7-4659-8b5a-2b28a517a9b2",
+            "69d3d62e-05de-40f0-a937-a9ab22ae7300",
+            "5df83155-4839-437e-bc09-9b7ca6a539b8",
+            "95dede17-2f36-475e-9215-490d0a3b57f1",
+            "adbf296d-8fd4-4e19-80f7-dbce7d2e437b",
+            "48033a18-68e2-4d14-bb86-2591b6ec6b16",
+            "df6e5273-ba2d-4b08-a022-262cd363ec6c",
+            "296d30c1-bb5b-4311-acda-88cbbc9092ef",
+            "0fde5281-c496-4bd5-8e31-8f22837d22d2",
+            "516c4ff7-790c-4d78-bff6-c661a8b748ee",
+            "73acc685-3b66-4186-9a6b-41a2359f774d",
+            "213b44bf-60b8-4e8a-97a8-6ebdc6f35dcc"
+          ]
+        },
+        {
+          "Type": "MERGED_CELL",
+          "Ids": ["9a946562-c033-4454-b6dd-0aff317ce3d3"]
+        }
+      ],
+      "EntityTypes": ["STRUCTURED_TABLE"]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 88.76953125,
+      "RowIndex": 1,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.39654767513275146,
+          "Height": 0.040825050324201584,
+          "Left": 0.05144228786230087,
+          "Top": 0.1240527331829071
+        }
+      },
+      "Id": "ec47be78-314b-44bc-bd89-2a60210035ca",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["a9c18dcd-c632-47f9-b88d-2f824ae603d9"]
+        }
+      ],
+      "EntityTypes": ["COLUMN_HEADER"]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.2109375,
+      "RowIndex": 1,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040936946868896,
+          "Height": 0.0408179946243763,
+          "Left": 0.4479895234107971,
+          "Top": 0.12406279146671295
+        }
+      },
+      "Id": "54ece814-8ed0-4c6b-be9d-6b2c5d8f7968",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["f9abaecb-4f35-4e78-b1ca-84ce1feeba49"]
+        }
+      ],
+      "EntityTypes": ["COLUMN_HEADER"]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.89453125,
+      "RowIndex": 1,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940838396549225,
+          "Height": 0.04081792011857033,
+          "Left": 0.5683985352516174,
+          "Top": 0.12406584620475769
+        }
+      },
+      "Id": "659d0db0-75b6-47bf-a758-10584ca66374",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["18d0fd38-4703-4ed3-9857-16a2649ff71d"]
+        }
+      ],
+      "EntityTypes": ["COLUMN_HEADER"]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.40625,
+      "RowIndex": 1,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007511407136917,
+          "Height": 0.04081788286566734,
+          "Left": 0.6878065466880798,
+          "Top": 0.12406887114048004
+        }
+      },
+      "Id": "b3513384-cb0f-4314-8257-d79ae18c4e95",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["5d590d76-0c94-4ad6-a1f6-add5a5b3623a"]
+        }
+      ],
+      "EntityTypes": ["COLUMN_HEADER"]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 92.08984375,
+      "RowIndex": 1,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940767616033554,
+          "Height": 0.04081781581044197,
+          "Left": 0.8078814148902893,
+          "Top": 0.12407191842794418
+        }
+      },
+      "Id": "28559032-da0b-4a9f-bf17-9f209445380b",
+      "EntityTypes": ["COLUMN_HEADER"]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 1,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022680915892124176,
+          "Height": 0.040926866233348846,
+          "Left": 0.9272888898849487,
+          "Top": 0.12396343797445297
+        }
+      },
+      "Id": "c249c462-8501-41ae-bc23-20fa652c4b65"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 88.8671875,
+      "RowIndex": 2,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.3965475559234619,
+          "Height": 0.046867724508047104,
+          "Left": 0.05144290626049042,
+          "Top": 0.16486789286136627
+        }
+      },
+      "Id": "bee0415e-e4bd-4723-b895-c045899fd406",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "e871dce6-083a-4562-8aaf-208b4b982a34",
+            "ae6e5a8d-bf35-4495-b35e-63b847ff2a08",
+            "8a85cc45-e6ca-4bfa-b704-57e647c58396"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.30859375,
+      "RowIndex": 2,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040936946868896,
+          "Height": 0.04686078056693077,
+          "Left": 0.44798997044563293,
+          "Top": 0.164877787232399
+        }
+      },
+      "Id": "50c94fef-f1c3-47f3-9dea-8ed6361b4fec",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["3915f988-9cce-4aa9-bd2a-5cd5de279e1d"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.9921875,
+      "RowIndex": 2,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940837651491165,
+          "Height": 0.046860694885253906,
+          "Left": 0.5683988928794861,
+          "Top": 0.16488078236579895
+        }
+      },
+      "Id": "5bd2c647-cd8a-4b54-a3a8-5caa320f7063",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["3f4c2781-6eee-49a7-847d-ccc23322f9bf"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.50390625,
+      "RowIndex": 2,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007509917020798,
+          "Height": 0.04686065390706062,
+          "Left": 0.6878069043159485,
+          "Top": 0.16488376259803772
+        }
+      },
+      "Id": "ef69c780-c273-491e-b67f-12668d2b52c3",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["40585cbe-5880-4a7f-a669-e419a5662acc"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 92.1875,
+      "RowIndex": 2,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940765380859375,
+          "Height": 0.046860579401254654,
+          "Left": 0.8078817129135132,
+          "Top": 0.16488675773143768
+        }
+      },
+      "Id": "c292069d-dc91-429f-acfd-fc2ec96fe5c5",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["3c6b542a-0724-47d6-8b91-988b5b7eec3a"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 2,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02268093451857567,
+          "Height": 0.046858154237270355,
+          "Left": 0.9272890686988831,
+          "Top": 0.16488973796367645
+        }
+      },
+      "Id": "747fa8f1-982a-4814-be9b-4e2a9870e06a"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 88.037109375,
+      "RowIndex": 3,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.3965473771095276,
+          "Height": 0.04864688590168953,
+          "Left": 0.05144362151622772,
+          "Top": 0.21172592043876648
+        }
+      },
+      "Id": "dd4201d7-75fa-4a3a-a2c4-2720eebfcabd",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "65d63acd-906f-429c-9276-d7f238f585ca",
+            "067c6ef0-9a0f-41c9-9528-787fffef003a"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.478515625,
+      "RowIndex": 3,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040931731462479,
+          "Height": 0.04864007607102394,
+          "Left": 0.4479904770851135,
+          "Top": 0.21173562109470367
+        }
+      },
+      "Id": "5c35c923-03a3-4f3d-a383-1d25d16bb711",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["5a37a89d-df70-431c-8728-279074964729"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.162109375,
+      "RowIndex": 3,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940832436084747,
+          "Height": 0.048639990389347076,
+          "Left": 0.5683993101119995,
+          "Top": 0.21173857152462006
+        }
+      },
+      "Id": "52bc4745-0971-4a14-ae56-56a894a1e3bf",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["845e245c-c4ca-4235-ba24-7b1a32dfd093"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.673828125,
+      "RowIndex": 3,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.1200750395655632,
+          "Height": 0.048639945685863495,
+          "Left": 0.6878072619438171,
+          "Top": 0.21174147725105286
+        }
+      },
+      "Id": "c0452e49-8ab3-46ec-aa39-e230024b3965",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["5ba5927d-1e1e-4193-aac9-a9d928ba9313"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.357421875,
+      "RowIndex": 3,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940759420394897,
+          "Height": 0.048639871180057526,
+          "Left": 0.8078820109367371,
+          "Top": 0.21174441277980804
+        }
+      },
+      "Id": "25b07648-c335-493a-9d58-940d21b2663c",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["78133848-132c-44d8-a6a3-38842bf55714"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 3,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02268093265593052,
+          "Height": 0.04863749444484711,
+          "Left": 0.9272893667221069,
+          "Top": 0.21174733340740204
+        }
+      },
+      "Id": "a9a4eae8-5871-4d0e-a2b4-c3942f6b5ae3"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 88.28125,
+      "RowIndex": 4,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.3965471386909485,
+          "Height": 0.04686722531914711,
+          "Left": 0.051444362848997116,
+          "Top": 0.26036331057548523
+        }
+      },
+      "Id": "f08c6e70-32f7-44ff-b9fc-32cd026d664d",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "e44e801b-4c79-4510-889f-a8b1fc759544",
+            "24de8614-a112-42d0-83ac-b2fed24cb65f"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.72265625,
+      "RowIndex": 4,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040923535823822,
+          "Height": 0.04686055704951286,
+          "Left": 0.4479909837245941,
+          "Top": 0.2603728175163269
+        }
+      },
+      "Id": "f6ab7e00-41c7-4670-a470-3d1aea5d97d6",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["5fa551ec-7f70-4fed-9070-7e42963adbbd"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.40625,
+      "RowIndex": 4,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.1194082498550415,
+          "Height": 0.0468604750931263,
+          "Left": 0.5683997869491577,
+          "Top": 0.2603757083415985
+        }
+      },
+      "Id": "bdb67081-aaba-4504-b2f0-8d4ec39cfc89",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["fcd52799-ab88-44fa-b596-485f275ebc70"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.869140625,
+      "RowIndex": 4,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007496505975723,
+          "Height": 0.046860430389642715,
+          "Left": 0.6878076791763306,
+          "Top": 0.26037856936454773
+        }
+      },
+      "Id": "8b30214a-e601-4429-b18e-db68461c65bb",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["34f763a3-874f-4f73-b345-c2d25e23a7dd"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.6015625,
+      "RowIndex": 4,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.119407519698143,
+          "Height": 0.046860355883836746,
+          "Left": 0.8078823089599609,
+          "Top": 0.26038143038749695
+        }
+      },
+      "Id": "b4321497-197a-4b0a-a2c1-678ab5b7e5ef",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["4dc68d21-d80f-4394-8cbb-28aa8ea819df"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 4,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02268091030418873,
+          "Height": 0.046858031302690506,
+          "Left": 0.927289605140686,
+          "Top": 0.26038429141044617
+        }
+      },
+      "Id": "cbfd060b-f821-4865-9d5c-c2f502102c02"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 87.3046875,
+      "RowIndex": 5,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.3965469002723694,
+          "Height": 0.04686697944998741,
+          "Left": 0.05144507437944412,
+          "Top": 0.30722126364707947
+        }
+      },
+      "Id": "0996f18d-dd4f-495d-bc9c-af0c5b20ce25",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "f2ee77d2-598f-451f-9668-2f4cd1b0e6f5",
+            "92b3a397-9f25-4821-a393-e6d1cddb51ed"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 89.697265625,
+      "RowIndex": 5,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040916830301285,
+          "Height": 0.04686044901609421,
+          "Left": 0.4479914903640747,
+          "Top": 0.30723056197166443
+        }
+      },
+      "Id": "8c946428-cc73-478a-827b-6831cc72b9da",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["08e8cf7c-c1b2-4b32-a13f-99fa548a64a2"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.380859375,
+      "RowIndex": 5,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940818279981613,
+          "Height": 0.04686036705970764,
+          "Left": 0.5684002041816711,
+          "Top": 0.30723336338996887
+        }
+      },
+      "Id": "cd6ada63-ef76-4beb-a030-a207c8b00187",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["44486732-ded7-449f-a629-e7d322182742"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 89.84375,
+      "RowIndex": 5,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007489800453186,
+          "Height": 0.04686032235622406,
+          "Left": 0.6878080368041992,
+          "Top": 0.3072361648082733
+        }
+      },
+      "Id": "1bf09f9c-85b2-4a5c-b494-273f7d713e09",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["4d953a1d-e710-46f0-9a25-c2dbcaaf116f"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.576171875,
+      "RowIndex": 5,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940746009349823,
+          "Height": 0.04686024785041809,
+          "Left": 0.8078826069831848,
+          "Top": 0.30723899602890015
+        }
+      },
+      "Id": "09e49c9f-64b9-43f0-beea-ac1cc9eb4bc6",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["d957ec4c-ff66-4b62-a0ac-518d1991930a"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 5,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022680899128317833,
+          "Height": 0.04685796797275543,
+          "Left": 0.9272898435592651,
+          "Top": 0.3072417974472046
+        }
+      },
+      "Id": "f42ac7ba-ead2-489a-a147-889f52d3b432"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 87.5,
+      "RowIndex": 6,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.39654672145843506,
+          "Height": 0.04864614084362984,
+          "Left": 0.05144578963518143,
+          "Top": 0.35407912731170654
+        }
+      },
+      "Id": "7c41deba-c7c9-4bb8-9b0e-41ff01d336b4",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "1f1e2504-f955-4d90-b789-b81cc1c16a4d",
+            "61076012-809b-4609-8ae8-5af79e30306c"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 89.892578125,
+      "RowIndex": 6,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040912359952927,
+          "Height": 0.04863974079489708,
+          "Left": 0.4479919970035553,
+          "Top": 0.3540882170200348
+        }
+      },
+      "Id": "41140019-bad9-4c04-af32-0c2ca357cbc9",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["2f2aa0e2-7b49-4028-9e46-06d4206b30ff"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.625,
+      "RowIndex": 6,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940813064575195,
+          "Height": 0.048639655113220215,
+          "Left": 0.5684006810188293,
+          "Top": 0.35409098863601685
+        }
+      },
+      "Id": "93a2c192-f58b-46aa-98d8-0433365fea04",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["42cf550f-a3e0-4678-b0fd-7f0b186fdc54"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.087890625,
+      "RowIndex": 6,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007484585046768,
+          "Height": 0.04863961040973663,
+          "Left": 0.6878083944320679,
+          "Top": 0.3540937304496765
+        }
+      },
+      "Id": "f9a3e63b-9579-403d-9133-8feceb118988",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["19eb43fc-74a9-43a8-9830-f28f75f75205"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.771484375,
+      "RowIndex": 6,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940740048885345,
+          "Height": 0.048639532178640366,
+          "Left": 0.8078829050064087,
+          "Top": 0.35409650206565857
+        }
+      },
+      "Id": "0b15b34b-cdc9-4d19-b1ed-8d6618be6f45",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["95bb967a-d9ec-4859-a909-61c31b0977ef"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 6,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022680895403027534,
+          "Height": 0.04863730072975159,
+          "Left": 0.9272900819778442,
+          "Top": 0.35409924387931824
+        }
+      },
+      "Id": "e62116a9-d556-4532-99fd-e4381143ca9b"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 87.5,
+      "RowIndex": 7,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.39654645323753357,
+          "Height": 0.04508708417415619,
+          "Left": 0.05144652724266052,
+          "Top": 0.40271636843681335
+        }
+      },
+      "Id": "7e6e5d02-ad92-4acc-ac69-4f09c2052137",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "097b356e-d19f-4eb0-bd6c-5d1e76fa0625",
+            "0fd2c1cd-8e52-4dfe-bc46-b8db4d5cbafa",
+            "c6c2d33a-0974-4205-9146-eeb5ec6a158a"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 89.892578125,
+      "RowIndex": 7,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.1204090267419815,
+          "Height": 0.04508082568645477,
+          "Left": 0.4479925036430359,
+          "Top": 0.4027252793312073
+        }
+      },
+      "Id": "c0afb69f-32ff-4e84-b2f6-1ba0ccb74895",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["0e39b52b-07e4-43bd-a4a0-bac1204de9b6"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.625,
+      "RowIndex": 7,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940804123878479,
+          "Height": 0.045080747455358505,
+          "Left": 0.5684010982513428,
+          "Top": 0.40272796154022217
+        }
+      },
+      "Id": "d91c9a58-4968-4cdf-ac9e-607c8abd117b",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["74d74bc4-862f-4e56-a926-1886aa239086"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.087890625,
+      "RowIndex": 7,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007475644350052,
+          "Height": 0.04508070647716522,
+          "Left": 0.6878088116645813,
+          "Top": 0.40273064374923706
+        }
+      },
+      "Id": "372164db-7de5-461e-9059-3d62a692d5b9",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["c799bb5c-9e83-43ff-bb76-6a6273009239"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.771484375,
+      "RowIndex": 7,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940731853246689,
+          "Height": 0.04508063569664955,
+          "Left": 0.8078832626342773,
+          "Top": 0.40273335576057434
+        }
+      },
+      "Id": "e4e82a3f-7011-4dd0-9953-58e1882d5681",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["e5df07b7-61de-417d-9b70-33717e23522f"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 48.388671875,
+      "RowIndex": 7,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022768402472138405,
+          "Height": 0.04507845640182495,
+          "Left": 0.9272903203964233,
+          "Top": 0.40273603796958923
+        }
+      },
+      "Id": "b5ee036e-5b3c-4f72-903c-298fc7de6f00",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["2b7a8c0b-3d41-48d5-a099-6f5dfed90985"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 87.939453125,
+      "RowIndex": 8,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.39654630422592163,
+          "Height": 0.04805251583456993,
+          "Left": 0.05144721642136574,
+          "Top": 0.44779473543167114
+        }
+      },
+      "Id": "4091a10b-c2f7-4659-8b5a-2b28a517a9b2",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "b22d6b8b-5d98-481a-a111-0979e4b6c9db",
+            "d0cc1520-59a4-4789-a055-fdae6949fabd"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.33203125,
+      "RowIndex": 8,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040898948907852,
+          "Height": 0.04804638400673866,
+          "Left": 0.4479929804801941,
+          "Top": 0.44780343770980835
+        }
+      },
+      "Id": "69d3d62e-05de-40f0-a937-a9ab22ae7300",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["3bcd6cb1-9d95-470f-b3e6-1dda68a6b50a"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.015625,
+      "RowIndex": 8,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940799653530121,
+          "Height": 0.0480463020503521,
+          "Left": 0.5684015154838562,
+          "Top": 0.44780609011650085
+        }
+      },
+      "Id": "5df83155-4839-437e-bc09-9b7ca6a539b8",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["53869163-9d52-460c-9c6f-1a9ae53911b8"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 90.52734375,
+      "RowIndex": 8,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007471174001694,
+          "Height": 0.048046257346868515,
+          "Left": 0.68780916929245,
+          "Top": 0.44780871272087097
+        }
+      },
+      "Id": "95dede17-2f36-475e-9215-490d0a3b57f1",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["5ea80809-0d05-4206-a664-1f5dce59942d"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.2109375,
+      "RowIndex": 8,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.1194072738289833,
+          "Height": 0.048046182841062546,
+          "Left": 0.8078835606575012,
+          "Top": 0.4478113651275635
+        }
+      },
+      "Id": "adbf296d-8fd4-4e19-80f7-dbce7d2e437b",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["ac127e51-cee7-4173-9b76-05d8490177c8"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 48.6083984375,
+      "RowIndex": 8,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022768406197428703,
+          "Height": 0.04804404824972153,
+          "Left": 0.9272905588150024,
+          "Top": 0.4478139877319336
+        }
+      },
+      "Id": "48033a18-68e2-4d14-bb86-2591b6ec6b16"
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 88.818359375,
+      "RowIndex": 9,
+      "ColumnIndex": 1,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.39654606580734253,
+          "Height": 0.048150550574064255,
+          "Left": 0.051447946578264236,
+          "Top": 0.4958387315273285
+        }
+      },
+      "Id": "df6e5273-ba2d-4b08-a022-262cd363ec6c",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "bba878d6-c4e1-4d29-91b4-bc9477077847",
+            "939a2657-f695-4f65-a1cc-95f384f5e4a9",
+            "bbca547f-4f87-4fdc-a8d7-4e689af6ba5c"
+          ]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.259765625,
+      "RowIndex": 9,
+      "ColumnIndex": 2,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12040892243385315,
+          "Height": 0.04814456030726433,
+          "Left": 0.44799351692199707,
+          "Top": 0.49584725499153137
+        }
+      },
+      "Id": "296d30c1-bb5b-4311-acda-88cbbc9092ef",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["173b39e0-5cc0-4b88-a68c-14073749ea90"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.943359375,
+      "RowIndex": 9,
+      "ColumnIndex": 3,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940793693065643,
+          "Height": 0.04814447835087776,
+          "Left": 0.5684019923210144,
+          "Top": 0.4958498179912567
+        }
+      },
+      "Id": "0fde5281-c496-4bd5-8e31-8f22837d22d2",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["09df2639-3478-4e9e-b31e-8c0a4f54c991"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 91.455078125,
+      "RowIndex": 9,
+      "ColumnIndex": 4,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.12007465213537216,
+          "Height": 0.04814443364739418,
+          "Left": 0.6878095269203186,
+          "Top": 0.49585241079330444
+        }
+      },
+      "Id": "516c4ff7-790c-4d78-bff6-c661a8b748ee",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["c027d735-aaf7-4d69-8777-643e51bd914b"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 92.138671875,
+      "RowIndex": 9,
+      "ColumnIndex": 5,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.11940720677375793,
+          "Height": 0.04814435914158821,
+          "Left": 0.8078838586807251,
+          "Top": 0.4958549737930298
+        }
+      },
+      "Id": "73acc685-3b66-4186-9a6b-41a2359f774d",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": ["e820ebd4-1fe4-4192-a1e9-bbbe00dd1281"]
+        }
+      ]
+    },
+    {
+      "BlockType": "CELL",
+      "Confidence": 49.12109375,
+      "RowIndex": 9,
+      "ColumnIndex": 6,
+      "RowSpan": 1,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.02276839315891266,
+          "Height": 0.048142269253730774,
+          "Left": 0.9272907972335815,
+          "Top": 0.4958575367927551
+        }
+      },
+      "Id": "213b44bf-60b8-4e8a-97a8-6ebdc6f35dcc"
+    },
+    {
+      "BlockType": "MERGED_CELL",
+      "Confidence": 34.6923828125,
+      "RowIndex": 1,
+      "ColumnIndex": 6,
+      "RowSpan": 6,
+      "ColumnSpan": 1,
+      "Geometry": {
+        "BoundingBox": {
+          "Width": 0.022769635543227196,
+          "Height": 0.2786615788936615,
+          "Left": 0.9272888898849487,
+          "Top": 0.12407495081424713
+        }
+      },
+      "Id": "9a946562-c033-4454-b6dd-0aff317ce3d3",
+      "Relationships": [
+        {
+          "Type": "CHILD",
+          "Ids": [
+            "c249c462-8501-41ae-bc23-20fa652c4b65",
+            "747fa8f1-982a-4814-be9b-4e2a9870e06a",
+            "a9a4eae8-5871-4d0e-a2b4-c3942f6b5ae3",
+            "cbfd060b-f821-4865-9d5c-c2f502102c02",
+            "f42ac7ba-ead2-489a-a147-889f52d3b432",
+            "e62116a9-d556-4532-99fd-e4381143ca9b"
+          ]
+        }
+      ]
+    }
+  ],
+  "rowColors": [
+    {
+      "rowIndex": 1,
+      "r": 49.106770833333336,
+      "g": 64.91493055555556,
+      "b": 70.48177083333333
+    },
+    {
+      "rowIndex": 2,
+      "r": 203.578125,
+      "g": 0.7638888888888888,
+      "b": 0.7361111111111112
+    },
+    {
+      "rowIndex": 3,
+      "r": 203.375,
+      "g": 0.06076388888888889,
+      "b": 0
+    },
+    {
+      "rowIndex": 4,
+      "r": 205.1484375,
+      "g": 3.921875,
+      "b": 0.9791666666666666
+    },
+    {
+      "rowIndex": 5,
+      "r": 202.15190972222223,
+      "g": 0,
+      "b": 0
+    },
+    {
+      "rowIndex": 6,
+      "r": 27.453125,
+      "g": 65.28038194444444,
+      "b": 128.47916666666666
+    },
+    {
+      "rowIndex": 7,
+      "r": 32.4765625,
+      "g": 76.51388888888889,
+      "b": 137.17881944444446
+    },
+    {
+      "rowIndex": 8,
+      "r": 27.838541666666668,
+      "g": 65.92447916666667,
+      "b": 129.28298611111111
+    },
+    {
+      "rowIndex": 9,
+      "r": 27.458333333333332,
+      "g": 65.34461805555556,
+      "b": 128.44965277777777
+    }
+  ],
+  "expectedRows": [
+    {
+      "team": "Red",
+      "player": "Player01 A",
+      "score": "22",
+      "kills": "22",
+      "assists": "7",
+      "deaths": "8",
+      "win": 1,
+      "loss": 0
+    },
+    {
+      "team": "Red",
+      "player": "Player02",
+      "score": "17",
+      "kills": "17",
+      "assists": "7",
+      "deaths": "11",
+      "win": 1,
+      "loss": 0
+    },
+    {
+      "team": "Red",
+      "player": "Player03",
+      "score": "6",
+      "kills": "6",
+      "assists": "7",
+      "deaths": "11",
+      "win": 1,
+      "loss": 0
+    },
+    {
+      "team": "Red",
+      "player": "Player04",
+      "score": "5",
+      "kills": "5",
+      "assists": "3",
+      "deaths": "18",
+      "win": 1,
+      "loss": 0
+    },
+    {
+      "team": "Blue",
+      "player": "Player05",
+      "score": "16",
+      "kills": "16",
+      "assists": "6",
+      "deaths": "10",
+      "win": 0,
+      "loss": 1
+    },
+    {
+      "team": "Blue",
+      "player": "Player06",
+      "score": "13",
+      "kills": "13",
+      "assists": "7",
+      "deaths": "14",
+      "win": 0,
+      "loss": 1
+    },
+    {
+      "team": "Blue",
+      "player": "Player07",
+      "score": "11",
+      "kills": "12",
+      "assists": "8",
+      "deaths": "12",
+      "win": 0,
+      "loss": 1
+    },
+    {
+      "team": "Blue",
+      "player": "Player08",
+      "score": "7",
+      "kills": "7",
+      "assists": "7",
+      "deaths": "15",
+      "win": 0,
+      "loss": 1
+    }
+  ]
+}

@@ -716,3 +716,56 @@ test('processScoreboardImage selects the scoreboard when Textract finds another 
   assert.equal(rows[0].player, 'Spartan');
   assert.equal(rows[0].score, '19');
 });
+
+test('processScoreboardImage drops icon words Textract reads in the player column', () => {
+  const nameCell = (
+    id: string,
+    rowIndex: number,
+    wordIds: string[],
+  ): TextractBlockLite => ({
+    Id: id,
+    BlockType: 'CELL',
+    RowIndex: rowIndex,
+    ColumnIndex: 1,
+    Relationships: [{ Type: 'CHILD', Ids: wordIds }],
+  });
+  const blocks: TextractBlockLite[] = [
+    table('icon-table', [
+      'icon-player-header',
+      'icon-score-header',
+      'icon-chat',
+      'icon-chat-score',
+      'icon-split',
+      'icon-split-score',
+    ]),
+    cell('icon-player-header', 1, 1, 'icon-player-header-word'),
+    cell('icon-score-header', 1, 2, 'icon-score-header-word'),
+    word('icon-player-header-word', 'PLAYERS'),
+    word('icon-score-header-word', 'SCORE'),
+    // MCC draws a chat bubble over the player column; Textract reads "...".
+    nameCell('icon-chat', 2, ['icon-clan', 'icon-dots', 'icon-name']),
+    word('icon-clan', '[UNSC]'),
+    word('icon-dots', '...'),
+    word('icon-name', 'Spartan117'),
+    cell('icon-chat-score', 2, 2, 'icon-chat-score-word'),
+    word('icon-chat-score-word', '13'),
+    // A bracket Textract reads as its own word still delimits the clan tag.
+    nameCell('icon-split', 3, [
+      'icon-open',
+      'icon-tag',
+      'icon-name-1',
+      'icon-name-2',
+    ]),
+    word('icon-open', '['),
+    word('icon-tag', 'Elite]'),
+    word('icon-name-1', 'Noble'),
+    word('icon-name-2', 'Six'),
+    cell('icon-split-score', 3, 2, 'icon-split-score-word'),
+    word('icon-split-score-word', '7'),
+  ];
+  const rows = processScoreboardImage(blocks, []);
+  assert.deepEqual(
+    rows.map((row) => row.player),
+    ['Spartan117', 'Noble Six'],
+  );
+});
