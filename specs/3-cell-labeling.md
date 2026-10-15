@@ -50,6 +50,8 @@ Reviewers in the Cognito `labeler` group open each scored run on a phone, compar
 | The queue lists completed processing runs with unresolved cells | A run enters the queue when it has a `SUCCEEDED` spec 2 quality result and parser provenance (§6.1), and is listed oldest first. | Every adjudication names the quality run it was reviewed against, and the validated table needs provenance to know which table rows the parser exported. |
 | Header cells are not mentioned | Header cells are reviewed like data cells. | Header OCR errors cause column mapping errors, and spec 2 writes feature rows for them. |
 | No component named | `applications/admin`, the workspace the repository README assigns to the reviewer API and mobile review interface. | `ocr-quality` has no API or interface (spec 2 §2.2). |
+| The sampling seed is not mentioned; a configured seed would sit in bundled configuration | `samplingSeed` is a `SecureString` at `/mcc/<env>/review/sampling-seed`, created by the OpenTofu foundation (P1.1) and readable only by `EnqueueRun` and `RebuildReviewState`. Plans record its SHA-256, never the seed (§7.6, §13.2). | The repository is public. With a committed seed anyone, reviewers included, could compute which cells will be double-reviewed and which runs hide priorities. A reviewer who looks harder at known blind cells biases the sample that spec 2 §9.6 relies on. |
+| A row has no priority of its own | Spec 2 §9.4 defines a row `reviewPriority`, and spec 3 displays and records it (§7.6). | Spec 2 owns every priority. Spec 3 only shows and records what spec 2 computed. |
 
 **Additional capabilities included:** a bulk action that accepts the rest of a row as one adjudication per cell, disagreement resolution for blind pairs, an operator rebuild that also enqueues runs scored before this component existed, and a per-run review plan that records sampling decisions as evidence.
 
@@ -123,9 +125,9 @@ Every route sits behind the CloudFront `/api/*` behavior and the JWT authorizer,
 
 | Method and route | Lambda | Behavior |
 | --- | --- | --- |
-| `GET /api/v1/queue?pass=PRIMARY\|BLIND_DOUBLE\|DISAGREEMENT&limit=25&cursor=` | `ReviewRead` | `PRIMARY`: runs that are not complete, oldest enqueue first. `BLIND_DOUBLE`: sampled cells waiting for a blind review, excluding cells the caller has adjudicated in the primary track. `DISAGREEMENT`: runs with an open disagreement. Returns run and cell summaries only, never OCR text or priorities. `limit` is 1 to 100. |
-| `GET /api/v1/runs/{runId}` | `ReviewRead` | The run view: tables, cells (observed text, geometry, `semanticField`, `exportedField`, row role), rows with the parser's output (exported, team, win and loss), current resolutions, required and resolved counts, open disagreements, `qualityRunId` (the latest `SUCCEEDED` quality run, spec 2 §5.2 rule 5), the latest validated version, and, only in `PRIORITY_SHOWN` runs, each cell's and table's `reviewPriority`, the run priority and each signal's `messageCode` and `evidence`. |
-| `GET /api/v1/runs/{runId}/blind-cells/{cellObservationId}` | `ReviewRead` | The blind view of one sampled cell: observed text, geometry, `semanticField` and `exportedField`. Never a decision, priority, signal or parser team. `404 TARGET_NOT_FOUND` when the cell is not in the run's blind sample. |
+| `GET /api/v1/queue?pass=PRIMARY\|BLIND_DOUBLE\|DISAGREEMENT&limit=25&cursor=` | `ReviewRead` | `PRIMARY`: runs that are not complete, oldest enqueue first. `BLIND_DOUBLE`: sampled cells waiting for a blind review, excluding cells the caller has adjudicated in the primary track. `DISAGREEMENT`: cells with an open disagreement, grouped by run. Returns run and cell summaries only, never OCR text, priorities or whether a cell is blind-sampled. `limit` is 1 to 100. |
+| `GET /api/v1/runs/{runId}` | `ReviewRead` | The run view: tables, cells (observed text, geometry, `semanticField`, `exportedField`, row role), rows with the parser's output (exported, team, win and loss), current resolutions, required and resolved counts, open disagreements, the rows that break §8.3 condition 5 with `OUTCOME_INCONSISTENT`, `qualityRunId` (the latest `SUCCEEDED` quality run, spec 2 §5.2 rule 5), the latest validated version, and, only in `PRIORITY_SHOWN` runs, each cell's, row's and table's `reviewPriority`, the run priority and each signal's `messageCode` and `evidence`. |
+| `GET /api/v1/runs/{runId}/blind-cells/{cellObservationId}` | `ReviewRead` | The blind view of one sampled cell: observed text, geometry, `semanticField` and `exportedField`. Never a decision, priority, signal or parser team. `404 TARGET_NOT_FOUND` unless the cell is in the blind queue or the caller wrote its current blind adjudication, so the route cannot be used to probe which cells are sampled. |
 | `GET /api/v1/runs/{runId}/image` | `ReviewRead` | A presigned `GetObject` URL for the run's `source/original`, valid for `imageUrlTtlSeconds` (600), with `response-content-type` from the screenshot metadata and `response-cache-control: private, no-store`. Never a bucket name or permanent URL. |
 | `POST /api/v1/runs/{runId}/adjudications` | `ReviewWrite` | Writes one cell, row or table adjudication (§4.2, §6.2). |
 | `POST /api/v1/runs/{runId}/adjudications/bulk-accept` | `ReviewWrite` | Accepts the remaining unresolved cells of one table row, one adjudication per cell (§7.2). |
@@ -159,7 +161,8 @@ The browser supplies only the decision, the target, `reviewPass`, `qualityRunId`
 | `priorDecisionsShown` | `true` for every `DISAGREEMENT_RESOLUTION`, and for any adjudication that supersedes one whose decision is not `SKIPPED`, because the reviewer saw the decision being replaced; `false` otherwise |
 | `bulk` | `true` only on the bulk route |
 | `decision` and `errorTypes` of rows and tables | derived from the reviewer's answers and the parser output (§7.4, §7.5) |
-| `reviewedAt`, `build`, `reviewPolicyVersion`, `reviewConfigVersion` | server clock and deployment |
+| `reviewedAt` | `max(now, predecessor.reviewedAt + 1 ms)`, and for a `DISAGREEMENT_RESOLUTION` at least the current blind adjudication's `reviewedAt + 1 ms` (§8.1) |
+| `build`, `reviewPolicyVersion`, `reviewConfigVersion` | deployment |
 
 Telemetry is client-reported and recorded as such. It is used for review analysis only and never becomes a feature (§8.6).
 
@@ -177,9 +180,11 @@ Every request is validated against a schema before any read. Text fields are at 
 | `qualityRunId` is not a quality run of this run with a `SUCCEEDED` outcome | `409 QUALITY_RUN_MISMATCH` | nothing |
 | `supersedesAdjudicationId` is not the head of the target's chain in its track, read from S3 as in §6.2 step 3, and the request is not a replay | `409 STALE_RESOLUTION`, with the current resolution | nothing |
 | `SKIPPED`, or a bulk accept, on a cell whose current decision is `ACCEPTED`, `CORRECTED` or `UNREADABLE`, when the request is not a replay | `409 ALREADY_RESOLVED` | nothing |
-| `BLIND_DOUBLE` on a cell outside the blind sample, or by a reviewer with a primary-track adjudication of that cell | `409 NOT_SAMPLED`, `409 SAME_REVIEWER` | nothing |
+| A bulk accept in which at least one cell failed | `409 BULK_PARTIAL`, with each cell's result (§6.2) | the cells that succeeded |
+| `BLIND_DOUBLE` on a cell that is not in the blind queue and has no blind chain, or by a reviewer with a primary-track adjudication of that cell, or superseding another reviewer's blind adjudication | `409 NOT_IN_BLIND_QUEUE`, `409 SAME_REVIEWER` | nothing |
 | `DISAGREEMENT_RESOLUTION` on a cell without an open disagreement, or by the blind reviewer | `409 NO_DISAGREEMENT`, `409 SAME_REVIEWER` | nothing |
-| A decision breaks a rule in §7.2, §7.4 or §7.5 | `422 INVALID_DECISION`, with the rule's code | nothing |
+| A decision breaks a rule in §7.2, §7.4 or §7.5, such as `INVALID_TEAM` or `INVALID_ANCHOR` | `422 INVALID_DECISION`, with the rule's code | nothing |
+| The run's player rows have inconsistent teams or outcomes (§8.3 condition 5) | not rejected; the run view and the write response report `OUTCOME_INCONSISTENT` for the rows involved | the adjudication |
 
 ### 4.4 Queue trigger
 
@@ -225,7 +230,7 @@ The rule invokes `EnqueueRun` asynchronously with a retry policy of 3 attempts w
 
 | Object | `schemaVersion` | Writer | Contents |
 | --- | --- | --- | --- |
-| `review/plan.json` | `review-plan/v1` | `enqueue-run` | `ReviewPlan` (§10.1): `runId`, `screenshotId`, `selectionReason`, `displayMode`, `blindSampleCellIds`, `reviewConfigVersion`, the triggering `qualityRunId`, `createdAt` |
+| `review/plan.json` | `review-plan/v1` | `enqueue-run` | `ReviewPlan` (§10.1): `runId`, `screenshotId`, `selectionReason`, `displayMode`, `blindSampleCellIds`, `reviewConfigVersion`, `samplingSeedSha256`, the triggering `qualityRunId`, `createdAt` |
 | `adjudications/cells/...` | `cell-adjudication/v1` | `review-write` | `CellAdjudication` with `reviewPass` `PRIMARY` or `DISAGREEMENT_RESOLUTION` |
 | `adjudications/rows/...` | `row-adjudication/v1` | `review-write` | `RowAdjudication` |
 | `adjudications/tables/...` | `table-adjudication/v1` | `review-write` | `TableAdjudication` |
@@ -252,7 +257,7 @@ Any change to a stage's behavior bumps its version in the same delivery.
 1. Validate the key (§4.4). Read the quality `outcome.json`. Stop with `skipped: QUALITY_NOT_SUCCEEDED` unless its status is `SUCCEEDED`.
 2. Read the run `manifest.json` and `normalized/observations.json`. Stop with `skipped: MISSING_PARSER_PROVENANCE` when `parser.provenance` (spec 2 P0.3) is absent. An operator replays such a run (spec 1 §6.2); the replay is scored and enqueued like any run.
 3. Build the review plan (§7.6) and write it create-only. On 412, read the existing plan and continue with it.
-4. Put the run's `META` item if it does not exist (status `OPEN`, run prefix, `screenshotId`, `enqueuedAt`, the plan's display mode, primary queue keys). Otherwise update `latestQualityRunId` when the new `qualityRunId` is greater.
+4. Put the run's `META` item and its `QUEUE#PRIMARY` item in one transaction if `META` does not exist (§8.2). `META` holds status `OPEN`, run prefix, `screenshotId`, `enqueuedAt` and the plan's display mode. Otherwise update `latestQualityRunId` when the new `qualityRunId` is greater.
 5. Evaluate the run once (§6.3). A run in which Textract found no table has no required item, so this evaluation completes it and writes its validated table with no rows.
 6. Log `Run enqueued` with `runId`, `qualityRunId` and the outcome of each step.
 
@@ -269,19 +274,19 @@ A re-score therefore never re-enqueues or resets a run. It only moves `latestQua
    2. When the successor key exists with another `clientRequestId`, or a non-null `supersedesAdjudicationId` is not an adjudication in the chain, return `409 STALE_RESOLUTION` with the current resolution.
    3. Otherwise check the pass rules (§4.3, §6.4) and the decision rules (§7) against the chain's head, and derive server-owned fields (§4.2).
 4. Write the adjudication to the successor key with `If-None-Match: *`. On 412, another request wrote the key after the listing: apply step 3.1 or 3.2 to the object it wrote.
-5. Update the item's projection (§8.2).
+5. Update the item's projection (§8.2). A `BLIND_DOUBLE` write also removes the cell's blind queue keys in the same update, so the cell leaves the blind queue.
 6. For a `BLIND_DOUBLE` write, evaluate the disagreement (§6.4) and stop. Otherwise evaluate the run (§6.3) and, for a cell with a blind adjudication, the disagreement.
 7. Return `201` with the adjudication, the item's resolution, the run's counts and the latest validated version.
 
-A bulk accept performs steps 1 to 5 for each listed cell in column order, with one `bulkActionId`, `bulk: true` and the per-cell `clientRequestId` `<clientRequestId>:<cellObservationId>`, then step 6 once. Every listed cell must belong to the target row and be unresolved, unless step 3.1 finds that its write is a replay. A failure on one cell does not undo earlier ones. The response lists each cell's result, and a retry with the same `clientRequestId` returns the cells already written as replays instead of `409 ALREADY_RESOLVED`.
+A bulk accept performs steps 1 to 5 for each listed cell in column order, with one `bulkActionId`, `bulk: true` and the per-cell `clientRequestId` `<clientRequestId>:<cellObservationId>`, then step 6 once. Every listed cell must belong to the target row and be unresolved, unless step 3.1 finds that its write is a replay. A failure on one cell does not undo earlier ones. The response lists each cell's result (`201` written, `200` replayed, or the error code). Its status is `200` when every listed cell was written or replayed, and `409 BULK_PARTIAL` otherwise, so a client that reads only the status still sees the failure. A retry with the same `clientRequestId` returns the cells already written as replays instead of `409 ALREADY_RESOLVED`.
 
 ### 6.3 Run evaluation and validated tables
 
 `evaluateRun(runPrefix, dependencies)` runs after every primary-track write, once at enqueue (§6.1), and in every rebuild:
 
 1. List the run's `adjudications/` prefix and resolve every chain (§8.1). S3 listings are strongly consistent, so the listing includes the write that triggered the evaluation.
-2. Compute the review scope and completion (§7.1, §8.3). Update the `META` counts, status and `evaluatedAdjudicationCount` (the number of listed keys) with the condition that `evaluatedAdjudicationCount` does not decrease, so an evaluation with an older listing never overwrites a newer one. When the condition fails, a newer evaluation has run and this one stops. When the run is incomplete, stop.
-3. Add every sampled cell in scope (§7.6) that has neither a blind adjudication nor a blind queue entry to the blind queue, with a conditional put on its `CELL` item. The step is idempotent and runs on every evaluation of a complete run, so cells of a table added to the scope later, and cells missed by an evaluation that stopped early, are queued by the next evaluation.
+2. Compute the review scope and completion (§7.1, §8.3). In one `TransactWriteItems`, update the `META` counts, status and `evaluatedAdjudicationCount` (the number of listed keys) with the condition that `evaluatedAdjudicationCount` does not decrease, and put the run's `QUEUE#PRIMARY` item when the run is incomplete or delete it when the run is complete (§8.2). The condition keeps an evaluation with an older listing from overwriting a newer one's status or queue membership. When the condition fails, a newer evaluation has run and this one stops. When the run is incomplete, stop.
+3. Add every sampled cell in scope (§7.6) that has neither a blind adjudication nor blind queue keys to the blind queue, with a conditional update of its `CELL` item that sets only the blind queue keys, on the condition that the item has no queue keys and no blind chain head. The update never replaces the item, so the cell's projection and reviewer sets stay intact. The step is idempotent and runs on every evaluation of a complete run, so cells of a table added to the scope later, and cells missed by an evaluation that stopped early, are queued by the next evaluation.
 4. Compute `adjudicationSetSha256` over the listed keys (§8.5). List `validated/` and read the latest version. Adjudication keys are only ever added, so two listings of one run differ only by keys added between them. When the latest version's `lineage.adjudicationCount` is at least the number of listed keys, it was built from this listing's set or a later one, and the evaluation stops.
 5. Build the validated table (§8.4) as version `n + 1` and write it create-only. On 412, another writer has written that version: return to step 1, at most 3 times, then log `VALIDATED_WRITE_CONTENDED` at `WARN` and leave the write to the next evaluation.
 
@@ -291,13 +296,13 @@ A table decision that adds a table to the scope can make a complete run incomple
 
 A blind reviewer takes cells from the `BLIND_DOUBLE` queue and sees only the blind view (§4.1). Their adjudication goes to `blind-adjudications/` with `reviewPass: BLIND_DOUBLE` and `priorityShown: false`, and it never supersedes or changes the primary track. Its `priorDecisionsShown` is `false` unless it replaces the blind reviewer's own earlier decision (§4.2).
 
-A primary and a blind resolution agree when both decisions are the same and, for `ACCEPTED` and `CORRECTED`, their resolved texts are identical. Error types are not compared. A cell has an open disagreement when its current primary and blind resolutions disagree and the primary chain has no `DISAGREEMENT_RESOLUTION` adjudication with a `reviewedAt` later than the current blind adjudication's. The rule is a pure function of the two chains, so writes and rebuilds compute the same answer. The server evaluates it after a blind write and after any primary-track write to a cell with a blind adjudication, and records the result on the cell's projection item and the run's `DISAGREEMENT` queue entry (§8.2).
+A primary and a blind resolution agree when both decisions are the same and, for `ACCEPTED` and `CORRECTED`, their resolved texts are identical. Error types are not compared. A cell has an open disagreement when its current primary and blind resolutions disagree and the primary chain has no `DISAGREEMENT_RESOLUTION` adjudication with a `reviewedAt` later than the current blind adjudication's. The rule is a pure function of the two chains, so writes and rebuilds compute the same answer. The server evaluates it after a blind write and after any primary-track write to a cell with a blind adjudication. It records the result as `disagreementOpen` on the cell's `CELL` item, and sets or removes the cell's `DISAGREEMENT` queue keys in the same update (§8.2). The update carries the primary and blind chain lengths it was computed from, and is conditional on neither length being lower than the stored ones, so an evaluation from older chains never overwrites a newer result.
 
 Any labeler other than the blind reviewer opens an open disagreement, sees both decisions without reviewer identities, and writes a `DISAGREEMENT_RESOLUTION` adjudication that supersedes the current primary adjudication. The disagreement closes whatever the resolver decides, including when the resolver keeps the first decision or chooses a third value. A later blind adjudication of the same cell can open it again. Because the resolution changes the primary set, the run gets a new validated version (§6.3).
 
 ### 6.5 Rebuild
 
-`RebuildReviewState` is invoked by an operator with `{ "scope": "RUN", "runPrefix": <prefix> }` or `{ "scope": "NAMESPACE" }`. For each run in scope with a `SUCCEEDED` quality outcome, it writes the plan and `META` item when missing (§6.1 steps 2 to 4), resolves every chain and writes each item's projection, recomputes blind and disagreement queue entries, and runs §6.3. `NAMESPACE` lists every key under `<ns>submissions/`. It is the backfill path for runs scored before this component was deployed, and the recovery path after the table is deleted. A rebuild writes the same projections as incremental writes (§16.1) and is idempotent.
+`RebuildReviewState` is invoked by an operator with `{ "scope": "RUN", "runPrefix": <prefix> }` or `{ "scope": "NAMESPACE" }`. For each run in scope with a `SUCCEEDED` quality outcome, it writes the plan, `META` and `QUEUE#PRIMARY` items when missing (§6.1 steps 2 to 4), resolves every chain and writes each item's projection, recomputes each cell's blind or disagreement queue keys, and runs §6.3. `NAMESPACE` lists every key under `<ns>submissions/`. It is the backfill path for runs scored before this component was deployed, and the recovery path after the table is deleted. A rebuild writes the same projections as incremental writes (§16.1) and is idempotent.
 
 ### 6.6 Retries and failure
 
@@ -343,7 +348,7 @@ A correction can carry several types, sorted and without duplicates.
 
 ### 7.4 Row decisions
 
-The reviewer answers three questions for a table row: whether it is a player row (`isPlayerRow`), the player's team (`team`), and the outcome (`outcome`, `WIN` or `LOSS`). `team` is one of the MCC colour names in spec 1 §8.4, optionally followed by a space and a digit from 2 to 9, or an empty string in a free-for-all. `team` and `outcome` are required when `isPlayerRow` is true and must be `null` otherwise.
+The reviewer answers three questions for a table row: whether it is a player row (`isPlayerRow`), the player's team (`team`), and the outcome (`outcome`, `WIN` or `LOSS`). `team` is one of the MCC colour names in spec 1 §8.4, optionally followed by a space and a digit from 2 to 9, or an empty string in a free-for-all (`422 INVALID_DECISION` with `INVALID_TEAM` otherwise). `team` and `outcome` are required when `isPlayerRow` is true and must be `null` otherwise.
 
 The server copies the parser's output for the row (whether `parser.provenance.rowIndexes` lists it, and the team, win and loss of its exported row) and derives the error types:
 
@@ -358,7 +363,7 @@ The server copies the parser's output for the row (whether `parser.provenance.ro
 
 ### 7.5 Table decisions
 
-The reviewer states the table's `role` (`SCOREBOARD` or `NOT_SCOREBOARD`). For a `SCOREBOARD` table they also confirm `columnFields`, a field for every column index (`PLAYER`, `SCORE`, `KILLS`, `ASSISTS`, `DEATHS` or `NONE`), with exactly one `PLAYER` column and at most one column per other field, and list `undetectedRows`: player rows the screenshot shows but Textract never detected. Each undetected row holds `insertAfterRowIndex`, `team`, `player`, `score`, `kills`, `assists`, `deaths` and `outcome`, entered by the reviewer. Adding or editing an undetected row writes a new table adjudication that supersedes the previous one with the complete list.
+The reviewer states the table's `role` (`SCOREBOARD` or `NOT_SCOREBOARD`). For a `SCOREBOARD` table they also confirm `columnFields`, a field for every column index (`PLAYER`, `SCORE`, `KILLS`, `ASSISTS`, `DEATHS` or `NONE`), with exactly one `PLAYER` column and at most one column per other field, and list `undetectedRows`: player rows the screenshot shows but Textract never detected. Each undetected row holds `insertAfterRowIndex`, `team`, `player`, `score`, `kills`, `assists`, `deaths` and `outcome`, entered by the reviewer. `insertAfterRowIndex` is `0` for the top of the table or the `rowIndex` of a row in the same table, so it lies between `0` and the table's largest `rowIndex` (`422 INVALID_DECISION` with `INVALID_ANCHOR` otherwise). `team` follows the §7.4 pattern (`INVALID_TEAM` otherwise), and `outcome` is `WIN` or `LOSS`. Adding or editing an undetected row writes a new table adjudication that supersedes the previous one with the complete list.
 
 The server copies whether the parser selected the table and the parser's `columnFields`, and derives the error types:
 
@@ -372,12 +377,14 @@ The server copies whether the parser selected the table and the parser's `column
 
 ### 7.6 Display modes and blind sampling
 
+`samplingSeed` is a secret read from SSM (§13.2), never from configuration or source, so nobody can compute in advance which runs will hide priorities or which cells will be double-reviewed. The plan records `samplingSeedSha256`, never the seed.
+
 `enqueue-run` decides both samples once per run and records them in the review plan. With `h(x)` the first four bytes of `sha256(x)` read as an unsigned big-endian integer:
 
 - **Display mode.** The run is `PRIORITY_HIDDEN` when `h(samplingSeed + "\0hidden\0" + runId) mod 10000 < priorityHiddenShare * 10000`, otherwise `PRIORITY_SHOWN`. In a hidden run the API returns no priority, score or signal for any item (§4.1), and every adjudication records `priorityShown: false`.
 - **Blind sample.** A cell is sampled when `h(samplingSeed + "\0blind\0" + cellObservationId) mod 10000 < blindDoubleReviewShare * 10000`. The plan lists the sampled cells of every table, and those in scope enter the blind queue once the run is complete (§6.3 step 3).
 
-In a shown run, `priorityShown` is `true` on every `PRIMARY` adjudication. `BLIND_DOUBLE` and `DISAGREEMENT_RESOLUTION` adjudications always record `priorityShown: false`, because their screens never show a priority (§9.3). `shownPriority` is the item's own priority from the quality result named by `qualityRunId`: the cell's `reviewPriority`, the table's `summary.reviewPriority`, or for a row the highest `reviewPriority` of its cells, which is what the reviewer interface displays on a row. It is `null` when the item has no priority, such as a cell of an unassessed table, and always `null` when `priorityShown` is false.
+In a shown run, `priorityShown` is `true` on every `PRIMARY` adjudication. `BLIND_DOUBLE` and `DISAGREEMENT_RESOLUTION` adjudications always record `priorityShown: false`, because their screens never show a priority (§9.3). `shownPriority` is the item's own priority from the quality result named by `qualityRunId`: the cell's `reviewPriority`, the table's `summary.reviewPriority`, or the row's `reviewPriority` from spec 2 §9.4. The reviewer interface displays the same value on each item. It is `null` when the item has no priority, such as a cell of an unassessed table, and always `null` when `priorityShown` is false.
 
 Labels with `priorityShown: false` and `priorDecisionsShown: false`, from hidden runs and from the blind sample, are the blind labels spec 2 §9.6 measures its automation gate on. A label that replaces an earlier decision records `priorDecisionsShown: true` (§4.2) and is not blind, even in a hidden run.
 
@@ -399,7 +406,7 @@ v1 rejects any other value than `REVIEW_ALL` in a plan. The optional `shownRiskM
 
 An item is a cell in the primary track, a cell in the blind track, a row, or a table. Its adjudications form a chain: the first has `supersedesAdjudicationId: null` and the key `.../root.json`, and each later one names the current head and has the key `.../<head adjudicationId>.json`. Because the key is create-only, two submissions naming the same predecessor cannot both be written, and the second gets `409 STALE_RESOLUTION`. This keeps the original rule that a replacement supersedes the current resolution only when it names it, and enforces it in storage instead of in the projection.
 
-The current adjudication of an item is the chain's last element. `reviewedAt` increases along a chain, because each successor is written after its predecessor exists. The resolution as of a cutoff (spec 2 §8.5 rule 1) is the last element whose `reviewedAt` is at or before the cutoff. A chain with a missing link, which create-only writes cannot produce, fails resolution with `BrokenChainError` and is logged at `ERROR`.
+The current adjudication of an item is the chain's last element. `reviewedAt` strictly increases along a chain: the writer sets it to `max(now, predecessor.reviewedAt + 1 ms)`, so clock differences between Lambda execution environments can never order a successor before its predecessor. A `DISAGREEMENT_RESOLUTION` also takes at least the current blind adjudication's `reviewedAt` plus 1 ms, so the open-disagreement rule (§6.4) always sees it as later than the blind decision it resolves. The resolution as of a cutoff (spec 2 §8.5 rule 1) is the last element whose `reviewedAt` is at or before the cutoff. A chain with a missing link, which create-only writes cannot produce, fails resolution with `BrokenChainError` and is logged at `ERROR`.
 
 ### 8.2 Resolutions and the `CellResolution` projection
 
@@ -411,11 +418,14 @@ The read routes use only these attributes and never list the bucket:
 
 | Item | Attributes | Written by |
 | --- | --- | --- |
-| `META` | `runPrefix`, `screenshotId`, `displayMode`, `latestQualityRunId`, `status` (`OPEN` or `COMPLETE`), required and resolved counts per item kind, `evaluatedAdjudicationCount`, `latestValidatedVersion` and `latestValidatedTableId`, `openDisagreementCount`, queue keys | `enqueue-run` (§6.1), `evaluateRun` (§6.3), the disagreement check (§6.4), `rebuild-review-state` |
-| `CELL#<blockId>` | the `CellResolution` fields, `primaryReviewerIds` (the `sub` of every reviewer with an adjudication in the cell's primary chain), `blindSampled`, the blind chain's head and `chainLength`, `blindReviewerId`, `disagreementOpen`, blind queue keys | `review-write`, `evaluateRun`, `rebuild-review-state` |
+| `META` | `runPrefix`, `screenshotId`, `displayMode`, `latestQualityRunId`, `status` (`OPEN` or `COMPLETE`), required and resolved counts per item kind, `evaluatedAdjudicationCount`, `latestValidatedVersion` and `latestValidatedTableId`; no queue keys | `enqueue-run` (§6.1), `evaluateRun` (§6.3), `rebuild-review-state` |
+| `QUEUE#PRIMARY` | queue keys `QUEUE#PRIMARY` and `<enqueuedAt>#<runId>`; present exactly while the run is not complete | `enqueue-run`, `evaluateRun`, `rebuild-review-state`, always in a transaction with the `META` status update |
+| `CELL#<blockId>` | the `CellResolution` fields, `primaryReviewerIds` (the `sub` of every reviewer with an adjudication in the cell's primary chain), `blindSampled`, the blind chain's head and `chainLength`, `blindReviewerId`, `disagreementOpen` with the chain lengths it was computed from, and at most one pair of queue keys: `QUEUE#BLIND` while the cell waits for a blind review, or `QUEUE#DISAGREEMENT` while its disagreement is open | `review-write`, `evaluateRun`, the disagreement check (§6.4), `rebuild-review-state` |
 | `ROW#...`, `TABLE#...` | the row or table resolution and `chainLength` | `review-write`, `rebuild-review-state` |
 
-`latestValidatedVersion` is updated with the condition that it only grows. The `BLIND_DOUBLE` queue omits cells whose `primaryReviewerIds` contain the caller, and a write checks the same rule against the S3 chain (§4.3).
+A run can be in the primary queue and have cells in the disagreement queue at the same time, because the run's queue membership lives on its own `QUEUE#PRIMARY` item and each cell's on its `CELL` item. A cell never needs two queues at once: a disagreement needs a blind adjudication, and the blind write removes the cell's blind queue keys (§6.2 step 5).
+
+`latestValidatedVersion` is updated with the condition that it only grows. The `BLIND_DOUBLE` queue omits cells whose `primaryReviewerIds` contain the caller, and a write checks the same rule against the S3 chain (§4.3). No route returns `blindSampled`; a reviewer learns that a cell is sampled only when it appears in the blind queue.
 
 ### 8.3 Review completion
 
@@ -424,15 +434,16 @@ A run is review-complete when all of these hold:
 1. every table of the run has a current table decision;
 2. every cell of every table in scope (§7.1) has a current primary decision of `ACCEPTED`, `CORRECTED` or `UNREADABLE`;
 3. every row of every table in scope has a current row decision;
-4. every row with `isPlayerRow: true` belongs to a table whose current role is `SCOREBOARD`.
+4. every row with `isPlayerRow: true` belongs to a table whose current role is `SCOREBOARD`;
+5. the run's player rows have consistent teams and outcomes (rule code `OUTCOME_INCONSISTENT`). The player rows are the detected rows with `isPlayerRow: true` in `SCOREBOARD` tables plus the undetected rows of those tables. A run with no player rows meets the condition. Otherwise either every team is empty and exactly one row is `WIN` (a free-for-all), or no team is empty, all rows of each team share one outcome, and exactly one team is `WIN`.
 
-Completion is a function of the resolved chains, so it is computed the same way after a write and in a rebuild. Open disagreements and blind reviews do not block completion. A later table decision can grow the scope and make the run incomplete again (§6.3).
+No single row write can be checked against condition 5, because changing which team won takes one write per row and every state in between breaks it. The API therefore never rejects a write for `OUTCOME_INCONSISTENT`. The run view and every write response list the rows that break condition 5 with that code, and the run stays incomplete until a reviewer fixes them. Completion is a function of the resolved chains, so it is computed the same way after a write and in a rebuild. Open disagreements and blind reviews do not block completion. A later table decision can grow the scope and make the run incomplete again (§6.3).
 
 ### 8.4 Validated table
 
 The validated table is the reviewed scoreboard of one run. It is the seam contract with the stats lakehouse (#159), which ingests every version into bronze.
 
-**Rows.** The builder visits every table whose current role is `SCOREBOARD`, in `tableIndex` order. Within a table it emits each row with `isPlayerRow: true` in `rowIndex` order and inserts each undetected row after the row named by its `insertAfterRowIndex`, keeping list order between undetected rows with the same anchor. `rowKey` is `<tableIndex>:<rowIndex>` for a detected row and `<tableIndex>:added:<position in undetectedRows>` for an undetected one.
+**Rows.** The builder visits every table whose current role is `SCOREBOARD`, in `tableIndex` order. Within a table it emits each row with `isPlayerRow: true` in `rowIndex` order. It then inserts the undetected rows in order of `insertAfterRowIndex` and then list position. Each goes after the last emitted detected row whose `rowIndex` is at or below its anchor, and after any undetected rows already placed there. When no emitted detected row is at or below the anchor, the row goes before every detected row of the table. An anchor on a header or non-player row therefore places the row after the nearest player row above it. `rowKey` is `<tableIndex>:<rowIndex>` for a detected row and `<tableIndex>:added:<position in undetectedRows>` for an undetected one.
 
 **Values.** For each field the table's confirmed `columnFields` maps to a column, the value comes from the cell at that row and column, or from the cell whose span covers them:
 
@@ -538,6 +549,7 @@ interface ReviewPlan {
   displayMode: DisplayMode;
   blindSampleCellIds: readonly string[]; // sorted
   reviewConfigVersion: string;
+  samplingSeedSha256: string;            // SHA-256 of the SSM seed; never the seed
   qualityRunId: string;                  // the quality run whose outcome enqueued the run
   createdAt: string;
 }
@@ -735,7 +747,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | `src/lib/decisions.ts` | `validateCellDecision`; `deriveRowDecision`; `deriveTableDecision`; `openDisagreement(primaryChain, blindChain)` | §6.4, §7.2 to §7.5. Pure. |
 | `src/lib/scope.ts` | `reviewScope(observations, tableResolutions)` | §7.1. Pure. |
 | `src/lib/completion.ts` | `evaluateCompletion(scope, resolutions)` | §8.3. Pure. |
-| `src/lib/sampling.ts` | `buildReviewPlan(observations, qualityRunId, config)` | §7.6. Pure. |
+| `src/lib/sampling.ts` | `buildReviewPlan(observations, qualityRunId, config, samplingSeed)` | §7.6. Pure; the caller reads the seed from SSM. |
 | `src/lib/run-evaluation.ts` | `evaluateRun(runPrefix, dependencies)` | §6.3. Shared by `review-write`, `enqueue-run` and `rebuild-review-state`, so no Lambda imports another. |
 | `src/lib/validated-table.ts` | `buildValidatedTable(evidence, resolutions, previous, versions)`; `adjudicationSetSha256(keys)` | §8.4, §8.5. Pure. |
 | `src/lib/review-state.ts` | `DynamoReviewStateStore` | Projections and queues (§8.2, §13.3). |
@@ -796,7 +808,6 @@ mcc-stats-suite/
 ```json
 {
   "reviewConfigVersion": "review-config-v1",
-  "samplingSeed": "review-v1",
   "priorityHiddenShare": 0.2,
   "blindDoubleReviewShare": 0.05,
   "imageUrlTtlSeconds": 600,
@@ -807,7 +818,7 @@ mcc-stats-suite/
 }
 ```
 
-The file is bundled into the Lambdas. `loadReviewConfig` validates every key at cold start: both shares between 0 and 1, `imageUrlTtlSeconds` between 60 and 900, `maxBulkCells` between 1 and 64. It throws `InvalidReviewConfigError` on any problem. A released file is never edited; a change adds `review-config-v2.json` and bumps `reviewConfigVersion`. Plans record the version they were sampled under, so a new share applies only to runs enqueued afterwards.
+The file is bundled into the Lambdas and holds no secret. The sampling seed lives in SSM (§13.2). `EnqueueRun` and `RebuildReviewState` read it at cold start and fail with `MissingSamplingSeedError` when it is absent. `loadReviewConfig` validates every key at cold start: both shares between 0 and 1, `imageUrlTtlSeconds` between 60 and 900, `maxBulkCells` between 1 and 64. It throws `InvalidReviewConfigError` on any problem. A released file is never edited; a change adds `review-config-v2.json` and bumps `reviewConfigVersion`. Plans record the configuration version and the seed's SHA-256 they were sampled under, so a new share or a new seed applies only to runs enqueued afterwards.
 
 ### 13.2 Persistent resources
 
@@ -816,6 +827,7 @@ The file is bundled into the Lambdas. `loadReviewConfig` validates every key at 
 | Evidence bucket | OpenTofu foundation | Existing (spec 1 §13.1), with EventBridge notifications from spec 2 P1.1. |
 | KMS data key and SSM parameters | OpenTofu foundation | Existing. The stack reads `/mcc/<env>/match-to-csv/evidence-bucket-name` and `/mcc/<env>/match-to-csv/data-key-arn`. |
 | Cognito user pool `<project>-<env>-reviewers` | OpenTofu foundation (P1.1) | Self-service sign-up disabled, TOTP MFA required, deletion protection on, `prevent_destroy`. Group `labeler`. A Cognito prefix domain from a variable, never committed. SSM parameters `/mcc/<env>/review/user-pool-id`, `/mcc/<env>/review/user-pool-arn` and `/mcc/<env>/review/user-pool-domain`. |
+| Sampling seed `/mcc/<env>/review/sampling-seed` | OpenTofu foundation (P1.1) | SSM `SecureString` encrypted with the AWS managed `aws/ssm` key, holding 32 random bytes generated by OpenTofu. The value exists only in SSM and the encrypted OpenTofu state, never in source, posted plans, logs or evidence. |
 
 Operators create reviewer accounts and add them to `labeler` with the Cognito console or CLI. Ephemeral stacks use the dev pool.
 
@@ -825,13 +837,13 @@ Operators create reviewer accounts and add them to `labeler` with the Cognito co
 | --- | --- |
 | `ReviewRead` | Node.js 22, ARM64, 1,024 MB, 10-second timeout, X-Ray, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `REVIEW_TABLE` |
 | `ReviewWrite` | Node.js 22, ARM64, 1,024 MB, 25-second timeout, X-Ray, env as `ReviewRead` plus `GIT_SHA`, `DEPLOYMENT_ENVIRONMENT` |
-| `EnqueueRun` | Node.js 22, ARM64, 512 MB, 1-minute timeout, env as `ReviewRead` |
-| `RebuildReviewState` | Node.js 22, ARM64, 2,048 MB, 15-minute timeout, env as `ReviewWrite` |
+| `EnqueueRun` | Node.js 22, ARM64, 512 MB, 1-minute timeout, env as `ReviewRead` plus `SAMPLING_SEED_PARAMETER` |
+| `RebuildReviewState` | Node.js 22, ARM64, 2,048 MB, 15-minute timeout, env as `ReviewWrite` plus `SAMPLING_SEED_PARAMETER` |
 | HTTP API `<stack>` | Routes in §4.1 only, JWT authorizer (issuer the user pool, audience the stack's app client), no CORS configuration, `$default` stage with throttling of 20 requests per second and a burst of 40, JSON access logs |
 | User pool client | On the foundation pool, no secret, authorization-code grant with PKCE, scopes `openid`, callback and sign-out URLs on the distribution's domain, access token valid 60 minutes |
 | CloudFront distribution | Default behavior: site bucket through Origin Access Control, a CloudFront Function that serves `/index.html` for paths without a file extension, caching optimized. `/api/*`: HTTP API origin, caching disabled, origin request policy `AllViewerExceptHostHeader`, all methods. HTTPS only, default CloudFront certificate. Response headers policy: HSTS, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`, and a Content Security Policy of `default-src 'self'`, `img-src 'self'` plus the evidence bucket's regional endpoint, `connect-src 'self'` plus the Cognito domain, `frame-ancestors 'none'`. No custom error responses, so API errors pass through. |
 | Site bucket | Public access blocked, SSE-S3, read only through Origin Access Control, removed with the stack; deployed from `web/dist` plus a generated `config.json` |
-| `ReviewState` table | On-demand; partition key `pk` (`RUN#<runId>`), sort key `sk` (`META`, `CELL#<blockId>`, `ROW#<tableBlockId>#<rowIndex>`, `TABLE#<tableBlockId>`); sparse GSI `queue` on `queuePk` (`QUEUE#PRIMARY`, `QUEUE#BLIND`, `QUEUE#DISAGREEMENT`) and `queueSk` (`<enqueuedAt>#<runId>` or `<completedAt>#<cellObservationId>`); encrypted with the foundation data key; removed with the stack because it is rebuildable (§6.5) |
+| `ReviewState` table | On-demand; partition key `pk` (`RUN#<runId>`), sort key `sk` (`META`, `QUEUE#PRIMARY`, `CELL#<blockId>`, `ROW#<tableBlockId>#<rowIndex>`, `TABLE#<tableBlockId>`); sparse GSI `queue` on `queuePk` and `queueSk`, set only on `QUEUE#PRIMARY` items (`QUEUE#PRIMARY`, `<enqueuedAt>#<runId>`) and on `CELL` items (`QUEUE#BLIND` or `QUEUE#DISAGREEMENT`, `<queuedAt>#<cellObservationId>`); encrypted with the foundation data key; removed with the stack because it is rebuildable (§6.5) |
 | EventBridge rule and DLQ | §4.4 |
 | Outputs | `DistributionDomainName`, `UserPoolClientId`, `RebuildFunctionName`, `ObjectPrefix` |
 
@@ -842,11 +854,11 @@ Log groups follow match-to-csv: three months in prod, two weeks otherwise, retai
 | Principal | Evidence bucket | KMS data key | `ReviewState` |
 | --- | --- | --- | --- |
 | `ReviewRead` | `GetObject` on `<ns>submissions/*` | decrypt | `GetItem`, `Query` |
-| `ReviewWrite` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/adjudications/*`, `.../blind-adjudications/*` and `.../validated/*` | decrypt, encrypt | `GetItem`, `Query`, `PutItem`, `UpdateItem` |
-| `EnqueueRun` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/review/*` and `.../validated/*` | decrypt, encrypt | `GetItem`, `PutItem`, `UpdateItem` |
-| `RebuildReviewState` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/review/*` and `.../validated/*`, never on adjudication prefixes | decrypt, encrypt | `GetItem`, `Query`, `PutItem`, `UpdateItem`, `BatchWriteItem` |
+| `ReviewWrite` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/adjudications/*`, `.../blind-adjudications/*` and `.../validated/*` | decrypt, encrypt | `GetItem`, `Query`, `PutItem`, `UpdateItem`, `DeleteItem`, `ConditionCheckItem` |
+| `EnqueueRun` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/review/*` and `.../validated/*` | decrypt, encrypt | `GetItem`, `Query`, `PutItem`, `UpdateItem`, `DeleteItem`, `ConditionCheckItem` |
+| `RebuildReviewState` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/review/*` and `.../validated/*`, never on adjudication prefixes | decrypt, encrypt | `GetItem`, `Query`, `PutItem`, `UpdateItem`, `DeleteItem`, `ConditionCheckItem`, `BatchWriteItem` |
 
-`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. `ReviewRead` signs image URLs with its own role, so a URL can read only what that role can. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject`, any bucket-configuration permission, or `PutObject` under `quality/`, `textract/`, `normalized/`, `export/` or `source/`.
+`EnqueueRun` and `RebuildReviewState` also have `ssm:GetParameter` with decryption on `/mcc/<env>/review/sampling-seed`; no other role can read it. `<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. `ReviewRead` signs image URLs with its own role, so a URL can read only what that role can. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject`, any bucket-configuration permission, or `PutObject` under `quality/`, `textract/`, `normalized/`, `export/` or `source/`.
 
 P1.2 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `admin-e-*` stacks can create and delete their HTTP API, distribution, CloudFront Function, Origin Access Control, response headers policy, site bucket, table and user pool client, and so the local workload boundary allows the table actions above on `admin-e-*` tables and KMS use through DynamoDB.
 
@@ -865,6 +877,7 @@ The stack deploys through `scripts/cdk-app.mjs` like match-to-csv: stable stacks
 7. Create-only writes, Object Lock and the absence of `DeleteObject` stop this component from changing any evidence, including its own.
 8. Ephemeral stacks read and write only under `ephemeral/<name>/`, enforced by key checks and IAM resource patterns. Their app clients sign in dev reviewers, who see only that namespace's runs.
 9. Self-service sign-up is disabled and MFA is required.
+10. The sampling seed is a secret (§7.6, §13.2). Only `EnqueueRun` and `RebuildReviewState` can read it, plans store only its hash, and no route reveals whether a cell is blind-sampled before it appears in the blind queue.
 
 ## 15. Observability
 
@@ -883,16 +896,16 @@ Lambda and library tests use `tap`, run from `applications/admin/test/*.test.ts`
 | File | Covers |
 | --- | --- |
 | `keys.test.ts` | chain keys for every item and track; `root` keys; six-digit validated keys; stable and ephemeral outcome keys accepted, claims, deeper keys and other namespaces rejected |
-| `chains.test.ts` | head of a chain; resolution at a cutoff; `BrokenChainError` on a missing link |
-| `decisions.test.ts` | the open-disagreement rule in §6.4, including a resolution that keeps the first decision, a resolution with a third value and a later blind adjudication; every rule in §7.2 with each failure code; every row and table error type derived on seeded cases and absent on clean ones; team name pattern |
-| `scope.test.ts`, `completion.test.ts` | the scope union in §7.1; scope growth after a table decision; `SKIPPED` leaves a cell unresolved; each completion condition in §8.3 |
-| `sampling.test.ts` | plans are deterministic; over 10,000 generated IDs both shares are within 1 percentage point of configuration |
-| `validated-table.test.ts` | row order with undetected rows; every value source; `semanticField`, `exportedField` and `confirmedField` on a fixture whose kills header is unreadable; player tidying; FFA; `contentSha256` stability; `adjudicationSetSha256` of keys `b` and `a` equals the SHA-256 of `a\nb`, as spec 2 §8.3 defines it |
-| `review-write.test.ts` | create-only chain writes; `STALE_RESOLUTION` on a second successor and on a predecessor that is not in the chain; replay by `clientRequestId`, including a retry after a write that succeeded but returned `503`; bulk accept with partial failure and replay of the written cells; the current adjudication taken from the S3 chain when the projection lags; server-owned fields ignore body values, including `priorityShown`, `selectionReason` and `reviewerId`; `shownPriority` for cells, rows and tables; blind and disagreement rules; validated version written on completion, not rewritten for an unchanged set, retried on 412; no write outside the permitted prefixes |
-| `review-read.test.ts` | hidden runs and blind views omit every priority, score, signal and decision; image URL key and TTL; `NOT_A_LABELER`; `RUN_NOT_FOUND`; queue filtering of the caller's own cells |
-| `enqueue-run.test.ts` | a `SUCCEEDED` outcome writes a plan and `META`; failed outcomes and runs without provenance are skipped; a re-score moves `latestQualityRunId` without a new plan; a run with no table is completed with a validated table that has no rows |
-| `validated-race.test.ts` | an evaluation that listed fewer keys than the latest version's `adjudicationCount` writes nothing, so an older set never becomes the latest version; an evaluation with an older listing never overwrites newer `META` counts or status; sampled cells of a table added to the scope after version 1, and cells missed by an evaluation that stopped after its validated write, are queued for blind review by the next evaluation |
-| `rebuild.test.ts` | a rebuild after deleting the table equals the incremental projections; a missing validated version is written; runs without a plan are enqueued; resolved disagreements stay closed and open ones are restored |
+| `chains.test.ts` | head of a chain; resolution at a cutoff; `BrokenChainError` on a missing link; `reviewedAt` set to the predecessor's plus 1 ms when the writer's clock is behind, and a `DISAGREEMENT_RESOLUTION` later than the blind adjudication it resolves |
+| `decisions.test.ts` | `INVALID_TEAM` and `INVALID_ANCHOR` on row and table decisions, including undetected rows; the open-disagreement rule in §6.4, including a resolution that keeps the first decision, a resolution with a third value and a later blind adjudication; every rule in §7.2 with each failure code; every row and table error type derived on seeded cases and absent on clean ones; team name pattern |
+| `scope.test.ts`, `completion.test.ts` | the scope union in §7.1; scope growth after a table decision; `SKIPPED` leaves a cell unresolved; each completion condition in §8.3, including `OUTCOME_INCONSISTENT` for a team with both outcomes, two winning teams, no winner, and a free-for-all with two winners |
+| `sampling.test.ts` | plans are deterministic for a given seed and change with the seed; the plan holds the seed's SHA-256 and never the seed; over 10,000 generated IDs both shares are within 1 percentage point of configuration |
+| `validated-table.test.ts` | row order with undetected rows, including anchors `0`, on the header, on a non-player row and shared by several rows; every value source; `semanticField`, `exportedField` and `confirmedField` on a fixture whose kills header is unreadable; player tidying; FFA; `contentSha256` stability; `adjudicationSetSha256` of keys `b` and `a` equals the SHA-256 of `a\nb`, as spec 2 §8.3 defines it |
+| `review-write.test.ts` | create-only chain writes; `STALE_RESOLUTION` on a second successor and on a predecessor that is not in the chain; replay by `clientRequestId`, including a retry after a write that succeeded but returned `503`; bulk accept with partial failure and replay of the written cells; the current adjudication taken from the S3 chain when the projection lags; `409 BULK_PARTIAL` with per-cell results; a run in the primary queue with a cell in the disagreement queue at the same time; the blind write removes the cell's blind queue keys; a disagreement evaluation from older chains does not overwrite a newer one; server-owned fields ignore body values, including `priorityShown`, `selectionReason` and `reviewerId`; `shownPriority` for cells, rows and tables; blind and disagreement rules, including `NOT_IN_BLIND_QUEUE` for a sampled cell that is not yet queued; validated version written on completion, not rewritten for an unchanged set, retried on 412; no write outside the permitted prefixes |
+| `review-read.test.ts` | hidden runs and blind views omit every priority, score, signal and decision; no route returns `blindSampled` or the review plan, and the blind view returns `404` for a sampled cell that is not in the blind queue; image URL key and TTL; `NOT_A_LABELER`; `RUN_NOT_FOUND`; queue filtering of the caller's own cells |
+| `enqueue-run.test.ts` | a `SUCCEEDED` outcome writes a plan, `META` and `QUEUE#PRIMARY`; a missing seed parameter fails with `MissingSamplingSeedError`; failed outcomes and runs without provenance are skipped; a re-score moves `latestQualityRunId` without a new plan; a run with no table is completed with a validated table that has no rows |
+| `validated-race.test.ts` | an evaluation that listed fewer keys than the latest version's `adjudicationCount` writes nothing, so an older set never becomes the latest version; an evaluation with an older listing never overwrites newer `META` counts or status; sampled cells of a table added to the scope after version 1, and cells missed by an evaluation that stopped before finishing step 3 followed by one that stops at step 4, are queued for blind review; the blind queue update leaves the cell's projection and reviewer sets intact |
+| `rebuild.test.ts` | a rebuild after deleting the table equals the incremental projections; a missing validated version is written; runs without a plan are enqueued; resolved disagreements stay closed and open ones are restored; a run reopened by a table decision is in the primary queue while one of its cells is in the disagreement queue |
 | `app.test.ts` | stable and ephemeral synthesis; no CORS configuration on the API; CloudFront behaviors and headers in §13.3; IAM resource patterns in §13.4; the EventBridge pattern in §4.4 |
 | `web/test/*.test.tsx` | each step renders evidence as text; correction requires an error type; hidden mode renders no priority; stale resolution reloads the item |
 | `web/test/e2e/*.spec.ts` | at 320 by 640 CSS pixels with touch emulation, a reviewer completes a fixture run, including a bulk accept, a correction, a row correction and an undetected row, with no horizontal scrolling |
@@ -914,9 +927,9 @@ v1 (Phases 0 to 4) is complete when:
 1. A reviewer in the `labeler` group completes a scored dev run on a 320-pixel-wide phone with touch alone, and a user outside the group gets `403 NOT_A_LABELER` from every route.
 2. The run stays incomplete while any required table, cell or row in §7.1 lacks a decision, and a `SKIPPED` cell keeps it incomplete.
 3. "Accept the rest of this row" on a row with four unresolved cells writes four `cell-adjudication/v1` objects with `bulk: true` and one `bulkActionId`.
-4. Every adjudication records `selectionReason: REVIEW_ALL`, a `qualityRunId` with a `SUCCEEDED` outcome, `priorityShown` and `shownPriority`. Every cell adjudication also records `semanticField` and `exportedField`, and a `CORRECTED` cell records at least one error type.
+4. Every adjudication records `selectionReason: REVIEW_ALL`, a `qualityRunId` with a `SUCCEEDED` outcome, `priorityShown`, `shownPriority` and `priorDecisionsShown`. Every cell adjudication also records `semanticField` and `exportedField`, and a `CORRECTED` cell records at least one error type.
 5. In a run whose plan says `PRIORITY_HIDDEN`, no API response contains a priority, score or signal, and every adjudication has `priorityShown: false`.
-6. A fixture run whose parser exported a total row, dropped a player row and swapped two teams yields `EXTRA_ROW`, `MISSING_ROW` and `WRONG_TEAM` row adjudications, and the validated table has the reviewer's rows and teams.
+6. A fixture run whose parser exported a total row, dropped a player row and swapped two teams yields `EXTRA_ROW`, `MISSING_ROW` and `WRONG_TEAM` row adjudications, and the validated table has the reviewer's rows and teams. While one team has both `WIN` and `LOSS` rows, the run stays incomplete and reports `OUTCOME_INCONSISTENT`.
 7. Completing a run writes `validated/000001.json` with `adjudicationSetSha256` per spec 2 §8.3, `runId`, `screenshotId` and stage versions. A later correction writes `validated/000002.json` and leaves version 1 byte-for-byte unchanged.
 8. A sampled cell is reviewed blind by a second reviewer, both adjudications are kept in separate tracks, and a disagreement is resolved by a third adjudication that supersedes the primary decision.
 9. Two tabs superseding the same adjudication produce one write and one `409 STALE_RESOLUTION`, and the evidence holds no fork.
@@ -930,7 +943,7 @@ v1 (Phases 0 to 4) is complete when:
 
 1. **Shown priorities bias labels.** Reviewers who see a priority look harder at flagged cells and less at others. Accepted because hidden runs and the blind sample give unbiased labels for spec 2 §9.6, and `priorityShown` lets analysis separate the two.
 2. **The blind sample may be too small at first.** At 5% of cells and 20% hidden runs, the gate's tens of thousands of blind labels (spec 2 §9.6) take many runs to collect. The shares are configuration (§13.1) and can grow when the risk model specification sets a target.
-3. **Blindness relies on the interface.** Any labeler can open the full run view of a cell they later review blind. The blind queue excludes their own primary decisions, and reviewers are trusted members of the league.
+3. **Blindness relies on the interface.** Any labeler can open the full run view of a cell they later review blind. The blind queue excludes their own primary decisions, and reviewers are trusted members of the league. The secret sampling seed (§7.6) keeps reviewers from knowing in advance which cells will be double-reviewed.
 4. **Validated versions can lag.** A handler that stops between its adjudication write and the validated write leaves a complete run without its newest version until the browser replays the request, the run is written to again, or an operator runs a rebuild (§6.6). Accepted because the evidence is complete and the lakehouse sees the version when it appears.
 5. **Duplicate runs are reviewed separately.** Retries and replays create sibling runs of one screenshot (spec 1 §18.6), and each is enqueued. Validated tables carry `screenshotId` and `imageSha256`, so the lakehouse can choose between them (#159).
 6. **Runs without parser provenance cannot be reviewed.** Runs written before spec 2 P0.3 are skipped until an operator replays them (§6.1).
@@ -984,13 +997,13 @@ This section is the backlog source for building the component. It is written to 
 | Contract | Defined in | Main consumers |
 | --- | --- | --- |
 | `validated-table/v1`, its key layout `runs/{runId}/validated/{validatedVersion}.json` and the version rule (§5.1, §8.4, §8.5) | P0.2, P2.3 | `review-write`, `enqueue-run`, `rebuild-review-state`, the stats lakehouse bronze ingestion (#159) |
-| `cell-adjudication/v1`, `row-adjudication/v1`, `table-adjudication/v1` and the chain keys and supersession rule (§5.1, §8.1) | P0.2, P2.1 | `review-write`, spec 2 `build-baselines` (spec 2 §8.3), the risk model specification's dataset builder (spec 2 §8.5) |
+| `cell-adjudication/v1`, `row-adjudication/v1`, `table-adjudication/v1`, the chain keys under `adjudications/` and `blind-adjudications/` (`runs/{runId}/adjudications/{cells,rows,tables}/...` and `runs/{runId}/blind-adjudications/cells/{cellBlockId}/{predecessor}.json`) and the supersession rule (§5.1, §8.1) | P0.2, P2.1 | `review-write`, spec 2 `build-baselines` (spec 2 §8.3), the risk model specification's dataset builder (spec 2 §8.5) |
 | `selectionReason`, `qualityRunId`, `priorityShown`, `shownPriority`, `priorDecisionsShown` and the blind double-review sample (§7.6, §7.7) | P0.2, P2.2 | spec 2 §8.5 and §9.6, the risk model specification's gate |
 | `adjudicationSetSha256` (spec 2 §8.3) | spec 2 | validated-table lineage here, spec 2 baselines |
 | Parser provenance in `normalized-ocr/v2` | spec 2 P0.3 | `enqueue-run`, `semanticField` and `exportedField` on labels, validated values |
 | Quality result types and key layout (spec 2 §5.1, §10.1) | spec 2 P0.2, P3.1 | `review-read`, `review-write`, `enqueue-run` |
 | `review-plan/v1` (§7.6) | P0.2, P2.2 | `enqueue-run`, `review-write`, `rebuild-review-state` |
-| Reviewer user pool SSM parameters (§13.2) | P1.1 | the stack, the deploy preflight |
+| Reviewer user pool and sampling seed SSM parameters (§13.2) | P1.1 | the stack, the deploy preflight, `enqueue-run`, `rebuild-review-state` |
 | Reviewer API routes and bodies (§4) | P0.2 | the web application, API tests |
 
 A change to a contract updates every consumer in the same PR.
@@ -1039,12 +1052,13 @@ A change to a contract updates every consumer in the same PR.
 #### P1.1 Reviewer user pool (S)
 
 - **Blocked by:** none
-- **Spec:** §1, §13.2, §14
+- **Spec:** §1, §7.6, §13.2, §14
 - **Files:** `infrastructure/modules/foundation/{cognito,variables,outputs}.tf`, `infrastructure/{dev,prod}/foundation/`, `infrastructure/modules/foundation/tests/`
-- **Provides:** the user pool, its domain, the `labeler` group and the `/mcc/<env>/review/` SSM parameters
+- **Provides:** the user pool, its domain, the `labeler` group, the `/mcc/<env>/review/` SSM parameters and the `sampling-seed` SecureString
 - **Acceptance:**
   - Sign-up is admin-only, TOTP MFA is required, deletion protection is on, and the pool has `prevent_destroy`.
   - The domain prefix comes from a variable and no value is committed.
+  - `/mcc/<env>/review/sampling-seed` is a `SecureString` with 32 random bytes generated by OpenTofu, and no plan output shows its value.
   - `npm run tofu:check` passes, and the PR states that applying it needs a person's approval.
 
 #### P1.2 Local bootstrap permissions for admin stacks (S)
@@ -1077,12 +1091,13 @@ A change to a contract updates every consumer in the same PR.
 #### P2.2 Review plans and sampling (S)
 
 - **Blocked by:** P0.2
-- **Spec:** §7.6, §7.7, §13.1
+- **Spec:** §7.6, §7.7, §13.1, §13.2
 - **Files:** `src/lib/{sampling,config}.ts`, `config/review-config-v1.json`
 - **Provides:** `buildReviewPlan`, `loadReviewConfig`
 - **Acceptance:**
   - The `sampling.test.ts` row of §16.1 passes.
-  - Invalid configuration throws `InvalidReviewConfigError`.
+  - Invalid configuration throws `InvalidReviewConfigError`, and the bundled configuration holds no seed.
+  - `buildReviewPlan` takes the seed as an argument and records only `samplingSeedSha256`.
   - A plan with any `selectionReason` other than `REVIEW_ALL` cannot be built.
 
 #### P2.3 Validated table builder (M)

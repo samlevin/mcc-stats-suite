@@ -412,7 +412,7 @@ Thresholds are configuration (§13.1).
 
 ### 9.4 Row, table and run summaries
 
-- Row: `maxSuspicion`, `expectedIssueCount` (sum of cell scores) and `hasCritical`. Rows sort by `hasCritical`, then `maxSuspicion`, then `expectedIssueCount`, all descending.
+- Row: `maxSuspicion`, `expectedIssueCount` (sum of cell scores), `hasCritical` and `reviewPriority`, the highest priority of its cells. Spec 3 displays and records the row's `reviewPriority`. Rows sort by `hasCritical`, then `maxSuspicion`, then `expectedIssueCount`, all descending.
 - Table: `cellCount`, `flaggedCellCount` (cells with `needsReview`), `criticalCellCount`, `meanSuspicion`, `maxSuspicion`, `estimatedIssueCount` and `reviewPriority`, the highest of its cell priorities and the priorities of its table signals.
 - Run: the same counts across assessed tables, `assessedTableCount`, `unassessedTableCount`, and `reviewPriority`, the highest of its table priorities and run signals.
 
@@ -436,9 +436,9 @@ The goal is to send as few cells to people as possible while keeping errors in t
 
 **Success measure.** The gate for stage 3 is stated in terms the data from stage 1 can measure: at the chosen threshold, the error rate among cells the model would auto-accept, at the upper bound of its 95% confidence interval, is below a target the risk model specification sets (for example 0.1%), and the review rate is as low as that allows. Errors are rare, so measuring a rate that low needs tens of thousands of labeled cells. Review-all labeling from the first screenshot is what makes that sample exist.
 
-**Blind labels.** Reviewers see the heuristic priority, so errors they miss will concentrate in `NONE` and `LOW` cells, which is the population a model would auto-accept, and a gate measured on those labels underestimates the error rate. The stage 3 gate is therefore measured on labels collected blind: spec 3's double-review sample, reviewed without the first decision or any priority, and adjudications whose `priorityShown` and `priorDecisionsShown` are both false ([spec 3](3-cell-labeling.md) §7.6). In stage 3 the audit sample of auto-accepted cells is reviewed without the model's decision or score.
+**Blind labels.** Reviewers see the heuristic priority, so errors they miss will concentrate in `NONE` and `LOW` cells, which is the population a model would auto-accept, and a gate measured on those labels underestimates the error rate. The stage 3 gate is therefore measured on labels collected blind: labels whose `priorityShown` and `priorDecisionsShown` are both false, from hidden runs and spec 3's double-review sample ([spec 3](3-cell-labeling.md) §7.6). In stage 3 the audit sample of auto-accepted cells is reviewed without the model's decision or score.
 
-**Prerequisites this specification guarantees for the risk model:** cell, row and table feature rows for every table of every scored run (§8.4); stable join keys (`cellObservationId`, `runId`, `screenshotId`) shared with spec 3; recorded heuristic scores as the comparison baseline; versioned features, configuration and baselines; and re-scoring to produce new feature schemas for old runs. Spec 3 owns the label-side prerequisites: an explicit decision on every cell, row and table, `selectionReason`, the shown `qualityRunId` and whether a priority was shown (`priorityShown`), error types, a blind double-review sample, and labels keyed to the parser's exported field as well as the semantic field.
+**Prerequisites this specification guarantees for the risk model:** cell, row and table feature rows for every table of every scored run (§8.4); stable join keys (`cellObservationId`, `runId`, `screenshotId`) shared with spec 3; recorded heuristic scores as the comparison baseline; versioned features, configuration and baselines; and re-scoring to produce new feature schemas for old runs. Spec 3 owns the label-side prerequisites: an explicit decision on every cell, row and table, `selectionReason`, the shown `qualityRunId`, whether a priority or an earlier decision was shown (`priorityShown`, `priorDecisionsShown`), error types, a blind double-review sample, and labels keyed to the parser's exported field as well as the semantic field.
 
 ## 10. Typed domain model
 
@@ -509,7 +509,10 @@ interface CellQuality {
   riskModel?: RiskModelAssessment; // absent in v1
 }
 
-interface RowQuality { rowIndex: number; maxSuspicion: number; expectedIssueCount: number; hasCritical: boolean }
+interface RowQuality {
+  rowIndex: number; maxSuspicion: number; expectedIssueCount: number; hasCritical: boolean;
+  reviewPriority: ReviewPriority; // highest cell priority in the row (§9.4)
+}
 
 interface QualitySummary {
   cellCount: number; flaggedCellCount: number; criticalCellCount: number;
