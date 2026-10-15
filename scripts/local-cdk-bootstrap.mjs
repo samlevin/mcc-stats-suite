@@ -91,10 +91,15 @@ export function localBootstrap(template) {
     ...applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
   ];
   const rules = applications.map((app) => arn('events', `rule/${app}-e-*`));
-  const deploymentParameters = [
-    arn('ssm', `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`),
-    ...applications.map((app) => arn('ssm', `parameter/mcc/dev/${app}/*`)),
-  ];
+  const bootstrapVersion = arn(
+    'ssm',
+    `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`,
+  );
+  // Everything under /mcc/<environment>/ is application config; CI and other
+  // parameters applications must not read live under other prefixes, such as
+  // /mcc-ci/<environment>/. One prefix therefore covers every application.
+  const applicationParameters = arn('ssm', 'parameter/mcc/dev/*');
+  const deploymentParameters = [bootstrapVersion, applicationParameters];
   const OWN_TAG = '${aws:PrincipalTag/Ephemeral}';
   // ${!...} renders the literal IAM policy variable through Fn::Sub.
   const OWN = OWN_TAG.replace('${', '${!');
@@ -141,16 +146,14 @@ export function localBootstrap(template) {
         ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
         applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
       ),
-      // match-to-csv's process-email reads its sender allowlist and the
-      // submission address it checks from dev parameters; no other application
-      // reads parameters at runtime. One ARN per application would push this
-      // boundary past the managed policy size limit, so an application that
-      // starts reading parameters at runtime adds its own entry here. Each
-      // function's own policy still names the exact parameters it reads.
+      // Functions read single dev application parameters at runtime, such as
+      // match-to-csv's sender allowlist and the submission address it checks.
+      // The boundary allows any application's; each function's own policy
+      // still names the exact parameters it reads.
       statement(
         'ReadApplicationParameters',
         'ssm:GetParameter',
-        arn('ssm', 'parameter/mcc/dev/match-to-csv/*'),
+        applicationParameters,
       ),
       // The app uses keys only for S3 server-side encryption.
       statement(
@@ -241,7 +244,7 @@ export function localBootstrap(template) {
         statement(
           'ReadBootstrapVersion',
           ['ssm:GetParameter', 'ssm:GetParameters'],
-          deploymentParameters[0],
+          bootstrapVersion,
         ),
       ]),
     },

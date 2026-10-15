@@ -153,10 +153,10 @@ run "dev_secure_defaults" {
     condition = (
       output.turbo_cache_bucket_name == aws_ssm_parameter.turbo_cache_bucket_name.value &&
       output.turbo_cache_bucket_name == aws_s3_bucket.turbo_cache.id &&
-      aws_ssm_parameter.turbo_cache_bucket_name.name == "/mcc/dev/turbo-cache/bucket-name" &&
+      aws_ssm_parameter.turbo_cache_bucket_name.name == "/mcc-ci/dev/turbo-cache/bucket-name" &&
       output.turbo_cache_key_arn == aws_ssm_parameter.turbo_cache_key_arn.value &&
       output.turbo_cache_key_arn == aws_kms_key.data.arn &&
-      aws_ssm_parameter.turbo_cache_key_arn.name == "/mcc/dev/turbo-cache/data-key-arn"
+      aws_ssm_parameter.turbo_cache_key_arn.name == "/mcc-ci/dev/turbo-cache/data-key-arn"
     )
     error_message = "The output and dev SSM contracts must publish the cache bucket and its encryption key."
   }
@@ -203,8 +203,8 @@ run "prod_service_contract" {
   assert {
     condition = (
       aws_s3_bucket.turbo_cache.bucket == "mcc-stats-suite-prod-000000000000-turbo-cache" &&
-      aws_ssm_parameter.turbo_cache_bucket_name.name == "/mcc/prod/turbo-cache/bucket-name" &&
-      aws_ssm_parameter.turbo_cache_key_arn.name == "/mcc/prod/turbo-cache/data-key-arn" &&
+      aws_ssm_parameter.turbo_cache_bucket_name.name == "/mcc-ci/prod/turbo-cache/bucket-name" &&
+      aws_ssm_parameter.turbo_cache_key_arn.name == "/mcc-ci/prod/turbo-cache/data-key-arn" &&
       aws_ssm_parameter.turbo_cache_bucket_name.value == output.turbo_cache_bucket_name &&
       aws_ssm_parameter.turbo_cache_key_arn.value == output.turbo_cache_key_arn &&
       output.turbo_cache_key_arn == aws_kms_key.data.arn &&
@@ -305,7 +305,7 @@ run "dev_github_cache_role" {
     condition = length(data.aws_iam_policy_document.github_cache.statement) == 4 && alltrue([for statement in data.aws_iam_policy_document.github_cache.statement :
       statement.sid == "ReadWriteCacheObjects" ? statement.actions == toset(["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]) && statement.resources == toset(["arn:aws:s3:::mcc-stats-suite-dev-000000000000-turbo-cache/turbogha/dev/*"]) :
       statement.sid == "ListCacheHashCandidates" ? statement.actions == toset(["s3:ListBucket"]) && one(statement.condition).test == "StringLike" && one(statement.condition).variable == "s3:prefix" && toset(one(statement.condition).values) == toset(["turbogha/dev/*"]) :
-      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc/dev/turbo-cache/${name}"]) :
+      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc-ci/dev/turbo-cache/${name}"]) :
       statement.sid == "UseCacheKeyThroughS3" && statement.actions == toset(["kms:Decrypt", "kms:GenerateDataKey"]) && length(statement.condition) == 2
     ])
     error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
@@ -351,7 +351,7 @@ run "prod_github_cache_role" {
     condition = length(data.aws_iam_policy_document.github_cache.statement) == 4 && alltrue([for statement in data.aws_iam_policy_document.github_cache.statement :
       statement.sid == "ReadWriteCacheObjects" ? statement.actions == toset(["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"]) && statement.resources == toset(["arn:aws:s3:::mcc-stats-suite-prod-000000000000-turbo-cache/turbogha/prod/*"]) :
       statement.sid == "ListCacheHashCandidates" ? statement.actions == toset(["s3:ListBucket"]) && one(statement.condition).test == "StringLike" && one(statement.condition).variable == "s3:prefix" && toset(one(statement.condition).values) == toset(["turbogha/prod/*"]) :
-      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc/prod/turbo-cache/${name}"]) :
+      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc-ci/prod/turbo-cache/${name}"]) :
       statement.sid == "UseCacheKeyThroughS3" && statement.actions == toset(["kms:Decrypt", "kms:GenerateDataKey"]) && length(statement.condition) == 2
     ])
     error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."

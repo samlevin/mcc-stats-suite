@@ -87,7 +87,7 @@ data "aws_iam_policy_document" "github_cache" {
     sid       = "ReadCacheContracts"
     effect    = "Allow"
     actions   = ["ssm:GetParameter"]
-    resources = [for name in ["bucket-name", "data-key-arn"] : "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/mcc/${var.environment}/turbo-cache/${name}"]
+    resources = [for name in ["bucket-name", "data-key-arn"] : "arn:${data.aws_partition.current.partition}:ssm:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:parameter/mcc-ci/${var.environment}/turbo-cache/${name}"]
   }
 }
 
