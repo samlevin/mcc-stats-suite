@@ -18,11 +18,11 @@
 
 **External dependencies at runtime:** S3, EventBridge, Step Functions, Lambda, KMS, SSM Parameter Store, SQS; DynamoDB from Phase 4
 
-**Out of scope:** correcting OCR text, human review and correction capture (spec 3), any API or user interface, model training or calibrated probabilities, match records
+**Out of scope:** correcting OCR text, human review and correction capture (spec 3), any API or user interface, training or serving a risk model (a later specification), match records, the stats lakehouse
 
-Match-to-csv records every OCR cell with its text, confidence, geometry and semantic field, and flags a few obvious problems. This component reads each successful run and scores every cell of every scoreboard table for how likely it is to be wrong, with structured reasons. Spec 3's reviewers use the scores to look at the worst cells first, and the scores are the starting point for a later supervised model.
+Match-to-csv records every OCR cell with its text, confidence, geometry and semantic field, and flags a few obvious problems. This component reads each successful run, scores every cell of every scoreboard table for how likely it is to be wrong, and records a feature row for every cell. Today spec 3's reviewers confirm every cell, and the scores tell them where to look hardest. The feature rows, joined with those confirmations, are the training data for a later risk model that decides which cells need review at all (§9.6).
 
-**Changes in 2.0-draft:** the original text predates match-to-csv. It defined its own bucket, OCR manifest, identifiers, tenant model, normalized table contract and a `OcrRuns` DynamoDB table, and it included a human correction workflow with its own API. This revision consumes match-to-csv evidence as built, writes results beside the run they score, drops the correction workflow in favor of spec 3, replaces seven Lambdas and a run table with one scoring Lambda behind conditional S3 writes, limits Halo rules to fields match-to-csv extracts, and moves cross-run baselines to a later phase that waits for spec 3's verified labels. §1 records each decision.
+**Changes in 2.0-draft:** the original text predates match-to-csv. It defined its own bucket, OCR manifest, identifiers, tenant model, normalized table contract and a `OcrRuns` DynamoDB table, and it included a human correction workflow with its own API. This revision consumes match-to-csv evidence as built, writes results beside the run they score, drops the correction workflow in favor of spec 3, replaces seven Lambdas and a run table with one scoring Lambda behind conditional S3 writes, limits Halo rules to fields match-to-csv extracts, and moves cross-run baselines to a later phase that waits for spec 3's verified labels. It also records a versioned feature row for every cell at scoring time and reserves the result fields a risk model will fill, so labels collected from the first review are usable for training. §1 records each decision.
 
 **Readiness:** this revision authorizes filing Phases 0 to 3. Phase 4 waits until spec 3 writes adjudications. Contracts in §5.3 and §10.1 freeze when P0.2 merges.
 
@@ -48,6 +48,8 @@ Match-to-csv records every OCR cell with its text, confidence, geometry and sema
 | Halo rules for team totals, placement, medals and ratios; template-specific schemas | Only rules over extracted fields (§7.3). No template IDs. Tables classified `UNKNOWN` are not assessed (§7.4). | Match-to-csv extracts player, score, kills, assists and deaths, and classifies tables only as `SCOREBOARD` or `UNKNOWN`. |
 | `ColumnBaselines` table updated with mergeable statistics | Phase 4: rebuild immutable baseline snapshots from spec 3 labels, load them into a DynamoDB cache behind a `BaselineSource` port, and record `baselineVersion` in every result (§8.3). | Incremental merges depend on update order and cannot be rebuilt exactly. A snapshot can be rebuilt and replaced by another source later. |
 | Configuration as versioned JSON in S3 | Versioned JSON bundled with the Lambda (§13.1). | The configuration changes only with a deploy, and the bundled file is reviewed with the code. |
+| "Later ML compatibility": a later model trains on verified examples and calibrates `P(correct)` | Every scoring writes one feature row per cell, for every table, with a `featureSchemaVersion` (§8.4). Label-derived values never become features. The result reserves `riskModel` fields that stay empty until a model exists (§9.6). | A model trained on features recomputed later by newer code does not match what production scored. Recording features at scoring time keeps training and serving identical, and labels collected before any model exists stay usable. |
+| Heuristic score routes cells to review | The heuristic never decides what is reviewed. Spec 3 confirms every cell until a risk model passes its gate (§9.6). | Reviewing every cell gives labels for every cell, so the first model is trained and evaluated without the selection bias of reviewing only flagged cells. |
 | Completion and failure events on EventBridge | Not in v1. Consumers read `outcome.json` (backlog P5.2). | No consumer exists yet. |
 | Retention moves screenshots and OCR output to Intelligent-Tiering after 30 days | Removed. Retention is the foundation's concern. | The evidence bucket is under Object Lock and its lifecycle belongs to OpenTofu. |
 | AWS CDK in Python with `infra/` and `services/` | TypeScript in the `applications/ocr-quality` workspace (§12). | The repository is a TypeScript monorepo. |
@@ -63,15 +65,18 @@ Match-to-csv records every OCR cell with its text, confidence, geometry and sema
 2. Give every cell in a scoreboard table a `suspicionScore`, a `reviewPriority` and the structured signals behind them, and summarize them per row, table and run.
 3. Write results as immutable evidence beside the run, so any score can be traced to its input hash, code commit and stage versions.
 4. Re-score a run under new rules or configuration without changing earlier results.
-5. Keep the scoring contract stable when cross-run baselines and, later, a calibrated model are added.
+5. Keep the scoring contract stable when cross-run baselines and, later, a risk model are added.
+6. Record, for every cell of every successful run, the features a risk model needs, exactly as they were at scoring time, so the model can be trained and evaluated on every label spec 3 collects.
 
 ### 2.2 Non-goals
 
+- Training, evaluating or serving a risk model, and deciding which cells skip review. A later specification owns those (§9.6).
 - Changing OCR text. Scores flag values; they never edit them.
 - Review, correction, verification or labeling of cells. Spec 3 owns those.
 - Any API or user interface. Spec 3 and later admin features read `result.json`.
 - Calibrated probabilities. `suspicionScore` is a heuristic and is never presented as `P(correct)`.
 - Assessing tables classified `UNKNOWN`, or fields match-to-csv does not extract.
+- Writing to the stats lakehouse. Feature rows, scores and training data stay in the evidence bucket; the lakehouse ingests only spec 3's validated tables.
 - Exactly-once scoring. Duplicate match-to-csv runs are each scored, and a re-score is always a new quality run.
 
 ## 3. Runtime architecture
@@ -92,7 +97,7 @@ Step Functions Standard workflow <stack>
         read completion, manifest and normalized observations
         claim the run for the quality version (create-only)
         profile -> rules -> anomalies -> score   (pure libraries)
-        write quality manifest, profiles, signals, result, outcome
+        write quality manifest, profiles, signals, feature rows, result, outcome
   |
   v
 Evidence bucket: runs/{runId}/quality/{qualityRunId}/
@@ -161,6 +166,7 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
       manifest.json
       profiles.json
       signals.json
+      features.jsonl
       result.json
       outcome.json
 [ephemeral/<name>/]baselines/{baselineVersion}/       (Phase 4)
@@ -188,6 +194,7 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 | `manifest.json` | `quality-run/v1` | `score-run` | `qualityRunId`, `runId`, `screenshotId`, `trigger` (`mode`, `executionArn`), `input` (completion, run manifest and normalized references, normalized SHA-256), `sourceVersions` (the run manifest's `versions`), `versions` (§5.4), `build` (`gitSha`, `environment`), `startedAt` |
 | `profiles.json` | `quality-profiles/v1` | `score-run` | one `FieldProfile` per assessed table and mapped field (§8.1) |
 | `signals.json` | `quality-signals/v1` | `score-run` | every signal before scoring, grouped by run, table and cell |
+| `features.jsonl` | `cell-feature-row/v1` on every line | `score-run` | one `CellFeatureRow` per cell of every table, assessed or not (§8.4) |
 | `result.json` | `quality-result/v1` | `score-run` | `QualityResult` (§10.1) |
 | `outcome.json` | `quality-run-outcome/v1` | `score-run` | `status` (`SUCCEEDED` or `FAILED`), `completedAt`; on success `result` reference and `summary`; on failure `error` |
 | baseline `manifest.json` | `baseline-build/v1` | `build-baselines` | `baselineVersion`, `builderVersion`, `builtAt`, `adjudicationCount`, `adjudicationSetSha256`, `build` |
@@ -205,6 +212,7 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 | `anomalyVersion` | `within-table-anomaly-v1` |
 | `scoringVersion` | `noisy-or-v1` |
 | `configVersion` | `quality-config-v1` |
+| `featureSchemaVersion` | `cell-features-v1` |
 | `baselineVersion` | `none` until Phase 4; then the snapshot's version |
 
 `baselineVersion` is recorded per quality run but is not part of `qualityVersion`, so a new snapshot does not re-score old runs automatically.
@@ -225,7 +233,7 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 2. In `AUTOMATIC` mode, write the claim, or resolve an existing one (§5.2).
 3. Create a `qualityRunId`. Read the run `manifest.json` and `normalized/observations.json`, hash the normalized bytes, and write the quality `manifest.json`.
 4. Load the current baseline through `BaselineSource` (`none` before Phase 4).
-5. Build field profiles (§8.1), evaluate rules (§7) and anomalies (§8.2, §8.3), and combine signals (§9). Write `profiles.json`, `signals.json` and `result.json`.
+5. Build field profiles (§8.1), evaluate rules (§7) and anomalies (§8.2, §8.3), and combine signals (§9). Build one feature row per cell of every table (§8.4). Write `profiles.json`, `signals.json`, `features.jsonl` and `result.json`.
 6. Write a `SUCCEEDED` `outcome.json`, log `Run scored` with counts and priority, and return `ScoreRunOutput`.
 
 ### 6.3 Retries and failure
@@ -276,7 +284,7 @@ Team totals, placement, medals and derived ratios need fields match-to-csv does 
 
 ### 7.4 Unknown layouts
 
-A table classified `UNKNOWN` is not assessed: it gets `assessed: false`, no cell entries, no signals and `reviewPriority: NONE` in `result.json`. Its presence is still counted in the run summary (`unassessedTableCount`), and `R001` flags a run with no assessed table.
+A table classified `UNKNOWN` is not assessed: it gets `assessed: false`, no cell entries, no signals and `reviewPriority: NONE` in `result.json`. Its cells still get feature rows (§8.4), because spec 3 reviewers label every cell and every label needs features. Its presence is still counted in the run summary (`unassessedTableCount`), and `R001` flags a run with no assessed table.
 
 ## 8. Profiles, anomalies and baselines
 
@@ -312,6 +320,32 @@ Baselines compare a value with every verified value of the same field, which is 
 
 **Migration.** The S3 snapshots are the record and the table is a cache: deleting the table and rebuilding from the latest snapshot loses nothing. Moving baselines to the data platform means adding a `BaselineSource` implementation that reads there and producing snapshots from it. Scoring code, signal IDs and the result contract do not change, and old results stay reproducible because each names its `baselineVersion`.
 
+### 8.4 Cell features
+
+Every quality run writes `features.jsonl`: one flat JSON line per cell of every table, assessed or not, in table and cell order. A line is the complete model input for that cell as it was at scoring time. Training joins these lines with spec 3 labels on `cellObservationId`; it never recomputes features with newer code. Values that do not apply are `null`, never omitted.
+
+| Group | Fields (`cell-features-v1`) |
+| --- | --- |
+| Identity and lineage | `schemaVersion`, `featureSchemaVersion`, `cellObservationId`, `tableObservationId`, `runId`, `screenshotId`, `qualityRunId`, `qualityVersion`, `textractNormalizerVersion`, `tableParserVersion`, `validationRulesVersion` |
+| Image | `imageWidthPx`, `imageHeightPx`, `imageAspectRatio`, `acquisitionType`, `contentType` |
+| Table | `tableIndex`, `tableClassification`, `tableConfidence`, `tableRowCount`, `tableColumnCount`, `scoreboardTableCount`, `mappedFieldCount` |
+| Position | `field`, `rowRole`, `rowIndex`, `columnIndex`, `rowSpan`, `columnSpan`, `relativeRowPosition` (row index over row count) |
+| OCR | `cellConfidence`, `tokenCount`, `tokenConfidenceMin`, `tokenConfidenceMean`, `tokenConfidenceMax`, `wordCount` |
+| Text | `observedText`, `textLength`, `digitCount`, `letterCount`, `upperCount`, `spaceCount`, `otherCount`, `isEmpty`, `parseSucceeded`, `integerValue`, `glyphCandidate`, `glyphSubstitutionCount` |
+| Geometry | `bboxLeft`, `bboxTop`, `bboxWidth`, `bboxHeight`, `rowCenterOffset` and `columnCenterOffset` (in units of the median cell height and width), `outsideTableDistance` |
+| Context | `fieldMedian`, `fieldMad`, `fieldCount`, `robustZ`, `digitLengthDeviation`, `rowEmptyCellCount`, `rowSignalCount`, `rowPlayerDuplicate`, `rosterSize` |
+| Validation and rules | `flagEmptyRequiredCell`, `flagLowTextractConfidence`, `flagInvalidInteger`, `signalIds` (sorted), `heuristicSuspicionScore`, `heuristicReviewPriority` |
+| Baseline | `baselineVersion`, `baselineP005`, `baselineP995`, `baselineDistance`, `baselineUsable` (all `null` before Phase 4) |
+
+Rules for the feature rows:
+
+1. **No leakage.** No feature comes from a spec 3 adjudication, a resolution, reviewer behavior, a later run of the same screenshot, or anything written after the quality run started. Labels are joined at training time only.
+2. **Baselines predate the label.** A baseline feature is read from the snapshot current at scoring time, which by construction does not contain this cell's own label, because review happens after scoring.
+3. **Schema changes are versioned.** Adding, removing or redefining a field bumps `featureSchemaVersion` and `qualityVersion`. Old runs get the new schema only through an `AUTOMATIC` backfill or `RESCORE` (§4.2), which writes a new quality run and leaves the old feature rows in place.
+4. **Flat and typed.** Each value is a string, number, boolean, `null` or, for `signalIds`, an array of strings, so the rows load into a columnar table without reshaping.
+
+The fields are candidates for a gradient-boosted classifier. Recording a field that later proves useless costs bytes; missing a field that proves useful costs every label collected before it existed.
+
 ## 9. Scoring and results
 
 ### 9.1 Score types
@@ -321,7 +355,7 @@ Baselines compare a value with every verified value of the same field, which is 
 - `needsReview`: true for `MEDIUM`, `HIGH` and `CRITICAL`.
 - `signals`: the structured reasons.
 
-The names `pCorrect` and `confidenceInterval` are reserved for a calibrated model (backlog P5.5). That model trains on spec 3 labels joined with each cell's OCR text, confidence, geometry, profile and signals from `signals.json`, and adds its fields beside `suspicionScore` without changing the trigger, the evidence layout or the existing result fields.
+The risk model's output has its own reserved fields (§9.6) and never reuses `suspicionScore`.
 
 ### 9.2 Cell score
 
@@ -357,6 +391,22 @@ Thresholds are configuration (§13.1).
 
 Results store `messageCode` and structured `evidence`, never prose, so a UI can word and translate messages itself.
 
+### 9.6 Path to automated review
+
+The goal is to send as few cells to people as possible while keeping errors in the accepted data below a fixed rate. This component gets there in three stages. Only stage 1 is in scope here; a later risk model specification owns stages 2 and 3.
+
+| Stage | Who reviews | What this component writes | Purpose |
+| --- | --- | --- | --- |
+| 1. Review every cell (v1) | Spec 3 reviewers confirm every cell and row, with `selectionReason: REVIEW_ALL` | Heuristic score, signals, feature rows; `riskModel` absent | Complete, unbiased labels. The heuristic highlights where to look harder and is the baseline any model must beat. |
+| 2. Shadow model | Still every cell | `riskModel` filled with `decision` recorded but not used | Every model version is measured exactly against reviewer decisions at no extra review cost. |
+| 3. Flagged plus audit | Cells the model flags, plus a random audit sample of auto-accepted cells (`selectionReason: MODEL_FLAGGED` or `AUDIT_SAMPLE`) | `riskModel.decision` routes review | Automation, with the audit sample measuring the error rate of auto-accepted cells and keeping labels flowing. |
+
+**Reserved result fields.** `CellQuality.riskModel` (§10.1) holds `modelId`, `modelVersion`, `featureSchemaVersion`, `predictedErrorProbability`, `thresholdVersion`, `threshold`, `decision` (`AUTO_ACCEPT` or `REVIEW_REQUIRED`) and `mode` (`SHADOW` or `ROUTING`). v1 never writes it. Consumers must treat it as optional now so stage 2 adds no contract change.
+
+**Success measure.** The gate for stage 3 is stated in terms the data from stage 1 can measure: at the chosen threshold, the error rate among cells the model would auto-accept, at the upper bound of its 95% confidence interval, is below a target the risk model specification sets (for example 0.1%), and the review rate is as low as that allows. Errors are rare, so measuring a rate that low needs tens of thousands of labeled cells. Review-all labeling from the first screenshot is what makes that sample exist.
+
+**Prerequisites this specification guarantees for the risk model:** a feature row for every cell of every scored run (§8.4); stable join keys (`cellObservationId`, `runId`, `screenshotId`) shared with spec 3; recorded heuristic scores as the comparison baseline; versioned features, configuration and baselines; and re-scoring to produce new feature schemas for old runs. Spec 3 owns the label-side prerequisites: an explicit decision on every cell and row, `selectionReason`, what the reviewer was shown, and error types.
+
 ## 10. Typed domain model
 
 ### 10.1 Shared contracts
@@ -384,7 +434,32 @@ interface QualitySignal {
 interface QualityVersions {
   qualityVersion: string; profileVersion: string; rulesetVersion: string;
   anomalyVersion: string; scoringVersion: string; configVersion: string;
+  featureSchemaVersion: string;
   baselineVersion: string;    // 'none' before Phase 4
+}
+
+// Reserved for the risk model (§9.6). Never written in v1.
+interface RiskModelAssessment {
+  modelId: string;
+  modelVersion: string;
+  featureSchemaVersion: string;
+  predictedErrorProbability: number;
+  thresholdVersion: string;
+  threshold: number;
+  decision: 'AUTO_ACCEPT' | 'REVIEW_REQUIRED';
+  mode: 'SHADOW' | 'ROUTING';
+}
+
+// One line of features.jsonl (§8.4). Every field is present; inapplicable values are null.
+interface CellFeatureRow {
+  schemaVersion: 'cell-feature-row/v1';
+  featureSchemaVersion: 'cell-features-v1';
+  cellObservationId: string;
+  runId: string;
+  screenshotId: string;
+  qualityRunId: string;
+  // ...every remaining field listed in §8.4, typed string | number | boolean | null,
+  // except signalIds: string[]
 }
 
 interface CellQuality {
@@ -397,6 +472,7 @@ interface CellQuality {
   reviewPriority: ReviewPriority;
   needsReview: boolean;
   signals: readonly QualitySignal[];
+  riskModel?: RiskModelAssessment; // absent in v1
 }
 
 interface RowQuality { rowIndex: number; maxSuspicion: number; expectedIssueCount: number; hasCritical: boolean }
@@ -484,6 +560,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | `src/lib/rules/halo.ts` | `evaluateHaloRules(table, cells, config)` | §7.3. |
 | `src/lib/anomalies.ts` | `evaluateAnomalies(table, cells, profiles, baseline, config)` | §8.2, §8.3 checks. |
 | `src/lib/scoring.ts` | `scoreCell(signals, config)`; `priorityFor(score, signals, config)`; `assembleResult(...)` | §9. |
+| `src/lib/features.ts` | `buildFeatureRows(observations, source, profiles, signals, scores, baseline, versions)` | §8.4. Pure; one row per cell of every table. |
 | `src/lib/baseline-source.ts` | `NoBaselineSource`; `DynamoBaselineSource` | The `BaselineSource` port. |
 | `src/lib/log.ts` | `log(level, message, details?)` | One JSON log line per call. |
 
@@ -508,7 +585,7 @@ mcc-stats-suite/
       lib/{app,ocr-quality-stack}.ts
     src/
       lambdas/{score-run,build-baselines}.ts
-      lib/{run-keys,evidence,config,profiles,anomalies,scoring,baseline-source,log}.ts
+      lib/{run-keys,evidence,config,profiles,anomalies,scoring,features,baseline-source,log}.ts
       lib/rules/{generic,halo}.ts
     test/
       *.test.ts
@@ -607,8 +684,9 @@ Tests use `tap`, run from `applications/ocr-quality/test/*.test.ts`, and never c
 | `profiles.test.ts` | medians and MAD; `madZero`; empty and unparsed cells; determinism |
 | `rules.test.ts` | every rule in §7 fires on a seeded case and stays quiet on a clean table; imported flags respect §7.1 scoping; `UNKNOWN` tables produce no signals |
 | `anomalies.test.ts` | robust z with and without zero MAD; small samples; alignment checks; within-table cap |
+| `features.test.ts` | one row per cell of every table, `UNKNOWN` tables included; every §8.4 field present with `null` where inapplicable; no field read from adjudications or resolutions; values match fixtures; rows are flat |
 | `scoring.test.ts` | noisy-OR across groups; max within a group; priority thresholds; `CRITICAL` override; row ordering; summaries |
-| `score-run.test.ts` | complete automatic run writes claim, manifest, profiles, signals, result and outcome in order; `FAILED` source skipped with no writes; foreign claim no-op; own claim continues; re-score skips the claim; artifact error writes `FAILED` outcome and rethrows |
+| `score-run.test.ts` | complete automatic run writes claim, manifest, profiles, signals, features, result and outcome in order; `FAILED` source skipped with no writes; foreign claim no-op; own claim continues; re-score skips the claim; artifact error writes `FAILED` outcome and rethrows |
 | `fixtures.test.ts` | every fixture produces its expected signals and priorities; at least one fixture per rule |
 | `app.test.ts` | stack synthesizes for stable and ephemeral deployments; IAM resource patterns per §13.4; EventBridge wildcard per §4.1 |
 | `baseline.test.ts` (Phase 4) | resolution of superseding adjudications; `usable: false` below the minimum; snapshot hash stability; pointer moves only after the load |
@@ -634,14 +712,15 @@ v1 (Phases 0 to 3) is complete when:
 5. A fixture seeded with `I6` at confidence 99 in a kills cell yields `INVALID_INTEGER` and `C001_SUSPICIOUS_GLYPH` with candidate `16`, `reviewPriority: HIGH`, and a score of 0.75.
 6. A run whose only table is `UNKNOWN` yields `R001_NO_SCOREBOARD_TABLE`, `assessed: false` for the table, and run priority `HIGH`.
 7. Every result records `qualityVersion`, the normalized artifact's SHA-256, the source run's stage versions, `gitSha` and `baselineVersion: none`.
-8. An ephemeral stack scores only runs under its own `ephemeral/<name>/` namespace.
-9. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
+8. `features.jsonl` has exactly one `cell-features-v1` row for every cell in `normalized/observations.json`, including cells of `UNKNOWN` tables, and no `result.json` cell carries `riskModel`.
+9. An ephemeral stack scores only runs under its own `ephemeral/<name>/` namespace.
+10. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
 
 Phase 4 is complete when a baseline built from at least 200 labeled values per field changes `baselineVersion` in new results, `B001` fires on a seeded out-of-range value, and deleting and rebuilding the cache reproduces the same snapshot hash.
 
 ## 18. Risks and accepted limitations
 
-1. **Scores are not probabilities.** Severity scores and thresholds are judgment, not fitted to data. Accepted until labels exist; P5.5 calibrates them.
+1. **Scores are not probabilities.** Severity scores and thresholds are judgment, not fitted to data. Accepted because v1 routes nothing: spec 3 reviews every cell, and the risk model replaces the heuristic for routing (§9.6).
 2. **Within-table statistics are weak.** Eight rows make robust z-scores noisy, and kills legitimately vary. Accepted by capping them at `LOW` (§8.2); Phase 4 adds baselines.
 3. **The player name pattern is unverified.** `playerNamePattern` is not checked against a labeled corpus and may flag valid names. It is `LOW` severity and configurable.
 4. **New quality versions do not backfill.** A `qualityVersion` bump scores new runs only. Operators backfill with `AUTOMATIC` executions (§4.2).
@@ -651,7 +730,9 @@ Phase 4 is complete when a baseline built from at least 200 labeled values per f
 8. **Baseline builds scan every adjudication.** `BuildBaselines` lists the whole namespace, so build time grows with label count. Accepted at league scale; P5.3 moves baselines to the data platform behind the same port.
 9. **Rules know only five fields.** Team totals, placements and medals are not checked until match-to-csv extracts them (P5.4).
 10. **Ephemeral pairing is by name.** An ephemeral ocr-quality stack sees only the ephemeral match-to-csv stack of the same name, and nothing enforces that the second one exists.
-11. **The SSM parameters live under `match-to-csv`.** The stack reads foundation parameters named for another application. Accepted to avoid duplicating foundation outputs; renaming them is a foundation change for every consumer.
+11. **Feature choice is a guess until a model is trained.** A feature that matters but is missing from `cell-features-v1` cannot be added to past rows except by re-scoring, and re-scoring cannot recover inputs match-to-csv never stored. Accepted because §8.4 records every input match-to-csv keeps, and re-scoring covers features derived from them.
+12. **Runs scored before this component exists have no features.** Runs completed before P3.2 deploys are scored only by an `AUTOMATIC` backfill (§4.2). P3.3 includes that backfill in dev and prod.
+13. **The SSM parameters live under `match-to-csv`.** The stack reads foundation parameters named for another application. Accepted to avoid duplicating foundation outputs; renaming them is a foundation change for every consumer.
 
 ## 19. Reference documentation
 
@@ -688,6 +769,9 @@ This section is the backlog source for building the component. It is written to 
 | Quality result types and `ScoreRunInput` (§10.1) | P0.2 | `score-run`, spec 3, later admin features |
 | Quality key layout and claim rule (§5.1, §5.2) | P3.1 | `score-run`, spec 3 queue ordering (P5.1) |
 | Signal IDs, groups and `messageCode` values (§7, §8) | P2.2, P2.3 | consumers that display reasons |
+| `cell-feature-row/v1` and `cell-features-v1` (§8.4) | P2.5 | the risk model specification, its training dataset builder |
+| Reserved `riskModel` fields (§9.6) | P0.2 | spec 3, the risk model specification |
+| Spec 3 `selectionReason` and shown-priority fields | spec 3 (#158) | the risk model specification |
 | `BaselineSource` port and `baseline-snapshot/v1` | P4.1 | `score-run`, `build-baselines`, P5.3 |
 | Spec 3 `cell-adjudication/v1` and its supersession rules | spec 3 | `build-baselines` |
 
@@ -795,11 +879,22 @@ A change to a contract updates every consumer in the same PR.
 ### Phase 3: Workflow and deployment
 
 **Goal:** every successful run in dev and prod is scored automatically.
-**Exit criteria:** §17 criteria 1 to 9 hold in dev, and prod deploys.
+**Exit criteria:** §17 criteria 1 to 10 hold in dev, and prod deploys.
+
+#### P2.5 Cell feature rows (S)
+
+- **Blocked by:** P2.4
+- **Spec:** §8.4, §9.6
+- **Files:** `src/lib/features.ts`
+- **Provides:** `buildFeatureRows`
+- **Acceptance:**
+  - Every cell of every table, `UNKNOWN` tables included, produces one row with every `cell-features-v1` field, `null` where inapplicable.
+  - Feature values match hand-computed values on fixtures, including token confidence statistics and alignment offsets.
+  - A test proves no feature reads spec 3 adjudications or resolutions.
 
 #### P3.1 `ScoreRun` handler (M)
 
-- **Blocked by:** P2.4
+- **Blocked by:** P2.4, P2.5
 - **Spec:** §4.3, §5, §6.2, §6.3
 - **Files:** `src/lambdas/score-run.ts`, `src/lib/{baseline-source,log}.ts`
 - **Provides:** `scoreRun`, `NoBaselineSource`
@@ -827,6 +922,7 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - `fixtures.test.ts` covers every signal ID in §7 and §8.2.
   - `TESTING.md` lists the §16.3 steps, and they pass in dev.
+  - Every successful run completed before the stack deployed is scored by an `AUTOMATIC` backfill in dev and prod, and the operator steps are in `TESTING.md`.
 
 ### Phase 4: Cross-run baselines
 
@@ -863,10 +959,10 @@ A change to a contract updates every consumer in the same PR.
 | P5.2 | Publish `OCR Quality Assessed` and `OCR Quality Failed` events | XS | When a consumer needs push notification instead of reading `outcome.json`. |
 | P5.3 | Data-platform `BaselineSource` | M | §18.8; needs the data platform. |
 | P5.4 | Rules for team totals, placement and medals | M | §18.9; needs match-to-csv to extract those fields. |
-| P5.5 | Calibrated per-cell probability from spec 3 labels | M | §18.1; adds `pCorrect` beside `suspicionScore`. |
+| P5.5 | Risk model specification: training dataset builder (feature rows joined with spec 3 labels, split by screenshot), gradient-boosted training, evaluation gate against the heuristic, shadow mode, then routing with an audit sample | M | §9.6. A separate specification; it fills the reserved `riskModel` fields. |
 | P5.6 | Alarms for failed executions and DLQ depth | S | Follow the match-to-csv observability approach. |
 | P5.7 | Scheduled baseline rebuild | XS | When manual builds become a chore. |
 
 ### 20.4 Dependency order and parallel lanes
 
-P0.1, P0.2 and P1.1 can start together. P2.2 and P2.3 run in parallel after P2.1. The critical path is P0.1 -> P2.1 -> P2.2 -> P2.4 -> P3.1 -> P3.2 -> P3.3. The first real feedback is P3.2 in dev, when live runs start producing priorities that can be compared with screenshots.
+P0.1, P0.2 and P1.1 can start together. P2.2 and P2.3 run in parallel after P2.1. The critical path is P0.1 -> P2.1 -> P2.2 -> P2.4 -> P2.5 -> P3.1 -> P3.2 -> P3.3. Feature rows ship with the first deployment, so every run spec 3 labels has features from the start. The first real feedback is P3.2 in dev, when live runs start producing priorities that can be compared with screenshots.
