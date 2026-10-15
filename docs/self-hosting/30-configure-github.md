@@ -16,8 +16,8 @@ GitHub holds only the values nobody can derive: for each environment, the AWS ac
 | repository | `DEV_AWS_REGION`, `PROD_AWS_REGION` | variables | workload Region of each account | application deploys, Turbo cache in `main` CI |
 | repository | `DEV_MCC_EMAIL_DOMAIN`, `PROD_MCC_EMAIL_DOMAIN` | secrets | verified SES domain that receives each environment's email, in lowercase | [Terrateam](70-optional-terrateam.md) only |
 | repository | `DEV_MCC_EMAIL_ALIAS`, `PROD_MCC_EMAIL_ALIAS` | secrets | each environment's submission alias, the part of `<alias>@<domain>` before the @: lowercase letters, digits, `_`, `-`, and single dots, with no `+` | [Terrateam](70-optional-terrateam.md) only |
-| repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `release-please` |
-| repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `release-please` |
+| repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `Release: release PR` |
+| repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `Release: release PR` |
 | repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in `main` CI and deploys |
 
 ### Turbo cache
@@ -28,7 +28,7 @@ Only Terrateam reads the email domain secrets, as the table shows. A local found
 
 ## Branch protection
 
-Protect `main`: require pull requests and the `check`, `gitleaks`, and `semantic_pr` status checks, require branches to be up to date, and block force pushes and deletion. Enable auto-merge if you want pull requests to merge when their checks pass.
+Protect `main`: require pull requests and the `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits` status checks, require branches to be up to date, and block force pushes and deletion. Enable auto-merge if you want pull requests to merge when their checks pass.
 
 ## Release Please
 
@@ -44,7 +44,7 @@ Do not replace the app with a personal access token or give the workflow's `GITH
 
 A fork deploys to its own accounts with its own Release Please app. It also needs a few repository changes:
 
-- `issue-triage.yml`, `pr-issue-metadata.yml`, and `pr-issue-status.yml` run only in `samlevin/mcc-stats-suite`. They skip on a fork. To use them, change the repository check, point the scripts at your own GitHub Project, and add a `MCC_PROJECT_TOKEN` secret with issue, pull request, and project access.
+- `tracker-issue-states.yml`, `tracker-pr-metadata.yml`, and `tracker-pr-issue-status.yml` run only in `samlevin/mcc-stats-suite`. They skip on a fork. To use them, change the repository check, point the scripts at your own GitHub Project, and add a `MCC_PROJECT_TOKEN` secret with issue, pull request, and project access.
 - The README badges point at the upstream repository.
 - `match-to-csv` CI and deploy jobs run on GitHub-hosted ARM64 runners (`ubuntu-24.04-arm`), which are free only for public repositories.
 - Enable Actions on the fork. GitHub disables workflows on new forks.

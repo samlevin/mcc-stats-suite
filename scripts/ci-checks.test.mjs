@@ -59,7 +59,7 @@ test('root, unknown, and empty changes require every workspace', () => {
   for (const path of [
     'turbo.json',
     'package-lock.json',
-    '.github/workflows/ci.yml',
+    '.github/workflows/ci-checks.yml',
     'scripts/ci-checks.mjs',
     'infrastructure/.tool-versions',
     'unexpected/file',
@@ -152,10 +152,23 @@ test('automation script tests run only in the repository scope', () => {
     assert.equal(classify(path.replace('.test.mjs', '.mjs')), 'repository');
   }
   for (const path of [
-    '.github/workflows/pr-issue-metadata.yml',
-    '.github/workflows/pr-issue-status.yml',
+    '.github/workflows/ci-pr-title.yml',
+    '.github/workflows/ci-secret-scan.yml',
+    '.github/workflows/tracker-issue-states.yml',
+    '.github/workflows/tracker-pr-issue-status.yml',
+    '.github/workflows/tracker-pr-metadata.yml',
   ])
     assert.equal(classify(path), 'repository', path);
+  // Workflows that build, deploy, or release always run the full gate.
+  for (const path of [
+    '.github/workflows/ci-checks.yml',
+    '.github/workflows/delivery-deploy.yml',
+    '.github/workflows/delivery-rollback.yml',
+    '.github/workflows/_delivery-promote-application.yml',
+    '.github/workflows/_delivery-deploy-environment.yml',
+    '.github/workflows/release-pr.yml',
+  ])
+    assert.equal(classify(path), 'full', path);
   const application = selectScopes(
     ['applications/match-to-csv/src/index.ts'],
     'pull_request',
@@ -271,10 +284,10 @@ test('the bundle job is the only Docker job and runs only synthesis and verifica
       /synth|bundle|typecheck/,
     ),
   );
-  const jobs = loadWorkflow('ci').jobs;
+  const jobs = loadWorkflow('ci-checks').jobs;
   const text = (job) => JSON.stringify(job.steps);
-  assert.ok(!text(jobs['application-checks']).includes('docker'));
-  const steps = jobs['application-bundles'].steps;
+  assert.ok(!text(jobs['check-workspaces']).includes('docker'));
+  const steps = jobs['check-bundles'].steps;
   const pull = steps.findIndex((step) => step.run?.includes('docker pull'));
   assert.ok(
     pull >= 0 && pull < steps.findIndex((step) => step.run === 'npm ci'),
@@ -461,9 +474,9 @@ test('CI cdk-config tests cannot invoke another compiler or modify built declara
 });
 
 test('workflow isolates cache namespaces and deploys dev and prod after CI', () => {
-  const parsedWorkflow = loadWorkflow('ci');
+  const parsedWorkflow = loadWorkflow('ci-checks');
   const workflow = readFileSync(
-    new URL('../.github/workflows/ci.yml', import.meta.url),
+    new URL('../.github/workflows/ci-checks.yml', import.meta.url),
     'utf8',
   );
   assert.match(workflow, /runs-on: ubuntu-24\.04-arm/);
@@ -482,38 +495,39 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
     const caches = job.steps.filter((step) =>
       step.uses?.startsWith('actions/cache'),
     );
-    assert.equal(caches.length, name === 'infrastructure' ? 1 : 0, name);
+    assert.equal(caches.length, name === 'check-infrastructure' ? 1 : 0, name);
   }
-  const [providerCache] = parsedWorkflow.jobs.infrastructure.steps.filter(
-    (step) => step.uses?.startsWith('actions/cache'),
-  );
+  const [providerCache] = parsedWorkflow.jobs[
+    'check-infrastructure'
+  ].steps.filter((step) => step.uses?.startsWith('actions/cache'));
   assert.match(providerCache.with.key, /runner\.os.*runner\.arch/);
   assert.match(providerCache.with['restore-keys'], /runner\.os.*runner\.arch/);
-  assert.deepEqual(parsedWorkflow.jobs.check.needs, [
-    'scope',
-    'infrastructure',
-    'application-checks',
-    'application-bundles',
+  const gate = parsedWorkflow.jobs['require-scoped-checks'];
+  assert.deepEqual(gate.needs, [
+    'detect-changes',
+    'check-infrastructure',
+    'check-workspaces',
+    'check-bundles',
   ]);
-  assert.equal(parsedWorkflow.jobs.check.if, '${{ !cancelled() }}');
+  assert.equal(gate.if, '${{ !cancelled() }}');
   // Job names are the required status-check contexts in the main ruleset.
-  assert.equal(parsedWorkflow.jobs.check.name, undefined);
+  assert.equal(gate.name, 'Require every check selected for the changed files');
   const dev = readFileSync(
-    new URL('../.github/workflows/deploy-dev.yml', import.meta.url),
+    new URL('../.github/workflows/delivery-deploy.yml', import.meta.url),
     'utf8',
   );
-  assert.match(dev, /workflows: \[ci\]/);
+  assert.match(dev, /workflows: \['CI: checks'\]/);
   assert.match(dev, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(dev, /_deliver-aws-application/);
+  assert.match(dev, /_delivery-promote-application/);
   const prod = readFileSync(
     new URL(
-      '../.github/workflows/_deliver-aws-application.yml',
+      '../.github/workflows/_delivery-promote-application.yml',
       import.meta.url,
     ),
     'utf8',
   );
-  assert.match(prod, /needs: dev/);
-  assert.match(prod, /needs\.dev\.result == 'success'/);
+  assert.match(prod, /needs: deploy-dev/);
+  assert.match(prod, /needs\.deploy-dev\.result == 'success'/);
   assert.match(prod, /environment: prod/);
   assert.ok(!workflow.includes('continue-on-error'));
   assert.ok(!workflow.includes('pull_request_target'));
@@ -563,7 +577,7 @@ test('cache uses dedicated session credentials and environment contracts without
   assert.match(action, /AWS_SESSION_TOKEN=" >> "\$GITHUB_ENV/);
   const workflow = readFileSync(
     new URL(
-      '../.github/workflows/_deploy-aws-application.yml',
+      '../.github/workflows/_delivery-deploy-environment.yml',
       import.meta.url,
     ),
     'utf8',
@@ -603,16 +617,16 @@ test('Turbo cache steps run only in repositories that opt in', () => {
   assert.deepEqual(
     steps.map(({ id }) => id),
     [
-      '_deploy-aws-application.yml deploy: Check out cache action from the qualified workflow revision',
-      '_deploy-aws-application.yml deploy: Start environment Turbo cache',
-      'ci.yml application-checks: Start trusted dev Turbo cache',
-      'ci.yml application-bundles: Start trusted dev Turbo cache',
+      '_delivery-deploy-environment.yml deploy: Check out cache action from the qualified workflow revision',
+      '_delivery-deploy-environment.yml deploy: Start environment Turbo cache',
+      'ci-checks.yml check-workspaces: Start trusted dev Turbo cache',
+      'ci-checks.yml check-bundles: Start trusted dev Turbo cache',
     ],
   );
   const context = (vars) => ({
     vars,
     github: { event_name: 'push', ref: 'refs/heads/main' },
-    needs: { scope: { outputs: { full: 'true' } } },
+    needs: { 'detect-changes': { outputs: { full: 'true' } } },
   });
   for (const { id, step } of steps) {
     assert.equal(typeof step.if, 'string', id);
@@ -648,7 +662,7 @@ test('same revision has separate dev and prod Turbo task hashes', () => {
 });
 
 test('classifier selects independent infrastructure and application gates', () => {
-  const ciWorkflow = loadWorkflow('ci');
+  const ciWorkflow = loadWorkflow('ci-checks');
   for (const key of [
     'full',
     'repository',
@@ -659,7 +673,7 @@ test('classifier selects independent infrastructure and application gates', () =
     'head',
   ]) {
     assert.equal(
-      ciWorkflow.jobs.scope.outputs[key],
+      ciWorkflow.jobs['detect-changes'].outputs[key],
       '${{ steps.scope.outputs.' + key + ' }}',
     );
   }
@@ -738,22 +752,22 @@ test('classifier selects independent infrastructure and application gates', () =
     assert.deepEqual(gates, expected);
     assert.equal(mode, workspaceMode(paths, 'pull_request'));
     const needs = {
-      scope: {
+      'detect-changes': {
         outputs: Object.fromEntries(
           Object.entries(expected).map(([key, value]) => [key, String(value)]),
         ),
       },
     };
     assert.equal(
-      evaluate(ciWorkflow.jobs['application-checks'].if, { needs }),
+      evaluate(ciWorkflow.jobs['check-workspaces'].if, { needs }),
       expected.check,
     );
     assert.equal(
-      evaluate(ciWorkflow.jobs['application-bundles'].if, { needs }),
+      evaluate(ciWorkflow.jobs['check-bundles'].if, { needs }),
       expected.check && expected.full,
     );
     assert.equal(
-      evaluate(ciWorkflow.jobs.infrastructure.if, { needs }),
+      evaluate(ciWorkflow.jobs['check-infrastructure'].if, { needs }),
       expected.infrastructure,
     );
   }
@@ -792,17 +806,20 @@ test('classifier selects independent infrastructure and application gates', () =
   });
   // Classification needs no checkout; the compare API serves pushes and PRs.
   assert.deepEqual(
-    ciWorkflow.jobs.scope.steps.map((step) => step.uses?.split('@')[0]),
+    ciWorkflow.jobs['detect-changes'].steps.map(
+      (step) => step.uses?.split('@')[0],
+    ),
     ['actions/github-script'],
   );
   assert.match(
-    ciWorkflow.jobs.scope.steps[0].uses,
+    ciWorkflow.jobs['detect-changes'].steps[0].uses,
     /^actions\/github-script@[a-f0-9]{40}$/,
   );
 });
 
 test('check aggregator requires exactly the selected gates', () => {
-  const aggregator = loadWorkflow('ci').jobs.check.steps[0].run;
+  const aggregator =
+    loadWorkflow('ci-checks').jobs['require-scoped-checks'].steps[0].run;
   const passes = (env) => {
     try {
       execFileSync('bash', ['-euo', 'pipefail', '-c', aggregator], {
@@ -841,8 +858,8 @@ test('check aggregator requires exactly the selected gates', () => {
 });
 
 test('workflow executes gate selection for push, PR, retired baseline, and API failure', async () => {
-  const ciWorkflow = loadWorkflow('ci');
-  const script = ciWorkflow.jobs.scope.steps[0].with.script;
+  const ciWorkflow = loadWorkflow('ci-checks');
+  const script = ciWorkflow.jobs['detect-changes'].steps[0].with.script;
   const currentClassifier = readFileSync(
     new URL('./ci-scope.mjs', import.meta.url),
   );
@@ -991,7 +1008,7 @@ test('workflow executes gate selection for push, PR, retired baseline, and API f
 });
 
 test('standalone infrastructure gate runs without credentials', () => {
-  const job = loadWorkflow('ci').jobs.infrastructure;
+  const job = loadWorkflow('ci-checks').jobs['check-infrastructure'];
   assert.ok(job.steps.some((step) => step.run === './scripts/tofu-checks.sh'));
   assert.ok(
     job.steps.some((step) =>

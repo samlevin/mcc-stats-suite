@@ -1,5 +1,7 @@
-name: rollback-aws-application
-run-name: Roll back ${{ inputs.application }} from ${{ inputs.release-tag }}
+# The CDK entry role trusts this exact name through the OIDC workflow claim.
+# Add a new name to bootstrap cdk_workflow_names and apply it before renaming.
+name: 'Delivery: roll back prod'
+run-name: Roll back ${{ inputs.application }} in prod to ${{ inputs.release-tag }}
 
 on:
   workflow_dispatch:
@@ -34,7 +36,7 @@ permissions:
   deployments: read
 
 jobs:
-  qualify:
+  qualify-release:
     name: Qualify rollback release
     runs-on: ubuntu-latest
     outputs:
@@ -43,7 +45,8 @@ jobs:
     steps:
       - name: Require main workflow definition
         run: test "${GITHUB_REF}" = "refs/heads/main"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
       - name: Validate release
@@ -153,19 +156,19 @@ jobs:
             fi
           } >> "${GITHUB_STEP_SUMMARY}"
 
-  deploy-prod:
-    name: Roll back production
-    needs: qualify
+  rollback-prod:
+    name: Roll back ${{ inputs.application }} in prod
+    needs: qualify-release
     permissions:
       actions: read
       contents: read
       deployments: write
       id-token: write
-    uses: ./.github/workflows/_deploy-aws-application.yml
+    uses: ./.github/workflows/_delivery-deploy-environment.yml
     with:
       application: ${{ inputs.application }}
       environment: prod
-      sha: ${{ needs.qualify.outputs.sha }}
+      sha: ${{ needs.qualify-release.outputs.sha }}
       operation: ${{ inputs.operation }}
       source: ${{ inputs.release-tag }}
     secrets:

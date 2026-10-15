@@ -525,7 +525,7 @@ mcc-stats-suite/
     modules/foundation/{main,ses,outputs,variables}.tf
     {dev,prod}/foundation/            # Environment roots calling the module
   scripts/{cdk-app,cdk-targets}.mjs
-  .github/workflows/{ci,deploy-dev,_deliver-aws-application,_deploy-aws-application,deploy-aws}.yml
+  .github/workflows/{ci-checks,delivery-deploy,_delivery-promote-application,_delivery-deploy-environment,delivery-rollback}.yml
 ```
 
 `match-to-csv` imports only `@mcc/contracts` and `@mcc/cdk-config` from the monorepo. The foundation never references CDK resources; CDK reads the foundation through SSM parameters.
@@ -956,7 +956,7 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** P4.2
 - **Spec:** §13.6
-- **Files:** `.github/workflows/_deploy-aws-application.yml`
+- **Files:** `.github/workflows/_delivery-deploy-environment.yml`
 - **Provides:** guarded dev and prod deploys
 - **Acceptance:**
   - The job fails when a foundation parameter is missing, the rule set is not active, the identity is unverified or the MX record does not target SES in the Region.

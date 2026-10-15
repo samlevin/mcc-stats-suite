@@ -1,11 +1,11 @@
 // Keep the allowlist narrow. A new or build-affecting path selects all checks.
 const repositoryFiles = new Set([
   '.github/labels.json',
-  '.github/workflows/issue-triage.yml',
-  '.github/workflows/pr-issue-metadata.yml',
-  '.github/workflows/pr-issue-status.yml',
-  '.github/workflows/semantic.pr.yaml',
-  '.github/workflows/secret-scan.yml',
+  '.github/workflows/ci-pr-title.yml',
+  '.github/workflows/ci-secret-scan.yml',
+  '.github/workflows/tracker-issue-states.yml',
+  '.github/workflows/tracker-pr-issue-status.yml',
+  '.github/workflows/tracker-pr-metadata.yml',
   '.github/CODEOWNERS',
   'CODEOWNERS',
   'LICENSE',

@@ -1,9 +1,11 @@
-name: deploy-applications
+# The CDK entry role trusts this exact name through the OIDC workflow claim.
+# Add a new name to bootstrap cdk_workflow_names and apply it before renaming.
+name: 'Delivery: deploy to dev then prod'
 run-name: Deliver ${{ github.event.workflow_run.head_sha }} through dev and prod
 
 on:
   workflow_run:
-    workflows: [ci]
+    workflows: ['CI: checks']
     types: [completed]
     branches: [main]
 
@@ -12,21 +14,22 @@ permissions:
   contents: read
 
 jobs:
-  qualify:
-    name: Select applications to deliver
+  select-applications:
+    name: Select applications from CI
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       applications: ${{ steps.selection.outputs.applications }}
       sha: ${{ github.event.workflow_run.head_sha }}
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - name: Download application selection
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: deploy-applications-${{ github.event.workflow_run.id }}
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
           path: selection
-      - name: Validate deployment selection
+      - name: Validate application selection
         id: selection
         run: |
           node -e '
@@ -40,14 +43,14 @@ jobs:
             fs.appendFileSync(process.env.GITHUB_OUTPUT, `applications=${JSON.stringify(applications)}\n`);
           '
 
-  deploy:
-    name: Deliver application
-    needs: qualify
-    if: needs.qualify.outputs.applications != '[]'
+  deliver:
+    name: Deliver ${{ matrix.application }}
+    needs: select-applications
+    if: needs.select-applications.outputs.applications != '[]'
     strategy:
       fail-fast: false
       matrix:
-        application: ${{ fromJSON(needs.qualify.outputs.applications) }}
+        application: ${{ fromJSON(needs.select-applications.outputs.applications) }}
     permissions:
       actions: read
       contents: read
@@ -55,10 +58,10 @@ jobs:
       issues: write
       pull-requests: read
       id-token: write
-    uses: ./.github/workflows/_deliver-aws-application.yml
+    uses: ./.github/workflows/_delivery-promote-application.yml
     with:
       application: ${{ matrix.application }}
-      sha: ${{ needs.qualify.outputs.sha }}
+      sha: ${{ needs.select-applications.outputs.sha }}
     secrets:
       DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
       PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

@@ -57,6 +57,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 - OpenTofu owns persistent shared resources; CDK owns application compute. Never manage a resource from both.
 - Evidence is immutable: never overwrite raw MIME, screenshots, provider responses, or runs; events are append-only. Replay creates a new run. Unknown layouts stay `UNKNOWN`.
 - Shared-package changes include every consumer update. Keep `package.json`, `package-lock.json`, `.release-please-manifest.json`, and `release-please-config.json` in sync (`npm run release:check`).
+- GitHub Actions file, workflow, job, and step names follow the naming convention in `CONTRIBUTING.md`, which `scripts/workflow-names.test.mjs` enforces. Read it before adding or renaming a workflow. Renaming a deployment workflow needs bootstrap trust applied first, and renaming a required check needs a ruleset change at merge.
 
 ## Terrateam module mapping
 
@@ -75,7 +76,7 @@ Issue tracker: GitHub Issues. This marker turns on the GitHub issue flows (`impl
 Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://github.com/users/samlevin/projects/1). Discover project field IDs with `gh`.
 
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
-- Issue states: claim and move to `In progress` before coding. `pr-issue-status.yml` moves the closing issue to `In review` when the PR opens; move it yourself only if its run logs a skip. Never mark issues `Done`.
+- Issue states: claim and move to `In progress` before coding. `tracker-pr-issue-status.yml` moves the closing issue to `In review` when the PR opens; move it yourself only if its run logs a skip. Never mark issues `Done`.
 - Every request needs an issue before work starts. Search for an existing one first; if none exists, file it with `mcc-create-github-issue` (`$mcc-create-github-issue` in Codex), then claim it and do the work.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
 

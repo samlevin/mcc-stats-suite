@@ -1,11 +1,11 @@
 # MCC Stats Suite
 
-[![CI](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci.yml)
-[![Secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/secret-scan.yml)
-[![Semantic PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/semantic.pr.yaml)
-[![Release Please](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-please.yml)
-[![application delivery](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-dev.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-dev.yml)
-[![Production rollback](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/deploy-aws.yml)
+[![CI: checks](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-checks.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-checks.yml)
+[![CI: secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-secret-scan.yml)
+[![CI: PR title](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-pr-title.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-pr-title.yml)
+[![Release: release PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-pr.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-pr.yml)
+[![Delivery: deploy to dev then prod](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-deploy.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-deploy.yml)
+[![Delivery: roll back prod](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-rollback.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-rollback.yml)
 [![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
 
 MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
