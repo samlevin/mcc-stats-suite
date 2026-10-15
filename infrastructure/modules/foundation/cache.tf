@@ -44,6 +44,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "turbo_cache" {
   }
 }
 
+# cache_service_role_arns is an additional same-account workload allowlist; the
+# managed CI cache role is included automatically. These exceptions remove a
+# denial without granting access. Other principals, including broadly privileged
+# CDK deployment roles, cannot read data or list object names. Lifecycle expiry
+# still works; force_destroy cannot bypass the denial to empty a populated bucket.
 data "aws_iam_policy_document" "turbo_cache_bucket" {
   statement {
     sid    = "DenyInsecureTransport"
@@ -89,7 +94,9 @@ data "aws_iam_policy_document" "turbo_cache_bucket" {
     }
     actions   = ["s3:ListBucket"]
     resources = [aws_s3_bucket.turbo_cache.arn]
-    # HeadBucket refreshes have no max-keys context. Object listings always do.
+    # OpenTofu HeadBucket refreshes have no max-keys context. Object listings
+    # supply a positive limit; zero-key requests expose no names. This preserves
+    # metadata-only refreshes without exempting a management principal.
     condition {
       test     = "NumericGreaterThan"
       variable = "s3:max-keys"
@@ -130,6 +137,10 @@ resource "aws_s3_bucket_policy" "turbo_cache" {
   policy = data.aws_iam_policy_document.turbo_cache_bucket.json
 }
 
+# turbo_cache_service_policy_json exports this minimal object/KMS policy for
+# additional approved workload roles. It neither creates a role nor attaches a
+# grant. KMS use requires the regional S3 service and this bucket's encryption
+# context, matching S3 Bucket Keys.
 data "aws_iam_policy_document" "turbo_cache_service" {
   statement {
     sid       = "ReadWriteCacheObjects"

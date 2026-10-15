@@ -17,29 +17,7 @@ dev/bootstrap
 prod/bootstrap
 ```
 
-For stable accounts, each root creates:
-
-- a private, encrypted, versioned S3 state bucket
-- native S3 state locking
-- the GitHub Actions OIDC provider, or reuse of an existing provider
-- optionally, a Terrateam role restricted to the repository's Terrateam workflow
-- a protected-environment CDK role restricted to the deployment workflow on
-  `main`
-- a permissions boundary for application runtime roles
-
-Set `create_terrateam_role = false` unless you apply the foundation with
-Terrateam. For a disposable, locally managed dev account, also set
-`create_cdk_deploy_role = false`. The root then omits GitHub OIDC and CI roles
-while retaining state and the workload boundary.
-
-The state bucket uses deletion protection, requires TLS, and retains noncurrent
-versions for 90 days. Both CI roles receive `PowerUserAccess`; the CDK entry
-role may assume only this account's `cdk-*` bootstrap roles. The Terrateam role
-cannot administer IAM beyond the Turbo cache role, and neither CI role operates
-this bootstrap state.
-
-Apply bootstrap changes locally through an authorized IAM Identity Center
-session. CI/CD manages only stable operational roots.
+See [Bootstrap the dev and prod accounts](../docs/self-hosting/10-bootstrap-accounts.md) for the resource list and configuration. Apply bootstrap changes locally through an authorized IAM Identity Center session. CI/CD manages only stable operational roots.
 
 ## Local inputs
 
@@ -74,17 +52,9 @@ The foundation module defines a cache bucket named `<project>-<environment>-<acc
 
 Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc-ci/<environment>/turbo-cache/bucket-name` and `/mcc-ci/<environment>/turbo-cache/data-key-arn`, outside the application namespace described in [SSM parameter namespaces](#ssm-parameter-namespaces).
 
-When the Terrateam role applies the foundation, it can create this cache role only after the bootstrap grants it permission. Apply the bootstrap first, following [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later).
+Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role when `github_oidc_subject_repository` is set. `github_turbo_cache_role_arn` publishes its ARN. See [Turbo cache](../docs/self-hosting/30-configure-github.md#turbo-cache) for activation and repository settings, and [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later) for the prerequisite bootstrap grant when using Terrateam.
 
-Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role. It uses the existing bootstrap GitHub provider and workload permissions boundary; foundation never creates a second provider. The role trusts only the repository named by `github_oidc_subject_repository`, at `refs/heads/main`, so a fork's foundation creates a role for the fork and never trusts upstream. Dev accepts the main branch subject for CI and the protected dev environment subject for deployment builds. Prod accepts only the protected prod environment subject. When GitHub immutable repository subjects are enabled, pass `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, matching bootstrap, to both foundation roots as `github_oidc_subject_repository` (each foundation root's `.envrc` exports it as `TF_VAR_github_oidc_subject_repository`, and Terrateam builds it from the runner's repository variables). Without immutable subjects, pass `OWNER/REPOSITORY`. A root without the value creates no cache role. No pull request subject is trusted.
-
-The dedicated role can read the two environment-specific SSM cache contracts, list hash candidates only under `turbogha/<environment>/`, and read/write/abort multipart uploads only in that prefix. KMS decrypt/data-key permissions require the regional S3 service and this bucket's encryption context with S3 Bucket Keys. It cannot delete cache objects, administer IAM, read evidence, use another environment's cache, or use the key directly. `github_turbo_cache_role_arn` publishes the role ARN. `main` CI reads the repository `DEV_AWS_ACCOUNT_ID` secret and `DEV_AWS_REGION` variable, and deployments read the `DEV_` or `PROD_` pair of the environment they deploy. Every cache step in CI and deployments runs only when the repository variable `MCC_TURBO_CACHE` is `true`, so a repository that has not opted in builds uncached.
-
-`cache_service_role_arns` remains an additional explicit same-account workload allowlist and defaults empty. The managed CI cache role is included automatically in both stable roots. Bucket policy denies data/listing access to other principals, including broadly privileged CDK deployment roles. The allowlist removes a denial and grants no permissions itself. Lifecycle expiration still works. OpenTofu `HeadBucket` refreshes remain possible because the listing denial applies to positive `s3:max-keys`, which object-list requests supply; metadata-only refreshes expose no cache names.
-
-The `turbo_cache_service_policy_json` output preserves the minimal object/KMS policy for additional approved workload roles. The managed CI role adds prefix-scoped listing because the selected v2 S3 provider calls `ListObjectsV2` before `GetObject`. Cleanup options are omitted and deletion is denied; S3 lifecycle owns seven-day expiry. CI uses an explicit temporary cache session, including its session token, independently of later deployment credentials.
-
-To empty a populated cache bucket manually, use an approved service workload role with a separately reviewed deletion grant, or wait for lifecycle expiry. A deployment role cannot bypass the data denial with `force_destroy`.
+To empty a populated cache bucket manually, use an approved service workload role with a separately reviewed deletion grant, or wait for lifecycle expiry.
 
 Run the AWS-free contract tests with fake provider credentials and local-plan overrides:
 
@@ -96,4 +66,4 @@ tofu -chdir=infrastructure/prod/foundation init -backend=false -lockfile=readonl
 tofu -chdir=infrastructure/prod/foundation validate
 ```
 
-These tests check dev/prod naming and SSM contracts, retention, encryption, IAM policy statements, and invalid service-role inputs. They do not inspect deployed resources. Review real environment plans before accepting the infrastructure change; expected changes are the cache bucket's controls, its SSM parameters, and outputs, with no evidence bucket, KMS key, or deployment-role replacement.
+These tests check dev/prod naming and SSM contracts, retention, encryption, IAM policy statements, and invalid service-role inputs. They do not inspect deployed resources. Review real environment plans before accepting infrastructure changes.
