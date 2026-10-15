@@ -171,6 +171,7 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
       outcome.json
 [ephemeral/<name>/]baselines/{baselineVersion}/       (Phase 4)
   manifest.json
+  members.jsonl
   snapshot.json
 ```
 
@@ -197,7 +198,8 @@ An operator starts the same workflow with `mode: "RESCORE"` and the key of a run
 | `features.jsonl` | `cell-feature-row/v1` on every line | `score-run` | one `CellFeatureRow` per cell of every table, assessed or not (§8.4) |
 | `result.json` | `quality-result/v1` | `score-run` | `QualityResult` (§10.1) |
 | `outcome.json` | `quality-run-outcome/v1` | `score-run` | `status` (`SUCCEEDED` or `FAILED`), `completedAt`; on success `result` reference and `summary`; on failure `error` |
-| baseline `manifest.json` | `baseline-build/v1` | `build-baselines` | `baselineVersion`, `builderVersion`, `builtAt`, `adjudicationCount`, `adjudicationSetSha256`, `build` |
+| baseline `manifest.json` | `baseline-build/v1` | `build-baselines` | `baselineVersion`, `builderVersion`, `builtAt`, `labelCutoff`, `adjudicationCount`, `memberScreenshotCount`, `adjudicationSetSha256`, `membersSha256`, `build` |
+| baseline `members.jsonl` | `baseline-member/v1` on every line | `build-baselines` | `screenshotId`, `runId`, `adjudicationCount` for every run that contributed a value |
 | baseline `snapshot.json` | `baseline-snapshot/v1` | `build-baselines` | one `FieldBaseline` per field (§8.3) |
 
 ### 5.4 Stage versions
@@ -309,9 +311,9 @@ Baselines compare a value with every verified value of the same field, which is 
 
 **Source of truth.** Spec 3 `cell-adjudication/v1` objects under each run's `adjudications/` prefix, resolved with spec 3's supersession rules. A cell counts when its current decision is `ACCEPTED` (value: `observedTextAtReview`) or `CORRECTED` (value: `submittedValue`), it is a `DATA` cell of a `SCOREBOARD` table, and its field is mapped. `UNREADABLE` and `SKIPPED` cells are excluded.
 
-**Build.** `BuildBaselines` is invoked by an operator. It lists adjudications under the namespace, resolves them, reads the matching cells from each run's normalized observations, computes one `FieldBaseline` per field, writes `snapshot.json` and then `manifest.json` under a new `baselineVersion`, loads the snapshot into the `BaselineCache` table, and finally moves the table's `CURRENT` pointer with a conditional write. A field with fewer than `minBaselineObservations` (200) values gets `usable: false`. `adjudicationSetSha256` hashes the sorted adjudication keys, so two builds over the same labels are recognizable.
+**Build.** `BuildBaselines` is invoked by an operator. It lists adjudications under the namespace, resolves them, reads the matching cells from each run's normalized observations, computes one `FieldBaseline` per field, writes `members.jsonl`, `snapshot.json` and then `manifest.json` under a new `baselineVersion`, loads the snapshot and its membership into the `BaselineCache` table, and finally moves the table's `CURRENT` pointer with a conditional write. `members.jsonl` lists every `screenshotId` and `runId` that contributed a value, and the manifest records `labelCutoff`, the latest `reviewedAt` among the adjudications used. Membership is by screenshot, so a reviewed sibling run of the same screenshot makes the screenshot a member. A field with fewer than `minBaselineObservations` (200) values gets `usable: false`. `adjudicationSetSha256` hashes the sorted adjudication keys, so two builds over the same labels are recognizable.
 
-**Read.** `ScoreRun` reads the current baseline once per execution through the `BaselineSource` port. `DynamoBaselineSource` reads the pointer and the field items. `NoBaselineSource` returns `none`. The quality manifest and result record the `baselineVersion` used.
+**Read.** `ScoreRun` asks the `BaselineSource` port once per execution for the baseline to use for the run's screenshot: the newest snapshot whose members do not include that `screenshotId`. A baseline therefore never contains a label of the screenshot being scored, whether scoring happens before review, after review through `RESCORE` or a backfill, or after a sibling run was reviewed. `DynamoBaselineSource` reads the snapshot versions newest first and the screenshot's `MEMBER` items, and picks the first version that is not among them. `NoBaselineSource` returns `none`, as does a source with no qualifying snapshot. The quality manifest, result and every feature row record the `baselineVersion` used and its `labelCutoff`.
 
 | ID | Condition | Severity | Group |
 | --- | --- | --- | --- |
@@ -322,7 +324,7 @@ Baselines compare a value with every verified value of the same field, which is 
 
 ### 8.4 Cell features
 
-Every quality run writes `features.jsonl`: one flat JSON line per cell of every table, assessed or not, in table and cell order. A line is the complete model input for that cell as it was at scoring time. Training joins these lines with spec 3 labels on `cellObservationId`; it never recomputes features with newer code. Values that do not apply are `null`, never omitted.
+Every quality run writes `features.jsonl`: one flat JSON line per cell of every table, assessed or not, in table and cell order. A line is the complete model input for that cell as it was at scoring time. Training selects feature rows by `(qualityRunId, cellObservationId)` under §8.5; it never recomputes features with newer code. Values that do not apply are `null`, never omitted.
 
 | Group | Fields (`cell-features-v1`) |
 | --- | --- |
@@ -335,16 +337,26 @@ Every quality run writes `features.jsonl`: one flat JSON line per cell of every 
 | Geometry | `bboxLeft`, `bboxTop`, `bboxWidth`, `bboxHeight`, `rowCenterOffset` and `columnCenterOffset` (in units of the median cell height and width), `outsideTableDistance` |
 | Context | `fieldMedian`, `fieldMad`, `fieldCount`, `robustZ`, `digitLengthDeviation`, `rowEmptyCellCount`, `rowSignalCount`, `rowPlayerDuplicate`, `rosterSize` |
 | Validation and rules | `flagEmptyRequiredCell`, `flagLowTextractConfidence`, `flagInvalidInteger`, `signalIds` (sorted), `heuristicSuspicionScore`, `heuristicReviewPriority` |
-| Baseline | `baselineVersion`, `baselineP005`, `baselineP995`, `baselineDistance`, `baselineUsable` (all `null` before Phase 4) |
+| Baseline | `baselineVersion`, `baselineLabelCutoff`, `baselineP005`, `baselineP995`, `baselineDistance`, `baselineUsable` (all `null` before Phase 4) |
 
 Rules for the feature rows:
 
 1. **No leakage.** No feature comes from a spec 3 adjudication, a resolution, reviewer behavior, a later run of the same screenshot, or anything written after the quality run started. Labels are joined at training time only.
-2. **Baselines predate the label.** A baseline feature is read from the snapshot current at scoring time, which by construction does not contain this cell's own label, because review happens after scoring.
+2. **Baselines exclude the target screenshot.** A baseline feature comes from the newest snapshot that has no member from the scored screenshot (§8.3), never from the current snapshot unconditionally. The snapshot's `members.jsonl` is the evidence a training job uses to verify this.
 3. **Schema changes are versioned.** Adding, removing or redefining a field bumps `featureSchemaVersion` and `qualityVersion`. Old runs get the new schema only through an `AUTOMATIC` backfill or `RESCORE` (§4.2), which writes a new quality run and leaves the old feature rows in place.
 4. **Flat and typed.** Each value is a string, number, boolean, `null` or, for `signalIds`, an array of strings, so the rows load into a columnar table without reshaping.
 
 The fields are candidates for a gradient-boosted classifier. Recording a field that later proves useless costs bytes; missing a field that proves useful costs every label collected before it existed.
+
+### 8.5 Training example selection
+
+A cell can have several feature rows: the automatic scoring, retries, re-scores and schema backfills each write their own quality run. A future training dataset builder, owned by the risk model specification, must turn labels and feature rows into exactly one example per labeled cell. This section fixes the rules now so that the evidence collected from the first review supports them.
+
+1. **Label.** The label for a cell is its spec 3 resolution as of the dataset's `labelCutoff`: the latest adjudication not superseded by another adjudication reviewed at or before the cutoff, following spec 3's supersession rule. `SKIPPED` cells have no label. Whether `UNREADABLE` is a class or an exclusion is the risk model specification's decision, and the dataset manifest records it.
+2. **Eligibility.** A feature row is eligible when its quality run has a `SUCCEEDED` outcome, its `featureSchemaVersion` is the one the dataset requests, and its baseline, if any, has no member from the cell's screenshot, checked against that snapshot's `members.jsonl`. Ineligible rows are skipped and counted in the dataset manifest.
+3. **One row per label.** For each labeled cell the builder picks one eligible row, keyed by `(qualityRunId, cellObservationId)`: the row from the quality run the reviewer was shown (spec 3 records that `qualityRunId` on the adjudication) when it is eligible, otherwise the eligible row with the greatest `qualityRunId`. The dataset records, per example, the chosen `qualityRunId` and which rule chose it (`SHOWN` or `LATEST_ELIGIBLE`).
+4. **Backfills qualify for training, not for routing analysis.** A row from a `RESCORE` or schema backfill written after review is eligible for training, because its features read only match-to-csv evidence and a baseline that excludes the screenshot. Any analysis of what the reviewer saw, such as the effect of the shown priority or the heuristic's routing performance, uses only `SHOWN` rows, and cells without one are left out of it.
+5. **Labels attach to the reviewed run.** Adjudications name a `cellObservationId`, which belongs to one processing run. Cells of a sibling run of the same screenshot are different observations and are never labeled by another run's adjudications.
 
 ## 9. Scoring and results
 
@@ -522,7 +534,8 @@ Workflow inputs are validated at the trust boundary in `score-run` before any re
 
 ```typescript
 interface BaselineSource {
-  current(): Promise<BaselineSnapshot | undefined>; // undefined means baselineVersion 'none'
+  // Newest snapshot with no member from this screenshot; undefined means baselineVersion 'none'.
+  forScreenshot(screenshotId: string): Promise<BaselineSnapshot | undefined>;
 }
 ```
 
@@ -635,7 +648,7 @@ The file is bundled into the Lambda. `loadQualityConfig` validates every key and
 | `BuildBaselines` (Phase 4) | Node.js 22, ARM64, 2,048 MB, 10-minute timeout, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `BASELINE_TABLE` |
 | State machine `<stack>` | §6.1 |
 | EventBridge rule and DLQ | §4.1 |
-| `BaselineCache` table (Phase 4) | On-demand, partition key `pk` (`CURRENT` or `baselineVersion`), sort key `sk` (field), encrypted with the foundation data key, removed with the stack because it is rebuildable from snapshots |
+| `BaselineCache` table (Phase 4) | On-demand, partition key `pk` (`VERSIONS`, `baselineVersion` or `MEMBER#<screenshotId>`), sort key `sk` (`baselineVersion` or field), encrypted with the foundation data key, removed with the stack because it is rebuildable from snapshots |
 | Outputs | `StateMachineArn`, `BuildBaselinesFunctionName` (Phase 4), `ObjectPrefix` |
 
 Log groups follow match-to-csv: three months in prod, two weeks otherwise, retained for stable stacks and destroyed with ephemeral ones.
@@ -716,7 +729,7 @@ v1 (Phases 0 to 3) is complete when:
 9. An ephemeral stack scores only runs under its own `ephemeral/<name>/` namespace.
 10. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
 
-Phase 4 is complete when a baseline built from at least 200 labeled values per field changes `baselineVersion` in new results, `B001` fires on a seeded out-of-range value, and deleting and rebuilding the cache reproduces the same snapshot hash.
+Phase 4 is complete when a baseline built from at least 200 labeled values per field changes `baselineVersion` in new results, `B001` fires on a seeded out-of-range value, and deleting and rebuilding the cache reproduces the same snapshot hash. Two leakage cases must also hold. A run re-scored after its own adjudications were included in a newer snapshot uses the newest snapshot without its screenshot. A run whose sibling run of the same screenshot was reviewed and included in a snapshot also skips that snapshot. In both cases the recorded `baselineVersion` is one whose `members.jsonl` does not list the screenshot.
 
 ## 18. Risks and accepted limitations
 
@@ -727,12 +740,13 @@ Phase 4 is complete when a baseline built from at least 200 labeled values per f
 5. **Duplicate source runs are scored separately.** Match-to-csv retries can create two runs of one screenshot (spec 1 §18.6), and each gets its own quality run. Consumers group by screenshot.
 6. **The export may lag the score.** Scoring starts at run completion, before match-to-csv writes the CSV, so a quality result can exist for a run whose export later fails. Rows are judged from `normalized-ocr/v2`, which is complete at completion.
 7. **The evidence bucket sends every object event to EventBridge.** Only the stack rules match run completions. Accepted because S3 events on the default bus have no delivery charge and the bucket's write rate is low.
-8. **Baseline builds scan every adjudication.** `BuildBaselines` lists the whole namespace, so build time grows with label count. Accepted at league scale; P5.3 moves baselines to the data platform behind the same port.
-9. **Rules know only five fields.** Team totals, placements and medals are not checked until match-to-csv extracts them (P5.4).
-10. **Ephemeral pairing is by name.** An ephemeral ocr-quality stack sees only the ephemeral match-to-csv stack of the same name, and nothing enforces that the second one exists.
-11. **Feature choice is a guess until a model is trained.** A feature that matters but is missing from `cell-features-v1` cannot be added to past rows except by re-scoring, and re-scoring cannot recover inputs match-to-csv never stored. Accepted because §8.4 records every input match-to-csv keeps, and re-scoring covers features derived from them.
-12. **Runs scored before this component exists have no features.** Runs completed before P3.2 deploys are scored only by an `AUTOMATIC` backfill (§4.2). P3.3 includes that backfill in dev and prod.
-13. **The SSM parameters live under `match-to-csv`.** The stack reads foundation parameters named for another application. Accepted to avoid duplicating foundation outputs; renaming them is a foundation change for every consumer.
+8. **Re-scored rows can use older baselines.** Excluding the scored screenshot means a run re-scored after review uses the newest snapshot built before its labels, which can be several builds old. Accepted because a slightly stale baseline is better than one containing the answer.
+9. **Baseline builds scan every adjudication.** `BuildBaselines` lists the whole namespace, so build time grows with label count. Accepted at league scale; P5.3 moves baselines to the data platform behind the same port.
+10. **Rules know only five fields.** Team totals, placements and medals are not checked until match-to-csv extracts them (P5.4).
+11. **Ephemeral pairing is by name.** An ephemeral ocr-quality stack sees only the ephemeral match-to-csv stack of the same name, and nothing enforces that the second one exists.
+12. **Feature choice is a guess until a model is trained.** A feature that matters but is missing from `cell-features-v1` cannot be added to past rows except by re-scoring, and re-scoring cannot recover inputs match-to-csv never stored. Accepted because §8.4 records every input match-to-csv keeps, and re-scoring covers features derived from them.
+13. **Runs scored before this component exists have no features.** Runs completed before P3.2 deploys are scored only by an `AUTOMATIC` backfill (§4.2). P3.3 includes that backfill in dev and prod.
+14. **The SSM parameters live under `match-to-csv`.** The stack reads foundation parameters named for another application. Accepted to avoid duplicating foundation outputs; renaming them is a foundation change for every consumer.
 
 ## 19. Reference documentation
 
@@ -770,6 +784,8 @@ This section is the backlog source for building the component. It is written to 
 | Quality key layout and claim rule (§5.1, §5.2) | P3.1 | `score-run`, spec 3 queue ordering (P5.1) |
 | Signal IDs, groups and `messageCode` values (§7, §8) | P2.2, P2.3 | consumers that display reasons |
 | `cell-feature-row/v1` and `cell-features-v1` (§8.4) | P2.5 | the risk model specification, its training dataset builder |
+| Training example selection and eligibility (§8.5) | this specification | the risk model specification's dataset builder; spec 3 records the shown `qualityRunId` it depends on |
+| `baseline-member/v1` and per-screenshot baseline selection (§8.3) | P4.1, P4.2 | `score-run`, the training dataset builder |
 | Reserved `riskModel` fields (§9.6) | P0.2 | spec 3, the risk model specification |
 | Spec 3 `selectionReason` and shown-priority fields | spec 3 (#158) | the risk model specification |
 | `BaselineSource` port and `baseline-snapshot/v1` | P4.1 | `score-run`, `build-baselines`, P5.3 |
@@ -938,16 +954,18 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - A build over fixture adjudications resolves supersession like spec 3 and counts only `ACCEPTED` and `CORRECTED` cells of mapped fields.
   - Two builds over the same adjudications produce the same `adjudicationSetSha256` and statistics.
-  - The `CURRENT` pointer moves only after every field item is loaded.
+  - The `CURRENT` pointer moves only after every field and member item is loaded.
+  - `members.jsonl` lists every contributing screenshot and run, including runs that are siblings of other members, and the manifest records `labelCutoff` and `membersSha256`.
 
 #### P4.2 Baseline signals in scoring (S)
 
 - **Blocked by:** P4.1
 - **Spec:** §8.3, §5.4
 - **Files:** `src/lib/{baseline-source,anomalies}.ts`, `src/lambdas/score-run.ts`
-- **Provides:** `DynamoBaselineSource`, `B001`, `B002`
+- **Provides:** `DynamoBaselineSource` with per-screenshot selection, `B001`, `B002`
 - **Acceptance:**
-  - Results record the `baselineVersion` read at the start of the execution.
+  - Results and feature rows record the `baselineVersion` and `baselineLabelCutoff` used.
+  - Scoring a run whose screenshot is a member of the newest snapshot uses the newest snapshot without it, both for a re-score after adjudication and for a run whose sibling was reviewed.
   - `B001` and `B002` fire on seeded values and never for fields with `usable: false`.
   - With no `CURRENT` pointer, scoring behaves exactly as in Phase 3 with `baselineVersion: none`.
 
@@ -957,8 +975,8 @@ A change to a contract updates every consumer in the same PR.
 | --- | --- | --- | --- |
 | P5.1 | Spec 3's review queue orders runs and cells by the latest `reviewPriority` | S | Blocked by P3.2 and spec 3's queue. Belongs to whichever spec ships second. |
 | P5.2 | Publish `OCR Quality Assessed` and `OCR Quality Failed` events | XS | When a consumer needs push notification instead of reading `outcome.json`. |
-| P5.3 | Data-platform `BaselineSource` | M | §18.8; needs the data platform. |
-| P5.4 | Rules for team totals, placement and medals | M | §18.9; needs match-to-csv to extract those fields. |
+| P5.3 | Data-platform `BaselineSource` | M | §18.9; needs the data platform. |
+| P5.4 | Rules for team totals, placement and medals | M | §18.10; needs match-to-csv to extract those fields. |
 | P5.5 | Risk model specification: training dataset builder (feature rows joined with spec 3 labels, split by screenshot), gradient-boosted training, evaluation gate against the heuristic, shadow mode, then routing with an audit sample | M | §9.6. A separate specification; it fills the reserved `riskModel` fields. |
 | P5.6 | Alarms for failed executions and DLQ depth | S | Follow the match-to-csv observability approach. |
 | P5.7 | Scheduled baseline rebuild | XS | When manual builds become a chore. |
