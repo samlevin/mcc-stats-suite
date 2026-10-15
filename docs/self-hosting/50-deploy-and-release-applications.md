@@ -24,7 +24,7 @@ npm run app:diff -- <application> --environment dev --ephemeral <name>
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
 
-For `match-to-csv`, run `npm run verify:bundle --workspace @mcc/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name, the alias, and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `<alias>+<name>@<domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `<alias>@<domain>` rule alone. If the alias or domain changes later, the stack's `process-email` rejects any message not sent to the current `<alias>+<name>@<domain>`, so mail to the old address stops without a redeploy. Redeploy to receive mail at the new address.
+For `match-to-csv`, run `npm run verify:bundle --workspace @mcc/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name, the alias, and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `<alias>+<name>@<domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `<alias>@<domain>` rule alone. If the alias or domain changes later, the stack's `process-email` rejects any message not sent to the current `<alias>+<name>@<domain>`, so mail to the old address stops within one minute without a redeploy. Redeploy to receive mail at the new address.
 
 Remove the stack when you are done:
 
@@ -66,26 +66,28 @@ The optional `match-to-csv` sender allowlist is the SSM parameter `/mcc/<environ
 
 Create the parameter by hand as `String` or `StringList`. `process-email` splits the value on commas or whitespace and matches addresses without regard to case. Use comma-separated addresses for `StringList`, as Parameter Store requires. When the parameter exists, every `From` address must be listed. A message with no `From` address is rejected. If the parameter is missing, the allowlist accepts every sender; SES verdict screening and attachment validation still apply.
 
-`process-email` reads the parameter for each message and does not cache its value between invocations. Creation, updates, and deletion apply to the next message without a plan, pull request, or deploy. Keep this parameter hand-managed. Never add it to OpenTofu or commit its value or real sender addresses to the repository.
+`process-email` checks the allowlist for each message. A warm Lambda caches the parameter value, including a missing parameter, for 60 seconds. Creation, updates, and deletion therefore take effect within one minute without a plan, pull request, or deploy. Keep this parameter hand-managed. Never add it to OpenTofu or commit its value or real sender addresses to the repository.
 
 ### AWS console
 
-1. Sign in to the target environment's AWS account and select the Region where `match-to-csv` is deployed. Open **Systems Manager -> Parameter Store**.
+1. Sign in to the target environment's AWS account with its administrator permission set, as configured in [prerequisites](00-prerequisites.md#accounts), and select the Region where `match-to-csv` is deployed. Open **Systems Manager -> Parameter Store**.
 2. To create the allowlist, choose **Create parameter**. Enter the environment's full parameter name above, choose the **Standard** tier, and choose **String** or **StringList** as the type. For `String`, keep the data type as **text**. Enter the allowed addresses, such as `player@example.test,teammate@example.test`, then choose **Create parameter**. See AWS's [console creation reference](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-create-console.html) for the field descriptions.
 3. To update it, open the parameter and choose **Edit**. Replace the value with the complete desired list, save the changes, then check the saved value.
 4. To remove the restriction, select the parameter in Parameter Store, choose **Delete**, and confirm deletion. A missing parameter accepts every sender through the allowlist.
 
 ### AWS CLI
 
-Use a signed-in profile with permission to read, write, and delete the parameter in the application's Region. These examples use the `mcc-dev` profile and its configured Region. For production, change both the profile to `mcc-prod` and `environment` to `prod` before running any command.
+Use the administrator profiles from [prerequisites](00-prerequisites.md#sso-profiles). These examples use `mcc-dev-admin` in the dev account and its configured workload Region. For production, change both the profile to `mcc-prod-admin` and `environment` to `prod` before running any command. The local `mcc-dev` deploy profile cannot manage the allowlist. An alternative operator profile needs `ssm:PutParameter`, `ssm:GetParameter`, and `ssm:DeleteParameter` on `/mcc/<environment>/match-to-csv/sender-allowlist` in the target account and Region.
 
 ```console
-export AWS_PROFILE=mcc-dev
+export AWS_PROFILE=mcc-dev-admin
 environment=dev
 allowlist_parameter="/mcc/${environment}/match-to-csv/sender-allowlist"
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity
 ```
+
+Confirm that `get-caller-identity` reports the intended dev or prod account before changing the parameter.
 
 Create or replace the complete list with [`put-parameter --overwrite`](https://docs.aws.amazon.com/cli/latest/reference/ssm/put-parameter.html). Replace these placeholder addresses with your allowed senders locally. Use the existing parameter's type when updating it; this example creates a `String`.
 
@@ -116,7 +118,7 @@ The final read should return `ParameterNotFound`. Sender addresses in CLI histor
 
 ### Verify in dev
 
-After saving the dev allowlist, send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result. After an update or deletion, send a new message to verify the new behavior without redeploying.
+After saving the dev allowlist, wait one minute for cached values to expire, then send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result. After an update or deletion, wait one minute and send a new message to verify the new behavior without redeploying.
 
 ## Releases
 
