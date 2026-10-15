@@ -35,7 +35,7 @@ Treat any change to the Terrateam workflow, the Terrateam configuration, or `inf
 
 Create two more GitHub Environments, `infra/foundation-dev` and `infra/foundation-prod`. Give them no required reviewers, so Terrateam jobs never wait for an Actions approval, and no variables or secrets. Terrateam's `access_control`, not the `prod` deployment approval, is the production gate for infrastructure.
 
-Terrateam reads the repository secrets and variables from [Configure GitHub](30-configure-github.md#variables-and-secrets): `DEV_AWS_ACCOUNT_ID`, `PROD_AWS_ACCOUNT_ID`, `DEV_MCC_EMAIL_DOMAIN`, `PROD_MCC_EMAIL_DOMAIN`, `DEV_AWS_REGION`, and `PROD_AWS_REGION`. The Terrateam workflow passes both secrets and variables to the runner, and GitHub masks the secrets in its public log, including inside the role ARN and bucket name built from them. `.terrateam/config.yml` builds the rest with the bootstrap naming rules:
+Terrateam reads the repository secrets and variables from [Configure GitHub](30-configure-github.md#variables-and-secrets): `DEV_AWS_ACCOUNT_ID`, `PROD_AWS_ACCOUNT_ID`, `DEV_MCC_EMAIL_DOMAIN`, `PROD_MCC_EMAIL_DOMAIN`, `DEV_MCC_EMAIL_ALIAS`, `PROD_MCC_EMAIL_ALIAS`, `DEV_AWS_REGION`, and `PROD_AWS_REGION`. The Terrateam workflow passes both secrets and variables to the runner, and GitHub masks the secrets in its public log, including inside the role ARN and bucket name built from them. `.terrateam/config.yml` builds the rest with the bootstrap naming rules:
 
 | Input | Built from |
 | --- | --- |
@@ -43,6 +43,7 @@ Terrateam reads the repository secrets and variables from [Configure GitHub](30-
 | backend bucket and Region | `mcc-stats-suite-tofu-state-<account>-<region>`, and the Region |
 | `TF_VAR_aws_region` | the Region |
 | `TF_VAR_email_domain` | the email domain, marked sensitive |
+| `TF_VAR_email_alias` | the email alias, marked sensitive |
 | `TF_VAR_github_oidc_subject_repository` | `<owner>@<owner_id>/<repo>@<repo_id>`, from the runner's `GITHUB_REPOSITORY_OWNER`, `GITHUB_REPOSITORY_OWNER_ID`, `GITHUB_REPOSITORY`, and `GITHUB_REPOSITORY_ID` |
 
 The OIDC subject step assumes immutable OIDC subjects. A repository with mutable subjects changes that step to print `${GITHUB_REPOSITORY}`. The Terrateam runner substitutes `$NAME` and `${NAME}` in every command before it runs and rejects shell syntax such as `$(...)`, so keep any other `$` out of commands in that file.

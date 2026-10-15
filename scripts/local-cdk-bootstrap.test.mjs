@@ -604,6 +604,34 @@ test('runtime roles cannot mutate compute, deploy stacks, or assume another role
   );
 });
 
+test('runtime reads only dev application parameters, one at a time', () => {
+  for (const name of [
+    'mcc/dev/match-to-csv/sender-allowlist',
+    'mcc/dev/match-to-csv/email-alias',
+    'mcc/dev/match-to-csv/email-domain',
+  ]) {
+    assert.equal(
+      allowed(runtime, 'ssm:GetParameter', parameter(name)),
+      true,
+      name,
+    );
+  }
+  for (const [action, name] of [
+    ['ssm:GetParameter', 'mcc/prod/match-to-csv/email-alias'],
+    ['ssm:GetParameter', 'mcc/dev/turbo-cache/bucket-name'],
+    ['ssm:GetParameter', 'cdk-bootstrap/mcclocal1/version'],
+    ['ssm:GetParameters', 'mcc/dev/match-to-csv/email-alias'],
+    ['ssm:GetParametersByPath', 'mcc/dev/match-to-csv'],
+    ['ssm:PutParameter', 'mcc/dev/match-to-csv/email-alias'],
+  ]) {
+    assert.equal(
+      allowed(runtime, action, parameter(name)),
+      false,
+      `${action} ${name}`,
+    );
+  }
+});
+
 test('runtime uses its own ephemeral objects in this account only', () => {
   const alice = own('alice');
   assert.equal(
@@ -1213,7 +1241,16 @@ test('ephemeral email and evidence routing retains the instance name', async () 
     (resource) => resource.Type === 'AWS::SES::ReceiptRule',
   ).Properties.Rule;
   assert.equal(receipt.Name, `match-to-csv-e-${longName}`);
-  assert.ok(JSON.stringify(receipt.Recipients).includes(`submit+${longName}@`));
+  assert.ok(JSON.stringify(receipt.Recipients).includes(`"+${longName}@"`));
+  const processEmail = values.find(
+    (resource) =>
+      resource.Properties?.FunctionName ===
+      `match-to-csv-e-${longName}-ProcessEmail`,
+  );
+  assert.equal(
+    processEmail.Properties.Environment.Variables.RECIPIENT_SUBADDRESS,
+    longName,
+  );
   assert.equal(
     receipt.Actions[0].S3Action.ObjectKeyPrefix,
     `incoming/${longName}/`,

@@ -10,11 +10,13 @@
 
 # Edit these.
 export AWS_PROFILE="mcc-dev-admin"
-# The email domain is read below from the SSM parameter the applied
-# foundation owns. Only for the first apply in a new environment, before
-# that parameter exists, uncomment this line with the lowercase domain
-# verified for SES, then remove it after the apply. Never commit it.
+# The email domain and alias are read below from the SSM parameters the
+# applied foundation owns. Only for the first apply that creates a parameter,
+# such as in a new environment, uncomment its line with the lowercase domain
+# verified for SES or the lowercase alias before the @, then remove it after
+# the apply. Never commit either.
 # email_domain_override="REPLACE_WITH_VERIFIED_DOMAIN"
+# email_alias_override="REPLACE_WITH_EMAIL_ALIAS"
 # OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID for immutable GitHub OIDC subjects,
 # otherwise OWNER/REPOSITORY. Get the IDs with:
 #   gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'
@@ -31,10 +33,10 @@ fi
 export TF_VAR_aws_region="$region"
 export TF_CLI_ARGS_init="-backend-config=bucket=mcc-stats-suite-tofu-state-${account_id}-${region} -backend-config=region=${region}"
 
-# The email domain comes from the SSM parameter the applied foundation owns, so
-# a local plan sees the applied value and never changes it. This is the one
-# derived value that needs a network call and a signed-in profile. The value is
-# never printed.
+# The email domain and alias come from the SSM parameters the applied
+# foundation owns, so a local plan sees the applied values and never changes
+# them. These are the only derived values that need a network call and a
+# signed-in profile. The values are never printed.
 email_domain_parameter="/mcc/dev/match-to-csv/email-domain"
 if [[ -n "${email_domain_override:-}" ]]; then
   export TF_VAR_email_domain="$email_domain_override"
@@ -43,4 +45,13 @@ elif email_domain="$(aws ssm get-parameter --name "$email_domain_parameter" --re
   export TF_VAR_email_domain="$email_domain"
 else
   echo "Cannot read $email_domain_parameter with profile $AWS_PROFILE; TF_VAR_email_domain is unset. Run aws sso login, or set email_domain_override for a new environment" >&2
+fi
+email_alias_parameter="/mcc/dev/match-to-csv/email-alias"
+if [[ -n "${email_alias_override:-}" ]]; then
+  export TF_VAR_email_alias="$email_alias_override"
+elif email_alias="$(aws ssm get-parameter --name "$email_alias_parameter" --region "$region" \
+  --query Parameter.Value --output text 2>/dev/null)"; then
+  export TF_VAR_email_alias="$email_alias"
+else
+  echo "Cannot read $email_alias_parameter with profile $AWS_PROFILE; TF_VAR_email_alias is unset. Run aws sso login, or set email_alias_override for the apply that creates it" >&2
 fi

@@ -7,4 +7,5 @@ module "foundation" {
   create_github_cache_role       = true
   github_oidc_subject_repository = var.github_oidc_subject_repository
   email_domain                   = var.email_domain
+  email_alias                    = var.email_alias
 }

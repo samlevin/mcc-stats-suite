@@ -36,7 +36,7 @@ Each row records how a requirement from the original specification is resolved. 
 | Debug mode writes a cropped PNG to `matches/<matchId>/cropped/` and logs crop dimensions | Removed. Every run always writes its complete evidence (§5), so there is no debug flag. | With no crop there is nothing to debug. Full evidence on every run is more useful than an opt-in partial record. |
 | One CSV per match | One CSV per processing run, which is one per screenshot attempt. | The system has no match entity. Grouping screenshots into matches belongs to the match-entry and association features. One email can carry screenshots of different matches. |
 | CSV written to a dedicated output bucket | The CSV and its structured table are written under the run in the evidence bucket (`export/extracted.csv`, `export/extracted-table.json`). | The CSV is derived evidence and belongs next to the observations it came from. The foundation still provisions an output bucket and an attachments bucket for later features; v1 writes to neither. |
-| CDK provisions the raw-email, attachments and output buckets, the SES receipt rule set and the IAM policies | OpenTofu (`infrastructure/modules/foundation`) owns every persistent resource: the KMS key, all buckets, the receipt rule set, its activation, the shared `submit@` rule and the SSM parameters. CDK owns compute: Lambda functions, state machines, the EventBridge rule, the dead-letter queue, log groups and IAM roles. | Data must outlive application stacks, and no resource may be managed by two tools. The one exception is the ephemeral `submit+<name>@` receipt rule, which an ephemeral stack adds to the foundation rule set and removes with itself. |
+| CDK provisions the raw-email, attachments and output buckets, the SES receipt rule set and the IAM policies | OpenTofu (`infrastructure/modules/foundation`) owns every persistent resource: the KMS key, all buckets, the receipt rule set, its activation, the shared `<alias>@<domain>` rule and the SSM parameters. CDK owns compute: Lambda functions, state machines, the EventBridge rule, the dead-letter queue, log groups and IAM roles. | Data must outlive application stacks, and no resource may be managed by two tools. The one exception is the ephemeral `<alias>+<name>@<domain>` receipt rule, which an ephemeral stack adds to the foundation rule set and removes with itself. |
 | Architecture: SES -> S3 -> handler Lambda -> preprocess Lambda -> CSV | SES -> raw-email bucket -> EventBridge `Object Created` -> Step Functions Standard workflow -> intake Lambda -> `Map` over screenshots -> extraction Lambda -> export Lambda. | A state machine gives per-screenshot isolation, bounded concurrency, declared retries, an execution history and a replay entry point. |
 | Emails must contain one or more image attachments | A message with no processable screenshot completes intake with status `REJECTED`, writes its evidence, and then fails the execution. | A silent empty success hides lost submissions. A failed execution shows up in the console and in alarms. |
 | Non-image attachments are ignored | Non-image attachments are recorded as `NOT_AN_IMAGE` rejections and stay only in the retained raw MIME message. Rejected images are stored with their rejection codes. | The submission record explains every attachment. |
@@ -80,8 +80,8 @@ Sender
   |
   v
 Amazon SES inbound (foundation receipt rule set mcc-inbound-<env>)
-  |  submit@<domain>            -> incoming/<env>/      (foundation rule)
-  |  submit+<name>@<domain>     -> incoming/<name>/     (ephemeral stack rule)
+  |  <alias>@<domain>           -> incoming/<env>/      (foundation rule)
+  |  <alias>+<name>@<domain>    -> incoming/<name>/     (ephemeral stack rule)
   v
 Raw-email bucket (SSE-S3, EventBridge notifications, 90-day expiry)
   |
@@ -130,10 +130,11 @@ Evidence bucket (SSE-KMS, versioned, Object Lock GOVERNANCE 365 days)
 
 | Deployment | Recipient | Receipt rule owner | Raw object prefix | Evidence namespace |
 | --- | --- | --- | --- | --- |
-| Stable `dev` or `prod` | `submit@<domain>` | Foundation (`aws_ses_receipt_rule.store_raw_email`, rule `submit`) | `incoming/<env>/` | bucket root (`submissions/`, `datasets/`) |
-| Ephemeral `<name>` in dev | `submit+<name>@<domain>` | Ephemeral stack (`StoreRawEmail`, rule named after the stack) | `incoming/<name>/` | `ephemeral/<name>/` |
+| Stable `dev` or `prod` | `<alias>@<domain>` | Foundation (`aws_ses_receipt_rule.store_raw_email`, rule `submit`) | `incoming/<env>/` | bucket root (`submissions/`, `datasets/`) |
+| Ephemeral `<name>` in dev | `<alias>+<name>@<domain>` | Ephemeral stack (`StoreRawEmail`, rule named after the stack) | `incoming/<name>/` | `ephemeral/<name>/` |
 
-- A Region has one active receipt rule set, so the foundation creates `mcc-inbound-<env>`, activates it only after the shared rule exists, and publishes its name and the domain in SSM. Stacks read them; nothing in source control holds the domain.
+- A Region has one active receipt rule set, so the foundation creates `mcc-inbound-<env>`, activates it only after the shared rule exists, and publishes its name, the alias, and the domain in SSM. The alias and domain come from `<ENV>_MCC_EMAIL_ALIAS` and `<ENV>_MCC_EMAIL_DOMAIN` repository secrets. Stacks read them; nothing in source control holds either. The rule named `submit` keeps that AWS name whatever the alias is.
+- An ephemeral rule keeps the alias and domain from its last deploy. Its `process-email` reads both parameters for every message and rejects one whose SES recipients, from the `for` clause of the topmost `Received` header, do not include the current `<alias>+<name>@<domain>`. SES lists only recipients a rule accepted, so a stale rule never lists the current address. It records the rejection code `RECIPIENT_NOT_ALLOWED`, stores no attachment, and keeps the raw MIME. A stale rule therefore accepts nothing.
 - Every rule enables SES spam and virus scanning, accepts optional TLS, writes the raw MIME message with an S3 action, then stops rule-set evaluation.
 - The foundation ignores rule ordering (`after`) on the shared rule so ephemeral rules can be added to the set without drift.
 
@@ -541,9 +542,9 @@ mcc-stats-suite/
 | Attachments and output buckets | Versioned, public access blocked, SSE-KMS. Reserved for later features; v1 does not write to them. |
 | `ephemeral/` lifecycle | Attachments and output objects expire after 30 days, evidence after 366 days (after its lock ends). Noncurrent versions expire after 30 days, incomplete uploads abort after 7 days, and expired delete markers are removed. Objects outside `ephemeral/` never expire. |
 | SES | Rule set `mcc-inbound-<env>`, the `submit` rule (§4.1) and its activation. |
-| SSM parameters under `/mcc/<env>/match-to-csv/` | `raw-email-bucket-name`, `evidence-bucket-name`, `attachments-bucket-name`, `output-bucket-name`, `data-key-arn`, `receipt-rule-set-name`, `email-domain` |
+| SSM parameters under `/mcc/<env>/match-to-csv/` | `raw-email-bucket-name`, `evidence-bucket-name`, `attachments-bucket-name`, `output-bucket-name`, `data-key-arn`, `receipt-rule-set-name`, `email-domain`, `email-alias` |
 
-The `email_domain` variable is sensitive, so plans posted to the public repository redact it, and must be a lowercase bare domain.
+The `email_domain` and `email_alias` variables are sensitive, so plans posted to the public repository redact them and the recipients built from them. The domain must be a lowercase bare domain. The alias must be at most 43 lowercase letters, digits, `_` or `-`, with single dots between them and no `+`.
 
 ### 13.2 Application stack (CDK)
 
@@ -801,11 +802,11 @@ A change to a contract updates every consumer in the same PR.
 - **Blocked by:** P1.1
 - **Spec:** §4.1, §13.1
 - **Files:** `infrastructure/modules/foundation/ses.tf`, `infrastructure/modules/foundation/tests/ses.tftest.hcl`
-- **Provides:** `receipt-rule-set-name` and `email-domain` parameters
+- **Provides:** `receipt-rule-set-name`, `email-domain`, and `email-alias` parameters
 - **Acceptance:**
-  - The rule set `mcc-inbound-<env>` holds a `submit` rule for `submit@<domain>` that scans, stores to `incoming/<env>/` and stops.
+  - The rule set `mcc-inbound-<env>` holds a `submit` rule for `<alias>@<domain>` that scans, stores to `incoming/<env>/` and stops.
   - The set activates only after the rule exists, and the rule ignores ordering changes.
-  - `email_domain` is sensitive and must be a lowercase bare domain; the module test covers both.
+  - `email_domain` and `email_alias` are sensitive and validated as in §13.1; the module test covers both.
 
 ### Phase 2: Intake
 
@@ -948,7 +949,8 @@ A change to a contract updates every consumer in the same PR.
 - **Provides:** per-developer addresses
 - **Acceptance:**
   - Stable stacks create no receipt rule.
-  - An ephemeral stack adds exactly one rule for `submit+<name>@<domain>` to the foundation rule set, reading both from SSM, storing to `incoming/<name>/`.
+  - An ephemeral stack adds exactly one rule for `<alias>+<name>@<domain>` to the foundation rule set, reading the rule set, alias, and domain from SSM, storing to `incoming/<name>/`.
+  - An ephemeral `process-email` rejects a recipient other than the current `<alias>+<name>@<domain>` (§4.1).
 
 #### P4.4 Deployment preflight and verification (S)
 

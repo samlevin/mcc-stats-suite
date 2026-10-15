@@ -24,7 +24,7 @@ npm run app:diff -- <application> --environment dev --ephemeral <name>
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
 
-For `match-to-csv`, run `npm run verify:bundle --workspace @mcc/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `submit+<name>@<your domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `submit@` rule alone.
+For `match-to-csv`, run `npm run verify:bundle --workspace @mcc/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name, the alias, and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `<alias>+<name>@<domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `<alias>@<domain>` rule alone. If the alias or domain changes later, the stack's `process-email` rejects any message not sent to the current `<alias>+<name>@<domain>`, so mail to the old address stops without a redeploy. Redeploy to receive mail at the new address.
 
 Remove the stack when you are done:
 
