@@ -89,9 +89,9 @@ Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Co
 
 ### Trusted deployment workflows
 
-The CDK entry role trusts a GitHub OIDC token only when its `workflow` claim matches an entry in `cdk_workflow_names` in `infrastructure/modules/bootstrap/variables.tf`. GitHub sets that claim to the `name:` of the top-level workflow that started the run, never to the name of a reusable workflow it calls. The list therefore names every workflow that calls `.github/workflows/_deploy-aws-application.yml`: `deploy-applications` for continuous delivery and `rollback-aws-application` for production rollback. `node --test scripts/deployment-workflows.test.mjs` fails when the list and those workflows disagree.
+The CDK entry role trusts a GitHub OIDC token only when its `workflow` claim matches an entry in `cdk_workflow_names` in `infrastructure/modules/bootstrap/variables.tf`. GitHub sets that claim to the `name:` of the top-level workflow that started the run, never to the name of a reusable workflow it calls. The list names the current callers of `.github/workflows/_deploy-aws-application.yml`: `deploy-applications` for continuous delivery and `rollback-aws-application` for prod rollback. It also includes their approved future names, `Delivery: deploy to dev then prod` and `Delivery: roll back prod`, for the rename in #133. `node --test scripts/deployment-workflows.test.mjs` checks the current callers and this exact transition list.
 
-When you rename one of those workflows, or add a workflow that calls the reusable deployment workflow, update the list in the same pull request. After it merges, re-apply bootstrap from the `main` checkout, dev first and then prod:
+Prepare a rename or a new caller in a separate bootstrap pull request first. Add the future workflow name and preserve every current name. Merge that prerequisite, then re-apply bootstrap from `main`, dev first and then prod, before merging the workflow change:
 
 ```console
 cd infrastructure/dev/bootstrap
@@ -102,7 +102,7 @@ tofu plan -out=bootstrap.tfplan
 tofu apply bootstrap.tfplan
 ```
 
-Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. Until both accounts are re-applied, a renamed or new workflow fails at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Afterwards, re-run the failed workflow.
+Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. Confirm both applies succeeded before merging the workflow rename or adding the caller. Otherwise it fails at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Keep the old names through the rename; remove them only in a follow-up bootstrap change after verifying delivery and rollback with the new names.
 
 ## CI roles for the foundation
 

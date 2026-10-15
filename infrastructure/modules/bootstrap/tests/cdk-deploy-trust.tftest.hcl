@@ -16,8 +16,8 @@ override_data {
   values = { partition = "aws", dns_suffix = "amazonaws.com" }
 }
 
-# scripts/deployment-workflows.test.mjs checks that the default names match
-# the top-level workflows that call _deploy-aws-application.yml.
+# scripts/deployment-workflows.test.mjs checks the current callers and the
+# two approved future names for the workflow rename in issue #133.
 run "cdk_role_trusts_every_deployment_caller" {
   command = plan
   plan_options { refresh = false }
@@ -31,8 +31,13 @@ run "cdk_role_trusts_every_deployment_caller" {
     condition = toset(one([
       for condition in one(data.aws_iam_policy_document.cdk_deploy_assume_role[0].statement).condition : condition
       if condition.variable == "token.actions.githubusercontent.com:workflow"
-    ]).values) == toset(["deploy-applications", "rollback-aws-application"])
-    error_message = "The CDK entry role must trust continuous delivery (deploy-applications) and production rollback (rollback-aws-application), the names GitHub puts in the OIDC workflow claim."
+      ]).values) == toset([
+      "deploy-applications",
+      "rollback-aws-application",
+      "Delivery: deploy to dev then prod",
+      "Delivery: roll back prod",
+    ])
+    error_message = "The CDK entry role must trust exactly the current and approved future delivery and rollback workflow names during the rename."
   }
   assert {
     condition = one([
