@@ -40,8 +40,8 @@ runs:
         AWS_REGION: ${{ inputs.region }}
       run: |
         test "$(aws sts get-caller-identity --query Account --output text)" = "$CACHE_ACCOUNT"
-        BUCKET="$(aws ssm get-parameter --name "/mcc/$CACHE_ENVIRONMENT/turbo-cache/bucket-name" --query Parameter.Value --output text)"
-        KEY="$(aws ssm get-parameter --name "/mcc/$CACHE_ENVIRONMENT/turbo-cache/data-key-arn" --query Parameter.Value --output text)"
+        BUCKET="$(aws ssm get-parameter --name "/mcc-ci/$CACHE_ENVIRONMENT/turbo-cache/bucket-name" --query Parameter.Value --output text)"
+        KEY="$(aws ssm get-parameter --name "/mcc-ci/$CACHE_ENVIRONMENT/turbo-cache/data-key-arn" --query Parameter.Value --output text)"
         test "$BUCKET" = "mcc-stats-suite-$CACHE_ENVIRONMENT-$CACHE_ACCOUNT-turbo-cache"
         [[ "$KEY" == "arn:aws:kms:$AWS_REGION:$CACHE_ACCOUNT:key/"* ]]
         echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"

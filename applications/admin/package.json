@@ -1,9 +1,9 @@
 {
-  "name": "@samlevin/admin",
+  "name": "@mcc/admin",
   "private": true,
   "version": "1.0.0",
   "dependencies": {
-    "@samlevin/cdk-config": "1.0.0"
+    "@mcc/cdk-config": "1.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

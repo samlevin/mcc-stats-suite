@@ -39,7 +39,6 @@ permissions:
   actions: read
   contents: read
   deployments: write
-  packages: read
   id-token: write
 
 jobs:
@@ -131,11 +130,7 @@ jobs:
         with:
           node-version: '22.16.0'
           cache: npm
-          registry-url: https://npm.pkg.github.com
-          scope: '@samlevin'
       - run: npm ci
-        env:
-          NODE_AUTH_TOKEN: ${{ github.token }}
       - name: Read release metadata
         id: release-metadata
         env:

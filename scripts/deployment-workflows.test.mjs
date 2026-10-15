@@ -207,17 +207,28 @@ test('selection rejects shared packages and unknown applications and accepts no 
   }
 });
 
-test('package publication runs separately after trusted CI at the validated SHA', () => {
-  const publication = workflow('publish-packages');
-  assert.deepEqual(publication.on.workflow_run, orchestration.on.workflow_run);
-  assert.equal(
-    publication.jobs['publish-packages'].if,
-    orchestration.jobs.qualify.if,
+test('workspaces install locally without a package registry or token', () => {
+  const root = new URL('../', import.meta.url);
+  assert.equal(existsSync(new URL('.npmrc', root)), false);
+  for (const name of ['contracts', 'cdk-config']) {
+    const pkg = JSON.parse(
+      readFileSync(new URL(`packages/${name}/package.json`, root), 'utf8'),
+    );
+    assert.equal(pkg.name, `@mcc/${name}`);
+    assert.equal(pkg.private, true);
+    assert.equal(pkg.publishConfig, undefined);
+  }
+  const workflows = readdirSync(new URL('.github/workflows/', root)).filter(
+    (file) => file.endsWith('.yml'),
   );
-  assert.equal(
-    publication.jobs['publish-packages'].steps[0].with.ref,
-    '${{ github.event.workflow_run.head_sha }}',
-  );
+  for (const file of workflows) {
+    const text = readFileSync(
+      new URL(`.github/workflows/${file}`, root),
+      'utf8',
+    );
+    assert.doesNotMatch(text, /npm\.pkg\.github\.com|NODE_AUTH_TOKEN/, file);
+    assert.doesNotMatch(text, /^\s*packages:\s*(read|write)\s*$/m, file);
+  }
 });
 
 test('approval prompt uses the qualified application and SHA with comment permissions', () => {
@@ -1001,6 +1012,7 @@ test('Terrateam builds the role, backend, and OIDC subject from the repository n
   assert.deepEqual([...names].sort(), [
     'DEV_AWS_ACCOUNT_ID',
     'DEV_AWS_REGION',
+    'DEV_MCC_EMAIL_ALIAS',
     'DEV_MCC_EMAIL_DOMAIN',
     'GITHUB_REPOSITORY',
     'GITHUB_REPOSITORY_ID',
@@ -1008,6 +1020,7 @@ test('Terrateam builds the role, backend, and OIDC subject from the repository n
     'GITHUB_REPOSITORY_OWNER_ID',
     'PROD_AWS_ACCOUNT_ID',
     'PROD_AWS_REGION',
+    'PROD_MCC_EMAIL_ALIAS',
     'PROD_MCC_EMAIL_DOMAIN',
   ]);
   const env = {
@@ -1017,6 +1030,8 @@ test('Terrateam builds the role, backend, and OIDC subject from the repository n
     PROD_AWS_REGION: 'prod-region-1',
     DEV_MCC_EMAIL_DOMAIN: 'dev.example.com',
     PROD_MCC_EMAIL_DOMAIN: 'prod.example.com',
+    DEV_MCC_EMAIL_ALIAS: 'dev-alias',
+    PROD_MCC_EMAIL_ALIAS: 'prod-alias',
     GITHUB_REPOSITORY_OWNER: 'Owner-1',
     GITHUB_REPOSITORY_OWNER_ID: '123',
     GITHUB_REPOSITORY: 'Owner-1/repo.name',
@@ -1028,12 +1043,14 @@ test('Terrateam builds the role, backend, and OIDC subject from the repository n
       '111111111111',
       'dev-region-1',
       'dev.example.com',
+      'dev-alias',
     ],
     'infra/foundation-prod': [
       'prod',
       '222222222222',
       'prod-region-1',
       'prod.example.com',
+      'prod-alias',
     ],
   };
   assert.deepEqual(
@@ -1041,7 +1058,8 @@ test('Terrateam builds the role, backend, and OIDC subject from the repository n
     Object.keys(expected),
   );
   for (const entry of config.workflows) {
-    const [environment, account, region, domain] = expected[entry.environment];
+    const [environment, account, region, domain, alias] =
+      expected[entry.environment];
     assert.equal(entry.tag_query, environment);
     for (const steps of [entry.plan, entry.apply]) {
       const oidc = steps.find((step) => step.type === 'oidc');
@@ -1081,6 +1099,7 @@ test('Terrateam builds the role, backend, and OIDC subject from the repository n
       assert.deepEqual(outputs, {
         TF_VAR_aws_region: { value: region, sensitive: undefined },
         TF_VAR_email_domain: { value: domain, sensitive: true },
+        TF_VAR_email_alias: { value: alias, sensitive: true },
         TF_VAR_github_oidc_subject_repository: {
           value: 'Owner-1@123/repo.name@456',
           sensitive: undefined,
@@ -1118,9 +1137,12 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
       'case "$*" in',
       '  "configure get sso_account_id") echo "${STUB_ACCOUNT}" ;;',
       '  "configure get region") echo "${STUB_REGION}" ;;',
-      '  "ssm get-parameter "*)',
+      '  "ssm get-parameter --name "*"/email-domain "*)',
       '    [ -n "${STUB_DOMAIN:-}" ] || { echo "ParameterNotFound" >&2; exit 254; }',
       '    echo "${STUB_DOMAIN}" ;;',
+      '  "ssm get-parameter --name "*"/email-alias "*)',
+      '    [ -n "${STUB_ALIAS:-}" ] || { echo "ParameterNotFound" >&2; exit 254; }',
+      '    echo "${STUB_ALIAS}" ;;',
       '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
       'esac',
     ].join('\n'),
@@ -1138,7 +1160,7 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
           ...names,
           'TF_VAR_aws_region',
           'TF_CLI_ARGS_init',
-          ...(foundation ? ['TF_VAR_email_domain'] : []),
+          ...(foundation ? ['TF_VAR_email_domain', 'TF_VAR_email_alias'] : []),
         ],
         directory,
       );
@@ -1160,7 +1182,7 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
             '-euo',
             'pipefail',
             '-c',
-            `source "$1"; printf '%s\\n' "$AWS_PROFILE" "$TF_VAR_aws_region" "$TF_CLI_ARGS_init" "\${TF_VAR_email_domain-<unset>}"`,
+            `source "$1"; printf '%s\\n' "$AWS_PROFILE" "$TF_VAR_aws_region" "$TF_CLI_ARGS_init" "\${TF_VAR_email_domain-<unset>}" "\${TF_VAR_email_alias-<unset>}"`,
             '_',
             new URL(`../${directory}/.envrc.example`, import.meta.url).pathname,
           ],
@@ -1181,7 +1203,11 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
         STUB_REGION: 'us-east-2',
       };
       const parameter = `/mcc/${environment}/match-to-csv/email-domain`;
-      const fromProfile = load({ ...profile, STUB_DOMAIN: 'mail.example.com' });
+      const aliasParameter = `/mcc/${environment}/match-to-csv/email-alias`;
+      const read = (name) =>
+        `aws ssm get-parameter --name ${name} --region us-east-2 --query Parameter.Value --output text`;
+      const stored = { STUB_DOMAIN: 'mail.example.com', STUB_ALIAS: 'stored' };
+      const fromProfile = load({ ...profile, ...stored });
       assert.equal(fromProfile.status, 0, fromProfile.stderr);
       assert.equal(fromProfile.stderr, '');
       assert.deepEqual(fromProfile.lines, [
@@ -1189,15 +1215,12 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
         'us-east-2',
         '-backend-config=bucket=mcc-stats-suite-tofu-state-111111111111-us-east-2 -backend-config=region=us-east-2',
         foundation ? 'mail.example.com' : '<unset>',
+        foundation ? 'stored' : '<unset>',
       ]);
       assert.deepEqual(fromProfile.calls, [
         'aws configure get sso_account_id',
         'aws configure get region',
-        ...(foundation
-          ? [
-              `aws ssm get-parameter --name ${parameter} --region us-east-2 --query Parameter.Value --output text`,
-            ]
-          : []),
+        ...(foundation ? [read(parameter), read(aliasParameter)] : []),
       ]);
       // AWS_REGION wins over the profile, as it does for the AWS CLI.
       const override = load({ ...profile, AWS_REGION: 'eu-west-1' });
@@ -1210,26 +1233,64 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
         text,
         /^# email_domain_override="REPLACE_WITH_VERIFIED_DOMAIN"$/m,
       );
+      assert.match(
+        text,
+        /^# email_alias_override="REPLACE_WITH_EMAIL_ALIAS"$/m,
+      );
       // A failed read warns with the parameter and profile, leaves the input
-      // unset, and never prints a domain.
+      // unset, and never prints a domain or an alias.
       const unreadable = load(profile);
       assert.equal(unreadable.status, 0, unreadable.stderr);
-      assert.equal(unreadable.lines[3], '<unset>');
-      assert.ok(unreadable.stderr.includes(parameter), unreadable.stderr);
+      assert.deepEqual(unreadable.lines.slice(3), ['<unset>', '<unset>']);
+      for (const name of [parameter, aliasParameter]) {
+        assert.ok(unreadable.stderr.includes(name), unreadable.stderr);
+      }
       assert.ok(
         unreadable.stderr.includes(`mcc-${environment}-admin`),
         unreadable.stderr,
       );
       assert.doesNotMatch(unreadable.stderr, /ParameterNotFound/);
-      // The one-time override wins and skips the parameter read.
-      const firstApply = load({
+      // Each read is independent: a missing alias leaves the domain set and
+      // the warning names only the alias parameter, without either value.
+      const aliasMissing = load({
         ...profile,
         STUB_DOMAIN: 'mail.example.com',
-        email_domain_override: 'new.example.com',
       });
-      assert.equal(firstApply.lines[3], 'new.example.com');
+      assert.deepEqual(aliasMissing.lines.slice(3), [
+        'mail.example.com',
+        '<unset>',
+      ]);
+      assert.ok(aliasMissing.stderr.includes(aliasParameter));
+      assert.ok(!aliasMissing.stderr.includes(parameter));
+      assert.doesNotMatch(aliasMissing.stderr, /mail\.example\.com/);
+      // The one-time overrides win and skip their parameter reads.
+      const firstApply = load({
+        ...profile,
+        ...stored,
+        email_domain_override: 'new.example.com',
+        email_alias_override: 'new-alias',
+      });
+      assert.deepEqual(firstApply.lines.slice(3), [
+        'new.example.com',
+        'new-alias',
+      ]);
       assert.ok(!firstApply.calls.some((call) => call.includes(' ssm ')));
       assert.equal(firstApply.stderr, '');
+      // The alias override alone still reads the applied domain.
+      const aliasOnly = load({
+        ...profile,
+        ...stored,
+        email_alias_override: 'new-alias',
+      });
+      assert.deepEqual(aliasOnly.lines.slice(3), [
+        'mail.example.com',
+        'new-alias',
+      ]);
+      assert.deepEqual(
+        aliasOnly.calls.filter((call) => call.includes(' ssm ')),
+        [read(parameter)],
+      );
+      assert.equal(aliasOnly.stderr, '');
     }
     const backend = repositoryFile(
       `infrastructure/${environment}/bootstrap/backend.tf.example`,

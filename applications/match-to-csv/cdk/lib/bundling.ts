@@ -14,7 +14,7 @@ export { esbuildVersion };
  *
  * To update: run `docker buildx imagetools inspect
  * public.ecr.aws/sam/build-nodejs22.x:latest`, copy the top-level `Digest`
- * here, then run `npm run verify:bundle --workspace @samlevin/match-to-csv`.
+ * here, then run `npm run verify:bundle --workspace @mcc/match-to-csv`.
  */
 export const BUNDLING_IMAGE =
   'public.ecr.aws/sam/build-nodejs22.x@sha256:8c7d07d694ff713755c4722e1123629fdb19edb6b3937ebe4e789f4eb678959a';

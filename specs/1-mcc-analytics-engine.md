@@ -36,7 +36,7 @@ Each row records how a requirement from the original specification is resolved. 
 | Debug mode writes a cropped PNG to `matches/<matchId>/cropped/` and logs crop dimensions | Removed. Every run always writes its complete evidence (§5), so there is no debug flag. | With no crop there is nothing to debug. Full evidence on every run is more useful than an opt-in partial record. |
 | One CSV per match | One CSV per processing run, which is one per screenshot attempt. | The system has no match entity. Grouping screenshots into matches belongs to the match-entry and association features. One email can carry screenshots of different matches. |
 | CSV written to a dedicated output bucket | The CSV and its structured table are written under the run in the evidence bucket (`export/extracted.csv`, `export/extracted-table.json`). | The CSV is derived evidence and belongs next to the observations it came from. The foundation still provisions an output bucket and an attachments bucket for later features; v1 writes to neither. |
-| CDK provisions the raw-email, attachments and output buckets, the SES receipt rule set and the IAM policies | OpenTofu (`infrastructure/modules/foundation`) owns every persistent resource: the KMS key, all buckets, the receipt rule set, its activation, the shared `submit@` rule and the SSM parameters. CDK owns compute: Lambda functions, state machines, the EventBridge rule, the dead-letter queue, log groups and IAM roles. | Data must outlive application stacks, and no resource may be managed by two tools. The one exception is the ephemeral `submit+<name>@` receipt rule, which an ephemeral stack adds to the foundation rule set and removes with itself. |
+| CDK provisions the raw-email, attachments and output buckets, the SES receipt rule set and the IAM policies | OpenTofu (`infrastructure/modules/foundation`) owns every persistent resource: the KMS key, all buckets, the receipt rule set, its activation, the shared `<alias>@<domain>` rule and the SSM parameters. CDK owns compute: Lambda functions, state machines, the EventBridge rule, the dead-letter queue, log groups and IAM roles. | Data must outlive application stacks, and no resource may be managed by two tools. The one exception is the ephemeral `<alias>+<name>@<domain>` receipt rule, which an ephemeral stack adds to the foundation rule set and removes with itself. |
 | Architecture: SES -> S3 -> handler Lambda -> preprocess Lambda -> CSV | SES -> raw-email bucket -> EventBridge `Object Created` -> Step Functions Standard workflow -> intake Lambda -> `Map` over screenshots -> extraction Lambda -> export Lambda. | A state machine gives per-screenshot isolation, bounded concurrency, declared retries, an execution history and a replay entry point. |
 | Emails must contain one or more image attachments | A message with no processable screenshot completes intake with status `REJECTED`, writes its evidence, and then fails the execution. | A silent empty success hides lost submissions. A failed execution shows up in the console and in alarms. |
 | Non-image attachments are ignored | Non-image attachments are recorded as `NOT_AN_IMAGE` rejections and stay only in the retained raw MIME message. Rejected images are stored with their rejection codes. | The submission record explains every attachment. |
@@ -80,8 +80,8 @@ Sender
   |
   v
 Amazon SES inbound (foundation receipt rule set mcc-inbound-<env>)
-  |  submit@<domain>            -> incoming/<env>/      (foundation rule)
-  |  submit+<name>@<domain>     -> incoming/<name>/     (ephemeral stack rule)
+  |  <alias>@<domain>           -> incoming/<env>/      (foundation rule)
+  |  <alias>+<name>@<domain>    -> incoming/<name>/     (ephemeral stack rule)
   v
 Raw-email bucket (SSE-S3, EventBridge notifications, 90-day expiry)
   |
@@ -113,7 +113,7 @@ Evidence bucket (SSE-KMS, versioned, Object Lock GOVERNANCE 365 days)
 
 **Ownership rules:** `process-email` owns submissions and source screenshots. `extract-text` owns processing runs, the Textract request and response, normalized observations and the run completion. `write-extracted-csv` owns the run's export artifacts. `compare-runs` and `materialize-training-data` only read runs and write their own new objects. `scoreboard-logic` and `csv` are pure and perform no I/O. Only Lambda entry points construct AWS SDK clients; every handler's core function receives its I/O as an injected dependencies object so tests run without AWS.
 
-**Packaging:** one npm workspace, `@samlevin/match-to-csv`, with Lambda sources under `src/lambdas/`, pure libraries under `src/lib/`, and the CDK app under `cdk/`. The payload types that cross Lambda and state-machine boundaries live in `@samlevin/contracts` so later applications can read the same evidence.
+**Packaging:** one npm workspace, `@mcc/match-to-csv`, with Lambda sources under `src/lambdas/`, pure libraries under `src/lib/`, and the CDK app under `cdk/`. The payload types that cross Lambda and state-machine boundaries live in `@mcc/contracts` so later applications can read the same evidence.
 
 ### 3.1 Execution policy
 
@@ -130,10 +130,11 @@ Evidence bucket (SSE-KMS, versioned, Object Lock GOVERNANCE 365 days)
 
 | Deployment | Recipient | Receipt rule owner | Raw object prefix | Evidence namespace |
 | --- | --- | --- | --- | --- |
-| Stable `dev` or `prod` | `submit@<domain>` | Foundation (`aws_ses_receipt_rule.store_raw_email`, rule `submit`) | `incoming/<env>/` | bucket root (`submissions/`, `datasets/`) |
-| Ephemeral `<name>` in dev | `submit+<name>@<domain>` | Ephemeral stack (`StoreRawEmail`, rule named after the stack) | `incoming/<name>/` | `ephemeral/<name>/` |
+| Stable `dev` or `prod` | `<alias>@<domain>` | Foundation (`aws_ses_receipt_rule.store_raw_email`, rule `submit`) | `incoming/<env>/` | bucket root (`submissions/`, `datasets/`) |
+| Ephemeral `<name>` in dev | `<alias>+<name>@<domain>` | Ephemeral stack (`StoreRawEmail`, rule named after the stack) | `incoming/<name>/` | `ephemeral/<name>/` |
 
-- A Region has one active receipt rule set, so the foundation creates `mcc-inbound-<env>`, activates it only after the shared rule exists, and publishes its name and the domain in SSM. Stacks read them; nothing in source control holds the domain.
+- A Region has one active receipt rule set, so the foundation creates `mcc-inbound-<env>`, activates it only after the shared rule exists, and publishes its name, the alias, and the domain in SSM. The alias and domain come from `<ENV>_MCC_EMAIL_ALIAS` and `<ENV>_MCC_EMAIL_DOMAIN` repository secrets. Stacks read them; nothing in source control holds either. The rule named `submit` keeps that AWS name whatever the alias is.
+- An ephemeral rule keeps the alias and domain from its last deploy. Its `process-email` reads both parameters for every message and rejects one whose SES recipients, from the `for` clause of the topmost `Received` header, do not include the current `<alias>+<name>@<domain>`. SES lists only recipients a rule accepted, so a stale rule never lists the current address. It records the rejection code `RECIPIENT_NOT_ALLOWED`, stores no attachment, and keeps the raw MIME. A stale rule therefore accepts nothing.
 - Every rule enables SES spam and virus scanning, accepts optional TLS, writes the raw MIME message with an S3 action, then stops rule-set evaluation.
 - The foundation ignores rule ordering (`after`) on the shared rule so ephemeral rules can be added to the set without drift.
 
@@ -376,7 +377,7 @@ The `MaterializeTrainingData` Lambda (exported as `TrainingDataMaterializerFunct
 
 ### 10.1 Shared contracts
 
-`@samlevin/contracts` exports the payloads that cross Lambda, state-machine and application boundaries:
+`@mcc/contracts` exports the payloads that cross Lambda, state-machine and application boundaries:
 
 ```typescript
 interface S3ObjectReference { bucket: string; key: string }
@@ -447,7 +448,7 @@ interface MaterializeTrainingDataOutput {
 
 ### 10.2 Internal types
 
-`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@samlevin/cdk-config` defines `DeploymentConfig` (§13.3).
+`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@mcc/cdk-config` defines `DeploymentConfig` (§13.3).
 
 ### 10.3 Relationships
 
@@ -502,7 +503,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 mcc-stats-suite/
   applications/match-to-csv/
     cdk.json                          # CDK app entry: cdk/bin/match-to-csv.ts
-    package.json                      # @samlevin/match-to-csv; build, typecheck, test, verify:bundle
+    package.json                      # @mcc/match-to-csv; build, typecheck, test, verify:bundle
     tsconfig.json
     README.md                         # Pipeline, evidence layout, replay, materialization
     TESTING.md
@@ -527,7 +528,7 @@ mcc-stats-suite/
   .github/workflows/{ci,deploy-dev,_deliver-aws-application,_deploy-aws-application,deploy-aws}.yml
 ```
 
-`match-to-csv` imports only `@samlevin/contracts` and `@samlevin/cdk-config` from the monorepo. The foundation never references CDK resources; CDK reads the foundation through SSM parameters.
+`match-to-csv` imports only `@mcc/contracts` and `@mcc/cdk-config` from the monorepo. The foundation never references CDK resources; CDK reads the foundation through SSM parameters.
 
 ## 13. Infrastructure and deployment
 
@@ -541,9 +542,9 @@ mcc-stats-suite/
 | Attachments and output buckets | Versioned, public access blocked, SSE-KMS. Reserved for later features; v1 does not write to them. |
 | `ephemeral/` lifecycle | Attachments and output objects expire after 30 days, evidence after 366 days (after its lock ends). Noncurrent versions expire after 30 days, incomplete uploads abort after 7 days, and expired delete markers are removed. Objects outside `ephemeral/` never expire. |
 | SES | Rule set `mcc-inbound-<env>`, the `submit` rule (§4.1) and its activation. |
-| SSM parameters under `/mcc/<env>/match-to-csv/` | `raw-email-bucket-name`, `evidence-bucket-name`, `attachments-bucket-name`, `output-bucket-name`, `data-key-arn`, `receipt-rule-set-name`, `email-domain` |
+| SSM parameters under `/mcc/<env>/match-to-csv/` | `raw-email-bucket-name`, `evidence-bucket-name`, `attachments-bucket-name`, `output-bucket-name`, `data-key-arn`, `receipt-rule-set-name`, `email-domain`, `email-alias` |
 
-The `email_domain` variable is sensitive, so plans posted to the public repository redact it, and must be a lowercase bare domain.
+The `email_domain` and `email_alias` variables are sensitive, so plans posted to the public repository redact them and the recipients built from them. The domain must be a lowercase bare domain. The alias must be at most 43 lowercase letters, digits, `_` or `-`, with single dots between them and no `+`.
 
 ### 13.2 Application stack (CDK)
 
@@ -721,7 +722,7 @@ This section is the backlog source for building the component. It is written to 
 
 | Contract | Defined in | Main consumers |
 | --- | --- | --- |
-| Payload types in `@samlevin/contracts` (§10.1) | P0.2 | every Lambda, the state machines, later applications |
+| Payload types in `@mcc/contracts` (§10.1) | P0.2 | every Lambda, the state machines, later applications |
 | `DeploymentConfig` and `resolveDeployment` | P0.3 | the stack, the CDK wrapper, every application |
 | Foundation SSM parameter names (§13.1) | P1.1, P1.2 | the stack, the deploy preflight |
 | Evidence key layout and create-only writes (§5) | P2.1 | every Lambda, comparison, materialization, specs 2 and 3 |
@@ -735,7 +736,7 @@ A change to a contract updates every consumer in the same PR.
 
 - Handlers keep I/O behind an injected dependencies object; only default dependencies construct SDK clients.
 - New behavior has `tap` tests that run without AWS, and the workspace stays above its coverage thresholds.
-- `npm run check` passes. Slices that touch CDK or bundling also pass `npm run app:synth -- match-to-csv --environment dev` and `npm run verify:bundle --workspace @samlevin/match-to-csv`. Slices that touch `infrastructure/` pass `npm run tofu:check`.
+- `npm run check` passes. Slices that touch CDK or bundling also pass `npm run app:synth -- match-to-csv --environment dev` and `npm run verify:bundle --workspace @mcc/match-to-csv`. Slices that touch `infrastructure/` pass `npm run tofu:check`.
 - Any change to a stage's behavior bumps that stage's version (§5.4).
 - No domain, address, account ID, real message or player data appears in code, fixtures, logs or docs.
 - Operator-visible changes update `applications/match-to-csv/README.md` or the self-hosting guide.
@@ -752,8 +753,8 @@ A change to a contract updates every consumer in the same PR.
 - **Files:** `applications/match-to-csv/{package.json,tsconfig.json,cdk.json,TESTING.md}`, `cdk/bin/match-to-csv.ts`
 - **Provides:** `build`, `typecheck`, `test` and `verify:bundle` scripts
 - **Acceptance:**
-  - `npm test --workspace @samlevin/match-to-csv` runs every `test/*.test.ts` with `tap` and fails below 80% statements, 65% branches, 80% lines or 60% functions.
-  - The workspace depends only on `@samlevin/contracts` and `@samlevin/cdk-config` from the monorepo.
+  - `npm test --workspace @mcc/match-to-csv` runs every `test/*.test.ts` with `tap` and fails below 80% statements, 65% branches, 80% lines or 60% functions.
+  - The workspace depends only on `@mcc/contracts` and `@mcc/cdk-config` from the monorepo.
   - CI runs the workspace's typecheck and tests on affecting changes.
 
 #### P0.2 Shared payload contracts (XS)
@@ -801,11 +802,11 @@ A change to a contract updates every consumer in the same PR.
 - **Blocked by:** P1.1
 - **Spec:** §4.1, §13.1
 - **Files:** `infrastructure/modules/foundation/ses.tf`, `infrastructure/modules/foundation/tests/ses.tftest.hcl`
-- **Provides:** `receipt-rule-set-name` and `email-domain` parameters
+- **Provides:** `receipt-rule-set-name`, `email-domain`, and `email-alias` parameters
 - **Acceptance:**
-  - The rule set `mcc-inbound-<env>` holds a `submit` rule for `submit@<domain>` that scans, stores to `incoming/<env>/` and stops.
+  - The rule set `mcc-inbound-<env>` holds a `submit` rule for `<alias>@<domain>` that scans, stores to `incoming/<env>/` and stops.
   - The set activates only after the rule exists, and the rule ignores ordering changes.
-  - `email_domain` is sensitive and must be a lowercase bare domain; the module test covers both.
+  - `email_domain` and `email_alias` are sensitive and validated as in §13.1; the module test covers both.
 
 ### Phase 2: Intake
 
@@ -948,7 +949,8 @@ A change to a contract updates every consumer in the same PR.
 - **Provides:** per-developer addresses
 - **Acceptance:**
   - Stable stacks create no receipt rule.
-  - An ephemeral stack adds exactly one rule for `submit+<name>@<domain>` to the foundation rule set, reading both from SSM, storing to `incoming/<name>/`.
+  - An ephemeral stack adds exactly one rule for `<alias>+<name>@<domain>` to the foundation rule set, reading the rule set, alias, and domain from SSM, storing to `incoming/<name>/`.
+  - An ephemeral `process-email` rejects a recipient other than the current `<alias>+<name>@<domain>` (§4.1).
 
 #### P4.4 Deployment preflight and verification (S)
 

@@ -27,7 +27,7 @@ The receipt rules enable SES scanning, so SES prepends `X-SES-Spam-Verdict`, `X-
 
 For the optional sender allowlist, see [Manage the sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist). The self-hosting guide covers its behavior and how to create, update, or remove it through the AWS console or CLI.
 
-A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@samlevin/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, or `SENDER_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses).
+A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, or `RECIPIENT_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses). They record the recipient check as `recipientCheck` (`NOT_CONFIGURED` for stable stacks, otherwise `ALLOWED` or `DENIED`, with the recipients SES recorded in its `Received` header).
 
 ## Deployment
 
@@ -41,7 +41,7 @@ Local developer stacks are explicit:
 npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
 ```
 
-Ephemeral deployments read the domain for their `submit+<name>@` rule from `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds it. The foundation owns the shared rule set and the `submit@` rule. Never put the domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
+Ephemeral deployments build their `<alias>+<name>@<domain>` rule from `/mcc/dev/match-to-csv/email-alias` and `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds either. The foundation owns the shared rule set and the `<alias>@<domain>` rule. The rule keeps the alias and domain from the stack's last deploy, so an ephemeral `process-email` reads both parameters for every message and rejects one whose SES recipients do not include the current `<alias>+<name>@<domain>` with `RECIPIENT_NOT_ALLOWED`, before storing any attachment. A warm Lambda reuses parameter values for up to a minute. Changing the alias or domain therefore needs no ephemeral redeploy to stop mail to the old address, only to receive mail at the new one. Never put the alias or domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
 
 ## Alarms
 
@@ -131,10 +131,10 @@ The split algorithm hashes the seed and `screenshotId`. Eighty percent of screen
 ## Development and tests
 
 ```console
-npm test --workspace @samlevin/match-to-csv
-npm run typecheck --workspace @samlevin/match-to-csv
+npm test --workspace @mcc/match-to-csv
+npm run typecheck --workspace @mcc/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @samlevin/match-to-csv
+npm run verify:bundle --workspace @mcc/match-to-csv
 ```
 
 The test suite enforces minimum statement, branch, line, and function coverage. It covers MIME intake behavior, multiple attachments, rejections, submission events, processing success and failure records, parser behavior, semantic mapping, multiple tables, CSV escaping, comparison behavior, ephemeral paths, materialization joins, and deterministic dataset splits. Tests do not call AWS.
