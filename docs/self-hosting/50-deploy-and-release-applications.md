@@ -24,7 +24,7 @@ npm run app:diff -- <application> --environment dev --ephemeral <name>
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
 
-For `match-to-csv`, run `npm run verify:bundle --workspace @mcc/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name, the alias, and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `<alias>+<name>@<domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `<alias>@<domain>` rule alone. If the alias or domain changes later, the stack's `process-email` rejects any message not sent to the current `<alias>+<name>@<domain>`, so mail to the old address stops without a redeploy. Redeploy to receive mail at the new address.
+For `match-to-csv`, run `npm run verify:bundle --workspace @mcc/match-to-csv` after synthesis. The dev foundation owns the SES receipt rule set and publishes its name, the alias, and the domain in SSM, so the foundation must be applied before any ephemeral stack; the `match-to-csv-dev` stack is not required. An ephemeral stack adds one receipt rule to that rule set for `<alias>+<name>@<domain>` and stores mail under `incoming/<name>/`, so send test email to that address and it starts only your stack's workflow. Its evidence lives under `ephemeral/<name>/`. Destroying the stack removes its rule and leaves the rule set and the shared `<alias>@<domain>` rule alone. If the alias or domain changes later, the stack's `process-email` rejects any message not sent to the current `<alias>+<name>@<domain>`, so mail to the old address stops within one minute without a redeploy. Redeploy to receive mail at the new address.
 
 Remove the stack when you are done:
 
@@ -38,10 +38,8 @@ npm run app:destroy -- <application> --environment dev --ephemeral <name>
 2. `ci` validates the merge commit and records which applications it affects. A shared-package change affects every consumer, and an empty selection deploys nothing.
 3. `deploy-applications` starts at that exact commit and runs one sequence per affected application. Each sequence deploys and verifies the application's `-dev` stack, then queues its `-prod` job.
 4. The production job waits for approval on the `prod` environment. Finish the application's smoke test in dev first; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv).
-5. Follow the **Review deployments** link in the merged pull request’s approval comment or the run summary. The comment names the application and short commit SHA and mentions the users or teams configured as required reviewers on the `prod` environment. In the run, choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Approve production: <application>`. Rejecting leaves production unchanged.
+5. Open the deployment run from the merged pull request’s approval comment or the Actions page. In the run, choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Approve production: <application>`. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.
-
-The workflow posts one approval comment per application and run using its `GITHUB_TOKEN`. Repeating the prompt within the same run updates that comment; a new run posts a fresh comment to notify reviewers again. Invalid production protection skips the prompt, and notification failures produce warnings without failing deployment. Direct pushes without a merged pull request still show the prompt in the run summary and skip the comment. Approval remains a manual GitHub environment review.
 
 Each application's production job depends only on its own successful dev job. A failed, cancelled, or skipped dev job blocks that application and nothing else. GitHub records every deployment, with its commit, application version, and shared-package versions, on the repository's Deployments page.
 
@@ -59,6 +57,66 @@ For a failure test, send an unsupported or undersized image. The submission reco
 Never commit test messages, recipient addresses, or domains.
 
 To get alarm email for a stable stack, create a `String` SSM parameter `/mcc/<environment>/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
+
+## Manage the sender allowlist
+
+The optional `match-to-csv` sender allowlist is the SSM parameter `/mcc/<environment>/match-to-csv/sender-allowlist`. Use `/mcc/dev/match-to-csv/sender-allowlist` for shared dev and every ephemeral stack, and `/mcc/prod/match-to-csv/sender-allowlist` for production. A dev allowlist change affects all those dev stacks.
+
+Create the parameter by hand as `String` or `StringList`. `process-email` splits the value on commas or whitespace and matches addresses without regard to case. Use comma-separated addresses for `StringList`, as Parameter Store requires. When the parameter exists, every `From` address must be listed. A message with no `From` address is rejected. If the parameter is missing, the allowlist accepts every sender; SES verdict screening and attachment validation still apply.
+
+`process-email` checks the allowlist for each message. A warm Lambda caches the parameter value, including a missing parameter, for 60 seconds. Creation, updates, and deletion therefore take effect within one minute without a plan, pull request, or deploy. Keep this parameter hand-managed. Never add it to OpenTofu or commit its value or real sender addresses to the repository.
+
+### AWS console
+
+1. Sign in to the target environment's AWS account with its administrator permission set, as configured in [prerequisites](00-prerequisites.md#accounts), and select the Region where `match-to-csv` is deployed. Open **Systems Manager -> Parameter Store**.
+2. To create the allowlist, choose **Create parameter**. Enter the environment's full parameter name above, choose the **Standard** tier, and choose **String** or **StringList** as the type. For `String`, keep the data type as **text**. Enter the allowed addresses, such as `player@example.test,teammate@example.test`, then choose **Create parameter**. See AWS's [console creation reference](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-create-console.html) for the field descriptions.
+3. To update it, open the parameter and choose **Edit**. Replace the value with the complete desired list, save the changes, then check the saved value.
+4. To remove the restriction, select the parameter in Parameter Store, choose **Delete**, and confirm deletion. A missing parameter accepts every sender through the allowlist.
+
+### AWS CLI
+
+Use the administrator profiles from [prerequisites](00-prerequisites.md#sso-profiles). These examples use `mcc-dev-admin` in the dev account and its configured workload Region. For production, change both the profile to `mcc-prod-admin` and `environment` to `prod` before running any command. The local `mcc-dev` deploy profile cannot manage the allowlist. An alternative operator profile needs `ssm:PutParameter`, `ssm:GetParameter`, and `ssm:DeleteParameter` on `/mcc/<environment>/match-to-csv/sender-allowlist` in the target account and Region.
+
+```console
+export AWS_PROFILE=mcc-dev-admin
+environment=dev
+allowlist_parameter="/mcc/${environment}/match-to-csv/sender-allowlist"
+aws sso login --profile "$AWS_PROFILE"
+aws sts get-caller-identity
+```
+
+Confirm that `get-caller-identity` reports the intended dev or prod account before changing the parameter.
+
+Create or replace the complete list with [`put-parameter --overwrite`](https://docs.aws.amazon.com/cli/latest/reference/ssm/put-parameter.html). Replace these placeholder addresses with your allowed senders locally. Use the existing parameter's type when updating it; this example creates a `String`.
+
+```console
+aws ssm put-parameter \
+  --name "$allowlist_parameter" \
+  --type String \
+  --value 'player@example.test,teammate@example.test' \
+  --overwrite
+```
+
+Read the saved type, value, and version:
+
+```console
+aws ssm get-parameter \
+  --name "$allowlist_parameter" \
+  --query 'Parameter.{Type:Type,Value:Value,Version:Version}'
+```
+
+To add or remove a sender, rerun `put-parameter --overwrite` with the entire revised list, then read it back. To remove the restriction entirely, delete the parameter:
+
+```console
+aws ssm delete-parameter --name "$allowlist_parameter"
+aws ssm get-parameter --name "$allowlist_parameter"
+```
+
+The final read should return `ParameterNotFound`. Sender addresses in CLI history and output stay local; never copy them into a commit, issue, or pull request.
+
+### Verify in dev
+
+After saving the dev allowlist, wait one minute for cached values to expire, then send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result. After an update or deletion, wait one minute and send a new message to verify the new behavior without redeploying.
 
 ## Releases
 

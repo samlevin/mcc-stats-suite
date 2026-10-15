@@ -2,10 +2,10 @@
 
 Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/bootstrap`, that you apply once from an administrator SSO session. It creates:
 
-- an encrypted, versioned, deletion-protected S3 state bucket;
+- an encrypted, versioned, deletion-protected S3 state bucket that requires TLS and retains noncurrent versions for 90 days; neither CI role operates the bootstrap state;
 - the GitHub Actions OIDC provider, unless the account already has one;
 - optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md), with an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role;
-- `mcc-stats-suite-<environment>-github-cdk-deploy`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
+- `mcc-stats-suite-<environment>-github-cdk-deploy`, with `PowerUserAccess`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
 
 Bootstrap stays local so that CI identities cannot rewrite their own trust. Never let infrastructure CI/CD apply the bootstrap roots.

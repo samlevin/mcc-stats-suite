@@ -10,6 +10,9 @@ locals {
   github_cache_role       = var.create_github_cache_role && local.cache_subject_repository != ""
 }
 
+# Reuse the bootstrap OIDC provider and workload boundary. Dev trusts main CI
+# and the protected dev environment; prod trusts only its protected environment.
+# Both require main, and neither accepts a pull request subject.
 data "aws_iam_policy_document" "cache_assume_role" {
   statement {
     effect  = "Allow"
@@ -49,6 +52,12 @@ resource "aws_iam_role" "github_cache" {
   max_session_duration = 3600
 }
 
+# The v2 S3 cache provider calls ListObjectsV2 before GetObject, so the managed
+# role adds prefix-scoped listing to object read/write and multipart abort. It
+# cannot delete objects, read evidence or another environment's cache, administer
+# IAM, or use KMS directly. S3 lifecycle owns seven-day expiry; action cleanup
+# options are omitted. CI supplies an explicit temporary cache session, including
+# its session token, independently of later deployment credentials.
 data "aws_iam_policy_document" "github_cache" {
   statement {
     sid       = "UseCacheKeyThroughS3"
