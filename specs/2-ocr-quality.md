@@ -294,7 +294,7 @@ Team totals, placement, medals and derived ratios need fields match-to-csv does 
 
 ### 7.4 Unknown layouts
 
-A table classified `UNKNOWN` is not assessed: it gets `assessed: false`, no cell entries, no signals and `reviewPriority: NONE` in `result.json`. Its cells still get feature rows (§8.4), because spec 3 reviewers label every cell and every label needs features. Its presence is still counted in the run summary (`unassessedTableCount`), and `R001` flags a run with no assessed table.
+A table classified `UNKNOWN` is not assessed: it gets `assessed: false`, no cell entries, no signals and `reviewPriority: NONE` in `result.json`. Its cells still get feature rows (§8.4), because every label needs features and spec 3 reviewers can label any cell. Every cell of an unassessed table needs a review decision when the table is the parser's selected table or a reviewer marks it as a scoreboard ([spec 3](3-cell-labeling.md) §7.1). Its presence is still counted in the run summary (`unassessedTableCount`), and `R001` flags a run with no assessed table.
 
 ## 8. Profiles, anomalies and baselines
 
