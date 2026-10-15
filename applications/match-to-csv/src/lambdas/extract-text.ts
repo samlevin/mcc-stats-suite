@@ -11,6 +11,12 @@ import type {
   S3ObjectReference,
 } from '@mcc/contracts';
 import sharp from 'sharp';
+import {
+  analyzeDocumentInput,
+  computeRowColors,
+  TEXTRACT_FEATURE_TYPES,
+  toLiteBlock,
+} from '../lib/textract-analysis';
 import { bodyToBuffer, processingRunPrefix } from '../lib/s3';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 import { MAX_IMAGE_BYTES } from '../lib/image-limits';
@@ -30,7 +36,7 @@ const versions = {
   preprocessingVersion: 'none-v1',
   textractConfigurationVersion: 'textract-tables-v1',
   textractNormalizerVersion: 'textract-normalizer-v2',
-  tableParserVersion: 'scoreboard-parser-v2',
+  tableParserVersion: 'scoreboard-parser-v3',
   semanticMapperVersion: 'scoreboard-semantic-v2',
   validationRulesVersion: 'scoreboard-validation-v2',
 };
@@ -75,10 +81,7 @@ const defaultDependencies: ExtractTextDependencies = {
   },
   async analyze(image) {
     return textract.send(
-      new AnalyzeDocumentCommand({
-        Document: { Bytes: image },
-        FeatureTypes: ['TABLES'],
-      }),
+      new AnalyzeDocumentCommand(analyzeDocumentInput(image)),
     );
   },
   calculateRowColors: computeRowColors,
@@ -137,7 +140,7 @@ export async function runExtraction(
       {
         provider: 'AWS_TEXTRACT',
         operation: 'AnalyzeDocument',
-        featureTypes: ['TABLES'],
+        featureTypes: [...TEXTRACT_FEATURE_TYPES],
         invokedAt,
         inputSha256: sha256(image),
         inputSizeBytes: image.byteLength,
@@ -297,28 +300,6 @@ function errorSummary(error: unknown): { name: string; message: string } {
     return { name: error.name, message: error.message };
   }
   return { name: 'UnknownError', message: String(error) };
-}
-
-function toLiteBlock(block: Block): TextractBlockLite {
-  return {
-    Id: block.Id,
-    BlockType: block.BlockType,
-    Text: block.Text,
-    RowIndex: block.RowIndex,
-    ColumnIndex: block.ColumnIndex,
-    Geometry: block.Geometry
-      ? {
-          BoundingBox: {
-            Top: block.Geometry.BoundingBox?.Top,
-            Height: block.Geometry.BoundingBox?.Height,
-          },
-        }
-      : undefined,
-    Relationships: block.Relationships?.map((relationship) => ({
-      Type: relationship.Type,
-      Ids: relationship.Ids,
-    })),
-  };
 }
 
 export function normalize(
@@ -554,44 +535,4 @@ function geometry(block: Block, imageArtifactId: string) {
       y: point.Y ?? 0,
     })),
   };
-}
-
-async function computeRowColors(
-  image: Buffer,
-  width: number,
-  height: number,
-  blocks: TextractBlockLite[],
-): Promise<RowColor[]> {
-  if (width < 1 || height < 1) return [];
-  const rows = new Map<number, { top: number; bottom: number }>();
-  for (const block of blocks) {
-    const box = block.Geometry?.BoundingBox;
-    if (block.BlockType !== 'CELL' || block.RowIndex == null || !box) continue;
-    const current = rows.get(block.RowIndex);
-    const top = box.Top ?? 0;
-    const bottom = top + (box.Height ?? 0);
-    rows.set(block.RowIndex, {
-      top: Math.min(current?.top ?? top, top),
-      bottom: Math.max(current?.bottom ?? bottom, bottom),
-    });
-  }
-  const colors: RowColor[] = [];
-  for (const [rowIndex, row] of rows) {
-    const top = Math.max(0, Math.floor(height * ((row.top + row.bottom) / 2)));
-    const stats = await sharp(image)
-      .extract({
-        left: Math.floor(width * 0.1),
-        top: Math.min(top, height - 1),
-        width: Math.max(1, Math.floor(width * 0.3)),
-        height: 1,
-      })
-      .stats();
-    colors.push({
-      rowIndex,
-      r: stats.channels[0]?.mean ?? 0,
-      g: stats.channels[1]?.mean ?? 0,
-      b: stats.channels[2]?.mean ?? 0,
-    });
-  }
-  return colors;
 }
