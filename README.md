@@ -62,7 +62,7 @@ NPM workspaces provide package boundaries. Turbo follows their dependency graph 
 
 OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, the SES receipt rule set, and SSM parameters that publish resource names and ARNs. Terrateam applies foundation changes to dev and then prod from the pull request, then merges it. Nothing applies from `main`. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
 
-CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, IAM grants, and logs. The foundation owns the account-wide SES receipt rule set and the shared `submit@` rule; an ephemeral stack adds only its own `submit+<name>@` rule. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
+CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, IAM grants, and logs. The foundation owns the account-wide SES receipt rule set and the shared `<alias>@<domain>` rule; an ephemeral stack adds only its own `<alias>+<name>@<domain>` rule. The alias and domain are repository secrets that the foundation publishes to SSM. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
 
 There are `dev` and `prod` environments. GitHub Actions deploys application stacks to them. Local developers may create named ephemeral stacks in the dev account.
 
@@ -98,8 +98,8 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 Target a workspace without running every package:
 
 ```console
-npm test --workspace @samlevin/match-to-csv
-npm run typecheck --workspace @samlevin/match-to-csv
+npm test --workspace @mcc/match-to-csv
+npm run typecheck --workspace @mcc/match-to-csv
 npm run app:synth -- match-to-csv --environment dev
 ```
 

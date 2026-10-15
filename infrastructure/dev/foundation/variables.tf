@@ -25,3 +25,9 @@ variable "email_domain" {
   type        = string
   sensitive   = true
 }
+
+variable "email_alias" {
+  description = "Local part of the submission address, before the @, in lowercase. Terrateam supplies it from the DEV_MCC_EMAIL_ALIAS repository secret; never commit it or store it as a variable. Sensitive so plan comments redact it."
+  type        = string
+  sensitive   = true
+}

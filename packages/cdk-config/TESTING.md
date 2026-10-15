@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```console
-npm test --workspace @samlevin/cdk-config
+npm test --workspace @mcc/cdk-config
 ```
 
 The suite covers explicit ephemeral names, reserved and malformed names, dev and production names, bootstrap qualifier, runtime boundary, and role path selection, and AWS account mismatch rejection.

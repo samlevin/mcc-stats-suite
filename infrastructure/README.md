@@ -60,15 +60,19 @@ Foundation code is not packaged or assigned a separate release ID. Plan and appl
 
 Do not run OpenTofu from this directory. Use [the bootstrap procedure](../docs/self-hosting/10-bootstrap-accounts.md) for account setup and run each environment root separately.
 
+## SSM parameter namespaces
+
+Everything under `/mcc/<environment>/` is application config: values that applications read, such as `/mcc/<environment>/match-to-csv/` and the data platform's `/mcc/<environment>/data-platform/`. Any application may read any of it, and the local workload boundary lets every ephemeral runtime role read any single parameter under `/mcc/dev/`. Parameters for CI or other shared infrastructure that applications must not read live under their own prefix, such as `/mcc-ci/<environment>/` for the Turbo cache contract. Never publish such a parameter under `/mcc/<environment>/`.
+
 ## Inbound email contract
 
-Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `submit@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain is the sensitive `email_domain` input; keep it out of version control and out of plain CI variables. Terrateam reads it from the `DEV_MCC_EMAIL_DOMAIN` or `PROD_MCC_EMAIL_DOMAIN` repository secret. A local apply, including one through `mcc-apply-foundation`, reads the applied value back from the SSM parameter through the root's ignored `.envrc`. After changing the secret, bump `<environment>/foundation/external-inputs.revision` in a pull request so Terrateam plans the root. The rule set name and domain are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name` and `/mcc/<environment>/match-to-csv/email-domain`. The domain identity and MX record are manual prerequisites.
+Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `<alias>@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain and alias are the sensitive `email_domain` and `email_alias` inputs; keep them out of version control and out of plain CI variables. Terrateam reads them from the `DEV_MCC_EMAIL_DOMAIN` and `DEV_MCC_EMAIL_ALIAS` or `PROD_MCC_EMAIL_DOMAIN` and `PROD_MCC_EMAIL_ALIAS` repository secrets. A local apply, including one through `mcc-apply-foundation`, reads the applied values back from the SSM parameters through the root's ignored `.envrc`. After changing a secret, bump `<environment>/foundation/external-inputs.revision` in a pull request so Terrateam plans the root. The rule set name, domain, and alias are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name`, `/mcc/<environment>/match-to-csv/email-domain`, and `/mcc/<environment>/match-to-csv/email-alias`. The domain identity and MX record are manual prerequisites.
 
 ## Turborepo cache storage contract
 
 The foundation module defines a cache bucket named `<project>-<environment>-<account>-turbo-cache` in each stable account. It blocks public access, requires TLS, and encrypts objects with the existing foundation KMS key and S3 Bucket Keys. Objects expire after seven days in both dev and prod; incomplete multipart uploads are aborted after seven days. Versioning and Object Lock are disabled because cache artifacts are reproducible.
 
-Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc/<environment>/turbo-cache/bucket-name` and `/mcc/<environment>/turbo-cache/data-key-arn`.
+Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc-ci/<environment>/turbo-cache/bucket-name` and `/mcc-ci/<environment>/turbo-cache/data-key-arn`, outside the application namespace described in [SSM parameter namespaces](#ssm-parameter-namespaces).
 
 When the Terrateam role applies the foundation, it can create this cache role only after the bootstrap grants it permission. Apply the bootstrap first, following [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later).
 

@@ -132,7 +132,7 @@ if (needsAws) {
 
 const sharedBuild = spawnSync(
   'npm',
-  ['run', 'build', '--workspace', '@samlevin/cdk-config'],
+  ['run', 'build', '--workspace', '@mcc/cdk-config'],
   {
     stdio: 'inherit',
     env: childEnvironment,

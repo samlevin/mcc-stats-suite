@@ -42,7 +42,7 @@ variable "github_oidc_subject_repository" {
 }
 
 variable "email_domain" {
-  description = "Verified SES domain that receives match-to-csv email. The shared rule accepts submit@ this domain. Sensitive so plan output posted to the public repository redacts it."
+  description = "Verified SES domain that receives match-to-csv email. The shared rule accepts <email_alias>@ this domain. Sensitive so plan output posted to the public repository redacts it."
   type        = string
   sensitive   = true
   // Lowercase only, so a case difference never shows up as an unexplained,
@@ -50,5 +50,20 @@ variable "email_domain" {
   validation {
     condition     = can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.email_domain))
     error_message = "email_domain must be a lowercase bare domain name such as mail.example.com."
+  }
+}
+
+variable "email_alias" {
+  description = "Local part of the shared submission address, before the @. The shared rule accepts <email_alias>@<email_domain>, and ephemeral stacks use <email_alias>+<name>@<email_domain>. Sensitive so plan output posted to the public repository redacts it."
+  type        = string
+  sensitive   = true
+  // Lowercase for the same reason as the domain. No +, which ephemeral
+  // addresses use to separate the alias from the stack name, and only
+  // characters that never need quoting before an @. At most 43 characters, so
+  // <alias>+<name> with a 20-character ephemeral name stays within the
+  // 64-character local part that RFC 5321 allows.
+  validation {
+    condition     = length(var.email_alias) <= 43 && can(regex("^[a-z0-9_-]+(\\.[a-z0-9_-]+)*$", var.email_alias))
+    error_message = "email_alias must be a lowercase local part of at most 43 characters: letters, digits, _ or -, with single dots between them and no +."
   }
 }

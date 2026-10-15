@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import type { ExtractTextOutput } from '@samlevin/contracts';
+import type { ExtractTextOutput } from '@mcc/contracts';
 import { writeExtractedCsv } from '../src/lambdas/write-extracted-csv';
 
 const event: ExtractTextOutput = {

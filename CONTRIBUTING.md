@@ -8,13 +8,13 @@ You do not need AWS access, secrets, or package registry credentials to contribu
 
 | Path | Package | Responsibility |
 |---|---|---|
-| `applications/match-to-csv` | `@samlevin/match-to-csv` | Working email intake and OCR evidence pipeline |
-| `applications/ocr-quality` | `@samlevin/ocr-quality` | Planned OCR scoring, anomaly detection, and labeling services |
-| `applications/admin` | `@samlevin/admin` | Planned reviewer API and interface |
-| `applications/data-pipeline` | `@samlevin/data-pipeline` | Planned Glue and DuckDB lakehouse transformations |
-| `applications/player` | `@samlevin/player` | Planned read-only statistics API and interface |
-| `packages/contracts` | `@samlevin/contracts` | Types shared across application boundaries |
-| `packages/cdk-config` | `@samlevin/cdk-config` | Account checks, environment rules, stack names, and resource prefixes |
+| `applications/match-to-csv` | `@mcc/match-to-csv` | Working email intake and OCR evidence pipeline |
+| `applications/ocr-quality` | `@mcc/ocr-quality` | Planned OCR scoring, anomaly detection, and labeling services |
+| `applications/admin` | `@mcc/admin` | Planned reviewer API and interface |
+| `applications/data-pipeline` | `@mcc/data-pipeline` | Planned Glue and DuckDB lakehouse transformations |
+| `applications/player` | `@mcc/player` | Planned read-only statistics API and interface |
+| `packages/contracts` | `@mcc/contracts` | Types shared across application boundaries |
+| `packages/cdk-config` | `@mcc/cdk-config` | Account checks, environment rules, stack names, and resource prefixes |
 | `infrastructure/modules` | n/a | Reusable OpenTofu bootstrap, foundation, and data-platform modules |
 | `infrastructure/dev` and `infrastructure/prod` | n/a | Environment roots |
 
@@ -29,7 +29,7 @@ asdf install
 npm ci
 ```
 
-Workspaces use the `@samlevin` scope and install from the local workspaces. Third-party dependencies come from npmjs.org.
+Workspaces use the `@mcc` scope, are never published, and install from the local workspaces. Third-party dependencies come from npmjs.org.
 
 For application, package, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
 
@@ -46,10 +46,10 @@ For documentation-only changes, run `npm run format:check`. For repository-only 
 Useful focused commands follow the workspace dependency graph:
 
 ```console
-npm test --workspace @samlevin/match-to-csv
-npm run typecheck --workspace @samlevin/contracts
+npm test --workspace @mcc/match-to-csv
+npm run typecheck --workspace @mcc/contracts
 npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @samlevin/match-to-csv
+npm run verify:bundle --workspace @mcc/match-to-csv
 ```
 
 Use `npm run format` and `npm run lint:fix` for automatic corrections. Add or update tests with every behavior change. Preserve immutable evidence semantics in `match-to-csv`: never overwrite source screenshots, provider responses, processing runs, or append-only events.

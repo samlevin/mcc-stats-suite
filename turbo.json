@@ -37,7 +37,7 @@
       "dependsOn": ["^build"],
       "outputs": []
     },
-    "@samlevin/cdk-config#ci:test": {
+    "@mcc/cdk-config#ci:test": {
       "dependsOn": ["build"],
       "outputs": []
     }

@@ -1,5 +1,5 @@
 import * as path from 'path';
-import type { DeploymentConfig } from '@samlevin/cdk-config';
+import type { DeploymentConfig } from '@mcc/cdk-config';
 import {
   Aspects,
   CfnOutput,
@@ -119,12 +119,28 @@ export class MatchToCsvStack extends Stack {
     // Operators create this optional parameter out of band; sender addresses
     // never live in source or OpenTofu state.
     const senderAllowlistParameter = `${prefix}/sender-allowlist`;
+    // The foundation publishes the submission address's alias and domain.
+    const emailAliasParameter = `${prefix}/email-alias`;
+    const emailDomainParameter = `${prefix}/email-domain`;
+    // An ephemeral stack's receipt rule keeps the alias and domain from its
+    // last deploy, so its process-email checks each message's recipient
+    // against the values the foundation publishes when the message arrives.
+    const runtimeParameters = deployment.ephemeral
+      ? [senderAllowlistParameter, emailAliasParameter, emailDomainParameter]
+      : [senderAllowlistParameter];
     const processEmail = this.nodeFunction(
       'ProcessEmail',
       'process-email.ts',
       {
         EVIDENCE_BUCKET: evidenceBucket.bucketName,
         SENDER_ALLOWLIST_PARAMETER: senderAllowlistParameter,
+        ...(deployment.ephemeral
+          ? {
+              EMAIL_ALIAS_PARAMETER: emailAliasParameter,
+              EMAIL_DOMAIN_PARAMETER: emailDomainParameter,
+              RECIPIENT_SUBADDRESS: deployment.ephemeral,
+            }
+          : {}),
         ...lambdaEnvironment,
       },
       1024,
@@ -165,13 +181,13 @@ export class MatchToCsvStack extends Stack {
     processEmail.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ssm:GetParameter'],
-        resources: [
+        resources: runtimeParameters.map((name) =>
           this.formatArn({
             service: 'ssm',
             resource: 'parameter',
-            resourceName: senderAllowlistParameter.slice(1),
+            resourceName: name.slice(1),
           }),
-        ],
+        ),
       }),
     );
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
@@ -345,13 +361,19 @@ export class MatchToCsvStack extends Stack {
     }
 
     // The foundation owns the receipt rule set, its activation, and the shared
-    // submit@ rule. An ephemeral stack adds only its own plus-addressed rule.
+    // <alias>@<domain> rule. An ephemeral stack adds only its own
+    // plus-addressed rule.
     if (deployment.ephemeral) {
-      // The foundation publishes the domain its shared rule serves, so the
-      // plus-addressed rule cannot drift from it.
+      // The foundation publishes the alias and domain its shared rule serves,
+      // so no committed file holds either. They resolve at deploy time;
+      // process-email rejects mail to them once the foundation changes.
+      const emailAlias = ssm.StringParameter.valueForStringParameter(
+        this,
+        emailAliasParameter,
+      );
       const emailDomain = ssm.StringParameter.valueForStringParameter(
         this,
-        `${prefix}/email-domain`,
+        emailDomainParameter,
       );
       new ses.CfnReceiptRule(this, 'StoreRawEmail', {
         ruleSetName: ssm.StringParameter.valueForStringParameter(
@@ -362,7 +384,7 @@ export class MatchToCsvStack extends Stack {
           name: deployment.resourcePrefix,
           enabled: true,
           recipients: [
-            Fn.join('', [`submit+${deployment.ephemeral}@`, emailDomain]),
+            Fn.join('', [emailAlias, `+${deployment.ephemeral}@`, emailDomain]),
           ],
           scanEnabled: true,
           tlsPolicy: 'Optional',

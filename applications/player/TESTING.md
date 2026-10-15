@@ -3,7 +3,7 @@
 Run from the repository root:
 
 ```console
-npm test --workspace @samlevin/player
+npm test --workspace @mcc/player
 npm run app:synth -- player
 ```
 
