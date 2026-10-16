@@ -24,7 +24,7 @@ Ready only means the metadata is complete. Before claiming, check that the issue
 
 ## Dependencies
 
-Use GitHub's blocked-by relationships for ordering. A blocked issue stays Ready until its blocker merges. You may build on an unmerged blocker if its PR is open, ready for review, passing required checks, and approved by the pre-PR review. Base your branch on its pushed head and record that SHA in your claim. Anything that needs merged or deployed behavior stays blocked.
+Use GitHub's blocked-by relationships for ordering. A blocked issue stays Ready until its blocker merges. You may build on an unmerged blocker if its PR is open, ready for review, passing required checks, and approved by a reviewer. For a coding agent's PR, the pre-PR review that [AGENTS.md](AGENTS.md#repository-agent-workflows) describes counts as that approval. Base your branch on its pushed head and record that SHA in your claim. Anything that needs merged or deployed behavior stays blocked.
 
 ## Claiming work
 
