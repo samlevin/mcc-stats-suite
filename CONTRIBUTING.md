@@ -22,41 +22,17 @@ Only `match-to-csv` contains a working product pipeline today. The other applica
 
 ## Set up the repository
 
-Install the versions pinned in `.tool-versions`, then install dependencies from the repository root:
-
-```console
-asdf install
-npm ci
-```
+Follow [Getting started](docs/getting-started.md) to install the tools and dependencies and to find the checks for each kind of change. Run the complete local gate, `npm run check`, before opening a pull request for application, package, dependency, build configuration, or unclassified changes.
 
 Workspaces use the `@mcc` scope, are never published, and install from the local workspaces. Third-party dependencies come from npmjs.org.
 
-For application, package, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
-
-```console
-npm run check
-```
-
-OpenTofu source and configuration files under `infrastructure/` select the separate AWS-free `check-infrastructure` job on PRs and main pushes. Unknown paths and `.terrateam/config.yml` run it alongside the application gate; application and package changes do not run it. It checks OpenTofu formatting, validates every dev/prod root without backends or inputs (including the inactive data-platform roots), and runs every module test suite. Infrastructure-only changes skip `check-workspaces`. The required `require-scoped-checks` job aggregates the selected gates. Run the infrastructure commands in [TESTING.md](TESTING.md) locally.
-
-For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0` and `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
-
-`npm run check` checks formatting, lint rules, release metadata, types, tests, and builds without AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
-
-Useful focused commands follow the workspace dependency graph:
-
-```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/contracts
-npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @mcc/match-to-csv
-```
+CI picks its checks from the files your pull request changes. [How CI selects checks](TESTING.md#how-ci-selects-checks) explains which gates run for each kind of change and which job is required.
 
 Use `npm run format` and `npm run lint:fix` for automatic corrections. Add or update tests with every behavior change. Preserve immutable evidence semantics in `match-to-csv`: never overwrite source screenshots, provider responses, processing runs, or append-only events.
 
 ## Submit a change
 
-Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) and follow [WORKFLOW.md](WORKFLOW.md) to claim one. If you work with Claude Code or Codex, the repository's own `mcc-` agents and skills run this workflow for you without touching your personal agent configuration; [.agents/README.md](.agents/README.md) explains how to invoke them and what each tool needs. Implement only executable leaf issues; a parent with sub-issues is a container with no branch or PR. Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
+Classify issues using [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) and follow [WORKFLOW.md](WORKFLOW.md) to claim one. To run this workflow with Claude Code or Codex, see [.agents/README.md](.agents/README.md). Implement only executable leaf issues; a parent with sub-issues is a container with no branch or PR. Create a focused branch and keep changes inside the smallest useful component boundary. A shared-package change should include every necessary contract migration and consumer update.
 
 Pull-request titles must follow Conventional Commits because Release Please derives versions and release notes from them. Common forms are:
 
@@ -69,13 +45,13 @@ chore: update development tooling
 
 Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, assignees, milestone, and project membership are copied from the linked issue automatically; nothing assigns people to issues.
 
-Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version. The ARM64 `check-workspaces` job runs repository checks, `build`, and `ci:test` concurrently, while the parallel `check-bundles` job runs `ci:synth` and `verify:bundle`; the required `require-scoped-checks` job aggregates selected results. Narrow workspace PRs use Turbo affected selection, including downstream consumers; full-scope main pushes validate every workspace before deployment. The bundles job retains CDK synthesis and native bundle verification. Infrastructure-only main pushes save an empty deployment selection and deploy no applications. See `TESTING.md` for cache boundaries and selection tests. Pull requests do not deploy applications.
+Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version.
 
 ## What happens after merge
 
-A merge to `main` deploys every affected application to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. You can follow it in the repository's Deployments page, but you do not run it.
+A merge to `main` deploys every affected application to `dev` and then, after a required reviewer approves, to `prod`. You can follow it in the repository's Deployments page, but you do not run it. [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes each step.
 
-Foundation changes under `infrastructure/` work differently. The maintainer applies them to dev and then prod from your pull request, and Terrateam merges the pull request when both have applied. Terrateam runs in the `infra/foundation-dev` and `infra/foundation-prod` GitHub Environments, which have no required reviewers; Terrateam's access control, not the `prod` deployment approval, gates the prod apply.
+Foundation changes under `infrastructure/` are applied before they merge. Someone with Terrateam apply access applies them to dev and then prod from your pull request, as [Change the foundation with Terrateam](docs/self-hosting/70-optional-terrateam.md#change-the-foundation-with-terrateam) describes.
 
 Release Please collects merged Conventional Commits into a release pull request. Merging it creates component tags such as `match-to-csv-v1.2.3`, `contracts-v1.1.0`, and `cdk-config-v1.0.4`. Applications pin internal packages at exact versions, and the release pull request patch-bumps consumers when a shared package changes:
 
@@ -86,21 +62,15 @@ The release pull request updates package versions, changelogs, the root lockfile
 
 ## Test against your own AWS account
 
-To deploy an ephemeral stack, you need your own dev account set up with [Self-hosting](docs/self-hosting/README.md). Copy `.envrc.example` to the ignored `.envrc`, set `AWS_PROFILE`, run `direnv allow`, and verify the account before any diff or deployment:
-
-```console
-aws sso login
-aws sts get-caller-identity
-npm run app:deploy -- <application> --environment dev --ephemeral <name>
-```
-
-The deployment harness checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and `--ephemeral`. Ephemeral names are 1 to 20 lowercase letters, numbers, or hyphens; `dev` and `prod` are reserved. Stacks are named `<application>-e-<name>`.
+To deploy an ephemeral stack to your own dev account, send it a test email, and check the result, follow [tier 2 of Getting started](docs/getting-started.md#tier-2-deploy-your-own-ephemeral-stack). It lists the [Self-hosting](docs/self-hosting/README.md) steps your account needs first.
 
 Never commit credentials, account IDs, email addresses, domain names, populated `.envrc` files, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
 
 ## Change shared infrastructure
 
-OpenTofu owns bootstrap, long-lived storage, encryption keys, SSM contracts, and the lakehouse foundation. CDK owns application compute and orchestration. Do not create a resource in one system if the other already manages it. Terrateam posts a plan on pull requests that change the foundation; check that it matches your intent. See [Change the foundation](docs/self-hosting/40-change-foundation.md) for how foundation pull requests are applied.
+Before you add an AWS resource, check which system owns it in [How AWS is divided](README.md#how-aws-is-divided). Check that the Terrateam plan on your foundation pull request matches your intent. See [Change the foundation](docs/self-hosting/40-change-foundation.md) for how foundation pull requests are applied.
+
+When you add or remove a root, a module directory, or a local module call, update `.terrateam/config.yml` in the same pull request, following [Map module calls to roots](docs/self-hosting/70-optional-terrateam.md#map-module-calls-to-roots).
 
 ## Name GitHub Actions workflows
 
@@ -126,9 +96,11 @@ Two kinds of rename need more than a code change:
 Update the closest durable document:
 
 - product behavior and operator-facing package details belong in an application README;
+- the path from a fresh clone to passing checks and a dev stack, including which checks to run for each kind of change, belongs in `docs/getting-started.md`;
 - local and CI test commands belong in `TESTING.md` or a package testing guide;
 - setting up and operating a deployment belongs in `docs/self-hosting/`;
 - future behavior and acceptance criteria belong in `specs/`;
-- repository-wide orientation belongs in this file or the root README.
+- repository-wide orientation belongs in this file or the root README;
+- instructions that only coding agents follow belong in `AGENTS.md` or `.agents/`.
 
 Do not put personal account structure, domain names, email addresses, or maintainer-specific setup in public documentation.

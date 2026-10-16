@@ -17,7 +17,18 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 - treats a change to a foundation root's `external-inputs.revision` file as a change to that root, which is how a changed secret reaches AWS (see [Change an external input](40-change-foundation.md#change-an-external-input)); and
 - checks both foundation roots for drift daily and opens an issue instead of reconciling.
 
-A root is affected only when a changed file matches that root's `file_patterns`. Module calls are not discovered, so every local module a root calls needs its own pattern. [AGENTS.md](../../AGENTS.md#terrateam-module-mapping) describes the mapping rules.
+A root is affected only when a changed file matches that root's `file_patterns`. Module calls are not discovered, so every local module a root calls needs its own pattern. [Map module calls to roots](#map-module-calls-to-roots) describes the rules.
+
+## Map module calls to roots
+
+The Terrateam indexer is disabled, so Terrateam plans a root only when a changed file matches that root's `file_patterns` in `.terrateam/config.yml`. Map module calls by hand, in the same pull request that changes them:
+
+- When a root calls a local module (`source = "../../modules/<name>"`), add `'infrastructure/modules/<name>/*.tf'` to that root's `file_patterns`. Follow module calls inside that module too, and add a pattern for every local module the root reaches.
+- `*` does not match `/`, so `*.tf` covers only that directory. Add one pattern per module directory. Leave out `tests/`, which never affects a plan.
+- Every Terrateam-managed root has a `dirs` entry with its environment tags (`dev` or `prod` selects the workflow), `'${DIR}/*.tf'`, `'${DIR}/*.tfvars'`, `'${DIR}/*.hcl'`, its module patterns, and `'.terrateam/config.yml'`.
+- Roots Terrateam must not run, such as bootstrap, get an entry with `autoplan: false`, `autoapply: false`, and `file_patterns: ['!**/*']`. Terrateam treats every directory holding `.tf` files as a root and runs one without an entry with its default workflow, so every new root and every new `infrastructure/modules/<name>` directory needs one.
+- When a module call is removed, remove its pattern from every root that no longer reaches the module.
+- Registry and Git modules need no pattern. The root pins their version, and a version change edits the root's own files.
 
 ## Bootstrap the Terrateam role
 

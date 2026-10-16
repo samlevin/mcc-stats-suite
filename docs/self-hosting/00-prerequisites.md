@@ -17,7 +17,7 @@ The foundation makes its own receipt rule set, `mcc-inbound-<environment>`, the 
 
 ## Tools
 
-Install the versions pinned in [`.tool-versions`](../../.tool-versions), plus:
+Install the tools from [Getting started](../getting-started.md#install-the-tools), plus:
 
 - AWS CLI v2 with IAM Identity Center profiles
 - `direnv`
@@ -35,11 +35,9 @@ Create an SSO profile for each account and permission set you use. Keep `dev` or
 
 ## Verify
 
-From the repository root:
+Complete [tier 1 of Getting started](../getting-started.md#tier-1-run-the-checks-locally), so `npm run check` passes. Then, from the repository root:
 
 ```console
-npm ci
-npm run check
 aws sso login --profile mcc-dev-admin
 aws sts get-caller-identity --profile mcc-dev-admin
 aws sso login --profile mcc-prod-admin
@@ -48,6 +46,6 @@ aws sts get-caller-identity --profile mcc-prod-admin
 
 The checks pass and the two account IDs differ.
 
-For infrastructure changes, run the full formatting, validation, and module-test loop in [TESTING.md](../../TESTING.md).
+For infrastructure changes, run `npm run tofu:check`, as the [Getting started table](../getting-started.md#choose-the-checks-for-your-change) lists. [TESTING.md](../../TESTING.md) explains what it checks.
 
 Next: [Bootstrap the dev and prod accounts](10-bootstrap-accounts.md).

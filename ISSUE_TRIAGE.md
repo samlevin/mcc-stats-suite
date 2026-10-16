@@ -9,7 +9,7 @@ Use [MCC delivery](https://github.com/users/samlevin/projects/1) for Priority, S
 | medium | Bounded functional defect | P2 |
 | low / none | Minor defect / planned work | P2; P3 when optional |
 
-Deadlines and blocking dependencies can raise priority. Use reported facts; note material uncertainty without inventing impact. No separate label-evidence report is needed.
+Deadlines and blocking dependencies can raise priority.
 
 | Size | Scope |
 | --- | --- |
@@ -34,7 +34,9 @@ Clear requests need little planning. For broad requests, establish boundaries, a
 
 ## Automation
 
-The [workflow](.github/workflows/tracker-issue-states.yml) uses deterministic GitHub API calls, with no model usage. It moves an open issue from Inbox to Ready when Priority, exactly one supported severity, and Size are present. Other statuses are left alone by metadata triage. Ready means triaged; implementation still requires clear scope, acceptance criteria, validation, and satisfied dependencies.
+Two workflows keep project status in step with the work.
+
+The [issue states workflow](.github/workflows/tracker-issue-states.yml) uses deterministic GitHub API calls, with no model usage. It moves an open issue from Inbox to Ready when Priority, exactly one supported severity, and Size are present. Other statuses are left alone by metadata triage. Ready means triaged; implementation still requires clear scope, acceptance criteria, validation, and satisfied dependencies.
 
 It also removes conflicting standard or legacy type labels from issues labeled `epic`, preserving severity/package/area/risk metadata. It closes any container when all direct children are closed and updates its project status to Done. Nested completion rolls up in the same run. If an unfinished child appears, it reopens only containers carrying the automation's `automation: container-closed` marker and sets their status to Ready. Manually closed containers are left alone. An empty issue is never auto-closed. Closed children count as complete regardless of close reason; a cancelled child should have its scope removed or reassigned before closure.
 
@@ -45,4 +47,6 @@ node scripts/issue-triage.mjs --apply --issue NUMBER
 node scripts/issue-containers.mjs --apply --issue NUMBER
 ```
 
-The second command reconciles the named issue's container subtree and ancestors, never unrelated issues. Drafts perform no writes. Both scripts default to dry-run. Actions uses `MCC_PROJECT_TOKEN`, provisioned from the owner's existing GitHub credential with explicit authorization. Local use relies on existing `gh` authentication. Do not print credentials or copy them during ordinary issue filing. Workflow activation requires publication on `main`; runtime field IDs are discovered. Concurrent human edits can race API writes, so avoid competing reconciliation sessions.
+The second command reconciles the named issue's container subtree and ancestors, never unrelated issues. Drafts perform no writes. Both scripts default to dry-run. Actions uses `MCC_PROJECT_TOKEN`, a token with write access to the MCC delivery project. Creating or changing it requires explicit authorization. Local use relies on existing `gh` authentication. Do not print credentials or copy them during ordinary issue filing. Workflow activation requires publication on `main`; runtime field IDs are discovered. Concurrent human edits can race API writes, so avoid competing reconciliation sessions.
+
+When a non-draft PR is opened, edited, reopened, or marked ready for review, the [PR issue status workflow](.github/workflows/tracker-pr-issue-status.yml) moves open issues named by closing keywords to `In review`: from `In progress` for any author, and also from `Ready` for the owner and collaborators. It skips other statuses and ordinary issue mentions, and its run logs each skip with the reason. It runs separately from `tracker-pr-metadata.yml`, so a status lookup failure does not block PR metadata. It also uses `MCC_PROJECT_TOKEN`.
