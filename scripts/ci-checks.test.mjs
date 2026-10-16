@@ -26,7 +26,6 @@ import {
   automationTests,
   buildTests,
   checks,
-  markdownLint,
   runChecks,
   workspaceArguments,
 } from './ci-checks.mjs';
@@ -96,15 +95,19 @@ test('infrastructure and documentation paths keep affected workspace mode', () =
 test('documentation and recognized repository scopes avoid workspace and infrastructure commands', () => {
   assert.deepEqual(checks({ full: false, repository: false }), [
     ['npm', ['run', 'format:check']],
-    markdownLint,
+    ['npx', ['eslint', '**/*.md', '--max-warnings', '0']],
   ]);
   const commands = checks({ full: false, repository: true });
-  assert.equal(commands.length, 5);
+  assert.equal(commands.length, 4);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
   assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
   assert.ok(JSON.stringify(commands).includes('branch-name.test.mjs'));
   assert.ok(JSON.stringify(commands).includes('agent-policy.test.mjs'));
-  assert.deepEqual(commands[1], markdownLint);
+  // One ESLint run covers the automation scripts and every Markdown file.
+  const lint = commands.filter(([, args]) => args[0] === 'eslint');
+  assert.equal(lint.length, 1);
+  assert.deepEqual(lint[0][1].slice(-3), ['**/*.md', '--max-warnings', '0']);
+  assert.ok(lint[0][1].includes('scripts/agent-policy.mjs'));
   assert.deepEqual(commands[2], ['npm', ['run', 'agents:check']]);
 });
 

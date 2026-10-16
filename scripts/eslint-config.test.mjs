@@ -46,3 +46,40 @@ test('Markdown gets only Markdown rules, never JavaScript, TypeScript, or Pretti
     [],
   );
 });
+
+test('eslint --fix reports Markdown problems but never rewrites Markdown', async () => {
+  const fixer = new ESLint({ cwd: root, fix: true });
+  const text = '# Title\n\nSome * spaced * emphasis.\n\n#Heading\n';
+  const [result] = await fixer.lintText(text, { filePath: 'docs/example.md' });
+  assert.equal(result.output, undefined);
+  assert.deepEqual(
+    [...new Set(result.messages.map(({ ruleId }) => ruleId))],
+    ['markdown/no-space-in-emphasis', 'markdown/no-missing-atx-heading-space'],
+  );
+});
+
+test('generated changelogs and untracked local agent files are not linted', async () => {
+  for (const path of [
+    'CHANGELOG.md',
+    'applications/match-to-csv/CHANGELOG.md',
+    'CLAUDE.local.md',
+    'AGENTS.override.md',
+  ])
+    assert.ok(await eslint.isPathIgnored(path), path);
+  assert.ok(!(await eslint.isPathIgnored('AGENTS.md')));
+});
+
+test('only the prose skill may use bracketed tell markers', async () => {
+  const text =
+    "# Title\n\nIt saves lives.[6] In today's [fast-paced/digital/modern] world.\n";
+  for (const path of [
+    '.agents/workflows/write-prose.md',
+    '.agents/skills/mcc-write-prose/SKILL.md',
+    '.claude/skills/mcc-write-prose/SKILL.md',
+  ])
+    assert.deepEqual(await lintMarkdown(text, path), [], path);
+  assert.deepEqual(await lintMarkdown(text), [
+    { ruleId: 'markdown/no-missing-label-refs', line: 3 },
+    { ruleId: 'markdown/no-missing-label-refs', line: 3 },
+  ]);
+});

@@ -8,6 +8,31 @@ const javascriptFiles = ['**/*.{js,mjs,cjs}'];
 const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
 const markdownFiles = ['**/*.md'];
 
+// Markdown layout is kept by hand, so `eslint --fix` (from `npm run lint:fix`,
+// an editor, or any other run) must never rewrite a Markdown file. This copy of
+// the plugin reports every problem its rules find but drops their fixes.
+const reportOnlyMarkdown = {
+  ...markdown,
+  rules: Object.fromEntries(
+    Object.entries(markdown.rules).map(([name, rule]) => [
+      name,
+      {
+        ...rule,
+        meta: { ...rule.meta, fixable: undefined },
+        create: (context) =>
+          rule.create(
+            Object.create(context, {
+              report: {
+                value: (descriptor) =>
+                  context.report({ ...descriptor, fix: undefined }),
+              },
+            }),
+          ),
+      },
+    ]),
+  ),
+};
+
 export default tseslint.config(
   {
     ignores: [
@@ -23,6 +48,12 @@ export default tseslint.config(
       // checkout type-checks every worktree and can exhaust the V8 heap.
       '.claude/worktrees/**',
       '.codex/worktrees/**',
+      // release-please writes changelogs from commit subjects, so bracketed
+      // text such as `[UNKNOWN]` would fail the Markdown rules.
+      '**/CHANGELOG.md',
+      // Untracked personal agent instructions, such as CLAUDE.local.md.
+      '**/*.local.md',
+      '**/AGENTS.override.md',
     ],
   },
   {
@@ -69,18 +100,42 @@ export default tseslint.config(
     files: [...javascriptFiles, ...typescriptFiles],
   },
   // Markdown is checked for broken structure (link fragments, table column
-  // counts, reference links, images, headings), not reformatted. Prettier
+  // counts, reference links, images, headings), never reformatted. Prettier
   // keeps ignoring Markdown, and code blocks inside it are not linted as code.
   // GFM parses GitHub tables; YAML front matter covers skill and agent files.
   ...markdown.configs.recommended.map((config) => ({
     ...config,
     files: markdownFiles,
+    plugins: { markdown: reportOnlyMarkdown },
     language: 'markdown/gfm',
     languageOptions: {
       frontmatter: 'yaml',
     },
   })),
-  // Rules turned off for specific files, each with its reason.
+  // Rules changed for specific files, each with its reason.
+  {
+    // The prose skill marks its example passages with literal tell numbers
+    // such as `[7]` and writes placeholders such as
+    // `[fast-paced/digital/modern]`. Both are text, not reference links.
+    files: [
+      '.agents/workflows/write-prose.md',
+      '.agents/skills/mcc-write-prose/SKILL.md',
+      '.claude/skills/mcc-write-prose/SKILL.md',
+    ],
+    rules: {
+      'markdown/no-missing-label-refs': [
+        'error',
+        {
+          allowLabels: [
+            ...Array.from({ length: 20 }, (_, index) => String(index + 1)),
+            'bracketed',
+            'comprehensive/holistic/nuanced',
+            'fast-paced/digital/modern',
+          ],
+        },
+      ],
+    },
+  },
   {
     // The template has its own title, then the specification an author
     // copies, whose title is a second H1 placeholder (`# <Component name>`).
