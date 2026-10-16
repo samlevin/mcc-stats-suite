@@ -22,35 +22,13 @@ Only `match-to-csv` contains a working product pipeline today. The other applica
 
 ## Set up the repository
 
-Install the versions pinned in `.tool-versions`, then install dependencies from the repository root:
-
-```console
-asdf install
-npm ci
-```
+Follow [Getting started](docs/getting-started.md) to install the tools and dependencies and to find the checks for each kind of change. Run the complete local gate, `npm run check`, before opening a pull request for application, package, dependency, build configuration, or unclassified changes.
 
 Workspaces use the `@mcc` scope, are never published, and install from the local workspaces. Third-party dependencies come from npmjs.org.
 
-For application, package, dependency, build configuration, or unclassified changes, run the complete local gate before opening a pull request:
-
-```console
-npm run check
-```
-
 OpenTofu source and configuration files under `infrastructure/` select the separate AWS-free `check-infrastructure` job on PRs and main pushes. Unknown paths and `.terrateam/config.yml` run it alongside the application gate; application and package changes do not run it. It checks OpenTofu formatting, validates every dev/prod root without backends or inputs (including the inactive data-platform roots), and runs every module test suite. Infrastructure-only changes skip `check-workspaces`. The required `require-scoped-checks` job aggregates the selected gates. Run the infrastructure commands in [TESTING.md](TESTING.md) locally.
 
-For documentation-only changes, run `npm run format:check`. For repository-only changes recognized by `scripts/ci-scope.mjs`, also run `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0` and `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs`. These paths do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
-
-`npm run check` checks formatting, lint rules, release metadata, types, tests, and builds without AWS. CDK synthesis may use Docker to package Linux ARM64 assets.
-
-Useful focused commands follow the workspace dependency graph:
-
-```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/contracts
-npm run app:synth -- match-to-csv --environment dev
-npm run verify:bundle --workspace @mcc/match-to-csv
-```
+Documentation-only and repository-only changes recognized by `scripts/ci-scope.mjs` run only the checks the [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists for them. They do not run workspace tests, builds, CDK synthesis, or OpenTofu checks. CI uses committed changed files and the baseline classifier, never PR titles or labels, to select checks. Changes to CI selection, dependencies, build configuration, and unknown paths always run the full gate. The classifier is read from the PR base or previous main commit; its first introduction runs the full gate.
 
 Use `npm run format` and `npm run lint:fix` for automatic corrections. Add or update tests with every behavior change. Preserve immutable evidence semantics in `match-to-csv`: never overwrite source screenshots, provider responses, processing runs, or append-only events.
 
@@ -86,15 +64,7 @@ The release pull request updates package versions, changelogs, the root lockfile
 
 ## Test against your own AWS account
 
-To deploy an ephemeral stack, you need your own dev account set up with [Self-hosting](docs/self-hosting/README.md). Copy `.envrc.example` to the ignored `.envrc`, set `AWS_PROFILE`, run `direnv allow`, and verify the account before any diff or deployment:
-
-```console
-aws sso login
-aws sts get-caller-identity
-npm run app:deploy -- <application> --environment dev --ephemeral <name>
-```
-
-The deployment harness checks the active account against the selected profile. Do not bypass that check or pass raw CDK context. Use `--environment` and `--ephemeral`. Ephemeral names are 1 to 20 lowercase letters, numbers, or hyphens; `dev` and `prod` are reserved. Stacks are named `<application>-e-<name>`.
+To deploy an ephemeral stack to your own dev account, send it a test email, and check the result, follow [tier 2 of Getting started](docs/getting-started.md#tier-2-deploy-your-own-ephemeral-stack). It lists the [Self-hosting](docs/self-hosting/README.md) steps your account needs first.
 
 Never commit credentials, account IDs, email addresses, domain names, populated `.envrc` files, `*.auto.tfvars`, state, plans, or local environment files. This is a public repository.
 
@@ -126,6 +96,7 @@ Two kinds of rename need more than a code change:
 Update the closest durable document:
 
 - product behavior and operator-facing package details belong in an application README;
+- the path from a fresh clone to passing checks and a dev stack, including which checks to run for each kind of change, belongs in `docs/getting-started.md`;
 - local and CI test commands belong in `TESTING.md` or a package testing guide;
 - setting up and operating a deployment belongs in `docs/self-hosting/`;
 - future behavior and acceptance criteria belong in `specs/`;

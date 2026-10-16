@@ -1,11 +1,6 @@
 # Repository testing
 
-Install once and run every workspace from the repository root:
-
-```console
-npm ci
-npm test
-```
+[Getting started](docs/getting-started.md) covers installing the repository and lists the checks to run for each kind of change. This guide explains what those checks cover and how CI selects them. From the repository root, `npm test` runs the repository script tests and then every workspace's tests.
 
 The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs:
 
@@ -15,13 +10,7 @@ node --test scripts/issue-*.test.mjs
 
 These tests use metadata mocks and never call GitHub. When a non-draft PR is opened, edited, reopened, or marked ready for review, the separate `tracker-pr-issue-status.yml` workflow moves open issues named by closing keywords to `In review` in MCC delivery: from `In progress` for any author, and also from `Ready` for the owner and collaborators. Other statuses and ordinary issue mentions are skipped, and each skip is logged with its reason. Status lookup failures do not block the metadata workflow. Preview with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs` or `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`; both default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`; see [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) for workflow credentials and activation.
 
-The full local quality gate is:
-
-```console
-npm run check
-```
-
-`npm run check` verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI selects checks from changed files using the committed baseline `scripts/ci-scope.mjs` and GitHub's commit comparison API. Markdown-only changes run formatting; recognized repository-only changes also run repository lint and issue-automation tests. They skip workspace tests/builds, CDK synthesis, bundle validation, and OpenTofu checks. Application and package code runs the full application gate. Dependencies, CI selection, `.terrateam/config.yml`, and unknown paths run the full application gate and the infrastructure gate. OpenTofu source and configuration files (`*.tf`, `*.tfvars`, and `*.hcl`) under `infrastructure/` select the separate `check-infrastructure` job. Infrastructure-only changes skip application checks. The required `require-scoped-checks` job, shown as `Require every check selected for the changed files`, waits for each selected gate and fails when one fails. Titles and labels never control selection. Renames inspect both removed and added paths. A single selector job publishes the main push deployment artifact after the required gate succeeds.
+`npm run check`, the full local quality gate, verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. CI selects checks from changed files using the committed baseline `scripts/ci-scope.mjs` and GitHub's commit comparison API. Markdown-only changes run formatting; recognized repository-only changes also run repository lint and issue-automation tests. They skip workspace tests/builds, CDK synthesis, bundle validation, and OpenTofu checks. Application and package code runs the full application gate. Dependencies, CI selection, `.terrateam/config.yml`, and unknown paths run the full application gate and the infrastructure gate. OpenTofu source and configuration files (`*.tf`, `*.tfvars`, and `*.hcl`) under `infrastructure/` select the separate `check-infrastructure` job. Infrastructure-only changes skip application checks. The required `require-scoped-checks` job, shown as `Require every check selected for the changed files`, waits for each selected gate and fails when one fails. Titles and labels never control selection. Renames inspect both removed and added paths. A single selector job publishes the main push deployment artifact after the required gate succeeds.
 
 Target one logical application with npm's workspace flag:
 
