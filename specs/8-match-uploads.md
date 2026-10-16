@@ -20,9 +20,9 @@
 
 **Out of scope:** maps, game variants and playlists (§1), player identity and gamertag resolution (spec 6), choosing one screenshot per match for statistics and every lakehouse table (#159), reading OCR content to group screenshots, attaching emailed screenshots to a match, and public access
 
-A match ends. An admin signs in to the admin application, picks that match's postgame scoreboard screenshots and uploads them. The upload request creates the match first: an opaque `matchId`, a slug of three random Halo terms such as `guardian-warthog-killtacular`, and the match's metadata. Only then does the admin application issue upload slots, so every screenshot is staged, checked and extracted already knowing its match. Match-to-csv carries the `matchId` from the upload into the screenshot's source and every run's manifest. A versioned match record lists the match's status and its screenshots, and match-to-csv runs, spec 7 and the stats lakehouse (#159) read it.
+A match ends. An admin signs in to the admin application, picks that match's postgame scoreboard screenshots and uploads them. The upload request creates the match first: an opaque `matchId`, a slug of one random Halo term and a short random suffix such as `warthog-7k3q`, and the match's metadata. Only then does the admin application issue upload slots, so every screenshot is staged, checked and extracted already knowing its match. Match-to-csv carries the `matchId` from the upload into the screenshot's source and every run's manifest. A versioned match record lists the match's status and its screenshots, and match-to-csv runs, spec 7 and the stats lakehouse (#159) read it.
 
-**Readiness:** this revision authorizes filing Phases 0 to 5. Slices that build on the admin workspace, user pool or stack are blocked by the spec 3 slices named in their **Blocked by** lines. P3.2 cannot merge until P1.2 is applied in dev and prod, and P4.4 until P1.1, P1.2 and spec 2 P1.1 are. The contracts in §5.3 and §10.1 freeze when P0.1 merges. The slug word list in §7.2 is a proposal until P0.2 merges it, and the limits in §7.4 are initial values until P5.3 records the first live matches. The stats lakehouse specification (#159, PR #174) is unmerged and still reads the 1.0-draft contract; §8.4 lists what it must change.
+**Readiness:** this revision authorizes filing Phases 0 to 5. Slices that build on the admin workspace, user pool or stack are blocked by the spec 3 slices named in their **Blocked by** lines. P3.2 cannot merge until P1.2 is applied in dev and prod, and P4.4 until P1.1, P1.2 and spec 2 P1.1 are. The contracts in §5.3 and §10.1 freeze when P0.1 merges. The slug word list in §7.2 is a proposal until P0.2 merges it, and the limits in §7.4 are initial values until P5.3 records the first live matches. Spec 9, the stats lakehouse (#159), merged while this revision was open and still reads the 1.0-draft contract; §8.4 lists what it must change.
 
 ---
 
@@ -36,7 +36,7 @@ The issue (#167) first asked for host-run sessions in which the host selected ea
 | What creates a match | One `POST /api/v1/matches` request, which carries the descriptions of 1 to 10 screenshot files. It writes the `MATCH_CREATED` event before any upload intent or presigned POST exists (§6.1). A match is never created by intake, by a screenshot or by a metadata rule. | Every staged object is then already under a match, so intake, extraction, review and statistics never handle a screenshot whose match is unknown. |
 | How screenshots join a match | By the upload. A screenshot belongs to the match whose upload created it, recorded in its upload intent, its staging key, its `SourceScreenshot.intake.matchId` and its run manifest. EXIF data, file times and upload order are never read to place it. A screenshot never moves between matches: an admin excludes it from the wrong match and uploads it to the right one (§4.2). | The admin knows which match the screenshots show. Explicit membership needs no association rules, has nothing to tune and cannot be wrong silently. Moving would make one screenshot's match depend on event order in two matches. |
 | Identifiers | `matchId`, `uploadId` and `eventId` are `evidenceId()` values (spec 1 §5.1), issued by `MatchWrite`. `matchId` is the key in every evidence path, contract, run manifest and lakehouse table. People never see or type it. | One identifier format across evidence, sortable by creation time, with no meaning a person might rely on. |
-| Slug | Every match also has a `slug`: three lowercase Halo terms joined by `-`, one drawn at random from each list in §7.2, such as `sandtrap-banshee-overkill`. It is unique across all matches of a namespace, reserved create-only at `match-slugs/{slug}.json` before the match is created, never changed and never reused, even for a voided match. Admin screens, URLs and later the player app show the slug, and `GET /api/v1/match-slugs/{slug}` resolves it to a `matchId`. | A person can say, type and remember a slug; nobody can do that with an `evidenceId()`. Drawing it at random keeps it free of players, time or content, and keeping it separate from `matchId` lets the word list change without touching any key. |
+| Slug | Every match also has a `slug`: one lowercase Halo term from the pool in §7.2, a `-`, and a random suffix of at least 4 Crockford base32 characters, such as `warthog-7k3q` or `killtacular-m2x9`. It is unique across all matches of a namespace, reserved create-only at `match-slugs/{slug}.json` before the match is created, never changed and never reused, even for a voided match. When draws collide, the suffix grows by one character, so the pool cannot run out (§7.2). Admin screens, URLs and later the player app show the slug, and `GET /api/v1/match-slugs/{slug}` resolves it to a `matchId`. | A person can say, type and remember a slug; nobody can do that with an `evidenceId()`. One word keeps slugs short (8 to 17 characters), and the suffix carries the uniqueness, so the word list can stay small. Drawing both at random keeps the slug free of players, time, content and `matchId`. `crypto.randomInt` over a fixed alphabet needs no library; `shortid` is deprecated, and `nanoid` would add a dependency for the same few lines. |
 | Match metadata | `MATCH_CREATED` records `matchId`, `slug`, `slugWordsVersion`, `game` (`halo3`), `playedAt`, `playedAtSource`, an optional `note`, `declaredScreenshotCount`, `createdAt` (the event's `occurredAt`), the admin's Cognito `sub` and the build (§4.2, §10.1). The match record adds status, screenshots, uploads, flags and counts (§7.3). | These are the fields the other specs read: spec 7 needs membership and status, spec 3 needs nothing new, and the lakehouse needs a match, its time and its screenshots. A game code keeps the record valid when other MCC games get parser profiles. |
 | Maps, game variants and playlists | Not recorded in v1. The admin application has no map catalog and no map picker. Spec 4 (map suggestions) is removed. Reading a map or game variant printed on a postgame screen is backlog (P6.3). | The admin no longer selects maps, and screenshot metadata cannot place one. The current captures and parser fixtures carry only the scoreboard table. A field nobody can fill reliably would invite guesses. |
 | Play time | `playedAt` defaults to the server time of `MATCH_CREATED` with `playedAtSource: UPLOAD_TIME`. The admin may enter an earlier time instead (`ADMIN_ENTERED`), from `maxPlayedAtAgeDays` before the request up to the request time, and may correct it later with `DETAILS_CORRECTED`. | The flow uploads right after the match ends, so upload time is close. An admin uploading the next morning knows better. Neither source reads image metadata. |
@@ -167,7 +167,7 @@ A match's current details event is its `MATCH_CREATED`, or the latest `DETAILS_C
 | `supersedesEventId` is not the current event it must name | `409 STALE_SUPERSESSION`, with the current event | nothing |
 | The match would exceed `maxUploadsPerMatch` or `maxEventsPerMatch` | `409 MATCH_LIMIT` | nothing |
 | The sequence write failed with `412` on 3 attempts in a row | `409 CONCURRENT_CHANGE` | nothing |
-| `slugAttempts` slug draws in a row were already reserved | `503 SLUG_UNAVAILABLE` | the request claim only; a retry with the same `clientRequestId` continues |
+| Every slug draw up to `slugMaxSuffixLength` was already reserved (§7.2) | `503 SLUG_UNAVAILABLE` | the request claim only; a retry with the same `clientRequestId` continues |
 | Any other storage error after the SDK's retries | `503 UNAVAILABLE` | possibly the objects written before it; the client retries with the same `clientRequestId` or `uploadBatchId`, which continues (§6.6) |
 
 ## 5. Match evidence
@@ -237,7 +237,7 @@ Any change to §7.3 bumps `matchRulesVersion`, which changes `inputsSha256`, so 
 1. Read `sub` and require `admin` (§4.3). Validate the body, including `playedAt` and every file.
 2. Write `match-requests/{clientRequestId}.json` with a new `matchId` and `If-None-Match: *`. On `412`, read the claim and use its `matchId`. When that match already has `MATCH_CREATED`, continue at step 6.
 3. Run the duplicate image check (§6.2 step 3) for every file. On a conflict, return `409 IMAGE_ALREADY_UPLOADED` and write nothing more. The claim stays, and a retry with the same `clientRequestId` checks again.
-4. Draw a slug (§7.2) and write `match-slugs/{slug}.json` naming the `matchId`, with `If-None-Match: *`. On `412`, draw again, at most `slugAttempts` draws, then return `503 SLUG_UNAVAILABLE`.
+4. Draw a slug (§7.2) and write `match-slugs/{slug}.json` naming the `matchId`, with `If-None-Match: *`. On `412`, draw again, lengthening the suffix as §7.2 states. When the last draw at `slugMaxSuffixLength` also returns `412`, return `503 SLUG_UNAVAILABLE`.
 5. Write `matches/{matchId}/events/000001.json`, `MATCH_CREATED`, with `If-None-Match: *`. `occurredAt` is the handler's clock, `playedAt` is the request's or `occurredAt`, and `declaredScreenshotCount` is the number of files. On `412`, another attempt for this claim created the match first: read it and continue at step 6. The slug this attempt reserved stays an orphan.
 6. Request the uploads with `uploadBatchId` equal to `clientRequestId` (§6.2 steps 2 to 5), skipping the duplicate check for files whose slot already exists.
 7. Log `Match created` with `matchId`, `fileCount` and `requestId`, and return `201`, or `200` when step 2 found a claim.
@@ -319,11 +319,17 @@ An EventBridge rule in the admin stack matches evidence bucket `Object Created` 
 
 ### 7.2 Slugs
 
-A slug is `<place>-<thing>-<moment>`: one word from each list below, drawn independently and uniformly with `crypto.randomInt`. It matches `^[a-z]{3,12}-[a-z]{3,12}-[a-z]{3,12}$`. The lists are bundled in `applications/admin/config/slug-words-v1.json`, which is immutable once released, and `loadSlugWords` validates them at cold start: every word is 3 to 12 lowercase ASCII letters, no word appears twice across the three lists, and each list has at least 32 words.
+A slug is `<word>-<suffix>`. `word` is drawn uniformly from the 176 words below, which form one pool; the groups only show where each word comes from. `suffix` is `n` characters drawn uniformly from the Crockford base32 alphabet in lowercase, `0123456789abcdefghjkmnpqrstvwxyz`, which leaves out `i`, `l`, `o` and `u` so a slug can be read aloud and typed without confusing letters and digits. Both draws use `crypto.randomInt`, and each attempt draws a new word and a new suffix. A slug matches `^[a-z]{3,12}-[0-9a-hjkmnp-tv-z]{4,8}$`.
+
+`n` starts at `slugSuffixLength` (4). After `slugAttemptsPerLength` (4) draws in a row at length `n` are already reserved, the next draws use `n + 1`, up to `slugMaxSuffixLength` (8). Every extra character multiplies the space by 32, so the pool never runs out in practice; the cap only bounds the pattern. The suffix is random and carries no checksum, time or part of `matchId`.
+
+`GET /api/v1/match-slugs/{slug}` lowercases the slug and, in the suffix only, reads `i` and `l` as `1` and `o` as `0`, as Crockford decoding does, so a slug copied by hand with those characters still resolves.
+
+The words are bundled in `applications/admin/config/slug-words-v1.json`, which is immutable once released, and `loadSlugWords` validates them at cold start: every word is 3 to 12 lowercase ASCII letters, no word appears twice, and the pool has at least 64 words.
 
 Words come from Halo terminology: multiplayer maps from every game in the Master Chief Collection, vehicles, weapons, equipment and armor abilities, species and factions, and Halo 3 medals and game types. A word is used only when the term is one word as players write it, so `High Ground`, `The Pit` and `Battle Rifle` are left out rather than joined. Named characters and real people are left out, as are words that read badly out of context.
 
-**`place` (64): multiplayer maps**
+**Maps (64)**
 
 | Game | Words |
 | --- | --- |
@@ -334,7 +340,7 @@ Words come from Halo terminology: multiplayer maps from every game in the Master
 | Halo 4 | `adrift`, `haven`, `monolith`, `pitfall`, `ragnarok`, `skyline`, `solace`, `vertigo`, `vortex` |
 | Halo 2: Anniversary | `bloodline`, `lockdown`, `remnant`, `shrine`, `stonetown`, `zenith` |
 
-**`thing` (64): vehicles, weapons, equipment and forces**
+**Vehicles, weapons, equipment and forces (64)**
 
 | Group | Words |
 | --- | --- |
@@ -343,7 +349,7 @@ Words come from Halo terminology: multiplayer maps from every game in the Master
 | Equipment, power-ups and armor abilities | `camo`, `evade`, `flare`, `hologram`, `jammer`, `jetpack`, `overshield`, `regenerator`, `sprint`, `teleporter`, `thruster` |
 | Species and factions | `brute`, `covenant`, `drone`, `elite`, `flood`, `forerunner`, `grunt`, `hunter`, `jackal`, `mjolnir`, `monitor`, `sentinel`, `spartan`, `odst` |
 
-**`moment` (48): medals, game types and plays**
+**Medals, game types and plays (48)**
 
 | Group | Words |
 | --- | --- |
@@ -351,9 +357,9 @@ Words come from Halo terminology: multiplayer maps from every game in the Master
 | Game types | `assault`, `dominion`, `grifball`, `headhunter`, `infection`, `juggernaut`, `oddball`, `regicide`, `ricochet`, `slayer`, `swat`, `territories` |
 | Plays and postgame | `beatdown`, `betrayal`, `carnage`, `comeback`, `headshot`, `killcam`, `medal`, `noscope`, `postgame`, `pummel`, `ragdoll`, `rematch`, `respawn`, `spree`, `sticky`, `victory` |
 
-The lists give 64 x 64 x 48 = 196,608 slugs per namespace. A draw collides with an existing reservation with probability `reserved / 196,608`, under 1% for the first 1,900 matches, and `match-write` draws again on a collision (§6.1 step 4). Examples: `guardian-warthog-killtacular`, `sandtrap-banshee-overkill`, `lockout-needler-oddball`.
+With a 4-character suffix the pool holds 176 x 32^4 = 184,549,376 slugs per namespace. A draw collides with probability `reserved / 184,549,376`, about 0.005% after 10,000 matches, and `match-write` draws again on a collision (§6.1 step 4). Slugs are 8 to 17 characters long. Examples: `warthog-7k3q`, `killtacular-m2x9`, `lockout-b8fn`, `oddball-x04t`.
 
-A later word list is a new file with a new `slugWordsVersion`. It may add words and may stop drawing a word, but a slug already reserved never changes and is never reused, whichever version drew it.
+A later word list is a new file with a new `slugWordsVersion`. It may add words and may stop drawing a word, but a slug already reserved never changes and is never reused, whichever version drew it. Raising `slugSuffixLength` is a new configuration version and changes no existing slug.
 
 ### 7.3 Match record
 
@@ -385,7 +391,9 @@ A match counts for statistics only when its `status` is `ACTIVE`, and a screensh
 | `maxUploadsPerMatch` | 20 | Every upload of a match, including rejected and excluded ones. |
 | `maxEventsPerMatch` | 200 | |
 | `maxPlayedAtAgeDays` | 14 | §4.3. |
-| `slugAttempts` | 8 | §6.1 step 4. |
+| `slugSuffixLength` | 4 | §7.2. |
+| `slugAttemptsPerLength` | 4 | §7.2. |
+| `slugMaxSuffixLength` | 8 | §7.2. |
 
 These are initial values. A change is a new configuration version filed as its own issue.
 
@@ -421,9 +429,9 @@ Spec 4 (map suggestions for match entry) is removed in the same change as this r
 
 Spec 7 reads match membership for `K006` and `K007` peers and for dataset grouping. This revision updates spec 7's references in the same change: a screenshot's match is its `intake.matchId`; its peers are the other `ACTIVE` screenshots of the highest record version of an `ACTIVE` match; the record version read is recorded as `matchVersion`; and spec 7's roles read `<ns>matches/*/record/*` and nothing else under `<ns>matches/`. Emailed screenshots still have no match and record `NO_MATCH_IDENTITY`.
 
-### 8.4 Stats lakehouse (#159, PR #174)
+### 8.4 Spec 9, the stats lakehouse (#159)
 
-The lakehouse specification reads the 1.0-draft contract. Its next revision makes these changes:
+[Spec 9](9-stats-lakehouse.md) reads the 1.0-draft contract. Its next revision makes these changes:
 
 | 1.0-draft contract | Change |
 | --- | --- |
@@ -456,7 +464,7 @@ The lakehouse specification reads the 1.0-draft contract. Its next revision make
 | Evidence bucket EventBridge notifications | spec 2 P1.1 | P4.4 cannot deploy until it is applied. |
 | Spec 1 sections in §8.5 | spec 1 | P3.1 and P3.2. |
 | Spec 7 references in §8.3 | spec 7 | This revision. |
-| Lakehouse changes in §8.4 | #159 | The lakehouse specification's next revision. |
+| Lakehouse changes in §8.4 | spec 9 | Spec 9's next revision. |
 
 ## 9. Admin experience
 
@@ -639,7 +647,7 @@ Match 1 -> many MatchRecord versions; the latest is current
 | --- | --- | --- |
 | `applications/admin/src/lib/match-events.ts` | `foldMatch(events)`; `checkMatchEvent(state, request)` | Pure §7.1 and the rules in §4.2 and §4.3. |
 | `applications/admin/src/lib/match-record.ts` | `buildMatchRecord(events, intents, receipts)`; `matchRecordInputsSha256(keys, version)` | Pure §7.3. |
-| `applications/admin/src/lib/slug.ts` | `loadSlugWords(version?)`; `drawSlug(words, randomInt)`; `isSlug(text)` | §7.2, with the random source injected. |
+| `applications/admin/src/lib/slug.ts` | `loadSlugWords(version?)`; `drawSlug(words, suffixLength, randomInt)`; `isSlug(text)`; `normalizeSlug(text)` | §7.2, with the random source injected. |
 | `applications/admin/src/lib/match-store.ts` | `claimRequest`, `reserveSlug`, `listEvents`, `putEvent`, `putSlot`, `putIntent`, `listImageIndex`, `putImageIndex`, `latestRecord`, `putRecord` | Evidence keys and create-only writes. |
 | `applications/admin/src/lib/upload-post.ts` | `presignUpload(intent, dependencies)` | Presigned POST with the §6.2 conditions. |
 | `applications/match-to-csv/src/lib/image-acceptance.ts` | `attachmentRejectionCodes(...)` | Moved from `process-email.ts` unchanged, so both intake Lambdas share it. |
@@ -694,11 +702,13 @@ mcc-stats-suite/
   "maxUploadsPerMatch": 20,
   "maxEventsPerMatch": 200,
   "maxPlayedAtAgeDays": 14,
-  "slugAttempts": 8
+  "slugSuffixLength": 4,
+  "slugAttemptsPerLength": 4,
+  "slugMaxSuffixLength": 8
 }
 ```
 
-`loadMatchConfig` validates every key at cold start: every value is a positive integer and `maxFilesPerRequest` is at most `maxUploadsPerMatch`. It throws `InvalidMatchConfigError` on any problem. `slug-words-v1.json` holds `{ "slugWordsVersion": "slug-words-v1", "place": [...], "thing": [...], "moment": [...] }` with the words of §7.2, validated as §7.2 states. Neither file holds a secret.
+`loadMatchConfig` validates every key at cold start: every value is a positive integer `maxFilesPerRequest` is at most `maxUploadsPerMatch`, and `slugSuffixLength` is from 4 to `slugMaxSuffixLength`, which is at most 8. It throws `InvalidMatchConfigError` on any problem. `slug-words-v1.json` holds `{ "slugWordsVersion": "slug-words-v1", "words": [...] }` with the 176 words of §7.2, validated as §7.2 states. Neither file holds a secret.
 
 ### 13.2 Persistent resources
 
@@ -746,7 +756,7 @@ Both stacks deploy as they do today (spec 1 §13.6, spec 3 §13.5). The admin pr
 1. Every match route requires a valid token in the `admin` group. The handler takes `matchId`, `uploadId` and `slug` only as identifiers and builds every key itself, so no request names a bucket, key or prefix.
 2. The presigned POST fixes the exact key, the content type and the maximum size, and expires in 600 seconds. A leaked POST can write one object of the declared size to one staging key, which `process-upload` checks like any upload. CORS on the attachments bucket allows any origin to send a POST, which grants nothing without a valid signed policy.
 3. Uploaded bytes are untrusted. `process-upload` checks them with spec 1's attachment rules and Sharp's `failOn: 'none'` before storing a source, verifies the intent exists and the declared SHA-256 matches, so an object posted outside the API is rejected.
-4. Slugs are drawn at random from a fixed list, so they reveal nothing about players, time or content. The word lists hold no player data.
+4. Slugs are a random word from a fixed list and a random suffix, so they reveal nothing about players, time, content or `matchId`. The word list holds no player data. A slug is not a secret: every match route still requires an `admin` token.
 5. Screenshots contain gamertags and live only in the evidence and attachments buckets under the application data key. Match events hold the admin's Cognito `sub`, not an email address. File names are normalized as spec 1 §4.3 does, and the original path on the admin's device is never sent.
 6. Logs never contain file names, notes, gamertags or `sub` values. Handlers log identifiers, slugs, event types, counts and request IDs.
 7. Every object this component writes is create-only, and Object Lock protects evidence for 365 days (spec 1 §13.1).
@@ -767,10 +777,10 @@ Tests never call AWS.
 | Layer or file | Covers |
 | --- | --- |
 | `match-events.test.ts` | every event type allowed and refused in each state of §4.2; `STALE_SUPERSESSION`; idempotent `clientRequestId`; `DETAILS_CORRECTED` changes `playedAt` and `note` and never the slug; voiding and restoring; exclusion and restoration |
-| `slug.test.ts` | `slug-words-v1.json` validates; every word matches the §7.2 pattern; no word repeats across lists; `drawSlug` with a fixed random source gives the expected slug; every drawn slug passes `isSlug`; a list under 32 words fails to load |
+| `slug.test.ts` | `slug-words-v1.json` validates; every word is 3 to 12 lowercase letters and none repeats; `drawSlug` with a fixed random source gives the expected slug; every drawn slug passes `isSlug`; no suffix contains `i`, `l`, `o` or `u`; a pool under 64 words fails to load; `normalizeSlug` lowercases and maps `i`, `l` and `o` in the suffix only |
 | `match-record.test.ts` | every row of §7.3; each flag; `DUPLICATE` within a match and not after the earlier copy is excluded; `screenshotIds` order; same inputs in any order give the same document; `inputsSha256` changes with a rules version bump |
 | `fixtures/matches/*.fixture.json` | Each fixture is a set of events, intents and receipts with the expected record, run by one test per file, including `intake-retry-after-receipt` (one intent, one `ACCEPTED` receipt, one `ACTIVE` screenshot whose `screenshotId` is the one the retry returned) |
-| `match-write.test.ts` | create writes the claim, slug reservation and `MATCH_CREATED` before any slot, intent or POST; a slug collision draws again and `slugAttempts` collisions return `503 SLUG_UNAVAILABLE`; a retried create with the same `clientRequestId` after a failure at each step returns the same `matchId` and slug and creates no second match; `IMAGE_ALREADY_UPLOADED` for a live image in another match, and none after it is excluded there or its match is voided; upload intents and POST conditions; two concurrent requests for one slot share one `uploadId`; uploads refused on a voided match; `MATCH_LIMIT`; event sequence race retried and `CONCURRENT_CHANGE` after 3 attempts |
+| `match-write.test.ts` | create writes the claim, slug reservation and `MATCH_CREATED` before any slot, intent or POST; a slug collision draws again, `slugAttemptsPerLength` collisions in a row lengthen the suffix by one, and collisions through `slugMaxSuffixLength` return `503 SLUG_UNAVAILABLE`; a retried create with the same `clientRequestId` after a failure at each step returns the same `matchId` and slug and creates no second match; `IMAGE_ALREADY_UPLOADED` for a live image in another match, and none after it is excluded there or its match is voided; upload intents and POST conditions; two concurrent requests for one slot share one `uploadId`; uploads refused on a voided match; `MATCH_LIMIT`; event sequence race retried and `CONCURRENT_CHANGE` after 3 attempts |
 | `match-read.test.ts` | slug resolution, `404` for an orphan reservation, list order and paging |
 | `write-match-record.test.ts` | no write when inputs are unchanged; a new version with `previousMatchVersion`; `412` retry; no write before `MATCH_CREATED` |
 | `process-upload.test.ts` | an accepted upload writes the submission, source with `intake.matchId`, completion and event, and the receipt last; a rejected image writes a `REJECTED` receipt and throws; a stored image whose SHA-256 differs from the intent is `REJECTED` with `SHA256_MISMATCH`; a missing intent writes a `REJECTED` completion with `UploadIntentMissingError` and no source or receipt; a namespace mismatch fails; no EXIF is read; a run for an upload with a receipt writes nothing and returns or throws as the receipt says; a failure after receipt persistence followed by a retry leaves exactly one receipt; a receipt write that returns `412` returns the existing receipt's screenshot |
@@ -795,7 +805,7 @@ In dev, an admin plays two matches. After each, the admin creates a match from a
 - [ ] A create request writes the request claim, the slug reservation and `MATCH_CREATED` before any upload slot, intent or presigned POST, and returns the slug.
 - [ ] Every screenshot uploaded to a match becomes one submission whose source has `intake.matchId`, one receipt, and one run whose manifest has `inputArtifact.intake.matchId`, through the unchanged extraction steps; an emailed screenshot still runs through `ProcessEmail` with no `intake`.
 - [ ] No EXIF field, file time or upload order is read to place a screenshot, and no map is recorded.
-- [ ] Every slug matches `<place>-<thing>-<moment>` from `slug-words-v1`, is unique in its namespace, never changes, and resolves to its `matchId`; a voided match keeps its slug and no slug is reused.
+- [ ] Every slug is a `slug-words-v1` word and a Crockford base32 suffix of 4 or more characters, is unique in its namespace, never changes, and resolves to its `matchId`; a voided match keeps its slug and no slug is reused.
 - [ ] A create request retried with the same `clientRequestId` after a failure at any step returns the same match and slug and never creates a second match.
 - [ ] An intake attempt that fails after writing its upload's receipt, followed by a successful retry, leaves exactly one receipt, and the record lists that screenshot once and never as `DUPLICATE`.
 - [ ] A file whose SHA-256 is live in another active match is refused with `409 IMAGE_ALREADY_UPLOADED` naming that match's slug, and accepted after the admin excludes it there.
@@ -812,8 +822,8 @@ In dev, an admin plays two matches. After each, the admin creates a match from a
 2. **The admin can put the wrong screenshots in a match.** Membership is whatever the admin uploads. Two games uploaded as one match show as `MULTIPLE_SCREENSHOTS`, the same flag two pages of one board raise; the admin excludes the wrong one and creates the right match. Spec 7's `K007` check fails such a pair and escalates it.
 3. **Play time is upload time unless the admin enters it.** A match uploaded the next day without an entered time sorts after matches played later. The New match screen shows the time it will record, and `DETAILS_CORRECTED` fixes it.
 4. **Concurrent uploads of one image to two matches both pass the duplicate check.** The check reads the index before writing, so two admins uploading the same file at the same moment both succeed. Both screenshots are `ACTIVE`, and the lakehouse can see equal `imageSha256` across matches. Accepted at league scale; a create-only claim per image is backlog if it happens (P6.4).
-5. **Orphan slug reservations.** A create request abandoned between its slug reservation and `MATCH_CREATED` leaves a reserved slug with no match, which is never reused. It costs one slug of 196,608.
-6. **The slug space is finite.** At 10,000 matches about 5% of draws collide and are redrawn, and `slugAttempts` makes a `503` vanishingly rare. A larger list is a new `slugWordsVersion`.
+5. **Orphan slug reservations.** A create request abandoned between its slug reservation and `MATCH_CREATED` leaves a reserved slug with no match, which is never reused. It costs one slug from a pool that cannot run out (§7.2).
+6. **Slugs repeat words.** With 176 words, two matches in one night often share a word, such as `warthog-7k3q` and `warthog-p2mz`. The suffix tells them apart, and the admin screens always show the whole slug. A longer word list is a new `slugWordsVersion`.
 7. **CORS allows any origin on the attachments bucket.** A page on another origin can send a POST but cannot sign one, and the bucket serves no reads to browsers. The foundation cannot name the admin distribution's domain without knowing about CDK.
 8. **No match index.** Listing matches lists evidence prefixes. At league scale, a few thousand matches a year, that is fast and cheap. A rebuildable projection table is backlog (P6.1).
 9. **Record writing is serialized across all matches.** A reserved concurrency of 1 means a burst of receipts can delay another match's record by seconds to minutes. Consumers already treat unlisted screenshots as not counted (§8.1).
@@ -822,7 +832,7 @@ In dev, an admin plays two matches. After each, the admin creates a match from a
 12. **Staged uploads expire after 30 days.** An upload with no receipt after 30 days must be uploaded again. An upload with a receipt never needs its staged copy again.
 13. **Failed intake attempts leave submissions without receipts.** They cost storage only, and receipts tell consumers which submission counts.
 14. **An execution that fails after intake needs an operator.** Nothing restarts it automatically, and alarms are backlog (P6.5).
-15. **The stats lakehouse specification still reads the 1.0-draft contract.** §8.4 lists its changes; its slices that read matches must not be filed before its next revision.
+15. **Spec 9 still reads the 1.0-draft contract.** §8.4 lists its changes; its slices that read matches must not be filed before its next revision.
 
 ## 19. Reference documentation
 
@@ -900,7 +910,7 @@ A change to a contract updates every consumer in the same PR.
 - **Files:** `applications/admin/config/slug-words-v1.json`, `src/lib/slug.ts`, `test/matches/slug.test.ts`
 - **Provides:** `loadSlugWords`, `drawSlug`, `isSlug`
 - **Acceptance:**
-  - The word file holds exactly the §7.2 lists.
+  - The word file holds exactly the §7.2 words.
   - The `slug.test.ts` row of §16.1 passes.
 
 ### Phase 1: Foundation
