@@ -1,0 +1,41 @@
+name: 'Tracker: add issues and PRs to the project'
+run-name: "Add ${{ github.event_name == 'issues' && format('issue #{0}', github.event.issue.number) || format('PR #{0}', github.event.pull_request.number) }} to MCC delivery"
+
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: project-membership-${{ github.event_name }}-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  add-to-project:
+    name: Add the new issue or PR to MCC delivery
+    if: github.repository == 'samlevin/mcc-stats-suite'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # Always execute trusted default-branch code, including for fork PRs.
+      - name: Check out default-branch scripts
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+          sparse-checkout: scripts
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.16.0'
+      - name: Add the item to MCC delivery
+        env:
+          MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
+          CONTENT_TYPE: ${{ github.event_name == 'issues' && 'issue' || 'pull_request' }}
+          CONTENT_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          DRY_RUN: 'false'
+        run: node scripts/issue-project-membership.mjs

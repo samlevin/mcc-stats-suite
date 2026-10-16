@@ -40,14 +40,12 @@ function fixture({
     1: {
       id: 'i1',
       labels: ['l1', 'shared'],
-      projects: ['p1'],
       assignees: ['u1'],
       milestone: { id: 'm1' },
     },
     2: {
       id: 'i2',
       labels: ['l2', 'shared'],
-      projects: ['p1', 'p2'],
       assignees: ['u1', 'u2'],
       milestone: { id: 'm1' },
     },
@@ -102,22 +100,6 @@ function fixture({
         },
       };
     }
-    if (query.includes('projectItems(first:')) {
-      const source =
-        variables.id === 'pr'
-          ? existing
-          : Object.values(sources).find((issue) => issue.id === variables.id);
-      return {
-        node: {
-          projectItems: {
-            nodes: (source.projects ?? []).map((id) => ({
-              project: { id, closed: false },
-            })),
-            pageInfo: { hasNextPage: false },
-          },
-        },
-      };
-    }
     if (query.includes('... on PullRequest { body'))
       return { node: { body: changed ? 'Closes #3' : body, state, milestone } };
     throw new Error(`Unexpected query: ${query}`);
@@ -125,11 +107,10 @@ function fixture({
   return { api, writes, calls, log: () => {} };
 }
 
-test('copies the union once while preserving PR labels, assignees, and projects', async () => {
+test('copies the union once while preserving PR labels and assignees', async () => {
   const f = fixture({
     existing: {
       labels: ['manual', 'shared'],
-      projects: ['manual-project', 'p1'],
       assignees: ['reviewer', 'u1'],
     },
   });
@@ -140,7 +121,6 @@ test('copies the union once while preserving PR labels, assignees, and projects'
       { id: 'pr', labels: ['l1', 'l2'] },
       { id: 'pr', assignees: ['u2'] },
       { id: 'pr', milestone: 'm1' },
-      { project: 'p2', id: 'pr' },
     ],
   );
   assert.ok(
@@ -149,11 +129,15 @@ test('copies the union once while preserving PR labels, assignees, and projects'
         !write.query.includes('assigneeIds') || write.variables.id === 'pr',
     ),
   );
+  // Project membership comes from tracker-project-membership.yml instead.
+  assert.ok(
+    f.calls.every(({ query }) => !/projectItems|ProjectV2/.test(query)),
+  );
 });
 test('unassigned issues add no assignees', async () => {
   const f = fixture({
     sources: {
-      1: { id: 'i1', labels: [], projects: [], assignees: [], milestone: null },
+      1: { id: 'i1', labels: [], assignees: [], milestone: null },
     },
     body: 'Closes #1',
   });
@@ -164,7 +148,6 @@ test('reruns with matching metadata make no writes', async () => {
   const f = fixture({
     existing: {
       labels: ['l1', 'l2', 'shared'],
-      projects: ['p1', 'p2'],
       assignees: ['u1', 'u2'],
     },
     milestone: { id: 'm1' },
@@ -188,8 +171,8 @@ test('conflicting milestones and existing PR milestones are preserved', async ()
   for (const options of [
     {
       sources: {
-        1: { id: 'i1', labels: [], projects: [], milestone: { id: 'm1' } },
-        2: { id: 'i2', labels: [], projects: [], milestone: { id: 'm2' } },
+        1: { id: 'i1', labels: [], milestone: { id: 'm1' } },
+        2: { id: 'i2', labels: [], milestone: { id: 'm2' } },
       },
     },
     { milestone: { id: 'manual' } },
@@ -209,7 +192,7 @@ test('changed descriptions prevent mutations', async () => {
   );
   assert.deepEqual(f.writes, []);
 });
-test('project, label, and assignee reads paginate and exclude closed projects', async () => {
+test('label and assignee reads paginate', async () => {
   const cursors = [];
   const api = async (query, { cursor }) => {
     cursors.push(cursor);
@@ -222,19 +205,10 @@ test('project, label, and assignee reads paginate and exclude closed projects', 
           },
         },
       };
-    if (query.includes('labels(first:'))
-      return {
-        node: {
-          labels: {
-            nodes: [{ id: cursor ? 'l2' : 'l1' }],
-            pageInfo: { hasNextPage: !cursor, endCursor: 'next' },
-          },
-        },
-      };
     return {
       node: {
-        projectItems: {
-          nodes: [{ project: { id: cursor ? 'p2' : 'p1', closed: !!cursor } }],
+        labels: {
+          nodes: [{ id: cursor ? 'l2' : 'l1' }],
           pageInfo: { hasNextPage: !cursor, endCursor: 'next' },
         },
       },
@@ -242,22 +216,21 @@ test('project, label, and assignee reads paginate and exclude closed projects', 
   };
   assert.deepEqual(await readMetadata(api, 'issue'), {
     labels: ['l1', 'l2'],
-    projects: ['p1'],
     assignees: ['u1', 'u2'],
   });
-  assert.deepEqual(cursors, [null, 'next', null, 'next', null, 'next']);
+  assert.deepEqual(cursors, [null, 'next', null, 'next']);
 });
 test('discovery failures prevent partial writes', async () => {
   const f = fixture();
   const original = f.api;
   f.api = async (query, variables) => {
-    if (query.includes('projectItems('))
-      throw new Error('Project access denied');
+    if (query.includes('assignees(first:'))
+      throw new Error('Assignee access denied');
     return original(query, variables);
   };
   await assert.rejects(
     copyMetadata({ ...f, number: 10, dryRun: false }),
-    /Project access denied/,
+    /Assignee access denied/,
   );
   assert.deepEqual(f.writes, []);
 });
@@ -347,7 +320,6 @@ test('valid issues still supply metadata alongside missing references', async ()
       { id: 'pr', labels: ['l1', 'shared'] },
       { id: 'pr', assignees: ['u1'] },
       { id: 'pr', milestone: 'm1' },
-      { project: 'p1', id: 'pr' },
     ],
   );
 });
