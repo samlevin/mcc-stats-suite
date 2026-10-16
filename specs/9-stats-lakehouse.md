@@ -40,7 +40,7 @@ The issue (#159) asks for bronze from review-complete runs, silver players, matc
 | Table format | Silver and gold tables are gzip-compressed JSON Lines files read by Athena through the OpenX JSON SerDe. Each build writes new files under its own prefix and then points each Glue table at them (§6.3). | The whole league history is a few megabytes. JSON Lines needs no native writer in the Lambda bundle, its content is byte-deterministic and easy to compare in tests, and a new prefix per build makes publication atomic per table. Parquet or Iceberg is backlog for when a build outgrows one Lambda (P5.2). |
 | Who owns the Glue tables | `BuildLakehouse` creates each Glue table when it is missing and updates its location after each build, from definitions in code (§7.6, §8.2). Neither OpenTofu nor CloudFormation manages them. Stable stacks use the OpenTofu Glue database; each ephemeral stack creates its own database, which CloudFormation deletes with the stack. | A table definition is derived metadata that one function can recreate at any time, like spec 3's `ReviewState` table. A CloudFormation table whose location a Lambda changes would drift on every build. Deleting a Glue database removes its tables, so ephemeral tables leave nothing behind. |
 | Who owns match records | The admin application (spec 8 §1). The lakehouse reads spec 8 association versions, selects the latest per session in silver, and never creates, changes or voids a match. | Spec 8 settles the question #159 left open. The host records each match while it happens, with its map and time. |
-| Screenshots of the same match | Silver groups a match's screenshots by board content: identical boards count once, disjoint pages of one board merge, and anything else marks the match `CONFLICTING_SCREENSHOTS` and keeps it out of gold until the host or a reviewer fixes it (§7.4). Spec 8 `DUPLICATE` screenshots are never counted. | Spec 8 leaves the choice of screenshot to this spec (spec 8 §8.1). Two captures of one board and two pages of a long board are both legitimate, and they can be told apart from content alone. A conflicting pair is a host or review error that guessing would hide. |
+| Screenshots of the same match | Silver groups a match's screenshots by board content: identical boards count once, disjoint pages of one team board merge, and anything else marks the match `CONFLICTING_SCREENSHOTS` and keeps it out of gold until the host or a reviewer fixes it (§7.4). Spec 8 `DUPLICATE` screenshots are never counted. In v1 a page merges only when it passed review on its own, which spec 3 allows only for a page that shows the winner, so pages of a free-for-all board and pages without a winning-team row cannot be counted (§7.4, §18.13). | Spec 8 leaves the choice of screenshot to this spec (spec 8 §8.1). Two captures of one board and two pages of a long board are both legitimate, and they can be told apart from content alone. A conflicting pair is a host or review error that guessing would hide. Spec 3 §8.3 condition 5 requires every review-complete table to have exactly one winner, and a page-level outcome rule would be a spec 3 contract change (P5.8). |
 | Emailed screenshots | Silver keeps their validated runs and screenshots with `matchRole: NO_SESSION`, and no match. Gold counts only session matches. A screenshot a host imports into a session (spec 8 backlog P6.2) is counted through the association with no change here. | An emailed screenshot has no match identity, map or play time. Grouping emailed boards into matches by content would guess, and one missed duplicate counts a game twice for every player in it. |
 | Same player across gamertag variants | A validated name links to a roster entry when it equals the entry's gamertag after NFKC normalization, lowercasing and whitespace collapse, active or inactive (§7.5). The player is the roster entry. An unlinked name is its own player. Silver applies no near matching to validated names. | A validated name was checked against the screenshot by a reviewer or the LLM reviewer, so OCR misreads are already corrected, and spec 1's tidy step has removed clan tags and collapsed whitespace. Xbox gamertags are unique ignoring case (spec 6 §1). Near matching on reviewed text would merge distinct real players, the risk spec 6 §18.1 accepts only for unreviewed CSVs. |
 | Renamed gamertags | Two players in v1. The roster records a rename as a deactivation and an add, and does not link them (spec 6 §1). Linking gamertags to one person is backlog P5.1. | Nothing records that two gamertags belong to one person yet. A guessed link would merge two people's statistics. |
@@ -48,7 +48,7 @@ The issue (#159) asks for bronze from review-complete runs, silver players, matc
 | Reviewer kind | Gold counts validated tables decided by people, by the LLM reviewer and by stage 3 auto-acceptance alike (spec 7 §8.8). Silver rows record the reviewer kinds of their values and rows when the validated table carries them (spec 3 2.1-draft), and whether any value was auto-accepted. | Spec 7 makes the LLM the primary reviewer and measures the error bound of accepted data monthly. Excluding LLM-decided tables would hide most of the league, and the recorded kinds let the player app or an analyst separate them. |
 | Where OCR evidence, quality features and training data live | They stay in the evidence bucket, and nothing in this component reads or copies them. `IngestBronze` reads only validated tables, run manifests, submission records, associations and map catalogs (§13.4). ML datasets (spec 1 §9.3, spec 2 §8.5, spec 7 `risk/datasets/`) and spec 2 baselines read the evidence bucket, never the lakehouse. | Spec 2 §2.2 already keeps features, scores and training data out of the lakehouse. Training data must join features and labels at the observation level, which only the evidence bucket holds, and copying it would create a second store to keep in sync. |
 | Ownership | OpenTofu (`infrastructure/modules/data-platform`) owns the three buckets, the lakehouse key, the Glue database, the Athena workgroup and their SSM parameters. The `data-pipeline` stack owns its Lambdas, rules, schedule, queue, log groups and, for ephemeral stacks, their Glue databases. | The repository rule: OpenTofu owns persistent shared resources and CDK owns application compute (`AGENTS.md`). Bronze, silver and gold outlive every stack. |
-| Play time of a match | `playedAt` is the match's `selectedAt` (spec 8 §7.1). An `ADDED` match uses the earliest `effectiveAt` of its screenshots, then the session's `endedAt` (§7.3). | The host selects the map just before play. `ADDED` matches have no selection time. |
+| Play time and order of a match | `playedAt` is the match's `selectedAt` (spec 8 §7.1). An `ADDED` match uses the earliest `effectiveAt` of its screenshots, then the session's `endedAt` (§7.3). Matches are ordered by their session's start and then `matchIndex`, never by `playedAt` or an event time (§7.3). | The host selects the map just before play. `ADDED` matches have no selection time. Spec 8 fixes `matchIndex` as the chronological position, which no correction changes, while an `ADDED` match's `playedAt` can fall after matches it preceded. |
 
 **Additional capabilities included:** ingest rejection records for operators, a per-build manifest with input and output hashes, Athena tables for every silver and gold dataset, and `rosterKeyMatches` on unlinked players so an operator can see names that look like a roster gamertag.
 
@@ -58,8 +58,8 @@ The issue (#159) asks for bronze from review-complete runs, silver players, matc
 
 1. Every validated table version and association version in the evidence namespace has a bronze copy within 5 minutes of its write, or a rejection record that says why not.
 2. Gold reflects every bronze object and the current roster within 20 minutes, including corrections, and every gold number traces to the bronze objects and evidence it came from.
-3. A match is counted once, with one statistics row per player, whether its board arrived as one screenshot, several captures or several pages.
-4. A build with the same inputs and versions produces byte-identical silver and gold content.
+3. A match is counted once, with one statistics row per player, whether its board arrived as one screenshot, several captures, or several pages that each passed review on their own (§7.4).
+4. A build with the same inputs and versions produces byte-identical silver and gold tables and serving documents, whatever its `buildId`.
 5. The player app reads one consistent snapshot of gold, never a half-published build.
 6. Each developer can deploy an isolated copy that reads only its own evidence namespace and writes only its own lakehouse namespace.
 
@@ -113,7 +113,7 @@ Gold bucket (OpenTofu):   builds/{buildId}/tables/{table}/, builds/{buildId}/ser
 - Every bronze write uses `If-None-Match: *`. No role has `DeleteObject` on any lakehouse bucket.
 - One build reads a fixed set of bronze keys and one roster version, and writes every output under a new `buildId` prefix before it publishes anything (§6.3).
 - `BuildLakehouse` has a reserved concurrency of 1, so two builds never publish at once.
-- Silver and gold are pure functions of the bronze key set, the roster version and the stage versions (§5.4). `buildId` and timestamps live only in the build manifest and the serving pointer.
+- Silver and gold tables and serving documents are pure functions of the bronze key set, the roster version and the stage versions (§5.4). `buildId` and the build's own timestamps live only in the build manifest, the serving pointer and object keys, never in a table file or serving document.
 - Handlers never read or write outside their namespace (`ephemeral/<name>/` for ephemeral stacks). The namespace comes from the deployment, never from an event or request.
 
 ## 4. Interfaces
@@ -209,7 +209,7 @@ Every bronze document is one line of JSON, so the files stay readable by line-or
 | `session-associations/...` | `bronze-session-association/v1` | same | `source`, `ingest`, and `document`, the association as parsed |
 | `map-catalogs/...` | `bronze-map-catalog/v1` | same | `source`, `ingest`, and `document`, the catalog as parsed |
 | `ingest-rejections/...` | `bronze-rejection/v1` | same | `source`, `ingest`, `code` (§4.3), `detail` (a field name or expected value, never document content) |
-| `builds/{buildId}/manifest.json` | `lakehouse-build/v1` | `build-lakehouse` | `LakehouseBuild` (§10.1): `buildId`, `inputsSha256`, bronze key counts per source, rejection count, roster reference, versions, per-table row counts and `contentSha256`, `asOf`, `startedAt`, `completedAt`, `build` |
+| `builds/{buildId}/manifest.json` | `lakehouse-build/v1` | `build-lakehouse` | `LakehouseBuild` (§10.1): `buildId`, `inputsSha256`, bronze key counts per source, rejection count, roster reference, versions, per-table row counts and `contentSha256`, the serving document count and `servingContentSha256`, `asOf`, `startedAt`, `completedAt`, `build` |
 | table `part-00000.json.gz` | none; the Glue definition in §7.6 or §8.2 | `build-lakehouse` | one JSON object per line, keys sorted bytewise, gzip-compressed |
 | serving documents | §8.3 | `build-lakehouse` | §8.3 |
 | `serving/current.json` | `gold-serving-pointer/v1` | `build-lakehouse` | `buildId`, `inputsSha256`, `servingPrefix`, `asOf`, `publishedAt` |
@@ -302,7 +302,9 @@ A screenshot can have several validated runs, from replays and retries (spec 1 �
 
 For each session with bronze associations, the session's current association is the one with the highest `associationVersion` (spec 8 §8.1). Silver copies the session and each match from it: `matchId`, `matchIndex`, `origin`, `status`, `mapId`, `mapCatalogVersion`, `selectedAt`, `screenshotIds` and `flags`. `mapName` is the `displayName` of the map in the bronze map catalog of that `mapCatalogVersion`, or `null` when bronze lacks the catalog.
 
-`playedAt` is `selectedAt` for a `LIVE` match (`playedAtSource: MAP_SELECTED`). For an `ADDED` match it is the earliest `effectiveAt` among its screenshots in the association (`CAPTURE_TIME`), and otherwise the session's `endedAt` (`SESSION_END`). A match with none of these, which only an open session can have, has `playedAt: null` and is never countable.
+`playedAt` is `selectedAt` for a `LIVE` match (`playedAtSource: MAP_SELECTED`). For an `ADDED` match it is the earliest `effectiveAt` among its screenshots in the association (`CAPTURE_TIME`), and otherwise the session's `endedAt` (`SESSION_END`). A match with none of these, which only an open session can have, has `playedAt: null` and is never countable. `playedAt` places a match in time windows (§8.1, §8.5) and is never used to order matches.
+
+**Match order.** Matches are ordered by their session's `startedAt`, then `sessionId`, then `matchIndex`. Spec 8 makes `matchIndex` each match's chronological position in its session, set only by `MAP_SELECTED` and `MATCH_ADDED`, so a map correction, a void or a restore never moves a match, and an `ADDED` match sits where the host placed it even when its `playedAt` comes from `endedAt` (spec 8 §7.1, §8.1). Every "latest", "newest first" and "last" over matches in §7 and §8 uses this order. Silver keys every match on `matchId` and reads `matchIndex` from the current association, because an added match moves the later ones.
 
 Each screenshot with a representative run gets a `matchRole`:
 
@@ -311,7 +313,7 @@ Each screenshot with a representative run gets a `matchRole`:
 | `runContext.channel` is `EMAIL` | `NO_SESSION` | `null` |
 | The session has no bronze association, or its current association does not list the screenshot | `NOT_ASSOCIATED` | `null` |
 | The current association lists it as `DERIVED` or `HOST_ASSIGNED` | `MATCH_MEMBER` | the association's `matchId` |
-| It is listed as `DUPLICATE` | `ASSOCIATION_DUPLICATE` | the association's `matchId`; never counted (spec 8 §8.1) |
+| It is listed as `DUPLICATE`, a repeated image of an earlier upload's screenshot | `ASSOCIATION_DUPLICATE` | the association's `matchId`, which is that of the screenshot it repeats; never counted (spec 8 §8.1) |
 | It is listed as `UNASSIGNED` or `EXCLUDED` | `UNASSIGNED` or `EXCLUDED` | `null` |
 
 ### 7.4 Statistics source of a match
@@ -331,6 +333,16 @@ The members of a match are its `screenshotIds` in the current association, in th
 
 **Merge rule.** With one distinct board, its rows are the match's rows. With several distinct boards, they are pages of one board and their rows are merged in member order when all of these hold: no row of any board has a `null` `playerKey`, no `playerKey` appears on two boards, and the merged rows meet spec 3's team and outcome rule (spec 3 §8.3 condition 5). `pageMerged` is then true. Otherwise the match is `CONFLICTING_SCREENSHOTS`, which a host fixes by excluding the wrong screenshot (spec 8 `SCREENSHOT_EXCLUDED`) and a reviewer by correcting the run, each of which writes new evidence.
 
+**Which pages can merge in v1.** Every board is a validated table, and spec 3 writes one only for a review-complete run, whose own rows must meet condition 5: exactly one `WIN` row in a free-for-all, or exactly one winning team. A page therefore reaches silver only when it shows the winner, and the merge rule then sees one winner per page:
+
+| Pages of one board | Result |
+| --- | --- |
+| Team board, every page holding at least one row of the winning team | Each page can become review-complete with the same winning team, and the validated pages merge (`OK`). |
+| Team board with a page that holds only losing-team rows | That page never becomes review-complete, so the match stays `PENDING_REVIEW`. |
+| Free-for-all board | Only the page with the single `WIN` row can become review-complete. Every other page has no `WIN` row and never does, so the match stays `PENDING_REVIEW`. If a reviewer marks a winner on two pages so both complete, their union has two `WIN` rows and the match is `CONFLICTING_SCREENSHOTS`. |
+
+A host can count such a match by excluding the page that cannot complete (spec 8 `SCREENSHOT_EXCLUDED` with `OTHER`), and the match then holds only the other page's players. Counting every page needs a spec 3 outcome rule for partial pages, which is backlog P5.8 (§18.13).
+
 A match is `countable` when its `status` is `ACTIVE`, its `statsStatus` is `OK` and its `playedAt` is set. Only countable matches reach gold.
 
 ### 7.5 Player identity
@@ -347,7 +359,7 @@ When several roster entries share a `nameKey`, which spec 6 refuses for entries 
 
 Every `UNROSTERED` player records `rosterKeyMatches`, the `gamertagId` of every roster entry whose `rosterKey` (spec 6 §7.1) equals `rosterKey` of the player's latest name. Silver never links on it. It shows an operator a name that looks like a roster gamertag, which is usually a player the operator should add, or a validated value a reviewer should correct.
 
-A player's `gamertag` is the roster entry's gamertag for `ROSTER` players, and for `UNROSTERED` players the `player` text of their latest countable row, by `playedAt` and then `matchId`, or of their latest row when none is countable.
+A player's `gamertag` is the roster entry's gamertag for `ROSTER` players, and for `UNROSTERED` players the `player` text of their latest countable row in match order (§7.3), or of their latest row in that order when none is countable.
 
 ### 7.6 Silver tables
 
@@ -388,27 +400,29 @@ Values are JSON numbers as computed, without rounding. Rounding for display is t
 | --- | --- | --- |
 | `gold_player_summaries` | player with a countable row | `player_key`, `identity`, `gamertag`, `rostered`, `matches`, `wins`, `losses`, `win_rate`, `kills`, `assists`, `deaths`, `score`, `kills_per_match`, `assists_per_match`, `kd_ratio`, `first_played_at`, `last_played_at`, `last_match_id` |
 | `gold_match_scoreboards` | row of a countable match, including `UNREADABLE` rows | `match_id`, `session_id`, `played_at`, `map_id`, `map_name`, `team`, `player_key`, `gamertag`, `rostered`, `score`, `kills`, `assists`, `deaths`, `win`, `loss`, `reviewer_kinds` |
-| `gold_recent_matches` | one of the `recentMatchesSize` latest countable matches by `played_at`, then `match_id` | `rank`, `match_id`, `session_id`, `played_at`, `map_id`, `map_name`, `player_count`, `winning_team`, `is_free_for_all` |
+| `gold_recent_matches` | one of the `recentMatchesSize` latest countable matches in match order (§7.3) | `rank`, `match_id`, `session_id`, `played_at`, `map_id`, `map_name`, `player_count`, `winning_team`, `is_free_for_all` |
 | `gold_leaderboards` | ranked player per metric | `metric`, `rank`, `player_key`, `gamertag`, `value`, `matches` |
 | `gold_rising_players` | ranked rising player | `rank`, `player_key`, `gamertag`, `recent_matches`, `baseline_matches`, `recent_kd_ratio`, `baseline_kd_ratio`, `kd_ratio_delta`, `recent_win_rate`, `baseline_win_rate`, `win_rate_delta`, `as_of` |
 
-`gamertag` is the silver player's `gamertag`, or `null` for an `UNREADABLE` row. `winning_team` is the team of the `WIN` rows, or `null` in a free-for-all.
+`gamertag` is the silver player's `gamertag`, or `null` for an `UNREADABLE` row. `winning_team` is the team of the `WIN` rows, or `null` in a free-for-all. `last_match_id` is the player's last countable match in match order (§7.3), and `rank` 1 in `gold_recent_matches` is the latest match.
 
 ### 8.3 Serving documents
 
-The player app reads these documents under `<ns>builds/{buildId}/serving/` in the gold bucket. Each is a JSON object with `schemaVersion`, `buildId` and `asOf`, and is written once.
+The player app reads these documents under `<ns>builds/{buildId}/serving/` in the gold bucket. Each is a JSON object with `schemaVersion` and `asOf`, serialized like a table line (object keys sorted bytewise, no whitespace), and is written once. No serving document holds `buildId`, the namespace, a timestamp of the build, or any other value that differs between two builds of the same inputs, so their bytes depend only on the build's inputs (§3.1). The pointer names the build that serves them.
 
-| Key | `schemaVersion` | Contents |
+| Key, relative to the serving prefix | `schemaVersion` | Contents |
 | --- | --- | --- |
-| `index.json` | `gold-serving-index/v1` | `lakehouseRulesVersion`, `lakehouseConfigVersion`, counts of players, rostered players and countable matches, and the keys of every other document |
+| `index.json` | `gold-serving-index/v1` | `lakehouseRulesVersion`, `lakehouseConfigVersion`, counts of players, rostered players and countable matches, and the keys of every other document relative to the serving prefix |
 | `players/index.json` | `gold-players-index/v1` | every player from `gold_player_summaries`: `playerKey`, `gamertag`, `rostered`, `matches`, `lastPlayedAt`, sorted by `playerKey` |
-| `players/{playerKey}.json` | `gold-player/v1` | the player's summary and every countable match they played, newest first: `matchId`, `playedAt`, `mapId`, `mapName`, `team`, `score`, `kills`, `assists`, `deaths`, `win` |
+| `players/{playerKey}.json` | `gold-player/v1` | the player's summary and every countable match they played, newest first in match order (§7.3): `matchId`, `playedAt`, `mapId`, `mapName`, `team`, `score`, `kills`, `assists`, `deaths`, `win` |
 | `matches/{matchId}.json` | `gold-match/v1` | the match's `sessionId`, `playedAt`, `mapId`, `mapName`, `isFreeForAll`, and its scoreboard rows from `gold_match_scoreboards` in validated row order |
 | `matches/recent.json` | `gold-recent-matches/v1` | `gold_recent_matches` |
 | `leaderboards.json` | `gold-leaderboards/v1` | each metric's ranked list from `gold_leaderboards` |
 | `rising-players.json` | `gold-rising-players/v1` | `gold_rising_players` and the window bounds |
 
 `<ns>serving/current.json` names the current build (§5.3). The player app never lists the bucket.
+
+`servingContentSha256` in the build manifest is the SHA-256 of one line per serving document, `<relative key> <SHA-256 of its bytes>`, sorted bytewise by key and joined with `\n`. Two builds of the same inputs have the same value, as each table has the same `contentSha256`.
 
 ### 8.4 Leaderboards
 
@@ -445,11 +459,13 @@ Every gold table and serving document is recomputed in full by every build that 
 
 ### 9.1 Spec 3
 
-Bronze reads `validated-table/v1` as spec 3 §8.4 and §8.5 define it, in both the 2.0-draft on `main` and the 2.1-draft. It requires the 2.0-draft fields and reads the 2.1-draft's `reviewerKind`, `rowReviewerKind`, `currentDecisionCounts` and `llmReviewers` when present, and bronze stores each document whole, so they are kept either way. Spec 3 §8.5's rule that "the lakehouse selects the latest version per run" is §7.1 here. Spec 3 §18.5 leaves the choice between sibling runs to this spec, which makes it in §7.2.
+Bronze reads `validated-table/v1` as spec 3 §8.4 and §8.5 define it, in both the 2.0-draft on `main` and the 2.1-draft. It requires the 2.0-draft fields and reads the 2.1-draft's `reviewerKind`, `rowReviewerKind`, `currentDecisionCounts` and `llmReviewers` when present, and bronze stores each document whole, so they are kept either way. Spec 3 §8.5's rule that "the lakehouse selects the latest version per run" is §7.1 here. Spec 3 §18.5 leaves the choice between sibling runs to this spec, which makes it in §7.2. Spec 3 §8.3 condition 5 applies to each run on its own, which limits the pages of one board that silver can merge in v1 (§7.4, §18.13).
 
 ### 9.2 Spec 8
 
 Spec 8 §8.1 is the match input. Bronze ingests every association version and map catalog, silver uses the latest association per session (§7.3), joins a run to its match by `screenshotId` and its session by `intake.sessionId` in the run manifest, treats a screenshot no association lists as unassigned, and never counts a `DUPLICATE`. Spec 8 leaves the choice of screenshot per match and the handling of `MULTIPLE_SCREENSHOTS` and `NO_SCREENSHOT` to this spec, which makes it in §7.4.
+
+Silver relies on the three guarantees of spec 8 §8.1. An association lists at most one screenshot per upload, the one its receipt names, so a retried intake never adds a member, and a submission without a receipt has no run silver could count. `DUPLICATE` means only a repeated image across uploads, so §7.4 treats every member as a distinct screenshot and uses board content only to tell captures from pages. `matchIndex` is a match's chronological position, which corrections never change, so match order (§7.3) comes from the association and never from event times.
 
 ### 9.3 Spec 6
 
@@ -472,6 +488,7 @@ This spec edits no other specification. The slice named in each row records the 
 | Evidence bucket EventBridge notifications | spec 2 P1.1 | P4.2 cannot merge until it is applied. |
 | Roster gamertags copied into silver and gold under the lakehouse key, while spec 6 §14 item 2 says roster contents live only under the application data key | spec 6 | Spec 6's next revision extends §14 item 2 to the lakehouse buckets under the lakehouse key. |
 | Out-of-scope lines naming #159 for match records, player identity or consent | spec 3, spec 6, spec 7 | Each spec's next revision points player identity and consent to this spec and match records to spec 8. |
+| An outcome rule for partial scoreboard pages, so pages without the winner can become review-complete (§7.4, §18.13) | spec 3 | Not needed for v1. P5.8 is blocked by spec 3's revision. |
 | The player app's read access, audience and any opt-out (§1, §4.5) | the player app specification (none yet) | That specification reads §4.5 and §8.3 as its data contract. |
 | Data platform roots inactive in Terrateam | `infrastructure/`, `.terrateam/config.yml` | P1.1 activates them. |
 
@@ -554,6 +571,7 @@ interface LakehouseBuild {
   versions: { lakehouseRulesVersion: string; lakehouseConfigVersion: string };
   tables: readonly { name: string; bucket: 'silver' | 'gold'; key: string; rows: number; contentSha256: string }[];
   servingDocuments: number;
+  servingContentSha256: string;         // §8.3; equal for two builds of the same inputs
   asOf: string | null;
   startedAt: string;
   completedAt: string;
@@ -606,7 +624,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | `src/lib/silver.ts` | `buildSilver(bronze, roster, config)`; `gameFingerprint(rows)`; `matchStats(match, members)`; `outcomeConsistent(rows)` | §7.1 to §7.4, §7.6. Pure. |
 | `src/lib/players.ts` | `nameKey(text)`; `linkPlayer(text, rosterIndex)`; `rosterIndex(entries)` | §7.5. Pure; uses `rosterKey` from `@mcc/roster`. |
 | `src/lib/gold.ts` | `buildGold(silver, config)`; `summaries`; `leaderboards`; `risingPlayers` | §8.1 to §8.5. Pure. |
-| `src/lib/serving.ts` | `servingDocuments(gold, buildId)`; `jsonLines(rows)`; `inputsSha256(keys, roster, versions)` | §6.3, §8.3. Pure. |
+| `src/lib/serving.ts` | `servingDocuments(gold, versions)`; `servingContentSha256(documents)`; `jsonLines(rows)`; `inputsSha256(keys, roster, versions)` | §6.3, §8.3. Pure; never receives `buildId`. |
 | `src/lib/catalog.ts` | `TABLES`; `GlueCatalogPublisher` | Glue table definitions and the create-or-update call (§6.3 step 9). |
 | `src/lib/roster-source.ts` | `readRoster(namespace, dependencies)` | §6.3 step 2. |
 | `src/lib/storage.ts` | `listKeys`, `readJson`, `putOnce`, `putPointer` | S3 access for all handlers. |
@@ -702,11 +720,13 @@ The data-platform roots are inactive today: Terrateam runs neither, and the self
 | --- | --- | --- | --- | --- |
 | `IngestBronze` | `GetObject` on `<ns>submissions/*/runs/*/validated/*`, `<ns>submissions/*/runs/*/manifest.json`, `<ns>submissions/*/ingestion.json`, `<ns>sessions/*/association/*` and `<ns>map-catalogs/*` | `GetObject`, `PutObject` on `<ns>validated-tables/*`, `<ns>session-associations/*`, `<ns>map-catalogs/*` and `<ns>ingest-rejections/*`; `ListBucket` with those prefixes | none | decrypt with the foundation data key; encrypt and decrypt with the lakehouse key |
 | `BackfillBronze` | as `IngestBronze`, plus `ListBucket` with prefixes `<ns>submissions/`, `<ns>sessions/` and `<ns>map-catalogs/` | as `IngestBronze` | none | as `IngestBronze` |
-| `BuildLakehouse` | none | `GetObject` on `<ns>validated-tables/*`, `<ns>session-associations/*` and `<ns>map-catalogs/*`; `ListBucket` with those prefixes and `<ns>ingest-rejections/` | `GetObject`, `PutObject` on `<ns>builds/*`; gold also on `<ns>serving/current.json` | roster table `GetItem` and `Query` with `dynamodb:LeadingKeys` `ROSTER#<namespace>`; decrypt with the foundation data key through DynamoDB; encrypt and decrypt with the lakehouse key; Glue `GetTable`, `CreateTable`, `UpdateTable` on its database and its tables |
+| `BuildLakehouse` | none | `GetObject` on `<ns>validated-tables/*`, `<ns>session-associations/*` and `<ns>map-catalogs/*`; `ListBucket` with those prefixes and `<ns>ingest-rejections/` | `GetObject`, `PutObject` on `<ns>builds/*`; gold also on `<ns>serving/current.json` | roster table `GetItem` and `Query` with `dynamodb:LeadingKeys` `ROSTER#<namespace>`; decrypt with the foundation data key through DynamoDB; encrypt and decrypt with the lakehouse key; Glue `GetTable`, `CreateTable`, `UpdateTable` on the regional catalog `arn:aws:glue:<region>:<account>:catalog`, its database `arn:aws:glue:<region>:<account>:database/<database>` and its tables `arn:aws:glue:<region>:<account>:table/<database>/*` |
 
-`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. An IAM `*` matches across `/`, so the allowed patterns above also match deeper keys, such as a spec 2 quality run's `manifest.json`. Each role that reads the evidence bucket therefore also has an explicit `Deny` of `s3:GetObject` on `<ns>submissions/*/runs/*/textract/*`, `.../normalized/*`, `.../quality/*`, `.../adjudications/*`, `.../blind-adjudications/*`, `.../review/*`, `.../llm-review/*` and `.../export/*`, on `<ns>submissions/*/screenshots/*/source/*`, and on `<ns>datasets/*` and `<ns>risk/*`. With those denies, no role can read OCR, quality, review, LLM review, export, source, dataset or risk evidence. No role can write to the evidence bucket, or call `DeleteObject`, `DeleteTable` or any bucket-configuration action. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. Operators query with Athena through their existing administrator roles.
+`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. An IAM `*` matches across `/`, so the allowed patterns above also match deeper keys, such as a spec 2 quality run's `manifest.json`. Each role that reads the evidence bucket therefore also has an explicit `Deny` of `s3:GetObject` on `<ns>submissions/*/runs/*/textract/*`, `.../normalized/*`, `.../quality/*`, `.../adjudications/*`, `.../blind-adjudications/*`, `.../review/*`, `.../llm-review/*` and `.../export/*`, on `<ns>submissions/*/screenshots/*/source/*`, and on `<ns>datasets/*` and `<ns>risk/*`. With those denies, no role can read OCR, quality, review, LLM review, export, source, dataset or risk evidence. No role can write to the evidence bucket, or call `DeleteObject`, `DeleteTable` or any bucket-configuration action.
 
-P1.2 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `data-pipeline-e-*` stacks can create and delete their functions, rule, schedule, queue and Glue database, and so the local workload boundary allows the actions above only under `ephemeral/<name>/` in the evidence and lakehouse buckets, only on the roster partition `ROSTER#ephemeral/<name>`, and only on Glue databases named for the stack.
+Glue authorizes a call against the resource it names and every ancestor of it, so a table action needs the table, its database and the catalog, and the build fails before the serving pointer without the catalog ARN ([Glue resource ARNs](https://docs.aws.amazon.com/glue/latest/dg/glue-specifying-resource-arns.html)). The catalog ARN grants nothing on other databases' tables, because each call is also checked against the table and database ARNs, which name only `<database>`, the database `GLUE_DATABASE` names. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. Operators query with Athena through their existing administrator roles.
+
+P1.2 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `data-pipeline-e-*` stacks can create and delete their functions, rule, schedule, queue and Glue database, and so the local workload boundary allows the actions above only under `ephemeral/<name>/` in the evidence and lakehouse buckets, only on the roster partition `ROSTER#ephemeral/<name>`, and only on Glue databases named for the stack. Each Glue statement, in the execution role and in the boundary, lists the regional catalog ARN beside the database and table ARNs named for the stack. Deleting the database with the stack also needs its children, so the execution role's `DeleteDatabase` statement lists the catalog, the database, `table/<database>/*` and `userDefinedFunction/<database>/*`.
 
 ### 13.5 Deployment
 
@@ -741,12 +761,12 @@ Tests use `tap`, run from `applications/data-pipeline/test/*.test.ts`, and never
 | `bronze-documents.test.ts` | each §4.3 check with its code; `runContext` for an emailed run and an uploaded run; 2.0-draft and 2.1-draft validated tables both accepted, with the 2.1-draft fields kept |
 | `ingest-bronze.test.ts` | a validated table writes one bronze object with `source.sha256` of the evidence bytes; a repeated event writes nothing; `412` with the same hash succeeds and with another throws `BronzeConflictError`; a rejection writes a record and does not throw; no read outside the §13.4 patterns |
 | `backfill-bronze.test.ts` | ingests only missing keys; `RUN` and `SESSION` scopes; continuation after the time limit |
-| `silver.test.ts` | latest version per run, including a version gap; representative run by `createdAt` and `runId`; `runsAgree`; every `matchRole`; every `statsStatus` row in §7.4, including two captures of one board, two disjoint pages, two pages that share a player, pages whose union has two winning teams, an unreadable name on a page, and a duplicate player; `playedAt` for `LIVE` and `ADDED` matches; voided matches not countable; `DUPLICATE` screenshots never counted |
+| `silver.test.ts` | latest version per run, including a version gap; representative run by `createdAt` and `runId`; `runsAgree`; every `matchRole`; every `statsStatus` row in §7.4, including two captures of one board, two disjoint team pages that each hold a winning-team row, two pages that share a player, pages whose union has two winning teams, an unreadable name on a page, and a duplicate player; each row of the v1 page table in §7.4: a team page with only losing-team rows and no validated run leaves the match `PENDING_REVIEW`, a free-for-all page without the winner and no validated run leaves it `PENDING_REVIEW`, two validated free-for-all pages that each hold a `WIN` row give `CONFLICTING_SCREENSHOTS`, and excluding the page that cannot complete gives `OK` with the other page's players only; `playedAt` for `LIVE` and `ADDED` matches; match order by session `startedAt`, `sessionId` and `matchIndex`, with an `ADDED` match anchored before the first `LIVE` match ordered first although its `playedAt` is `endedAt`, and a map correction leaving the order and `matchIndex` unchanged; voided matches not countable; `DUPLICATE` screenshots never counted |
 | `players.test.ts` | `nameKey` with NFKC input, case and whitespace; links to active and inactive entries; tie rule for entries sharing a `nameKey`; unrostered keys are hashes with no gamertag text; `rosterKeyMatches` |
 | `gold.test.ts` | every §8.1 definition with `null` values; leaderboards exclude unrostered players and players under `leaderboardMinMatches`, with the tie order; rising players on a fixture with windows that end at `asOf`, not the clock; recent matches order |
-| `serving.test.ts` | JSON Lines keys sorted, `contentSha256` stable; the same inputs give byte-identical content for two `buildId` values; `inputsSha256` changes with a new key, a roster version or a version bump |
+| `serving.test.ts` | JSON Lines keys sorted, `contentSha256` stable; the same inputs built under two `buildId` values give byte-identical table files and serving documents, equal `contentSha256` and `servingContentSha256`, and no serving document containing either `buildId` or the namespace; `index.json` keys are relative to the serving prefix; recent matches and player documents follow match order; `inputsSha256` changes with a new key, a roster version or a version bump |
 | `build-lakehouse.test.ts` | unchanged inputs write nothing; `force` builds; publish order of §5.2 rule 4; a failure before the pointer leaves the old pointer; Glue tables created when missing and updated after; `RosterIntegrityError`; a correction (a second validated version) changes gold on the next build while bronze keeps version 1 |
-| `app.test.ts` | stable and ephemeral synthesis; the §4.1 patterns; schedule and reserved concurrency; IAM resource patterns in §13.4, including every explicit `Deny` on evidence subprefixes; the ephemeral Glue database |
+| `app.test.ts` | stable and ephemeral synthesis; the §4.1 patterns; schedule and reserved concurrency; IAM resource patterns in §13.4, including every explicit `Deny` on evidence subprefixes and a Glue statement whose resources are exactly the regional catalog ARN, the stack's database ARN and its `table/<database>/*` ARN; the ephemeral Glue database |
 
 A fixture is a set of bronze documents and a roster with player data replaced by placeholders, plus the expected silver and gold rows.
 
@@ -765,12 +785,12 @@ v1 (Phases 0 to 4) is complete when:
 1. Every `validated/{n}.json` written in a dev namespace has a bronze object within 5 minutes, holding the document, the evidence key, version ID and SHA-256, and the run's channel, session and `receivedAt`.
 2. An evidence object that fails §4.3 gets a rejection record with its code and no bronze object.
 3. A correction that writes `validated/000002.json` leaves the version 1 bronze object unchanged, and the next build's silver and gold use version 2.
-4. Silver links each run to its session and match through the latest association, and a host correction in spec 8 changes the match's map or membership in the next build.
-5. A match with two captures of one board, or two disjoint pages, yields one statistics row per player; a match with conflicting screenshots yields none and reports `CONFLICTING_SCREENSHOTS`.
+4. Silver links each run to its session and match through the latest association, and a host correction in spec 8 changes the match's map or membership in the next build without changing its `matchIndex` or its place in match order (§7.3).
+5. A match with two captures of one board, or two disjoint pages of a team board that each hold a winning-team row, yields one statistics row per player; a match with conflicting screenshots, including two validated free-for-all pages that each hold a `WIN` row, yields none and reports `CONFLICTING_SCREENSHOTS`; and a match with a page that cannot become review-complete under spec 3 §8.3 condition 5 (a free-for-all page without the winner, or a team page with only losing-team rows) yields none and stays `PENDING_REVIEW` until the host excludes that page (§7.4).
 6. A validated name that differs from a roster gamertag only by case, Unicode normalization form or repeated whitespace links to that entry, and an unrostered name produces a hashed `player_key` with no gamertag in any S3 key or log line.
-7. Gold serving documents for players, matches, recent matches, leaderboards and rising players exist under the build the pointer names, and two builds of the same inputs have identical content hashes.
+7. Gold serving documents for players, matches, recent matches, leaderboards and rising players exist under the build the pointer names, no serving document contains a `buildId`, and two builds of the same inputs have byte-identical table files and serving documents, with equal `contentSha256` per table and equal `servingContentSha256`.
 8. A build with unchanged inputs publishes nothing, and a failed build leaves the previous pointer in place.
-9. No data-pipeline role can read OCR, quality, review, LLM review, dataset or risk evidence, write evidence, or delete a lakehouse object, and `app.test.ts` checks the allowed patterns and the explicit denies in §13.4.
+9. No data-pipeline role can read OCR, quality, review, LLM review, dataset or risk evidence, write evidence, or delete a lakehouse object, and `app.test.ts` checks the allowed patterns, the explicit denies, and the Glue grant on the catalog, database and table ARNs in §13.4.
 10. The data-platform roots plan and apply through Terrateam, and the lakehouse buckets expire `ephemeral/` objects.
 11. An ephemeral stack ingests and builds only its own namespace, and destroying it removes its Glue database and tables.
 12. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
@@ -789,6 +809,7 @@ v1 (Phases 0 to 4) is complete when:
 10. **Rising players depend on recent play.** With fewer than 5 matches in either window nobody qualifies, and the dataset is empty. The thresholds are configuration.
 11. **LLM-decided statistics count.** Most validated tables are decided by the LLM reviewer (spec 7), and their errors reach gold. Spec 7's audit bounds (spec 7 §9.2) measure the rate, and `reviewer_kinds` lets consumers separate them.
 12. **The stack reads SSM parameters under `match-to-csv`.** As spec 2 §18.14 records, the evidence bucket and data key parameters carry another application's name.
+13. **Some multi-page boards cannot be counted in v1.** Spec 3 §8.3 condition 5 makes a run review-complete only when its own rows have exactly one winner, so a free-for-all page without the winner, or a team page that shows only the losing team, never gets a validated table, and its match stays `PENDING_REVIEW` (§7.4). The host can count the match by excluding that page, which leaves its players out of the match. Accepted for v1 because a page-level outcome rule is a spec 3 contract change, and the match stays visible in `silver_matches` with its `stats_status`. P5.8 adds the rule.
 
 ## 19. Reference documentation
 
@@ -893,7 +914,8 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - The local execution role can create, update and delete the resource types in §13.3 only when they are named for a `data-pipeline-e-*` stack, including its Glue database.
   - The local workload boundary allows lakehouse bucket access only under `ephemeral/<name>/`, roster reads only on `ROSTER#ephemeral/<name>`, and Glue table actions only in the stack's database.
-  - Existing bootstrap tests pass, and new tests cover each added statement.
+  - Every Glue statement in the execution role and the boundary lists the regional catalog ARN beside the stack's database and table ARNs, and the `DeleteDatabase` statement also lists the database's tables and user-defined functions (§13.4).
+  - Existing bootstrap tests pass, and new tests cover each added statement, including the catalog ARN in each Glue statement.
 
 ### Phase 2: Bronze
 
@@ -950,7 +972,7 @@ A change to a contract updates every consumer in the same PR.
 - **Blocked by:** P3.1
 - **Spec:** §8, §10.1
 - **Files:** `src/lib/{gold,serving,config}.ts`, `config/lakehouse-config-v1.json`
-- **Provides:** `buildGold`, `servingDocuments`, `jsonLines`, `inputsSha256`, `loadLakehouseConfig`
+- **Provides:** `buildGold`, `servingDocuments`, `servingContentSha256`, `jsonLines`, `inputsSha256`, `loadLakehouseConfig`
 - **Acceptance:**
   - The `gold.test.ts` and `serving.test.ts` rows of §16.1 pass.
   - Invalid configuration throws `InvalidLakehouseConfigError`.
@@ -1002,6 +1024,7 @@ A change to a contract updates every consumer in the same PR.
 | P5.5 | Per-map gold dataset | S | Matches and results per map, from `silver_matches`. |
 | P5.6 | Athena tables over bronze | S | Only if audits need SQL over bronze. |
 | P5.7 | Pruning of unpublished and old builds | S | §18.6. Needs a reviewed deletion grant. |
+| P5.8 | Partial scoreboard pages | M | §18.13. Blocked by a spec 3 revision that lets a reviewer mark a run as a partial page, requires of such a page only that each team's rows share one outcome and at most one row or team wins, and records the page role in the validated table. This spec's merge rule already applies condition 5 to the merged pages, so it then counts pages without a winner. |
 
 ### 20.4 Dependency order and parallel lanes
 
