@@ -10,6 +10,8 @@
 
 MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
 
+To work on the code, start with [Getting started](docs/getting-started.md). It takes you from a fresh clone to passing checks without AWS access, and then to your own stack in a dev account.
+
 The project starts with OCR, but the stored evidence is meant to outlive the first parser. Every processing run retains source hashes, provider output, normalized cells, confidence, geometry, validation results, and code versions. That record supports replaying old screenshots through new pipelines, comparing results, labeling cells, and eventually training OCR quality models.
 
 ## What works today
@@ -74,41 +76,11 @@ match-to-csv-prod        live stack
 
 ## Start locally
 
-Local work needs Git, Node.js 22.16.0, and npm. Docker is needed for CDK synthesis and OpenTofu 1.12.1 for the infrastructure format check. [`.tool-versions`](.tool-versions) pins Node and OpenTofu. With `asdf` installed:
-
-```console
-asdf plugin add nodejs https://github.com/asdf-vm/asdf-nodejs.git
-asdf plugin add opentofu https://github.com/virtualstaticvoid/asdf-opentofu.git
-asdf install
-```
-
-Run the repository checks. None of them call AWS:
-
-```console
-npm ci
-npm run check
-```
-
-`npm run check` covers Prettier, ESLint, release metadata, TypeScript, tests, and builds. For infrastructure changes, follow the full formatting, validation, and module-test loop in [TESTING.md](TESTING.md). See it for focused commands and the difference between unit, synthesis, and deployed integration checks.
+[Getting started](docs/getting-started.md) is the one setup path. Its first tier needs no AWS access and ends with a passing `npm run check`. The second takes you through deploying your own ephemeral stack and sending it a test email. It also lists the checks to run for each kind of change.
 
 Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain names, populated backend files, variable files, state, or plans.
 
 ## Develop and deploy
-
-Target a workspace without running every package:
-
-```console
-npm test --workspace @mcc/match-to-csv
-npm run typecheck --workspace @mcc/match-to-csv
-npm run app:synth -- match-to-csv --environment dev
-```
-
-With access to a dev AWS account, you can deploy a named ephemeral stack there. [Self-hosting](docs/self-hosting/README.md) covers the account setup:
-
-```console
-npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
-npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
-```
 
 Pull requests run CI without deploying and need no AWS access. A merge to `main` deploys affected applications to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. Release Please versions applications and shared packages.
 
