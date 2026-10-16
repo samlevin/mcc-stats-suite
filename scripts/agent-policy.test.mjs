@@ -411,7 +411,7 @@ test('every role and workflow renders for both tools with matching bodies', () =
     'create-github-issue',
     'review-code',
     'review-security',
-    'write-prose',
+    'plain-language',
   ]) {
     assert.ok(
       names.includes(`.claude/skills/${PREFIX}${skill}/SKILL.md`),
@@ -460,18 +460,6 @@ test('every role and workflow renders for both tools with matching bodies', () =
         `${role}: ${line.slice(0, 40)}`,
       );
   }
-});
-
-test('the write-prose skill keeps its attribution in both tools', () => {
-  const files = render();
-  for (const path of [
-    `.claude/skills/${PREFIX}write-prose/SKILL.md`,
-    `.agents/skills/${PREFIX}write-prose/SKILL.md`,
-  ])
-    assert.match(
-      files.get(path),
-      /Based on the \[Anti-Slop Reference\]\(https:\/\/github\.com\/NousResearch\/autonovel\/blob\/master\/ANTI-SLOP\.md\)/,
-    );
 });
 
 // Report and relay wording that callers depend on. Each check matches a short
@@ -531,6 +519,33 @@ test('the implementer sends the reviewer its own resolved policy line', () => {
       ),
       `${path} pre-PR packet must carry the reviewer's resolved Policy: line`,
     );
+});
+
+test('the implementer never sets In review and reports the state as read', () => {
+  const files = render();
+  for (const path of [
+    `.claude/agents/${PREFIX}implementer.md`,
+    `.codex/agents/${PREFIX}implementer.toml`,
+  ]) {
+    const content = files.get(path);
+    assert.ok(
+      lineWith(content, /^Never:/, 'In review or Done'),
+      `${path} must forbid setting In review or Done`,
+    );
+    assert.ok(
+      lineWith(content, /^Claim:/, 'only project status you ever set'),
+      `${path} claim step must limit the agent to In progress`,
+    );
+    assert.ok(
+      lineWith(content, /^PR:/, "Leave the issue's status alone"),
+      `${path} PR step must leave In review to automation`,
+    );
+    assert.ok(
+      lineWith(content, /^Return /, 'project state as read'),
+      `${path} handoff must report the project state as read`,
+    );
+    assert.doesNotMatch(content, /Move the issue to In review/i, path);
+  }
 });
 
 test('the README keeps the effective-model verification row', () => {

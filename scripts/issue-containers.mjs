@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import {
   configuration,
   discover,
+  failureMessage,
   ghGraphql,
   paginate,
   REPOSITORY,
@@ -225,11 +226,7 @@ if (
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
     await reconcileContainers({ api: ghGraphql, ...config });
   } catch (error) {
-    console.error(
-      error.code || error.status
-        ? 'GitHub API request failed; check issue and Projects permissions.'
-        : error.message,
-    );
+    console.error(failureMessage(error));
     process.exitCode = 1;
   }
 }

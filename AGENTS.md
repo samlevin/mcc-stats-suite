@@ -10,9 +10,9 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 
 | Changed | Run |
 | --- | --- |
-| Docs only | `npm run format:check` |
+| Docs only | `npm run format:check`, `npx eslint '**/*.md' --max-warnings 0` |
 | `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs` |
-| `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
+| `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs '**/*.md' --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
 | A workspace | iterate with `npm test --workspace @mcc/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:check` (pinned OpenTofu formatting, backend-disabled init and validation for every environment root, plus module tests) |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev`; `npm run verify:bundle --workspace @mcc/match-to-csv` |
@@ -39,7 +39,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | File or draft issues | `/mcc-create-github-issue` | `$mcc-create-github-issue` | `mcc-issue-triager` (read-only metadata) |
 | Review a pushed branch or PR | `/mcc-review-code` | `$mcc-review-code` | `mcc-code-reviewer` (read-only, reports to you) |
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
-| Write a PR body, issue body, comment, or doc | `/mcc-write-prose` | `$mcc-write-prose` | none |
+| Write a PR body, issue body, comment, or doc | `/mcc-plain-language` | `$mcc-plain-language` | none |
 | Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits sources, regenerates both tools, verifies |
 | Plan and apply a PR's foundation roots while Terrateam cannot run, only when a person asks | `/mcc-apply-foundation` | `$mcc-apply-foundation` | none; the agent runs `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` itself, one approved step at a time |
 | Plan and apply the bootstrap roots at `origin/main`, dev then prod, only when a person asks | `/mcc-apply-bootstrap` | `$mcc-apply-bootstrap` | none; the agent runs `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` itself, one approved step at a time |
@@ -78,7 +78,7 @@ Issue tracker: GitHub Issues. This marker turns on the GitHub issue flows (`impl
 Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://github.com/users/samlevin/projects/1). Discover project field IDs with `gh`.
 
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
-- Issue states: claim and move to `In progress` before coding. When several agents share one GitHub identity, the claim comment names the agent. `tracker-pr-issue-status.yml` moves the closing issue to `In review` when the PR opens; move it yourself only if its run logs a skip. Never mark issues `Done`.
+- Issue states: claim and move to `In progress` before coding. That is the only status an agent sets during delivery. When several agents share one GitHub identity, the claim comment names the agent. `tracker-pr-issue-status.yml` moves the closing issue to `In review` when the PR opens, and only a person marks an issue `Done`. Agents never set `In review` or `Done`, even when that workflow skips or fails: the handoff reports the issue's project state as read, and the agent leaves the status alone.
 - Every request needs an issue before work starts. Search for an existing one first; if none exists, file it with `mcc-create-github-issue` (`$mcc-create-github-issue` in Codex), then claim it and do the work.
 - Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
 

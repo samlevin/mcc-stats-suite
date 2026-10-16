@@ -1,35 +1,30 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { paginate, REPOSITORY } from './issue-triage.mjs';
+import {
+  failureMessage,
+  ghGraphql,
+  paginate,
+  REPOSITORY,
+} from './issue-triage.mjs';
 
 const PAGE = 'pageInfo { hasNextPage endCursor }';
 
+// A referenced number that is not an issue or PR returns NOT_FOUND with null
+// data; that response is expected and every other error still fails.
 export function metadataGraphql(query, variables, run = execFileSync) {
-  let output;
-  try {
-    output = run('gh', ['api', 'graphql', '--input', '-'], {
-      input: JSON.stringify({ query, variables }),
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-  } catch (error) {
-    if (!error.stdout) throw error;
-    output = error.stdout;
-  }
-  const result = JSON.parse(output);
-  if (result.errors?.length) {
-    const missingReference =
+  return ghGraphql(
+    query,
+    variables,
+    run,
+    (result) =>
       query.includes('issueOrPullRequest(number:') &&
       result.errors.every(
         (error) =>
-          error.type === 'NOT_FOUND' &&
+          error?.type === 'NOT_FOUND' &&
           error.path?.join('.') === 'repository.issueOrPullRequest',
       ) &&
-      result.data?.repository?.issueOrPullRequest === null;
-    if (!missingReference)
-      throw new Error('GitHub GraphQL request returned errors');
-  }
-  return result.data;
+      result.data?.repository?.issueOrPullRequest === null,
+  );
 }
 
 export function referenceText(body) {
@@ -194,11 +189,7 @@ if (
       dryRun: mode === 'true',
     });
   } catch (error) {
-    console.error(
-      error.code || error.status
-        ? 'GitHub API request failed; check authentication and issue and pull request permissions.'
-        : error.message,
-    );
+    console.error(failureMessage(error));
     process.exitCode = 1;
   }
 }
