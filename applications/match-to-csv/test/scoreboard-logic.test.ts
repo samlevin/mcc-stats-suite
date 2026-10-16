@@ -769,3 +769,91 @@ test('processScoreboardImage drops icon words Textract reads in the player colum
     ['Spartan117', 'Noble Six'],
   );
 });
+
+test('processScoreboardImage flags possibly misread gamertags and keeps them as read', () => {
+  // Each row is the player cell's words as [text, WORD confidence].
+  const players: [string, number | undefined][][] = [
+    // A low-confidence clan tag or icon word is not part of the name.
+    [
+      ['[UNSC]', 20],
+      ['...', 10],
+      ['Spartan117', 99],
+    ],
+    // A lowercase l read as an uppercase I, at very low confidence.
+    [['PIayer05', 39]],
+    // A high-confidence name with a space before its digits is left alone.
+    [
+      ['Agent', 99],
+      ['47', 99],
+    ],
+    // The same split read with low confidence may be a misread space.
+    [
+      ['Player', 60],
+      ['06', 95],
+    ],
+    // Both rules can apply to one name.
+    [
+      ['Lone', 40],
+      ['7', 95],
+    ],
+    // Without a confidence there is no evidence for a flag.
+    [['NoConfidence', undefined]],
+  ];
+  const blocks: TextractBlockLite[] = [
+    word('flag-player-header-word', 'PLAYERS'),
+    word('flag-score-header-word', 'SCORE'),
+    cell('flag-player-header', 1, 1, 'flag-player-header-word'),
+    cell('flag-score-header', 1, 2, 'flag-score-header-word'),
+  ];
+  const cellIds = ['flag-player-header', 'flag-score-header'];
+  players.forEach((words, index) => {
+    const rowIndex = index + 2;
+    const wordIds = words.map(([text, confidence], position) => {
+      const id = `flag-${rowIndex}-word-${position}`;
+      blocks.push({ ...word(id, text), Confidence: confidence });
+      return id;
+    });
+    blocks.push(
+      {
+        Id: `flag-${rowIndex}-player`,
+        BlockType: 'CELL',
+        RowIndex: rowIndex,
+        ColumnIndex: 1,
+        Relationships: [{ Type: 'CHILD', Ids: wordIds }],
+      },
+      word(`flag-${rowIndex}-score-word`, '10'),
+      cell(
+        `flag-${rowIndex}-score`,
+        rowIndex,
+        2,
+        `flag-${rowIndex}-score-word`,
+      ),
+    );
+    cellIds.push(`flag-${rowIndex}-player`, `flag-${rowIndex}-score`);
+  });
+  blocks.push(table('flag-table', cellIds));
+
+  const rows = processScoreboardImage(blocks, []);
+  const low = (wordConfidence: number) => ({
+    field: 'player',
+    code: 'LOW_WORD_CONFIDENCE',
+    wordConfidence,
+  });
+  const split = (wordConfidence: number) => ({
+    field: 'player',
+    code: 'SPLIT_TRAILING_DIGITS',
+    wordConfidence,
+  });
+  assert.deepEqual(
+    rows.map((row) => [row.player, row.reviewFlags]),
+    [
+      ['Spartan117', undefined],
+      ['PIayer05', [low(39)]],
+      ['Agent 47', undefined],
+      ['Player 06', [split(60)]],
+      ['Lone 7', [low(40), split(40)]],
+      ['NoConfidence', undefined],
+    ],
+  );
+  assert.ok(!('reviewFlags' in rows[0]), 'an unflagged row has no flag list');
+});

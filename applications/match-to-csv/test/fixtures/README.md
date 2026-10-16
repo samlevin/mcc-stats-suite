@@ -28,10 +28,20 @@ npm test --workspace @mcc/match-to-csv
 A fixture whose parser output disagrees with its screenshot for a tracked reason has a `knownIssue`:
 
 ```json
-"knownIssue": { "issue": "#161", "fields": ["player"] }
+"knownIssue": { "issue": "#<issue>", "fields": ["player"] }
 ```
 
 The suite then checks every field except the listed ones, and runs the full comparison as a `todo` test that reports without failing. Remove `knownIssue` when the issue is fixed.
+
+## Flagged misreads
+
+When the parser keeps an OCR misread as read and flags its row for review, the fixture lists it in `misreads`. `expectedRows` still holds the value from the screenshot, plus the row's `reviewFlags`:
+
+```json
+"misreads": [{ "field": "player", "expected": "Player05", "read": "PIayer05" }]
+```
+
+The suite checks that one expected row holds `expected` and carries a review flag on `field`, replaces the value with `read`, and then compares the parser output with every expected row. A parser flag that `expectedRows` does not list, or a listed flag the parser does not produce, fails the test.
 
 ## Capturing a real screenshot
 
@@ -62,6 +72,6 @@ The `halo3-two-team-capture-*` fixtures come from real Textract responses. Scree
      --output test/fixtures/<name>.fixture.json
    ```
 
-   The reducer changes only the text of WORD blocks in each table's player-column data cells. Characters Textract read around a name stay as read, so `IUNSC]` becomes `ICLAN1]`. It keeps the blocks reachable from each `TABLE`, drops `PAGE` and `LINE` blocks and polygons, and copies block IDs, bounding boxes, row and column indexes, relationships, header and numeric text, and row colors unchanged. It fails when a player cell holds text the mapping does not cover, or when a mapped real name remains in the output. Rerunning it keeps the output file's `expectedRows` and `knownIssue`.
+   The reducer changes only the text of WORD blocks in each table's player-column data cells. Characters Textract read around a name stay as read, so `IUNSC]` becomes `ICLAN1]`. It keeps the blocks reachable from each `TABLE`, drops `PAGE` and `LINE` blocks and polygons, and copies block IDs, bounding boxes, row and column indexes, relationships, header and numeric text, and row colors unchanged. It fails when a player cell holds text the mapping does not cover, or when a mapped real name remains in the output. Rerunning it keeps the output file's `expectedRows`, `knownIssue`, and `misreads`.
 
-4. Transcribe `expectedRows` from the screenshot, using the placeholders, then run the suite and compare each row with the screenshot.
+4. Transcribe `expectedRows` from the screenshot, using the placeholders, then run the suite and compare each row with the screenshot. Add `reviewFlags` to each row the parser flags, and list each flagged misread in `misreads`.
