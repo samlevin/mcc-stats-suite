@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
+import type { Block } from '@aws-sdk/client-textract';
 import {
   runExtraction,
   type ExtractTextDependencies,
 } from '../src/lambdas/extract-text';
+import type {
+  RowColor,
+  ScoreboardParseResult,
+} from '../src/lib/scoreboard-logic';
 
 const source = {
   screenshotId: 'screen-1',
@@ -196,4 +201,105 @@ test('runExtraction enforces the 10,000,000-byte Textract limit', async () => {
   assert.ok(
     !writes.some((write) => write.key.endsWith('/textract/request.json')),
   );
+});
+
+/** Textract blocks for a PLAYERS/SCORE table with two player rows. */
+function scoreboardBlocks(): Block[] {
+  const rows = [
+    ['PLAYERS', 'SCORE'],
+    ['PlayerOne', '15'],
+    ['PlayerTwo', '9'],
+  ];
+  const cells = rows.flatMap((texts, row) =>
+    texts.map((text, column) => ({ text, row: row + 1, column: column + 1 })),
+  );
+  return [
+    {
+      Id: 'table',
+      BlockType: 'TABLE',
+      Relationships: [
+        { Type: 'CHILD', Ids: cells.map((c) => `cell-${c.row}-${c.column}`) },
+      ],
+    },
+    ...cells.flatMap(({ text, row, column }): Block[] => [
+      {
+        Id: `cell-${row}-${column}`,
+        BlockType: 'CELL',
+        RowIndex: row,
+        ColumnIndex: column,
+        Relationships: [{ Type: 'CHILD', Ids: [`word-${row}-${column}`] }],
+      },
+      { Id: `word-${row}-${column}`, BlockType: 'WORD', Text: text },
+    ]),
+  ];
+}
+
+async function extractScoreboard(rowColors: RowColor[]) {
+  const writes: Array<{ key: string; value: any }> = [];
+  const publishedRowCounts: number[] = [];
+  const result = await runExtraction(
+    { source },
+    {
+      ...dependencies(
+        writes,
+        async () => ({ $metadata: {}, Blocks: scoreboardBlocks() }),
+        undefined,
+        publishedRowCounts,
+      ),
+      async calculateRowColors() {
+        return rowColors;
+      },
+    },
+  );
+  const written = (suffix: string): unknown =>
+    writes.find((write) => write.key.endsWith(suffix))?.value;
+  const observations = written('/normalized/observations.json') as {
+    parser: ScoreboardParseResult & { version: string };
+  };
+  return {
+    result,
+    publishedRowCounts,
+    parser: observations.parser,
+    completion: written('/completion.json') as {
+      status: string;
+      metrics: { extractedRowCount: number };
+    },
+  };
+}
+
+test('runExtraction succeeds with no rows and records why for a board that is not two-team', async () => {
+  const { result, publishedRowCounts, parser, completion } =
+    await extractScoreboard([
+      { rowIndex: 1, r: 30, g: 30, b: 30 },
+      { rowIndex: 2, r: 120, g: 120, b: 120 },
+      { rowIndex: 3, r: 120, g: 120, b: 120 },
+    ]);
+
+  assert.equal(completion.status, 'SUCCEEDED');
+  assert.equal(completion.metrics.extractedRowCount, 0);
+  assert.deepEqual(result.rows, []);
+  assert.deepEqual(publishedRowCounts, [0]);
+  assert.equal(parser.version, 'scoreboard-parser-v5');
+  assert.deepEqual(parser.rows, []);
+  assert.deepEqual(parser.noRowsReason, {
+    code: 'UNSUPPORTED_TEAM_LAYOUT',
+    colorClusterCount: 1,
+  });
+});
+
+test('runExtraction records no reason for a two-team board', async () => {
+  const { result, parser } = await extractScoreboard([
+    { rowIndex: 2, r: 230, g: 20, b: 20 },
+    { rowIndex: 3, r: 20, g: 20, b: 230 },
+  ]);
+
+  assert.deepEqual(
+    result.rows.map((row) => [row.player, row.team, row.win]),
+    [
+      ['PlayerOne', 'Red', 1],
+      ['PlayerTwo', 'Blue', 0],
+    ],
+  );
+  assert.deepEqual(parser.rows, result.rows);
+  assert.ok(!('noRowsReason' in parser));
 });

@@ -9,11 +9,11 @@
 //
 // The tests cover:
 //   1) Simple 2-team match (Red vs Blue) with clear color separation.
-//   2) Free-for-all match where all row colors are the same (no teams).
-//   3) Three-team match (Red vs Blue vs Green) with uneven team sizes.
-//   4) Filtering of non-player rows (e.g. mis-detected header, blank rows),
+//   2) Boards that are not two-team boards (one color cluster, no row color
+//      data, three color clusters) yield no rows and say why.
+//   3) Filtering of non-player rows (e.g. mis-detected header, blank rows),
 //      and ignoring header and non-player row colors when assigning teams.
-//   5) Header fallback logic when Textract can't read headers clearly.
+//   4) Header fallback logic when Textract can't read headers clearly.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -23,6 +23,46 @@ import {
   type RowColor,
   type CsvRow,
 } from '../src/lib/scoreboard-logic';
+
+/**
+ * Two-team row colors for the given row indexes: the first half red, the
+ * rest blue, so the top row's team is Red.
+ */
+function twoTeamColors(rowIndexes: number[]): RowColor[] {
+  const half = Math.ceil(rowIndexes.length / 2);
+  return rowIndexes.map((rowIndex, position) =>
+    position < half
+      ? { rowIndex, r: 230, g: 20, b: 20 }
+      : { rowIndex, r: 20, g: 20, b: 230 },
+  );
+}
+
+/**
+ * A board of PLAYERS/SCORE rows, one per name, with its first player on
+ * RowIndex 2.
+ */
+function simpleBoard(prefix: string, names: string[]): TextractBlockLite[] {
+  const cellIds = [`${prefix}-c-h-player`, `${prefix}-c-h-score`];
+  const blocks: TextractBlockLite[] = [
+    word(`${prefix}-w-h-player`, 'PLAYERS'),
+    word(`${prefix}-w-h-score`, 'SCORE'),
+    cell(`${prefix}-c-h-player`, 1, 1, `${prefix}-w-h-player`),
+    cell(`${prefix}-c-h-score`, 1, 2, `${prefix}-w-h-score`),
+  ];
+  names.forEach((name, index) => {
+    const rowIndex = index + 2;
+    const id = `${prefix}-${rowIndex}`;
+    blocks.push(
+      word(`${id}-w-player`, name),
+      word(`${id}-w-score`, String(20 - index)),
+      cell(`${id}-c-player`, rowIndex, 1, `${id}-w-player`),
+      cell(`${id}-c-score`, rowIndex, 2, `${id}-w-score`),
+    );
+    cellIds.push(`${id}-c-player`, `${id}-c-score`);
+  });
+  blocks.push(table(`${prefix}-tbl`, cellIds));
+  return blocks;
+}
 
 /**
  * Helper: create a WORD block.
@@ -197,7 +237,8 @@ test('processScoreboardImage: simple 2-team Red vs Blue match', () => {
     { rowIndex: 3, r: 20, g: 20, b: 230 }, // Blue team
   ];
 
-  const rows = processScoreboardImage(blocks, rowColors);
+  const { rows, noRowsReason } = processScoreboardImage(blocks, rowColors);
+  assert.equal(noRowsReason, undefined, 'a two-team board has no reason');
   assert.deepEqual(
     rows.length,
     2,
@@ -225,325 +266,97 @@ test('processScoreboardImage: simple 2-team Red vs Blue match', () => {
 
 /**
  * Test 2:
- * Free-for-all (FFA) match.
+ * Boards that are not two-team boards produce no rows.
  *
- * - All row colors are the SAME, so clustering will produce 1 cluster.
- * - processScoreboardImage treats this as FFA:
- *     * Team column should be empty for all players.
- *     * Only the top row is the winner (score doesn't matter here).
+ * Only two-team boards are supported. When the player rows form one color
+ * cluster, carry no row color data, or form three or more clusters, the
+ * parser returns no rows and an UNSUPPORTED_TEAM_LAYOUT reason with the
+ * cluster count.
  */
-test('processScoreboardImage: free-for-all match (no teams)', () => {
-  // Very similar to previous test, but we make both rows have the same color.
-  const wPlayer = word('ffa-w-player', 'PLAYERS');
-  const wScore = word('ffa-w-score', 'SCORE');
-  const wKills = word('ffa-w-kills', 'KILLS');
-  const wAssists = word('ffa-w-assists', 'ASSISTS');
-  const wDeaths = word('ffa-w-deaths', 'DEATHS');
-
-  const wP1 = word('ffa-w-p1-name', 'PlayerOne');
-  const wP1Score = word('ffa-w-p1-score', '15');
-  const wP1Kills = word('ffa-w-p1-kills', '15');
-  const wP1Assists = word('ffa-w-p1-assists', '5');
-  const wP1Deaths = word('ffa-w-p1-deaths', '10');
-
-  const wP2 = word('ffa-w-p2-name', 'PlayerTwo');
-  const wP2Score = word('ffa-w-p2-score', '10');
-  const wP2Kills = word('ffa-w-p2-kills', '10');
-  const wP2Assists = word('ffa-w-p2-assists', '3');
-  const wP2Deaths = word('ffa-w-p2-deaths', '12');
-
-  const cHeaderPlayer = cell('ffa-c-header-player', 1, 1, 'ffa-w-player');
-  const cHeaderScore = cell('ffa-c-header-score', 1, 2, 'ffa-w-score');
-  const cHeaderKills = cell('ffa-c-header-kills', 1, 3, 'ffa-w-kills');
-  const cHeaderAssists = cell('ffa-c-header-assists', 1, 4, 'ffa-w-assists');
-  const cHeaderDeaths = cell('ffa-c-header-deaths', 1, 5, 'ffa-w-deaths');
-
-  const cP1Player = cell('ffa-c-p1-player', 2, 1, 'ffa-w-p1-name');
-  const cP1Score = cell('ffa-c-p1-score', 2, 2, 'ffa-w-p1-score');
-  const cP1Kills = cell('ffa-c-p1-kills', 2, 3, 'ffa-w-p1-kills');
-  const cP1Assists = cell('ffa-c-p1-assists', 2, 4, 'ffa-w-p1-assists');
-  const cP1Deaths = cell('ffa-c-p1-deaths', 2, 5, 'ffa-w-p1-deaths');
-
-  const cP2Player = cell('ffa-c-p2-player', 3, 1, 'ffa-w-p2-name');
-  const cP2Score = cell('ffa-c-p2-score', 3, 2, 'ffa-w-p2-score');
-  const cP2Kills = cell('ffa-c-p2-kills', 3, 3, 'ffa-w-p2-kills');
-  const cP2Assists = cell('ffa-c-p2-assists', 3, 4, 'ffa-w-p2-assists');
-  const cP2Deaths = cell('ffa-c-p2-deaths', 3, 5, 'ffa-w-p2-deaths');
-
-  const tbl = table('ffa-tbl', [
-    cHeaderPlayer.Id!,
-    cHeaderScore.Id!,
-    cHeaderKills.Id!,
-    cHeaderAssists.Id!,
-    cHeaderDeaths.Id!,
-    cP1Player.Id!,
-    cP1Score.Id!,
-    cP1Kills.Id!,
-    cP1Assists.Id!,
-    cP1Deaths.Id!,
-    cP2Player.Id!,
-    cP2Score.Id!,
-    cP2Kills.Id!,
-    cP2Assists.Id!,
-    cP2Deaths.Id!,
-  ]);
-
-  const blocks: TextractBlockLite[] = [
-    tbl,
-    wPlayer,
-    wScore,
-    wKills,
-    wAssists,
-    wDeaths,
-    wP1,
-    wP1Score,
-    wP1Kills,
-    wP1Assists,
-    wP1Deaths,
-    wP2,
-    wP2Score,
-    wP2Kills,
-    wP2Assists,
-    wP2Deaths,
-    cHeaderPlayer,
-    cHeaderScore,
-    cHeaderKills,
-    cHeaderAssists,
-    cHeaderDeaths,
-    cP1Player,
-    cP1Score,
-    cP1Kills,
-    cP1Assists,
-    cP1Deaths,
-    cP2Player,
-    cP2Score,
-    cP2Kills,
-    cP2Assists,
-    cP2Deaths,
-  ];
-
-  // All rows same background color => FFA.
+test('processScoreboardImage: one color cluster yields no rows', () => {
+  const blocks = simpleBoard('one', ['PlayerOne', 'PlayerTwo', 'PlayerThree']);
   const rowColors: RowColor[] = [
     { rowIndex: 2, r: 120, g: 120, b: 120 },
     { rowIndex: 3, r: 120, g: 120, b: 120 },
+    { rowIndex: 4, r: 125, g: 118, b: 122 },
   ];
 
-  const rows = processScoreboardImage(blocks, rowColors);
-  assert.deepEqual(rows.length, 2, 'should produce 2 rows in FFA');
+  assert.deepEqual(processScoreboardImage(blocks, rowColors), {
+    rows: [],
+    noRowsReason: { code: 'UNSUPPORTED_TEAM_LAYOUT', colorClusterCount: 1 },
+  });
+});
 
-  const p1 = rows.find((r) => r.player === 'PlayerOne') as CsvRow;
-  const p2 = rows.find((r) => r.player === 'PlayerTwo') as CsvRow;
+test('processScoreboardImage: no row color data yields no rows', () => {
+  const blocks = simpleBoard('none', ['PlayerOne', 'PlayerTwo']);
+  const expected = {
+    rows: [],
+    noRowsReason: { code: 'UNSUPPORTED_TEAM_LAYOUT', colorClusterCount: 0 },
+  };
 
-  assert.equal(p1.team, '', 'PlayerOne should have empty team (FFA)');
-  assert.equal(p2.team, '', 'PlayerTwo should have empty team (FFA)');
+  assert.deepEqual(processScoreboardImage(blocks, []), expected);
+  // Colors for rows that are not player rows are no color data either.
+  assert.deepEqual(
+    processScoreboardImage(blocks, [{ rowIndex: 1, r: 30, g: 30, b: 30 }]),
+    expected,
+  );
+});
 
-  assert.equal(p1.win, 1, 'PlayerOne (top row) should be winner in FFA');
-  assert.equal(p1.loss, 0, 'PlayerOne should have loss=0 in FFA');
+test('processScoreboardImage: three color clusters yield no rows', () => {
+  const blocks = simpleBoard('three', [
+    'RedGuy',
+    'BlueOne',
+    'BlueTwo',
+    'GreenGuy',
+  ]);
+  const rowColors: RowColor[] = [
+    { rowIndex: 2, r: 220, g: 30, b: 30 }, // Red
+    { rowIndex: 3, r: 30, g: 30, b: 220 }, // Blue
+    { rowIndex: 4, r: 35, g: 35, b: 210 }, // Blue, same cluster as row 3
+    { rowIndex: 5, r: 30, g: 220, b: 30 }, // Green
+  ];
 
-  assert.equal(p2.win, 0, 'PlayerTwo should be non-winner in FFA');
-  assert.equal(p2.loss, 1, 'PlayerTwo should have loss=1 in FFA');
+  assert.deepEqual(processScoreboardImage(blocks, rowColors), {
+    rows: [],
+    noRowsReason: { code: 'UNSUPPORTED_TEAM_LAYOUT', colorClusterCount: 3 },
+  });
 });
 
 /**
  * Test 3:
- * Three-team match with uneven team sizes (Red vs Blue vs Green).
- *
- * - Row colors:
- *     Row 2 -> Red
- *     Row 3 -> Blue
- *     Row 4 -> Blue (same team as Row 3)
- *     Row 5 -> Green
- * - We expect:
- *     - 3 team names (Red, Blue, Green).
- *     - All Blue players share the same team name.
- *     - Top row (RowIndex 2) = Red player is the winner.
- */
-test('processScoreboardImage: 3-team match with uneven sizes', () => {
-  // We'll simplify the table: only 1 stat column we care about (Score).
-  const wPlayer = word('3t-w-player', 'PLAYERS');
-  const wScore = word('3t-w-score', 'SCORE');
-
-  const wRed = word('3t-w-red', 'RedGuy');
-  const wRedScore = word('3t-w-red-score', '25');
-
-  const wBlue1 = word('3t-w-blue1', 'BlueOne');
-  const wBlue1Score = word('3t-w-blue1-score', '15');
-
-  const wBlue2 = word('3t-w-blue2', 'BlueTwo');
-  const wBlue2Score = word('3t-w-blue2-score', '10');
-
-  const wGreen = word('3t-w-green', 'GreenGuy');
-  const wGreenScore = word('3t-w-green-score', '5');
-
-  // Header row
-  const cHeaderPlayer = cell('3t-c-header-player', 1, 1, '3t-w-player');
-  const cHeaderScore = cell('3t-c-header-score', 1, 2, '3t-w-score');
-
-  // Red row
-  const cRedPlayer = cell('3t-c-red-player', 2, 1, '3t-w-red');
-  const cRedScore = cell('3t-c-red-score', 2, 2, '3t-w-red-score');
-
-  // BlueOne row
-  const cBlue1Player = cell('3t-c-blue1-player', 3, 1, '3t-w-blue1');
-  const cBlue1Score = cell('3t-c-blue1-score', 3, 2, '3t-w-blue1-score');
-
-  // BlueTwo row
-  const cBlue2Player = cell('3t-c-blue2-player', 4, 1, '3t-w-blue2');
-  const cBlue2Score = cell('3t-c-blue2-score', 4, 2, '3t-w-blue2-score');
-
-  // Green row
-  const cGreenPlayer = cell('3t-c-green-player', 5, 1, '3t-w-green');
-  const cGreenScore = cell('3t-c-green-score', 5, 2, '3t-w-green-score');
-
-  const tbl = table('3t-tbl', [
-    cHeaderPlayer.Id!,
-    cHeaderScore.Id!,
-    cRedPlayer.Id!,
-    cRedScore.Id!,
-    cBlue1Player.Id!,
-    cBlue1Score.Id!,
-    cBlue2Player.Id!,
-    cBlue2Score.Id!,
-    cGreenPlayer.Id!,
-    cGreenScore.Id!,
-  ]);
-
-  const blocks: TextractBlockLite[] = [
-    tbl,
-    wPlayer,
-    wScore,
-    wRed,
-    wRedScore,
-    wBlue1,
-    wBlue1Score,
-    wBlue2,
-    wBlue2Score,
-    wGreen,
-    wGreenScore,
-    cHeaderPlayer,
-    cHeaderScore,
-    cRedPlayer,
-    cRedScore,
-    cBlue1Player,
-    cBlue1Score,
-    cBlue2Player,
-    cBlue2Score,
-    cGreenPlayer,
-    cGreenScore,
-  ];
-
-  // Row colors:
-  // - Red rowIndex 2 is red-ish
-  // - Blue rows 3 and 4 are blue-ish
-  // - Green row 5 is green-ish
-  const rowColors: RowColor[] = [
-    { rowIndex: 2, r: 220, g: 30, b: 30 }, // Red
-    { rowIndex: 3, r: 30, g: 30, b: 220 }, // Blue
-    { rowIndex: 4, r: 35, g: 35, b: 210 }, // Blue-ish, same team as row 3
-    { rowIndex: 5, r: 30, g: 220, b: 30 }, // Green
-  ];
-
-  const rows = processScoreboardImage(blocks, rowColors);
-  assert.deepEqual(rows.length, 4, 'should produce 4 player rows');
-
-  const red = rows.find((r) => r.player === 'RedGuy') as CsvRow;
-  const blue1 = rows.find((r) => r.player === 'BlueOne') as CsvRow;
-  const blue2 = rows.find((r) => r.player === 'BlueTwo') as CsvRow;
-  const green = rows.find((r) => r.player === 'GreenGuy') as CsvRow;
-
-  assert.equal(red.team, 'Red', 'RedGuy should be on Red team');
-  assert.equal(green.team, 'Green', 'GreenGuy should be on Green team');
-
-  assert.equal(
-    blue1.team,
-    blue2.team,
-    'BlueOne and BlueTwo should share the same team name',
-  );
-  assert.equal(
-    blue1.team,
-    'Blue',
-    'Blue team should be labeled as Blue per MCC color legend',
-  );
-
-  assert.equal(red.win, 1, 'RedGuy (rowIndex 2) should be winner (top row)');
-  assert.equal(red.loss, 0, 'RedGuy should not have a loss');
-
-  assert.equal(blue1.win, 0, 'BlueOne should not be the winning team');
-  assert.equal(blue2.win, 0, 'BlueTwo should not be the winning team');
-  assert.equal(green.win, 0, 'GreenGuy should not be the winning team');
-});
-
-/**
- * Test 4:
  * Non-player rows should be filtered out.
  *
  * - We add a fake "Total" row with non-numeric score/kills.
  * - Only player rows with numeric score or kills should be returned.
  */
 test('processScoreboardImage: filters out non-player rows', () => {
-  const wPlayer = word('np-w-player', 'PLAYERS');
-  const wScore = word('np-w-score', 'SCORE');
+  const blocks = simpleBoard('np', ['RealPlayer', 'OtherPlayer']);
+  const tbl = blocks.find((block) => block.BlockType === 'TABLE')!;
+  tbl.Relationships![0].Ids!.push('np-c-total-player', 'np-c-total-score');
+  blocks.push(
+    word('np-w-total', 'Total'),
+    word('np-w-total-score', 'N/A'), // not numeric
+    cell('np-c-total-player', 4, 1, 'np-w-total'),
+    cell('np-c-total-score', 4, 2, 'np-w-total-score'),
+  );
 
-  const wP1 = word('np-w-p1', 'RealPlayer');
-  const wP1Score = word('np-w-p1-score', '10');
-
-  const wTotal = word('np-w-total', 'Total');
-  const wTotalScore = word('np-w-total-score', 'N/A'); // not numeric
-
-  const cHeaderPlayer = cell('np-c-header-player', 1, 1, 'np-w-player');
-  const cHeaderScore = cell('np-c-header-score', 1, 2, 'np-w-score');
-
-  const cP1Player = cell('np-c-p1-player', 2, 1, 'np-w-p1');
-  const cP1Score = cell('np-c-p1-score', 2, 2, 'np-w-p1-score');
-
-  const cTotalPlayer = cell('np-c-total-player', 3, 1, 'np-w-total');
-  const cTotalScore = cell('np-c-total-score', 3, 2, 'np-w-total-score');
-
-  const tbl = table('np-tbl', [
-    cHeaderPlayer.Id!,
-    cHeaderScore.Id!,
-    cP1Player.Id!,
-    cP1Score.Id!,
-    cTotalPlayer.Id!,
-    cTotalScore.Id!,
-  ]);
-
-  const blocks: TextractBlockLite[] = [
-    tbl,
-    wPlayer,
-    wScore,
-    wP1,
-    wP1Score,
-    wTotal,
-    wTotalScore,
-    cHeaderPlayer,
-    cHeaderScore,
-    cP1Player,
-    cP1Score,
-    cTotalPlayer,
-    cTotalScore,
-  ];
-
-  // All rows same color => FFA, but we only care that "Total" is filtered out.
-  const rowColors: RowColor[] = [
-    { rowIndex: 2, r: 100, g: 100, b: 100 },
-    { rowIndex: 3, r: 100, g: 100, b: 100 },
-  ];
-
-  const rows = processScoreboardImage(blocks, rowColors);
-  assert.deepEqual(rows.length, 1, 'should only contain the real player row');
-
-  const p = rows[0];
-  assert.equal(p.player, 'RealPlayer', 'only RealPlayer row should remain');
+  const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
+  assert.deepEqual(
+    rows.map((r) => r.player),
+    ['RealPlayer', 'OtherPlayer'],
+    'only the real player rows should remain',
+  );
 });
 
 /**
- * Test 4b:
+ * Test 3b:
  * Header and non-player row colors must not create team clusters.
  *
  * - The header row (RowIndex 1) and a "Total" row (RowIndex 4) are shaded
- *   differently from the two player rows, which share one color.
- * - Only player rows count toward team clustering, so the board stays FFA.
+ *   differently from the player rows.
+ * - Only player rows count toward team clustering, so player rows of one
+ *   color stay one cluster and yield no rows, and two-team player rows stay
+ *   two clusters.
  */
 test('processScoreboardImage: header and non-player row colors do not create teams', () => {
   const blocks: TextractBlockLite[] = [
@@ -575,26 +388,41 @@ test('processScoreboardImage: header and non-player row colors do not create tea
     cell('hc-c-total-score', 4, 2, 'hc-w-total-score'),
   ];
 
-  const rowColors: RowColor[] = [
+  const oneColor: RowColor[] = [
     { rowIndex: 1, r: 30, g: 30, b: 30 }, // dark header
     { rowIndex: 2, r: 120, g: 120, b: 120 },
     { rowIndex: 3, r: 120, g: 120, b: 120 },
     { rowIndex: 4, r: 20, g: 20, b: 230 }, // blue-tinted footer
   ];
+  assert.deepEqual(
+    processScoreboardImage(blocks, oneColor),
+    {
+      rows: [],
+      noRowsReason: { code: 'UNSUPPORTED_TEAM_LAYOUT', colorClusterCount: 1 },
+    },
+    'one player color is one cluster, not a two-team board',
+  );
 
-  const rows = processScoreboardImage(blocks, rowColors);
+  const twoTeams: RowColor[] = [
+    { rowIndex: 1, r: 30, g: 30, b: 30 }, // dark header
+    { rowIndex: 2, r: 230, g: 20, b: 20 },
+    { rowIndex: 3, r: 20, g: 20, b: 230 },
+    { rowIndex: 4, r: 20, g: 230, b: 20 }, // green-tinted footer
+  ];
+  const { rows, noRowsReason } = processScoreboardImage(blocks, twoTeams);
+  assert.equal(noRowsReason, undefined);
   assert.deepEqual(
     rows.map((r) => [r.player, r.team, r.win, r.loss]),
     [
-      ['PlayerOne', '', 1, 0],
-      ['PlayerTwo', '', 0, 1],
+      ['PlayerOne', 'Red', 1, 0],
+      ['PlayerTwo', 'Blue', 0, 1],
     ],
-    'player rows should be FFA with only the top row winning',
+    'two player colors stay a two-team board',
   );
 });
 
 /**
- * Test 5:
+ * Test 4:
  * Header fallback logic.
  *
  * - We simulate a situation where Textract mis-reads header texts (e.g. "P1", "P2").
@@ -665,11 +493,18 @@ test('processScoreboardImage: header fallback when headers are not clearly recog
     cDeaths,
   ];
 
-  // Single row, but color doesn't matter here; use any values.
-  const rowColors: RowColor[] = [{ rowIndex: 2, r: 150, g: 150, b: 150 }];
+  // A second player on the other team, so the board is a two-team board.
+  ['OtherPlayer', '10', '9', '1', '12'].forEach((text, index) => {
+    const column = index + 1;
+    blocks.push(
+      word(`hf-w-other-${column}`, text),
+      cell(`hf-c-other-${column}`, 3, column, `hf-w-other-${column}`),
+    );
+    tbl.Relationships![0].Ids!.push(`hf-c-other-${column}`);
+  });
 
-  const rows = processScoreboardImage(blocks, rowColors);
-  assert.deepEqual(rows.length, 1, 'should produce exactly 1 row');
+  const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
+  assert.deepEqual(rows.length, 2, 'should produce exactly 2 rows');
 
   const row = rows[0];
   assert.equal(
@@ -690,6 +525,8 @@ test('processScoreboardImage selects the scoreboard when Textract finds another 
   const scoreHeader = cell('score-header', 1, 2, 'score-header-word');
   const playerValue = cell('player-value', 2, 1, 'player-value-word');
   const scoreValue = cell('score-value', 2, 2, 'score-value-word');
+  const otherPlayer = cell('other-player', 3, 1, 'other-player-word');
+  const otherScore = cell('other-score', 3, 2, 'other-score-word');
   const blocks = [
     table('decoy-table', ['decoy-header', 'decoy-value']),
     word('decoy-header-word', 'SETTING'),
@@ -701,18 +538,24 @@ test('processScoreboardImage selects the scoreboard when Textract finds another 
       'score-header',
       'player-value',
       'score-value',
+      'other-player',
+      'other-score',
     ]),
     word('player-header-word', 'PLAYERS'),
     word('score-header-word', 'SCORE'),
     word('player-value-word', 'Spartan'),
     word('score-value-word', '19'),
+    word('other-player-word', 'Elite'),
+    word('other-score-word', '7'),
     playerHeader,
     scoreHeader,
     playerValue,
     scoreValue,
+    otherPlayer,
+    otherScore,
   ];
-  const rows = processScoreboardImage(blocks, []);
-  assert.equal(rows.length, 1);
+  const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
+  assert.equal(rows.length, 2);
   assert.equal(rows[0].player, 'Spartan');
   assert.equal(rows[0].score, '19');
 });
@@ -763,7 +606,7 @@ test('processScoreboardImage drops icon words Textract reads in the player colum
     cell('icon-split-score', 3, 2, 'icon-split-score-word'),
     word('icon-split-score-word', '7'),
   ];
-  const rows = processScoreboardImage(blocks, []);
+  const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
   assert.deepEqual(
     rows.map((row) => row.player),
     ['Spartan117', 'Noble Six'],
@@ -833,7 +676,10 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
   });
   blocks.push(table('flag-table', cellIds));
 
-  const rows = processScoreboardImage(blocks, []);
+  const { rows } = processScoreboardImage(
+    blocks,
+    twoTeamColors(players.map((_, index) => index + 2)),
+  );
   const low = (wordConfidence: number) => ({
     field: 'player',
     code: 'LOW_WORD_CONFIDENCE',

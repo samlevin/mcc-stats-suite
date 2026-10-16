@@ -10,11 +10,13 @@
 // and returns:
 //   - A list of CsvRow objects:
 //       Team, Player, Score, Kills, Assists, Deaths, Win, Loss
+//   - Why the list is empty, when the board's team layout is unsupported.
 //
 // It supports:
-//   - Arbitrary team sizes (1v3v2, 4v3, etc.)
+//   - Two-team boards only, with any number of players on each team.
+//     A board whose player rows form one color cluster, carry no row color,
+//     or form three or more clusters yields no rows.
 //   - MCC official team colors (Red/Blue/Green/Orange/Gold/Purple/Brown/Pink)
-//   - Free-for-all (FFA) matches where Team is empty.
 //   - Review flags on player names Textract may have misread. Names always
 //     stay as read; a flag only marks the row for a person to check.
 
@@ -68,6 +70,26 @@ export interface RowColor {
   r: number; // average red 0–255
   g: number; // average green 0–255
   b: number; // average blue 0–255
+}
+
+/**
+ * Why a board with player rows produced no rows. Only two-team boards are
+ * supported, so a board whose player rows do not form exactly two color
+ * clusters is rejected. `colorClusterCount` is 0 when no player row has a
+ * color.
+ */
+export interface NoRowsReason {
+  code: 'UNSUPPORTED_TEAM_LAYOUT';
+  colorClusterCount: number;
+}
+
+/**
+ * The parser's result: the CSV rows, plus the reason when an unsupported
+ * team layout left them empty.
+ */
+export interface ScoreboardParseResult {
+  rows: CsvRow[];
+  noRowsReason?: NoRowsReason;
 }
 
 /////////////////////////
@@ -147,13 +169,14 @@ const SPLIT_TRAILING_DIGITS_BELOW = 90;
  * @param blocks    Textract-like blocks from an image containing a scoreboard.
  * @param rowColors For each table row, the average background RGB.
  *
- * @returns A list of CsvRow objects ready to write to CSV.
+ * @returns The CsvRow objects ready to write to CSV, and the reason they are
+ *          empty when the board is not a two-team board.
  */
 export function processScoreboardImage(
   blocks: TextractBlockLite[],
   rowColors: RowColor[],
-): CsvRow[] {
-  if (!blocks.length) return [];
+): ScoreboardParseResult {
+  if (!blocks.length) return { rows: [] };
 
   // Map Id -> Block for quick lookup.
   const blockMap = new Map<string, TextractBlockLite>();
@@ -170,7 +193,7 @@ export function processScoreboardImage(
     )[0];
   if (!table || !table.Relationships) {
     // No table found => nothing to parse.
-    return [];
+    return { rows: [] };
   }
 
   // 2) Gather CELL blocks that are children of the TABLE.
@@ -203,7 +226,7 @@ export function processScoreboardImage(
   }
 
   const rowIndices = Array.from(tableByRow.keys()).sort((a, b) => a - b);
-  if (!rowIndices.length) return [];
+  if (!rowIndices.length) return { rows: [] };
 
   // 4) Use the first row as header to detect which column is Player/Score/etc.
   const headerRowIndex = rowIndices[0];
@@ -267,73 +290,49 @@ export function processScoreboardImage(
     players.push(pr);
   }
 
-  if (!players.length) return [];
+  if (!players.length) return { rows: [] };
 
-  // 6) Use row background colors to assign team names (or FFA).
-  const rowToTeam = assignTeamsByColor(rowColors, players);
+  // 6) Use row background colors to assign team names. Only a board whose
+  //    player rows form exactly two color clusters is supported.
+  const { colorClusterCount, rowToTeam } = assignTeamsByColor(
+    rowColors,
+    players,
+  );
+  if (colorClusterCount !== 2) {
+    return {
+      rows: [],
+      noRowsReason: { code: 'UNSUPPORTED_TEAM_LAYOUT', colorClusterCount },
+    };
+  }
 
-  // If no row gets a team name, treat it as FFA.
-  const anyTeamAssigned = Array.from(rowToTeam.values()).some((t) => !!t);
-  const isFFA = !anyTeamAssigned;
-
-  // The top row in the table is the winner.
+  // The top row's team is the winning team.
   const topPlayerRow = players.reduce((a, b) =>
     a.rowIndex < b.rowIndex ? a : b,
   );
+  const winningTeam = rowToTeam.get(topPlayerRow.rowIndex);
 
-  let winningTeam: string | undefined;
-  let winningRowIndex: number | undefined;
-
-  if (isFFA) {
-    winningRowIndex = topPlayerRow.rowIndex;
-  } else {
-    winningTeam = rowToTeam.get(topPlayerRow.rowIndex);
-  }
-
-  // 7) Build final CsvRow list with Win/Loss flags.
+  // 7) Build final CsvRow list with Win/Loss flags. All players on the
+  //    winning team get Win=1; everyone else gets Loss=1.
   const rows: CsvRow[] = [];
 
   for (const p of players) {
-    const team = rowToTeam.get(p.rowIndex) ?? '';
-
-    let win = 0;
-    let loss = 0;
-
-    if (isFFA) {
-      // Free-for-all: only top row is winner.
-      if (p.rowIndex === winningRowIndex) {
-        win = 1;
-        loss = 0;
-      } else {
-        win = 0;
-        loss = 1;
-      }
-    } else {
-      // Team game: all players on winningTeam get Win=1.
-      const playerTeam = rowToTeam.get(p.rowIndex);
-      if (playerTeam && playerTeam === winningTeam) {
-        win = 1;
-        loss = 0;
-      } else {
-        win = 0;
-        loss = 1;
-      }
-    }
+    const playerTeam = rowToTeam.get(p.rowIndex);
+    const won = !!playerTeam && playerTeam === winningTeam;
 
     rows.push({
-      team,
+      team: playerTeam ?? '',
       player: p.player,
       score: p.score ?? '',
       kills: p.kills ?? '',
       assists: p.assists ?? '',
       deaths: p.deaths ?? '',
-      win,
-      loss,
+      win: won ? 1 : 0,
+      loss: won ? 0 : 1,
       ...(p.reviewFlags.length ? { reviewFlags: p.reviewFlags } : {}),
     });
   }
 
-  return rows;
+  return { rows };
 }
 
 //////////////////////////////
@@ -492,29 +491,26 @@ function isProbablyNumeric(val?: string): boolean {
 }
 
 /**
- * Use background colors to cluster rows into MCC teams.
- * - If only one cluster => treat as FFA and return undefined for all rows.
- * - Otherwise => name each cluster with an MCC color (Red/Blue/Green/etc.).
+ * Use background colors to cluster player rows into MCC teams.
+ * - Returns how many color clusters the player rows form; 0 when no player
+ *   row has a color.
+ * - Names each cluster with an MCC color (Red/Blue/Green/etc.) and maps each
+ *   clustered row to its team. A player row without a color has no team.
  */
 function assignTeamsByColor(
   rowColors: RowColor[],
   players: PlayerRow[],
-): Map<number, string | undefined> {
-  const rowToTeam = new Map<number, string | undefined>();
+): { colorClusterCount: number; rowToTeam: Map<number, string> } {
+  const rowToTeam = new Map<number, string>();
 
   // Cluster only the colors of rows that parsed as players. The header row
   // and filtered non-player rows are usually shaded differently and would
-  // otherwise form their own cluster and turn an FFA board into a team game.
+  // otherwise form their own cluster and turn a one-color board into a
+  // two-team board.
   const playerRowIndices = new Set(players.map((p) => p.rowIndex));
   const playerColors = rowColors.filter((rc) =>
     playerRowIndices.has(rc.rowIndex),
   );
-
-  if (!playerColors.length) {
-    // No color info => safest is to treat as FFA.
-    for (const p of players) rowToTeam.set(p.rowIndex, undefined);
-    return rowToTeam;
-  }
 
   // Group rows into clusters based on RGB distance.
   const clusters: TeamCluster[] = [];
@@ -552,12 +548,6 @@ function assignTeamsByColor(
     }
   }
 
-  // If we only have one color cluster, scoreboard looks like FFA.
-  if (clusters.length <= 1) {
-    for (const p of players) rowToTeam.set(p.rowIndex, undefined);
-    return rowToTeam;
-  }
-
   // Give each cluster an official MCC color name based on its hue.
   const nameCounts = new Map<string, number>();
   for (const c of clusters) {
@@ -575,7 +565,7 @@ function assignTeamsByColor(
     }
   }
 
-  return rowToTeam;
+  return { colorClusterCount: clusters.length, rowToTeam };
 }
 
 /**
