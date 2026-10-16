@@ -43,7 +43,7 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
-Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, assignees, milestone, and project membership are copied from the linked issue automatically; nothing assigns people to issues.
+Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, assignees, and milestone are copied from the linked issue automatically; nothing assigns people to issues. The `tracker-project-membership.yml` workflow adds every new issue and pull request, including one from a fork, to the MCC delivery project when it opens, however it was created.
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version.
 

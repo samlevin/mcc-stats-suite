@@ -44,7 +44,7 @@ Do not replace the app with a personal access token or give the workflow's `GITH
 
 A fork deploys to its own accounts with its own Release Please app. It also needs a few repository changes:
 
-- `tracker-issue-states.yml`, `tracker-pr-metadata.yml`, and `tracker-pr-issue-status.yml` run only in `samlevin/mcc-stats-suite`. They skip on a fork. To use them, change the repository check, point the scripts at your own GitHub Project, and add a `MCC_PROJECT_TOKEN` secret with issue, pull request, and project access.
+- `tracker-issue-states.yml`, `tracker-pr-metadata.yml`, `tracker-pr-issue-status.yml`, and `tracker-project-membership.yml` run only in `samlevin/mcc-stats-suite`. They skip on a fork. To use them, change the repository check, point the scripts at your own GitHub Project, and add a `MCC_PROJECT_TOKEN` secret with issue, pull request, and project access.
 - The README badges point at the upstream repository.
 - `match-to-csv` CI and deploy jobs run on GitHub-hosted ARM64 runners (`ubuntu-24.04-arm`), which are free only for public repositories.
 - Enable Actions on the fork. GitHub disables workflows on new forks.

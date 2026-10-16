@@ -16,6 +16,7 @@ export const automationTests = [
   'scripts/issue-triage.test.mjs',
   'scripts/issue-pr-metadata.test.mjs',
   'scripts/issue-pr-status.test.mjs',
+  'scripts/issue-project-membership.test.mjs',
   'scripts/branch-name.test.mjs',
   'scripts/agent-policy.test.mjs',
 ];
@@ -26,6 +27,7 @@ const automationLintTargets = [
   'scripts/issue-containers.mjs',
   'scripts/issue-pr-metadata.mjs',
   'scripts/issue-pr-status.mjs',
+  'scripts/issue-project-membership.mjs',
   'scripts/branch-name.mjs',
   'scripts/agent-policy.mjs',
   ...automationTests,
