@@ -47,17 +47,6 @@ test('Markdown gets only Markdown rules, never JavaScript, TypeScript, or Pretti
   );
 });
 
-test('eslint --fix reports Markdown problems but never rewrites Markdown', async () => {
-  const fixer = new ESLint({ cwd: root, fix: true });
-  const text = '# Title\n\nSome * spaced * emphasis.\n\n#Heading\n';
-  const [result] = await fixer.lintText(text, { filePath: 'docs/example.md' });
-  assert.equal(result.output, undefined);
-  assert.deepEqual(
-    [...new Set(result.messages.map(({ ruleId }) => ruleId))],
-    ['markdown/no-space-in-emphasis', 'markdown/no-missing-atx-heading-space'],
-  );
-});
-
 test('generated changelogs and untracked local agent files are not linted', async () => {
   for (const path of [
     'CHANGELOG.md',

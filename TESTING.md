@@ -2,7 +2,7 @@
 
 [Getting started](docs/getting-started.md) covers installing the repository and lists the checks to run for each kind of change. This guide explains what those checks cover and how CI selects them. From the repository root, `npm test` runs the repository script tests and then every workspace's tests.
 
-`npm run check`, the full local quality gate, verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Prettier ignores Markdown, so ESLint's Markdown rules are the only check on `.md` files. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes to code. Neither rewrites Markdown: ESLint reports Markdown problems but drops their fixes, so fix them by hand.
+`npm run check`, the full local quality gate, verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Prettier ignores Markdown, so ESLint's Markdown rules are the only check on `.md` files. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. `lint:fix` fixes code only, so fix Markdown problems by hand.
 
 ## Workspace tests
 

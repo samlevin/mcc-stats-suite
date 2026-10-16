@@ -8,31 +8,6 @@ const javascriptFiles = ['**/*.{js,mjs,cjs}'];
 const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
 const markdownFiles = ['**/*.md'];
 
-// Markdown layout is kept by hand, so `eslint --fix` (from `npm run lint:fix`,
-// an editor, or any other run) must never rewrite a Markdown file. This copy of
-// the plugin reports every problem its rules find but drops their fixes.
-const reportOnlyMarkdown = {
-  ...markdown,
-  rules: Object.fromEntries(
-    Object.entries(markdown.rules).map(([name, rule]) => [
-      name,
-      {
-        ...rule,
-        meta: { ...rule.meta, fixable: undefined },
-        create: (context) =>
-          rule.create(
-            Object.create(context, {
-              report: {
-                value: (descriptor) =>
-                  context.report({ ...descriptor, fix: undefined }),
-              },
-            }),
-          ),
-      },
-    ]),
-  ),
-};
-
 export default tseslint.config(
   {
     ignores: [
@@ -100,13 +75,12 @@ export default tseslint.config(
     files: [...javascriptFiles, ...typescriptFiles],
   },
   // Markdown is checked for broken structure (link fragments, table column
-  // counts, reference links, images, headings), never reformatted. Prettier
+  // counts, reference links, images, headings), not reformatted. Prettier
   // keeps ignoring Markdown, and code blocks inside it are not linted as code.
   // GFM parses GitHub tables; YAML front matter covers skill and agent files.
   ...markdown.configs.recommended.map((config) => ({
     ...config,
     files: markdownFiles,
-    plugins: { markdown: reportOnlyMarkdown },
     language: 'markdown/gfm',
     languageOptions: {
       frontmatter: 'yaml',
