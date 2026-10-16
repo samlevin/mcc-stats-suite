@@ -69,20 +69,6 @@ export async function readMetadata(api, id) {
     );
     return data.node?.labels;
   });
-  const projects = await paginate(async (cursor) => {
-    const data = await api(
-      `query($id: ID!, $cursor: String) { node(id: $id) {
-        ... on Issue { projectItems(first: 100, after: $cursor, includeArchived: false) {
-          nodes { project { id closed } } ${PAGE}
-        } }
-        ... on PullRequest { projectItems(first: 100, after: $cursor, includeArchived: false) {
-          nodes { project { id closed } } ${PAGE}
-        } }
-      } }`,
-      { id, cursor },
-    );
-    return data.node?.projectItems;
-  });
   const assignees = await paginate(async (cursor) => {
     const data = await api(
       `query($id: ID!, $cursor: String) { node(id: $id) {
@@ -95,9 +81,6 @@ export async function readMetadata(api, id) {
   });
   return {
     labels: labels.map((label) => label.id),
-    projects: projects
-      .filter((item) => item.project && !item.project.closed)
-      .map((item) => item.project.id),
     assignees: assignees.map((assignee) => assignee.id),
   };
 }
@@ -146,9 +129,6 @@ export async function copyMetadata({
   const labels = [...new Set(issues.flatMap((issue) => issue.labels))].filter(
     (id) => !current.labels.includes(id),
   );
-  const projects = [
-    ...new Set(issues.flatMap((issue) => issue.projects)),
-  ].filter((id) => !current.projects.includes(id));
   // The PR inherits whoever owns the issues it closes; nobody is assigned
   // to an issue by this script, and assignees already on the PR stay.
   const assignees = [
@@ -164,7 +144,7 @@ export async function copyMetadata({
   const milestone =
     !pr.milestone && milestones.length === 1 ? milestones[0] : null;
   log(
-    `PR #${number}: ${labels.length} labels, ${assignees.length} assignees, ${projects.length} projects, ${milestone ? 1 : 0} milestone to copy${dryRun ? ' (dry run)' : ''}.`,
+    `PR #${number}: ${labels.length} labels, ${assignees.length} assignees, ${milestone ? 1 : 0} milestone to copy${dryRun ? ' (dry run)' : ''}.`,
   );
   if (dryRun) return;
   // A description edit during discovery must not apply stale issue metadata.
@@ -191,11 +171,6 @@ export async function copyMetadata({
       `mutation($id: ID!, $milestone: ID!) { updatePullRequest(input: {pullRequestId: $id, milestoneId: $milestone}) { clientMutationId } }`,
       { id: pr.id, milestone },
     );
-  for (const project of projects)
-    await api(
-      `mutation($project: ID!, $id: ID!) { addProjectV2ItemById(input: {projectId: $project, contentId: $id}) { item { id } } }`,
-      { project, id: pr.id },
-    );
 }
 
 if (
@@ -205,7 +180,7 @@ if (
   try {
     if (process.env.GITHUB_ACTIONS === 'true') {
       if (!process.env.MCC_PROJECT_TOKEN)
-        throw new Error('MCC_PROJECT_TOKEN is required for Projects access.');
+        throw new Error('MCC_PROJECT_TOKEN is required.');
       if (process.env.GITHUB_REPOSITORY !== REPOSITORY)
         throw new Error('Unexpected repository');
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
@@ -221,7 +196,7 @@ if (
   } catch (error) {
     console.error(
       error.code || error.status
-        ? 'GitHub API request failed; check authentication and Projects permissions.'
+        ? 'GitHub API request failed; check authentication and issue and pull request permissions.'
         : error.message,
     );
     process.exitCode = 1;

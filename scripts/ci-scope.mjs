@@ -6,6 +6,7 @@ const repositoryFiles = new Set([
   '.github/workflows/tracker-issue-states.yml',
   '.github/workflows/tracker-pr-issue-status.yml',
   '.github/workflows/tracker-pr-metadata.yml',
+  '.github/workflows/tracker-project-membership.yml',
   '.github/CODEOWNERS',
   'CODEOWNERS',
   'LICENSE',
@@ -18,6 +19,8 @@ const repositoryFiles = new Set([
   'scripts/issue-pr-metadata.test.mjs',
   'scripts/issue-pr-status.mjs',
   'scripts/issue-pr-status.test.mjs',
+  'scripts/issue-project-membership.mjs',
+  'scripts/issue-project-membership.test.mjs',
 ]);
 
 // Known workspaces. Shared with scripts/ci-checks.mjs so selection and Turbo

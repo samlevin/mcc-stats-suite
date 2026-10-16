@@ -10,7 +10,9 @@ Relationships, if the CLI lacks flags: GraphQL `addSubIssue(issueId, subIssueId)
 
 Project: select it by owner and number, never by title.
 `gh project field-list {{project.number}} --owner {{project.owner}} --format json`
-`gh project item-add {{project.number}} --owner {{project.owner}} --url ISSUE --format json` (check for existing membership first; template or project automation may have already added it)
+A repository workflow adds each new issue to the project within about a minute. Never run `gh project item-add`. Find the item the workflow added:
+`gh api graphql -f query='query($url: URI!) { resource(url: $url) { ... on Issue { projectItems(first: 50) { nodes { id project { id number owner { ... on User { login } ... on Organization { login } } } } } } } }' -F url=ISSUE --jq '.data.resource.projectItems.nodes[] | select(.project.number == {{project.number}} and .project.owner.login == "{{project.owner}}") | "\(.id) \(.project.id)"'`
+It prints the item ID (ITEM) and the project ID (PID). An empty result means the item is not there yet. Repeat every 10 seconds for up to 3 minutes. If it is still missing, skip that issue's fields and post-create commands and report it as unfinished: name the issue, say that it is not in the project and its fields are unset, and point to the repository's Actions runs for the issue. Once the item exists, set each field on it:
 `gh project item-edit --id ITEM --project-id PID --field-id FID --single-select-option-id OID`
 Resolve IDs from current metadata and never copy them across projects. If project authorization is missing, keep the created issue and report the gap. Never refresh auth or add scopes without permission.
 
