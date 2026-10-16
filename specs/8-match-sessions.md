@@ -36,10 +36,11 @@ The issue (#167) states the intended flow: a host starts a session, selects a ma
 | Identifiers | `sessionId`, `matchId` and `uploadId` are `evidenceId()` values (spec 1 §5.1), issued by `SessionWrite`. `mapId` is a slug from the map catalog (the map catalog row below), `<game>-<map slug>`, such as `halo3-guardian`. Every session event has an `eventId` (also `evidenceId()`) and a `sequence` number. | One identifier format across evidence, sortable by creation time. A game prefix keeps map slugs unique when maps from other MCC games join the catalog. |
 | What a match is | A match is created by the host's `MAP_SELECTED` event, before the map is played, or by a later `MATCH_ADDED` correction. Each `MAP_SELECTED` creates exactly one match. | The host selects the map before play, so the selection is the earliest record of the match, and its time starts the match's window (§7.3). |
 | Where session events live | Each event is one create-only JSON object in the evidence bucket at `sessions/{sessionId}/events/{sequence}.json`. The sequence number is the next free number in the session, and `If-None-Match: *` refuses a second writer of the same number (§6.1). There is no session table. | The evidence bucket already gives immutable, Object Lock protected, append-only storage (spec 1 §5.2). Create-only sequence keys serialize the writers of one session without a new persistent resource. At league scale, listing a session's events is cheap (§18.6). |
-| Corrections | A correction is a new event that names the event it supersedes in `supersedesEventId`. `SessionWrite` refuses it with `409 STALE_SUPERSESSION` when that event is not the current one (§6.1). No event is ever changed or deleted. Corrections are allowed while the session is open and after it ends. | Every earlier decision stays readable, and two hosts cannot both supersede the same decision. Spec 4's map correction route already requires the prior event ID. |
+| Corrections | A correction is a new event that names the event it supersedes in `supersedesEventId`. `SessionWrite` refuses it with `409 STALE_SUPERSESSION` when that event is not the current one (§6.1). No event is ever changed or deleted. Corrections are allowed while the session is open and after it ends. A correction never moves a match: a match's position comes only from the event that created it (§7.1), and a correction's time is kept for audit. | Every earlier decision stays readable, and two hosts cannot both supersede the same decision. Spec 4's map correction route already requires the prior event ID. Fixing a map label must not reorder the games around it. |
 | Spec 4's `MapSelectionEvent` | Not adopted as written. `MAP_SELECTED` carries spec 4's suggestion fields (`suggestionModelVersion`, `suggestedMapIds`, `selectedSuggestionRank`), so spec 4 needs no second event. Spec 4 must change where its match is created, its time field, its sequence number and its routes (§8.2). | Spec 4's event is written after the game, has no session, and needs a global transactional counter. The host selects the map before the game, and the session sequence orders it. |
 | The map catalog | A bundled, immutable file in `applications/admin/config/map-catalog-v<n>.json`. v1 holds every Halo 3 multiplayer map MCC offers. A map is never removed or renamed; a later version marks it `selectable: false`. `SessionWrite` writes each catalog version it uses to `map-catalogs/{mapCatalogVersion}.json` create-only, so consumers read map names from evidence. This is spec 4's "predefined map catalog". | Every current capture and parser profile is Halo 3 (spec 7 §4.1, §4.4). A released file pins what a `mapId` meant when it was chosen. |
 | How uploads reach match-to-csv | The browser posts each file to the attachments bucket under `uploads/{sessionId}/{uploadId}/original` with a presigned POST (§6.2). The bucket's `Object Created` event starts the existing match-to-csv main workflow, where a new first `Choice` state sends it to a new `ProcessUpload` Lambda instead of `ProcessEmail`. `ProcessUpload` applies spec 1's attachment checks, stores the original as a new submission, and returns the same output, so the same `Map`, `ExtractText` and `WriteExtractedCsv` states run unchanged. Email intake runs beside it, unchanged apart from a `channel` field in its trigger input. | One extraction path means every run is comparable, and spec 2, spec 3 and spec 7 need no change to read uploaded runs. Staging in the attachments bucket, which the foundation reserved for later features (spec 1 §13.1), keeps unchecked bytes out of the Object Lock bucket, as the raw-email bucket does for mail. |
+| Which screenshot an upload has when intake runs more than once | Exactly one: the screenshot in the upload's receipt. `ProcessUpload` writes the receipt at a fixed key per upload, `uploads/{uploadId}/receipt.json`, create-only and as its last write, after the submission's completion. Every later intake run for that upload, whether a retry, a restarted execution, a duplicate delivery or a second POST, finds the receipt and returns its screenshot without writing anything (§6.3). | Retries are then never a duplicate. The screenshot the association lists is always the one sent to extraction, even when the attempt that wrote the receipt failed before extraction began. |
 | When the host may upload | Only to an ended session. An upload request for an open session is refused with `409 SESSION_OPEN`. | The last match's window ends at `SESSION_ENDED` (§7.3). Uploading after the night also matches the issue's flow. |
 | Capture-time sources | In order: EXIF `DateTimeOriginal` with `OffsetTimeOriginal`; EXIF `DateTimeOriginal` without an offset, read in the session's `hostTimeZone`; the browser's `File.lastModified`, corrected for the browser clock's offset from the server. The first usable source wins, and every candidate is recorded (§7.2). | EXIF is written by the capturing device when the image is made. A file time is often the time of the last copy, so it comes last, and a file time equal to the moment the host picked the file is discarded. |
 | Upload order | Recorded as `uploadIndex` and used only to order screenshots on host screens. It is never a capture time and never assigns a screenshot. | One missing or extra screenshot would shift every later assignment by one match without any visible sign. |
@@ -72,7 +73,7 @@ The issue (#167) states the intended flow: a host starts a session, selects a ma
 - Deciding which screenshot of a match is used for statistics, or merging pages. #159 owns that.
 - Recording teams, players, game variants or results on a match. Those come from validated tables (spec 3 §8.4).
 - Associating emailed screenshots, or screenshots uploaded to an open session.
-- Exactly-once intake. A retried `ProcessUpload` creates a second submission, which the association marks `DUPLICATE` (§7.4).
+- Exactly-once submissions. An intake attempt that fails before writing its upload's receipt leaves a submission with no receipt, which no association lists and no execution extracts. Each upload still has at most one receipt and one screenshot (§6.3, §6.5).
 - Real-time screenshot upload during play.
 
 ## 3. Runtime architecture
@@ -95,11 +96,11 @@ Host browser --presigned POST (10 minutes)--> Attachments bucket (OpenTofu): upl
 match-to-csv main workflow <stack>
   Route intake (Choice on $.channel)
     +-- EMAIL          -> ProcessEmail (spec 1, unchanged)
-    +-- SESSION_UPLOAD -> ProcessUpload: checks, stores the original as a new submission,
-                          writes sessions/{sessionId}/uploads/{uploadId}/receipts/{submissionId}.json
+    +-- SESSION_UPLOAD -> ProcessUpload: returns the existing receipt's screenshot, or checks, stores the
+                          original as a new submission, and writes sessions/{sessionId}/uploads/{uploadId}/receipt.json last
   Process attachments (Map) -> ExtractText -> WriteExtractedCsv   (spec 1, unchanged)
 
-Evidence bucket Object Created under sessions/*/events/, intent.json, receipts/  (EventBridge, spec 2 P1.1)
+Evidence bucket Object Created under sessions/*/events/, intent.json, receipt.json  (EventBridge, spec 2 P1.1)
   |
   v
 admin EventBridge rule -> DeriveAssociation Lambda (reserved concurrency 1) --(failed delivery)--> SQS DLQ
@@ -108,7 +109,7 @@ admin EventBridge rule -> DeriveAssociation Lambda (reserved concurrency 1) --(f
 Evidence bucket: sessions/{sessionId}/association/{associationVersion}.json  -->  stats lakehouse (#159)
 ```
 
-**Ownership rules:** `session-write` owns session events, upload slots, upload intents and map catalog snapshots, and is the only module that signs upload POSTs. `process-upload` in match-to-csv owns upload submissions and upload receipts. `derive-association` owns association versions. `session-read` writes nothing. No admin module writes under `submissions/`, and no match-to-csv module writes under `sessions/` except `process-upload` under `sessions/*/uploads/*/receipts/`. `session-events`, `capture-time` and `association` are pure and perform no I/O. Only Lambda entry points construct AWS SDK clients; each core function receives an injected dependencies object.
+**Ownership rules:** `session-write` owns session events, upload slots, upload intents and map catalog snapshots, and is the only module that signs upload POSTs. `process-upload` in match-to-csv owns upload submissions and upload receipts. `derive-association` owns association versions. `session-read` writes nothing. No admin module writes under `submissions/`, and no match-to-csv module writes under `sessions/` except `process-upload` at `sessions/*/uploads/*/receipt.json`. `session-events`, `capture-time` and `association` are pure and perform no I/O. Only Lambda entry points construct AWS SDK clients; each core function receives an injected dependencies object.
 
 **Packaging:** session, upload, association and map catalog types live in `@mcc/contracts`, because match-to-csv writes receipts and the lakehouse reads associations. The admin Lambdas and pure libraries live in `@mcc/admin` beside spec 3's, and host screens in its `web/` application. `process-upload` lives in `@mcc/match-to-csv`.
 
@@ -117,7 +118,7 @@ Evidence bucket: sessions/{sessionId}/association/{associationVersion}.json  -->
 ### 3.1 Execution policy
 
 - One host action is one API request and at most one session event.
-- One uploaded file is one upload intent, one attachments bucket object, one main workflow execution and, when accepted, one submission with one screenshot.
+- One uploaded file is one upload intent and one staged attachments bucket object, and has at most one receipt. The receipt names the one submission and screenshot the association uses, and every main workflow execution for the upload that reaches extraction extracts that screenshot (§6.3).
 - Every evidence write uses `If-None-Match: *`. No handler deletes or overwrites an object.
 - Session events are numbered from 1 without gaps. A write that loses the race for a number re-reads the session and retries, up to 3 attempts (§6.1).
 - The association is a pure function of the session's input objects and the bundled configuration (§7.6). Deriving it twice from the same inputs gives the same document apart from `derivedAt` and `build`.
@@ -182,7 +183,7 @@ The suggestion fields of `MAP_SELECTED` keep spec 4's meaning, with the type cha
   events/{sequence}.json                          session-event/v1, sequence zero-padded to 6 digits
   upload-slots/{uploadBatchId}-{uploadIndex}.json  upload-slot/v1, claims one uploadId per slot
   uploads/{uploadId}/intent.json                  upload-intent/v1
-  uploads/{uploadId}/receipts/{submissionId}.json upload-receipt/v1 (written by match-to-csv)
+  uploads/{uploadId}/receipt.json                 upload-receipt/v1 (written by match-to-csv), at most one per upload
   association/{associationVersion}.json           session-association/v1, zero-padded to 10 digits
 [ephemeral/<name>/]map-catalogs/{mapCatalogVersion}.json   map-catalog/v1
 [ephemeral/<name>/]submissions/{submissionId}/...           spec 1 §5.1, for each accepted or rejected upload
@@ -196,9 +197,10 @@ Attachments bucket:
 1. Every evidence object above is written once with `If-None-Match: *`. Session events are never updated or deleted, and a correction is always a new event (§1).
 2. Event `sequence` numbers in a session start at 1 and have no gaps. `SESSION_STARTED` is always sequence 1.
 3. An upload intent exists before its presigned POST is issued, and `process-upload` refuses a staged object without an intent.
-4. A map catalog snapshot's bytes are the bundled file's bytes, so every writer of a version produces the same object.
-5. An association version is written only when its `inputsSha256` differs from the latest version's. Its number is one more than the latest.
-6. The staged copy in the attachments bucket is not evidence. The stored original under `submissions/` is, and its SHA-256 is recorded in the receipt.
+4. An upload has at most one receipt, because its key holds no submission or version. `process-upload` writes it after the submission's completion and event, so a receipt always names a submission that finished intake, and the first receipt written for an upload is final.
+5. A map catalog snapshot's bytes are the bundled file's bytes, so every writer of a version produces the same object.
+6. An association version is written only when its `inputsSha256` differs from the latest version's. Its number is one more than the latest.
+7. The staged copy in the attachments bucket is not evidence. The stored original under `submissions/` is, and its SHA-256 is recorded in the receipt.
 
 ### 5.3 Document schemas
 
@@ -207,13 +209,13 @@ Attachments bucket:
 | `events/{sequence}.json` | `session-event/v1` | `session-write` | `SessionEvent` (§10.1) |
 | `upload-slots/{uploadBatchId}-{uploadIndex}.json` | `upload-slot/v1` | `session-write` | `uploadBatchId`, `uploadIndex`, `uploadId`, `createdAt` |
 | `uploads/{uploadId}/intent.json` | `upload-intent/v1` | `session-write` | `UploadIntent`: `uploadId`, `sessionId`, `uploadBatchId`, `uploadIndex`, `fileName` (normalized as spec 1 §4.3), `contentType`, `sizeBytes`, `fileLastModified`, `clientTime`, `requestedAt`, `actorSub`, `stagingObject` |
-| `uploads/{uploadId}/receipts/{submissionId}.json` | `upload-receipt/v1` | `process-upload` | `UploadReceipt`: `sessionId`, `uploadId`, `submissionId`, `stagingObject` with `versionId`, `status` (`ACCEPTED` or `REJECTED`), `rejectionCodes`, `screenshot` (`SourceScreenshot` or `null`), `exif` (`dateTimeOriginal`, `offsetTimeOriginal`, `error`), `receivedAt` |
+| `uploads/{uploadId}/receipt.json` | `upload-receipt/v1` | `process-upload` | `UploadReceipt`: `sessionId`, `uploadId`, `submissionId`, `stagingObject` with `versionId`, `status` (`ACCEPTED` or `REJECTED`), `rejectionCodes`, `screenshot` (`SourceScreenshot` or `null`), `exif` (`dateTimeOriginal`, `offsetTimeOriginal`, `error`), `receivedAt` |
 | `association/{associationVersion}.json` | `session-association/v1` | `derive-association` | `SessionAssociation` (§10.1) |
 | `map-catalogs/{mapCatalogVersion}.json` | `map-catalog/v1` | `session-write` | `MapCatalog`: `mapCatalogVersion` and `maps` with `mapId`, `game`, `displayName`, `selectable` |
 | upload submission `ingestion.json` | `upload-submission/v1` | `process-upload` | `submissionId`, `channel: SESSION_UPLOAD`, `sessionId`, `uploadId`, `stagingObject` with `versionId`, `receivedAt` |
 | `source/metadata.json` | `source-screenshot/v1` | `process-email`, `process-upload` | adds an optional `intake` (`channel`, `sessionId`, `uploadId`); absent on emailed screenshots |
 
-Submission completion, submission events and every run object keep their spec 1 schemas. The one addition is that a `REJECTED` upload completion without an intent carries `error`, which spec 1 sets only on `FAILED` (§6.3 step 2).
+Submission completion, submission events and every run object keep their spec 1 schemas. The one addition is that a `REJECTED` upload completion without an intent carries `error`, which spec 1 sets only on `FAILED` (§6.3 step 4).
 
 ### 5.4 Stage versions
 
@@ -254,18 +256,21 @@ The attachments bucket's EventBridge rule (§13.3) starts the main workflow with
 
 `processUpload(event, dependencies)` performs these steps in order:
 
-1. Parse the key as `[ns]uploads/{sessionId}/{uploadId}/original`, and require that `[ns]` equals the stack's `OBJECT_PREFIX`. Create a `submissionId` and write `ingestion.json` (`upload-submission/v1`).
-2. Read `[ns]sessions/{sessionId}/uploads/{uploadId}/intent.json`. When it does not exist, write a `REJECTED` completion with no screenshot, no rejected attachment and `error` `{ name: "UploadIntentMissingError" }`, append `SUBMISSION_REJECTED` with the same `error` in its `detail`, and throw `UploadIntentMissingError`. No source and no receipt are written, because there is no session to write them under.
-3. Read the staged object at `versionId`, store its bytes as `screenshots/{screenshotId}/source/original`, and run Sharp metadata and spec 1's attachment checks (§4.3) with the intent's normalized `fileName` as `attachmentName`. Write `source/metadata.json` with `intake`.
-4. Read EXIF `DateTimeOriginal` and `OffsetTimeOriginal` from Sharp's `exif` buffer as raw strings. A missing buffer gives `null` for both; an unparseable one records `error` and `null` for both.
-5. Write the receipt, then the submission completion and event as spec 1 does. With the image rejected, the receipt is `REJECTED`, and the stage throws after writing them, so the execution fails as a rejected email does.
-6. Return `{ submissionId, screenshots: [source], rejectedAttachments: [] }`.
+1. Parse the key as `[ns]uploads/{sessionId}/{uploadId}/original`, and require that `[ns]` equals the stack's `OBJECT_PREFIX`.
+2. Read `[ns]sessions/{sessionId}/uploads/{uploadId}/receipt.json`. When it exists, the upload's intake is already decided: log `Upload already received` with `sessionId`, `uploadId` and the receipt's `submissionId`, and write nothing. An `ACCEPTED` receipt returns `{ submissionId, screenshots: [screenshot], rejectedAttachments: [] }` from the receipt, so this execution extracts the receipt's screenshot. A `REJECTED` receipt throws as step 7 does.
+3. Create a `submissionId` and write `ingestion.json` (`upload-submission/v1`).
+4. Read `[ns]sessions/{sessionId}/uploads/{uploadId}/intent.json`. When it does not exist, write a `REJECTED` completion with no screenshot, no rejected attachment and `error` `{ name: "UploadIntentMissingError" }`, append `SUBMISSION_REJECTED` with the same `error` in its `detail`, and throw `UploadIntentMissingError`. No source and no receipt are written, because there is no session to write them under.
+5. Read the staged object at `versionId`, store its bytes as `screenshots/{screenshotId}/source/original`, and run Sharp metadata and spec 1's attachment checks (§4.3) with the intent's normalized `fileName` as `attachmentName`. Write `source/metadata.json` with `intake`.
+6. Read EXIF `DateTimeOriginal` and `OffsetTimeOriginal` from Sharp's `exif` buffer as raw strings. A missing buffer gives `null` for both; an unparseable one records `error` and `null` for both.
+7. Write the submission completion and event as spec 1 does, then the receipt with `If-None-Match: *` as the last write. With the image rejected, the receipt is `REJECTED`, and the stage throws after writing it, so the execution fails as a rejected email does.
+8. When the receipt write returns `412`, another intake run for the upload wrote its receipt first. Read that receipt and finish as step 2 does. This run's submission keeps its completion but has no receipt, so no association lists it and no execution extracts its screenshot.
+9. Return `{ submissionId, screenshots: [source], rejectedAttachments: [] }`.
 
-Errors after step 1 record `FAILED` and `SUBMISSION_FAILED` on a best-effort basis and rethrow, as spec 1 P2.3 requires of `process-email`.
+Errors after step 3 and before the completion is written record `FAILED` and `SUBMISSION_FAILED` on a best-effort basis and rethrow, as spec 1 P2.3 requires of `process-email`. Any other error writing the receipt rethrows. The next intake run for the upload then finds the receipt if the write took effect, and otherwise starts a new submission.
 
 ### 6.4 Association derivation
 
-An EventBridge rule in the admin stack matches evidence bucket `Object Created` events whose key matches `[ns]sessions/*/events/*`, `[ns]sessions/*/uploads/*/intent.json` or `[ns]sessions/*/uploads/*/receipts/*`, and invokes `DeriveAssociation` asynchronously with the key. An operator may also invoke it with `{ sessionId }`.
+An EventBridge rule in the admin stack matches evidence bucket `Object Created` events whose key matches `[ns]sessions/*/events/*`, `[ns]sessions/*/uploads/*/intent.json` or `[ns]sessions/*/uploads/*/receipt.json`, and invokes `DeriveAssociation` asynchronously with the key. An operator may also invoke it with `{ sessionId }`.
 
 `deriveAssociation(sessionId, dependencies)`:
 
@@ -281,8 +286,9 @@ An EventBridge rule in the admin stack matches evidence bucket `Object Created` 
 
 - `SessionWrite` relies on the SDK's default retries and returns `503 UNAVAILABLE` for other storage errors. The client retries with the same `clientRequestId`, so an event written before the response was lost returns with `200`.
 - A presigned POST that expires before the browser posts returns `403` from S3. The client repeats the upload request with the same `uploadBatchId` and `uploadIndex` and receives a fresh POST for the same `uploadId`.
-- A retried `ProcessUpload` creates a new submission and a second receipt for the same upload, as spec 1 §6.3 does for email. The association marks the later screenshot `DUPLICATE` (§7.4).
-- A second POST of the same key within the 600 seconds creates a new version of the staged object, a second execution and a second receipt. The association keeps the screenshot of the earliest accepted receipt and marks the other `DUPLICATE`, whether or not the bytes differ (§7.4).
+- Intake can run more than once for one upload: a Step Functions retry of `ProcessUpload`, an operator restarting a failed execution with the same input, a duplicate EventBridge delivery, or a second POST of the same key within the 600 seconds, which creates a new staged version and a second execution. Each run first reads the upload's receipt (§6.3 step 2). Once the receipt exists, every run returns its screenshot and writes nothing, so a run that follows a failure after the receipt was written extracts the screenshot the association lists. A staged version whose run starts after the receipt exists is never stored.
+- A run that fails before the receipt is written leaves its submission with a `FAILED` completion, or a `SUCCEEDED` one when only the receipt write failed, and no receipt. As spec 1 §6.3 does for email, the next run creates a new submission. Two concurrent runs both create submissions, the first receipt write wins, and the other run returns the winner's screenshot (§6.3 step 8). No association lists a submission without a receipt, and no execution extracts its screenshot.
+- An execution that fails after its receipt was written, for example when the Lambda's response is lost, leaves an accepted screenshot with no run. An operator recovers it by starting the main workflow again with the execution's input. Intake returns the receipt's screenshot, and extraction runs on it.
 - A failed derivation leaves the earlier version as the latest. The next input change, or the operator rebuild, writes the missing version.
 
 ## 7. Association rules
@@ -294,9 +300,10 @@ An EventBridge rule in the admin stack matches evidence bucket `Object Created` 
 1. Events apply in `sequence` order.
 2. `MAP_SELECTED` creates a `LIVE` match with `selectedAt` equal to its `occurredAt` and `liveIndex` equal to the number of `MAP_SELECTED` events so far. `MATCH_ADDED` creates an `ADDED` match with no `selectedAt` and no window.
 3. A match's `mapId` and `mapCatalogVersion` come from its current map event (§4.2). Its `status` is `VOIDED` after a `MATCH_VOIDED` that no `MATCH_RESTORED` supersedes, otherwise `ACTIVE`.
-4. `matchIndex` orders every match for display: `LIVE` matches in `liveIndex` order, each `ADDED` match after its `afterMatchId` (or first when `null`), and several `ADDED` matches after one anchor in event order. It is recomputed in every version, so consumers key on `matchId`.
-5. `clockOffsetSeconds` is the `offsetSeconds` of the current `CLOCK_OFFSET_SET`, or 0.
-6. The session is `OPEN` until `SESSION_ENDED`, then `ENDED` with `endedAt` equal to that event's `occurredAt`.
+4. `matchIndex` is each match's chronological position in the session, 1-based, active and voided matches alike. `LIVE` matches take `liveIndex` order. Each `ADDED` match follows its `afterMatchId` match, and a `null` `afterMatchId` anchors it at the start of the session, before the first `LIVE` match. The `ADDED` matches that share one anchor follow it in the `sequence` order of their `MATCH_ADDED` events, and each of them is followed by the `ADDED` matches anchored on it before the next one starts. `MATCH_ADDED` is refused until the session ends, so every `LIVE` match exists before any `ADDED` match is placed.
+5. Only `MAP_SELECTED` and `MATCH_ADDED` place a match. `MAP_CORRECTED`, `MATCH_VOIDED` and `MATCH_RESTORED` never change any match's `matchIndex` or `selectedAt`, whenever they are written, and no event changes the relative order of two existing matches. A correction's `occurredAt` records when the label changed and is used only for audit. An added match moves the matches after it one place later, so `matchIndex` is recomputed in every version and consumers key on `matchId`.
+6. `clockOffsetSeconds` is the `offsetSeconds` of the current `CLOCK_OFFSET_SET`, or 0.
+7. The session is `OPEN` until `SESSION_ENDED`, then `ENDED` with `endedAt` equal to that event's `occurredAt`.
 
 ### 7.2 Capture time
 
@@ -321,7 +328,7 @@ The shift `g` credits a screenshot taken just after the host selected the next m
 
 ### 7.4 Assignment
 
-For each upload, the screenshot is the one from its earliest `ACCEPTED` receipt by `submissionId`. Screenshots from its later receipts are `DUPLICATE` with `duplicateOf` set to that screenshot. After that, a screenshot whose `sha256` equals that of a screenshot from an earlier `uploadId` in the session is `DUPLICATE` of it. A `DUPLICATE` screenshot carries the `matchId` and `mapId` of the screenshot it duplicates.
+An upload has at most one receipt (§5.2), and when that receipt is `ACCEPTED`, its screenshot is the upload's screenshot. Intake retries never add a screenshot (§6.5), so `DUPLICATE` means only a repeated image: a screenshot whose `sha256` equals that of the screenshot of an earlier `uploadId` in the session is `DUPLICATE` of it, with `duplicateOf` set to that screenshot. A `DUPLICATE` screenshot carries the `matchId` and `mapId` of the screenshot it duplicates.
 
 Every other accepted screenshot takes the first matching row:
 
@@ -338,7 +345,7 @@ Every other accepted screenshot takes the first matching row:
 | The session is ended and `effectiveAt` is at or after `endedAt + g` | `UNASSIGNED` | `null` | `AFTER_SESSION_END` |
 | otherwise, including a time after a capped last window but before `endedAt + g` | `UNASSIGNED` | `null` | `BETWEEN_WINDOWS` |
 
-A `DERIVED` screenshot is `nearBoundary` when `effectiveAt` is within `boundaryMarginSeconds` of either edge of its window. Every assigned screenshot records its match's `mapId`. Uploads without an `ACCEPTED` receipt appear in `uploads` as `PENDING` (no receipt) or `REJECTED` with the receipt's codes. The association does not decide that a pending upload is lost, because that would depend on the clock at derivation time.
+A `DERIVED` screenshot is `nearBoundary` when `effectiveAt` is within `boundaryMarginSeconds` of either edge of its window. Every assigned screenshot records its match's `mapId`. Uploads without an `ACCEPTED` receipt appear in `uploads` as `PENDING` (no receipt) or `REJECTED` with the receipt's codes, and their `screenshotId` is `null`. The association does not decide that a pending upload is lost, because that would depend on the clock at derivation time.
 
 A match records `screenshotIds` (`DERIVED` and `HOST_ASSIGNED` screenshots, by `uploadIndex` and then `uploadId`), `screenshotCount`, and the flags `NO_SCREENSHOT` (count 0) and `MULTIPLE_SCREENSHOTS` (count 2 or more). `DUPLICATE` screenshots are not counted.
 
@@ -375,7 +382,13 @@ The admin application owns the contract, and `@mcc/contracts` exports its types 
 | `sessions/{sessionId}/events/{sequence}.json` | Audit, and spec 4's map selection history (§8.2). |
 | `map-catalogs/{mapCatalogVersion}.json` | Map names and games for a `mapId`. |
 
-A run joins its match in two steps. Its manifest's `screenshotId` (spec 1 §5.3), or a validated table's `screenshotId` (spec 3 §8.5), selects the screenshot entry in the latest association of its session. Its session is `inputArtifact.intake.sessionId` in the manifest, or `intake.sessionId` in `source/metadata.json`. A screenshot whose source has no `intake` came by email and has no session. A screenshot that the latest association lists as `UNASSIGNED` or `EXCLUDED` has no match. A `DUPLICATE` carries the `matchId` of the screenshot it repeats and names it in `duplicateOf`. Matches do not count it, and consumers should not either. A consumer must treat an uploaded screenshot that no association lists yet as unassigned, because derivation runs after the receipt is written.
+A run joins its match in two steps. Its manifest's `screenshotId` (spec 1 §5.3), or a validated table's `screenshotId` (spec 3 §8.5), selects the screenshot entry in the latest association of its session. Its session is `inputArtifact.intake.sessionId` in the manifest, or `intake.sessionId` in `source/metadata.json`. A screenshot whose source has no `intake` came by email and has no session. A screenshot that the latest association lists as `UNASSIGNED` or `EXCLUDED` has no match. A consumer must treat an uploaded screenshot that no association lists yet as unassigned, because derivation runs after the receipt is written.
+
+The contract guarantees three things about what an association lists:
+
+- **One screenshot per upload, and it is the extracted one.** An association lists at most one screenshot per upload, the one in the upload's receipt. Every main workflow execution for the upload that reaches extraction extracts that screenshot, including one that retries or restarts intake after an earlier attempt failed (§6.3, §6.5). A submission left without a receipt by a failed or losing intake attempt is never listed and never extracted, and consumers ignore it as they ignore any screenshot no association lists.
+- **`DUPLICATE` means a repeated image, never a retry.** A `DUPLICATE` is the screenshot of a later upload whose bytes equal those of an earlier upload's screenshot in the session (§7.4). It carries the `matchId` of the screenshot it repeats and names it in `duplicateOf`. Matches do not count it, and consumers should not either.
+- **`matchIndex` is the match's chronological position.** A map correction, a void or a restore never changes any `matchIndex` or `selectedAt`, and no event changes the relative order of two existing matches. Only `MATCH_ADDED` inserts a match, at the deterministic place §7.1 defines, and moves the later matches one place on.
 
 The lakehouse (#159) ingests every association version, as it does every validated table version, and selects the latest per session in silver. A correction reaches it as a new version. Choosing one screenshot per match, and what to do with `MULTIPLE_SCREENSHOTS` and `NO_SCREENSHOT` matches, is the lakehouse's decision.
 
@@ -388,9 +401,9 @@ Spec 4 assumed a reporter who creates a match after the game. This spec records 
 | "When a game ends, the reporter creates a match record and selects the map that was just played." | The host selects the map before the game in a session, and that selection creates the match (§1). "Reporter" becomes "host", and the match-entry form becomes the session's map selection screen. |
 | `MapSelectionEvent` (`map-selection-event/v1`) | Replaced by `MAP_SELECTED`, `MAP_CORRECTED` and `MATCH_ADDED` session events. `eventId`, `matchId`, `mapId`, `suggestionModelVersion`, `suggestedMapIds` and `selectedSuggestionRank` keep their meaning. |
 | `suggestionModelVersion: string`, `selectedSuggestionRank?: number` | `suggestionModelVersion: string \| null`, `null` when no suggestion was shown, including before spec 4 ships. `selectedSuggestionRank: number \| null`, always present. |
-| `concludedAt` | `occurredAt` of the map event, which is when the map was selected, before play. |
-| `sequenceNumber`, a global counter assigned transactionally | Removed. Spec 4 orders effective selections by `(occurredAt, eventId)` across sessions, with `ADDED` matches placed by their session's `matchIndex`. `previousMapIds` comes from that order, and spec 4 decides whether history crosses sessions. |
-| "Every confirmed match creates one immutable `MapSelectionEvent`" | Every effective map of an `ACTIVE` match is one training label: the current map event of the match. Voided matches are excluded. |
+| `concludedAt` | The match's `selectedAt`, the `occurredAt` of its `MAP_SELECTED` event, which is when the map was selected, before play. An `ADDED` match has no `selectedAt`. A `MAP_CORRECTED` event's `occurredAt` records when the label changed, for audit, and never times or orders a label. |
+| `sequenceNumber`, a global counter assigned transactionally | Removed. Spec 4 orders matches, not map events: sessions by `(startedAt, sessionId)`, and the matches of a session by the `matchIndex` of §7.1, which only `MAP_SELECTED` and `MATCH_ADDED` set. A correction therefore changes a match's label and never its position, and an `ADDED` match sits after its anchor as §7.1 places it. `previousMapIds` comes from that order, and spec 4 decides whether history crosses sessions. |
+| "Every confirmed match creates one immutable `MapSelectionEvent`" | Every `ACTIVE` match is one training label at its position: the `mapId` of the match's current map event. Voided matches are excluded, and excluding one never reorders the others. |
 | `POST /v1/matches` | `POST /api/v1/sessions/{sessionId}/events` with `MAP_SELECTED`. The match and its selection are one event, so the atomicity spec 4's integration test checks holds by construction. |
 | `POST /v1/matches/{matchId}/map-corrections` | The same route with `MAP_CORRECTED`, whose `supersedesEventId` is spec 4's required prior event ID. |
 | `GET /v1/maps/suggestions` | Kept, under `/api/v1/` on the admin API, for the `host` group. The map selection screen calls it once spec 4 ships, and falls back to the full catalog. Its `basedOnSequenceNumber` becomes `basedOnEventId`, the `eventId` of the latest effective map event the ranker read. |
@@ -401,7 +414,7 @@ Spec 4's rule that training never reads a screenshot's associated map holds: the
 
 ### 8.3 Spec 1
 
-Match-to-csv still creates no match and associates nothing (spec 1 §2.2). It gains a second intake channel. P3.1 and P3.2 update spec 1 in the same PR as the behavior: §1 and §2.1 (session upload beside email), §3 and §6.1 (the **Route intake** state and the upload rule), §4 (a new subsection for upload intake), §5.1 and §5.3 (`upload-submission/v1`, `upload-receipt/v1`, and `intake` on `source-screenshot/v1` and in the run manifest's `inputArtifact`), §10.1 (`SourceScreenshot.intake`, `ProcessUploadInput`), §11, §13.1 (attachments bucket notifications, CORS and `uploads/` expiry), §13.2 and §13.4 (`ProcessUpload`), and §16.1. The statement in spec 1 §13.1 that objects outside `ephemeral/` never expire stops being true for the attachments bucket's `uploads/` prefix.
+Match-to-csv still creates no match and associates nothing (spec 1 §2.2). It gains a second intake channel. P3.1 and P3.2 update spec 1 in the same PR as the behavior: §1 and §2.1 (session upload beside email), §3 and §6.1 (the **Route intake** state and the upload rule), §4 (a new subsection for upload intake), §5.1 and §5.3 (`upload-submission/v1`, `upload-receipt/v1`, and `intake` on `source-screenshot/v1` and in the run manifest's `inputArtifact`), §6.3 (a retried upload intake returns the upload's receipt instead of creating a second screenshot), §10.1 (`SourceScreenshot.intake`, `ProcessUploadInput`), §11, §13.1 (attachments bucket notifications, CORS and `uploads/` expiry), §13.2 and §13.4 (`ProcessUpload`), and §16.1. The statement in spec 1 §13.1 that objects outside `ephemeral/` never expire stops being true for the attachments bucket's `uploads/` prefix.
 
 ### 8.4 Spec 7
 
@@ -591,7 +604,7 @@ interface AssociatedScreenshot {
 
 interface AssociatedMatch {
   matchId: string;
-  matchIndex: number; // 1-based display order
+  matchIndex: number; // 1-based chronological position (§7.1); corrections never change it
   origin: 'LIVE' | 'ADDED';
   status: 'ACTIVE' | 'VOIDED';
   mapId: string;
@@ -609,7 +622,7 @@ interface AssociatedUpload {
   uploadIndex: number;
   state: 'PENDING' | 'REJECTED' | 'ACCEPTED';
   rejectionCodes: AttachmentRejectionCode[];
-  screenshotIds: string[]; // every accepted receipt's screenshot
+  screenshotId: string | null; // the receipt's screenshot when ACCEPTED; an upload has at most one receipt
 }
 
 interface SessionAssociation {
@@ -630,7 +643,7 @@ interface SessionAssociation {
     suggestedClockOffsetSeconds: number | null;
   };
   matches: AssociatedMatch[]; // matchIndex order
-  screenshots: AssociatedScreenshot[]; // uploadIndex, then uploadId, then submissionId order
+  screenshots: AssociatedScreenshot[]; // uploadIndex, then uploadId order; one per accepted upload
   uploads: AssociatedUpload[];
   counts: {
     matches: number; voidedMatches: number; uploads: number; pendingUploads: number;
@@ -649,7 +662,7 @@ Handlers validate every request and every object they read against these types w
 Session 1 -> many SessionEvent (sequence 1..n)
 Session 1 -> many Match (LIVE from MAP_SELECTED, ADDED from MATCH_ADDED)
 Match 1 -> 1 current map event -> 1 mapId in 1 map catalog version
-Session 1 -> many UploadIntent -> 0..many UploadReceipt -> 0..1 SourceScreenshot each
+Session 1 -> many UploadIntent -> 0..1 UploadReceipt -> 0..1 SourceScreenshot
 SourceScreenshot 1 -> many processing runs (spec 1)
 Session 1 -> many SessionAssociation versions; the latest is current
 SessionAssociation 1 -> many AssociatedScreenshot -> 0..1 Match
@@ -771,9 +784,9 @@ The foundation knows nothing about either stack. The CORS rule names no CloudFro
 | `SessionRead` | `ListBucket` with prefix `<ns>sessions/`; `GetObject` on `<ns>sessions/*`, `<ns>map-catalogs/*` and `<ns>submissions/*/screenshots/*/source/original` | none | decrypt |
 | `SessionWrite` | `ListBucket` with prefix `<ns>sessions/`; `GetObject` on `<ns>sessions/*`; `PutObject` on `<ns>sessions/*/events/*`, `<ns>sessions/*/upload-slots/*`, `<ns>sessions/*/uploads/*/intent.json` and `<ns>map-catalogs/*` | `PutObject` on `<ns>uploads/*`, used only to sign POSTs | encrypt, decrypt |
 | `DeriveAssociation` | `ListBucket` with prefix `<ns>sessions/`; `GetObject` on `<ns>sessions/*`; `PutObject` on `<ns>sessions/*/association/*` | none | encrypt, decrypt |
-| `ProcessUpload` | `ListBucket` with prefix `<ns>sessions/`, so a missing intent reads as `404`; `GetObject` on `<ns>sessions/*/uploads/*/intent.json`; `PutObject` on `<ns>submissions/*` and `<ns>sessions/*/uploads/*/receipts/*` | `GetObject` and `GetObjectVersion` on `<ns>uploads/*` | encrypt, decrypt |
+| `ProcessUpload` | `ListBucket` with prefix `<ns>sessions/`, so a missing intent or receipt reads as `404`; `GetObject` on `<ns>sessions/*/uploads/*/intent.json` and `<ns>sessions/*/uploads/*/receipt.json`; `PutObject` on `<ns>submissions/*` and `<ns>sessions/*/uploads/*/receipt.json` | `GetObject` and `GetObjectVersion` on `<ns>uploads/*` | encrypt, decrypt |
 
-`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject` or any bucket-configuration permission. No admin role can write under `submissions/` or `receipts/`, and `ProcessUpload` cannot write events, intents or associations. P4.4 extends `scripts/local-cdk-bootstrap.mjs` so the local workload boundary allows these actions for `admin-e-*` and `match-to-csv-e-*` roles in their own namespace.
+`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject` or any bucket-configuration permission. No admin role can write under `submissions/` or to a `receipt.json`, and `ProcessUpload` cannot write events, intents or associations. P4.4 extends `scripts/local-cdk-bootstrap.mjs` so the local workload boundary allows these actions for `admin-e-*` and `match-to-csv-e-*` roles in their own namespace.
 
 ### 13.5 Deployment
 
@@ -792,7 +805,7 @@ Both stacks deploy as they do today (spec 1 §13.6, spec 3 §13.5). The admin pr
 
 - Lambdas log JSON lines through the same `log` helper as spec 3. `SessionWrite` logs each event written, `DeriveAssociation` each version with its counts, and `ProcessUpload` the same intake record as `process-email` with `channel: SESSION_UPLOAD`, following spec 5's stage records once they exist.
 - X-Ray tracing is active on every function.
-- Evidence is the audit record. "What happened to this upload" is answered by its intent, its receipts, the submission they name, and its entry in the latest association.
+- Evidence is the audit record. "What happened to this upload" is answered by its intent, its receipt, the submission the receipt names, and its entry in the latest association. An accepted receipt whose screenshot has no run is the sign of an execution that failed after intake (§6.5).
 - Undeliverable association events wait in `<stack>-association-dlq` for 14 days. Alarms follow spec 5 (backlog P6.6).
 
 ## 16. Testing, CI and release
@@ -803,13 +816,13 @@ Tests never call AWS.
 
 | Layer or file | Covers |
 | --- | --- |
-| `session-events.test.ts` | every event type allowed and refused in each state of §4.2; `STALE_SUPERSESSION`; idempotent `clientRequestId`; `matchIndex` with `ADDED` matches; voiding and restoring |
+| `session-events.test.ts` | every event type allowed and refused in each state of §4.2; `STALE_SUPERSESSION`; idempotent `clientRequestId`; `matchIndex` with `ADDED` matches, including a `null` anchor, two `ADDED` matches on one anchor and an `ADDED` match anchored on another; a `MAP_CORRECTED` of the first of three `LIVE` matches A, B, C written after `SESSION_ENDED` leaves the order A, B, C and every `matchIndex` and `selectedAt` unchanged and changes only A's `mapId` and current map event; voiding and restoring change no `matchIndex` |
 | `capture-time.test.ts` | each source; precedence; `EXIF_LOCAL` in a repeated and a skipped daylight-saving hour; browser skew correction; `PICK_TIME`; unparseable EXIF |
-| `association.test.ts` | every row of §7.4; window edges at exactly `start` and `end`; the cap gap; the open-session window; near-boundary flags; duplicates by retry and by hash; `NO_SCREENSHOT` and `MULTIPLE_SCREENSHOTS`; clock offset suggestion of exactly 3,600 for a one-hour skew, a centered offset for a skew of a few minutes, and none when the current offset is best; same inputs in any order give the same document; `inputsSha256` changes with a version bump |
-| `fixtures/sessions/*.fixture.json` | Each fixture is a set of events, intents and receipts with the expected association, run by one test per file |
+| `association.test.ts` | every row of §7.4; window edges at exactly `start` and `end`; the cap gap; the open-session window; near-boundary flags; duplicates by hash across uploads; `NO_SCREENSHOT` and `MULTIPLE_SCREENSHOTS`; clock offset suggestion of exactly 3,600 for a one-hour skew, a centered offset for a skew of a few minutes, and none when the current offset is best; same inputs in any order give the same document; `inputsSha256` changes with a version bump |
+| `fixtures/sessions/*.fixture.json` | Each fixture is a set of events, intents and receipts with the expected association, run by one test per file. They include `map-corrected-after-end`, in which the first of three matches is corrected after the session ends and the expected matches keep the order, `matchIndex`, `selectedAt` and windows of the uncorrected session, and `intake-retry-after-receipt`, an ended session with one match and the upload evidence that `process-upload.test.ts`'s failure after receipt persistence and successful retry leave (one intent and one `ACCEPTED` receipt), giving one `DERIVED` screenshot whose `screenshotId` is the one the retry returned for extraction and `counts.duplicate` of 0 |
 | `session-write.test.ts` | sequence race retried and `CONCURRENT_CHANGE` after 3 attempts; catalog snapshot written once; upload intents and POST conditions; two concurrent requests for one upload slot share one `uploadId`; uploads refused on an open session |
 | `derive-association.test.ts` | no write when inputs are unchanged; a new version with `previousAssociationVersion`; `412` retry |
-| `process-upload.test.ts` | an accepted upload writes the submission, source with `intake`, receipt and completion in order; a rejected image writes a `REJECTED` receipt and throws; a missing intent writes a `REJECTED` completion with `UploadIntentMissingError` and no source or receipt; a namespace mismatch fails; EXIF strings recorded |
+| `process-upload.test.ts` | an accepted upload writes the submission, source with `intake`, completion and event, and the receipt last; a rejected image writes a `REJECTED` receipt and throws; a missing intent writes a `REJECTED` completion with `UploadIntentMissingError` and no source or receipt; a namespace mismatch fails; EXIF strings recorded; a run for an upload with an `ACCEPTED` receipt writes nothing and returns the receipt's `submissionId` and screenshot, and with a `REJECTED` receipt writes nothing and throws; a failure after receipt persistence (the first attempt writes the receipt and then throws) followed by a retry with the same input leaves exactly one receipt, and the retry returns the first attempt's screenshot for extraction; a failure before the receipt followed by a retry gives the retry's submission the receipt; a receipt write that returns `412` returns the existing receipt's screenshot and leaves its own submission without a receipt |
 | match-to-csv `app.test.ts` | **Route intake** sends `SESSION_UPLOAD` to `ProcessUpload` and anything else to `ProcessEmail`; the upload rule's prefix per stack type |
 | admin `app.test.ts` | session routes, reserved concurrency, rule patterns, DLQ and the §13.4 grants for stable and ephemeral stacks |
 | Web component tests | map picker never preselects; upload queue retries an expired POST; review actions send the current event as `supersedesEventId` |
@@ -830,12 +843,14 @@ In dev, a host starts a session, selects three maps a few minutes apart, takes a
 - [ ] A session with three `MAP_SELECTED` events and `SESSION_ENDED` produces three `LIVE` matches whose windows follow §7.3, and every event has a gapless `sequence`.
 - [ ] Two concurrent writes to one session produce two events with consecutive sequences, or one event and `409 CONCURRENT_CHANGE`; never two events with one sequence.
 - [ ] A screenshot uploaded to an ended session becomes one submission whose source has `intake.sessionId`, one receipt, and one run through the unchanged extraction steps; an emailed screenshot still runs through `ProcessEmail`.
+- [ ] An intake attempt that fails after writing its upload's receipt, followed by a successful retry, leaves exactly one receipt; the retry extracts the receipt's screenshot, and the association lists that screenshot with its match and never as `DUPLICATE`.
 - [ ] An upload request for an open session returns `409 SESSION_OPEN` and writes nothing.
 - [ ] A screenshot with `EXIF_WITH_OFFSET` inside match 2's window is `DERIVED` to match 2 with match 2's `mapId`; one with no usable capture time is `UNASSIGNED` with `NO_CAPTURE_TIME`.
 - [ ] Two different screenshots inside one window are both assigned and the match is flagged `MULTIPLE_SCREENSHOTS`; a byte-identical second upload is `DUPLICATE`.
 - [ ] A match with no screenshot appears with `NO_SCREENSHOT`, and a screenshot outside every window is `UNASSIGNED` with the §7.4 reason and no match.
 - [ ] Screenshots from a device whose clock is one hour behind produce a `suggestedClockOffsetSeconds` of 3,600 and no assignment change until the host writes `CLOCK_OFFSET_SET`, and the right assignments after it.
 - [ ] `MAP_CORRECTED` with a stale `supersedesEventId` returns `409 STALE_SUPERSESSION`. With the current one it writes a new event, the earlier event is unchanged, and the next association version shows the new `mapId` for the match and its screenshots.
+- [ ] Correcting the map of the first of three matches after the session ends leaves the match order, every `matchIndex` and every `selectedAt` unchanged; a `MATCH_ADDED` places its match as §7.1 defines without changing the relative order of the other matches.
 - [ ] Every association change writes a new version with `previousAssociationVersion`, and deriving unchanged inputs writes nothing.
 - [ ] Given a run's manifest and the latest association, a consumer obtains the run's `sessionId`, `matchId` and `mapId` with no other input, for both the first run and a replay of the screenshot.
 - [ ] Every §16.1 test passes with the coverage thresholds, both stacks synthesize, and `npm run tofu:check` passes.
@@ -855,8 +870,10 @@ In dev, a host starts a session, selects three maps a few minutes apart, takes a
 10. **`EXIF_LOCAL` assumes the device is in the host's time zone.** A console set to another zone produces whole-hour skews, which the offset suggestion detects.
 11. **Spec 4 and spec 7 are not yet revised.** Until they are, spec 4 describes a different match flow and spec 7 groups uploaded pages only by `gameKey`. §8.2 and §8.4 list the changes, and spec 4 must be revised before any of its slices is filed.
 12. **Emailed screenshots have no session.** Players who email screenshots during a session contribute runs that no association lists. Importing them is backlog (P6.2).
-13. **Staged uploads expire after 30 days.** The stored original in the evidence bucket is kept, so nothing is lost after a successful intake. An upload whose execution failed for 30 days must be uploaded again.
+13. **Staged uploads expire after 30 days.** The stored original in the evidence bucket is kept, so nothing is lost after a successful intake. An upload with no receipt after 30 days must be uploaded again. An upload with a receipt never needs its staged copy again, because a restarted intake reads the receipt (§6.3 step 2).
 14. **The map catalog is Halo 3 only.** Sessions of other MCC games need a new catalog version and new parser profiles first.
+15. **Failed intake attempts leave submissions without receipts.** An attempt that fails before its receipt, or loses the receipt write to a concurrent run, keeps its stored original and completion, which no association lists and no execution extracts (§6.5). They cost storage only, and receipts are what tell consumers which submission counts.
+16. **An execution that fails after intake needs an operator.** When the receipt exists but the execution failed before extraction, the screenshot is listed with no run until an operator restarts the execution (§6.5). Nothing restarts it automatically, and alarms are backlog (P6.6).
 
 ## 19. Reference documentation
 
@@ -977,6 +994,7 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - Each event type is allowed and refused exactly as §4.2 and §4.3 state, with the listed codes.
   - The fold gives each match's current map event, status and `matchIndex`, and the session's clock offset.
+  - `matchIndex` follows §7.1 for `ADDED` matches, and correcting the map of the first of three matches after the session ends, or voiding or restoring a match, leaves every `matchIndex` and `selectedAt` unchanged.
 
 #### P2.2 Capture time (S)
 
@@ -991,11 +1009,11 @@ A change to a contract updates every consumer in the same PR.
 #### P2.3 Association derivation (M)
 
 - **Blocked by:** P2.1, P2.2
-- **Spec:** §7.3 to §7.6, §13.1
+- **Spec:** §7.1 to §7.6, §13.1
 - **Files:** `applications/admin/src/lib/association.ts`, `config/association-config-v1.json`, `test/sessions/association.test.ts`, `test/fixtures/sessions/`
 - **Provides:** `associate`, `associationInputsSha256`
 - **Acceptance:**
-  - Every row of §7.4 and every window rule of §7.3 has a fixture.
+  - Every row of §7.4 and every window rule of §7.3 has a fixture, and the `map-corrected-after-end` and `intake-retry-after-receipt` fixtures of §16.1 pass.
   - The clock offset suggestion follows §7.5 and never changes an assignment.
   - The output is identical for inputs given in any order, apart from `derivedAt` and `build`.
 
@@ -1007,13 +1025,14 @@ A change to a contract updates every consumer in the same PR.
 #### P3.1 Upload intake Lambda (M)
 
 - **Blocked by:** P0.1
-- **Spec:** §6.3, §5.3, §8.3, spec 1 §4.3
+- **Spec:** §5.2, §5.3, §6.3, §6.5, §8.3, spec 1 §4.3
 - **Files:** `applications/match-to-csv/src/lambdas/process-upload.ts`, `src/lib/{image-acceptance,exif}.ts`, `src/lambdas/process-email.ts`, `test/process-upload.test.ts`, `specs/1-mcc-analytics-engine.md`
 - **Provides:** `processUpload`, `upload-receipt/v1`, `upload-submission/v1`
 - **Acceptance:**
   - The `process-upload.test.ts` row of §16.1 passes.
+  - The receipt is the last write, an upload never has two receipts, and an intake run for an upload with a receipt writes nothing and returns or rejects as the receipt says, including the retry after a failure after receipt persistence.
   - `attachmentRejectionCodes` moves to `image-acceptance.ts` and every existing intake test passes unchanged.
-  - Spec 1 §4, §5 and §10.1 describe the upload intake.
+  - Spec 1 §4, §5, §6.3 and §10.1 describe the upload intake.
 
 #### P3.2 Intake routing and upload trigger (S)
 
