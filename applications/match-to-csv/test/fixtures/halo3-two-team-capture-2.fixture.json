@@ -2066,7 +2066,14 @@
       "assists": "11",
       "deaths": "10",
       "win": 1,
-      "loss": 0
+      "loss": 0,
+      "reviewFlags": [
+        {
+          "field": "player",
+          "code": "LOW_WORD_CONFIDENCE",
+          "wordConfidence": 39.04555892944336
+        }
+      ]
     },
     {
       "team": "Red",
@@ -2086,7 +2093,14 @@
       "assists": "5",
       "deaths": "15",
       "win": 1,
-      "loss": 0
+      "loss": 0,
+      "reviewFlags": [
+        {
+          "field": "player",
+          "code": "SPLIT_TRAILING_DIGITS",
+          "wordConfidence": 54.783164978027344
+        }
+      ]
     },
     {
       "team": "Blue",
@@ -2129,8 +2143,8 @@
       "loss": 1
     }
   ],
-  "knownIssue": {
-    "issue": "#161",
-    "fields": ["player"]
-  }
+  "misreads": [
+    { "field": "player", "expected": "Player05", "read": "PIayer05" },
+    { "field": "player", "expected": "Player06", "read": "Player 06" }
+  ]
 }

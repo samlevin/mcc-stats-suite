@@ -225,7 +225,7 @@ Every run manifest records these values. A change to a stage's behavior changes 
 | `preprocessingVersion` | `none-v1` |
 | `textractConfigurationVersion` | `textract-tables-v1` |
 | `textractNormalizerVersion` | `textract-normalizer-v2` |
-| `tableParserVersion` | `scoreboard-parser-v3` |
+| `tableParserVersion` | `scoreboard-parser-v4` |
 | `semanticMapperVersion` | `scoreboard-semantic-v2` |
 | `validationRulesVersion` | `scoreboard-validation-v2` |
 
@@ -316,6 +316,18 @@ Each `TABLE` block is scored on its row-1 cells: 3 points for a header containin
 3. Any field left unmapped falls back to the header's columns in order: player first, then score, kills, assists and deaths.
 4. For each later row, tidy the player name: drop words that hold no letter, digit or square bracket, remove one leading clan tag in square brackets, and collapse runs of whitespace. Gamertags hold only letters, digits and spaces, so a dropped word is an icon Textract read as text, such as the chat bubble MCC draws as `...`. Skip rows with an empty name.
 5. Skip rows where neither score nor kills is all digits. This drops totals, footers and other non-player rows.
+6. Flag player names Textract may have misread (§8.2.1).
+
+#### 8.2.1 Player review flags
+
+A row gets `reviewFlags` when a rule below applies to its player name, and has no `reviewFlags` otherwise. The name's words are the last words of the player cell after the icon filter in step 4, as many as the tidied name holds, so clan-tag words never count. A word without a confidence is skipped, and a name with no known confidence gets no flags. Flags never change the name, which stays as read. Correcting a name needs a source of truth beyond the screenshot and is out of scope (§2.2).
+
+| Code | Condition | `wordConfidence` |
+| --- | --- | --- |
+| `LOW_WORD_CONFIDENCE` | a name word's `WORD` confidence is below 50 | the lowest name-word confidence |
+| `SPLIT_TRAILING_DIGITS` | the name's last word is all digits, the word before it ends in a letter, and either word's confidence is below 90 | the lower of the two |
+
+Each flag records `field: 'player'`. The thresholds come from the two real Halo 3 captures: correctly read gamertag words went as low as 52, a lowercase `l` read as `I` scored 39, and a space inserted before trailing digits split one gamertag into words scoring 55 and 88. Gamertags may contain spaces, so a split read with high confidence is not flagged. A `CELL` block's confidence describes table structure and stays near 89 for every player cell in those captures, so it cannot single out a misread.
 
 ### 8.3 Row colour sampling
 
@@ -349,7 +361,7 @@ Rules apply in table order and the first match wins. When two clusters receive t
 
 ### 8.6 CSV format
 
-`rowsToCsv(rows)` writes the header `Team,Player,Score,Kills,Assists,Deaths,Win,Loss`, then one line per row in table order. Every value, including the header and the numeric flags, is wrapped in double quotes with embedded quotes doubled. Lines end with `\n`, including the last. Statistics are written exactly as observed.
+`rowsToCsv(rows)` writes the header `Team,Player,Score,Kills,Assists,Deaths,Win,Loss`, then one line per row in table order. Every value, including the header and the numeric flags, is wrapped in double quotes with embedded quotes doubled. Lines end with `\n`, including the last. Statistics are written exactly as observed. The CSV leaves out `reviewFlags`; `extract-text`'s output, `parser.rows` in normalized observations, and `export/extracted-table.json` keep them.
 
 ## 9. Replay, comparison and training data
 
@@ -395,9 +407,18 @@ interface SourceScreenshot extends S3ObjectReference {
   heightPx: number;
 }
 
+type RowReviewCode = 'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS';
+
+interface RowReviewFlag {
+  field: 'player';
+  code: RowReviewCode;
+  wordConfidence: number; // lowest WORD confidence the rule read, 0 to 100
+}
+
 interface CsvRow {
   team: string; player: string; score: string; kills: string;
   assists: string; deaths: string; win: number; loss: number;
+  reviewFlags?: RowReviewFlag[]; // present only when a §8.2.1 rule applies
 }
 
 type ProcessEmailInput = S3ObjectReference;
@@ -448,7 +469,7 @@ interface MaterializeTrainingDataOutput {
 
 ### 10.2 Internal types
 
-`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@mcc/cdk-config` defines `DeploymentConfig` (§13.3).
+`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `Confidence`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@mcc/cdk-config` defines `DeploymentConfig` (§13.3).
 
 ### 10.3 Relationships
 
@@ -635,8 +656,8 @@ Tests use `tap`, run from `applications/match-to-csv/test/*.test.ts`, and never 
 
 | File | Covers |
 | --- | --- |
-| `scoreboard-logic.test.ts` | two-team match, FFA, three uneven teams, non-player row filtering, header fallback, choosing the scoreboard over an earlier decoy table, win/loss |
-| `scoreboard-fixtures.test.ts` | every `*.fixture.json` produces its `expectedRows`, except the fields a `knownIssue` lists, which run as a `todo` test; the directory holds at least one fixture |
+| `scoreboard-logic.test.ts` | two-team match, FFA, three uneven teams, non-player row filtering, header fallback, choosing the scoreboard over an earlier decoy table, win/loss, player review flags |
+| `scoreboard-fixtures.test.ts` | every `*.fixture.json` produces its `expectedRows`, with each listed misread kept as read and flagged, except the fields a `knownIssue` lists, which run as a `todo` test; the directory holds at least one fixture |
 | `normalization.test.ts` | semantic header mapping; independent mapping per table; invalid integer flags |
 | `extract-text-handler.test.ts` | a complete successful run; provider failure records and rethrow; hash mismatch never calls the provider |
 | `process-email.test.ts` | multiple attachments with an ephemeral prefix; rejected submission; independent rejection codes; failed completion when storage fails |
@@ -649,7 +670,7 @@ Tests use `tap`, run from `applications/match-to-csv/test/*.test.ts`, and never 
 | `app.test.ts` | termination protection by stack type; `GIT_SHA` precedence over `GITHUB_SHA` |
 | `bundling.test.ts` | locked esbuild for Docker bundling; Docker forced only for Sharp functions; local esbuild check; pinned image |
 
-A fixture is a JSON file with `name`, `blocks`, `rowColors` and `expectedRows`, plus an optional `knownIssue` naming a tracked mismatch and the fields it affects. Each fixture covers one behavior, preferably a real Textract output reduced to the smallest failing case with player data replaced. `test/fixtures/README.md` describes capturing a screenshot with `scripts/capture-textract.ts` and reducing it with `scripts/reduce-capture.ts`.
+A fixture is a JSON file with `name`, `blocks`, `rowColors` and `expectedRows`, plus an optional `knownIssue` naming a tracked mismatch and the fields it affects, and optional `misreads` listing values the parser keeps as read and flags for review. Each fixture covers one behavior, preferably a real Textract output reduced to the smallest failing case with player data replaced. `test/fixtures/README.md` describes capturing a screenshot with `scripts/capture-textract.ts` and reducing it with `scripts/reduce-capture.ts`.
 
 ### 16.2 CI and release
 
@@ -686,6 +707,7 @@ v1 is complete when all of the following hold:
 9. **Player names reach logs.** Step Functions logs include execution data, which carries attachment names and extracted rows. Log retention is two weeks in dev and three months in prod.
 10. **Operator Lambdas trust IAM alone.** `CompareRuns` and `MaterializeTrainingData` accept any key in the bucket. Create-only writes stop them from overwriting evidence, but they can write new objects outside a run.
 11. **`EMPTY_REQUIRED_CELL` fires on every empty cell,** including cells in unmapped columns. Reviewers should expect noise there until the validation rules know which columns are required.
+12. **Player review thresholds come from two captures.** §8.2.1 separates the misreads in those captures from every correct reading, with a margin of a few points on one side. More captures may show misreads above 50 or correct readings below it. A misread that scores high and keeps the word count, such as `I` for `l` at 90, passes unflagged.
 
 ## 19. Reference documentation
 

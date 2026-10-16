@@ -28,6 +28,7 @@ export function toLiteBlock(block: Block): TextractBlockLite {
     Id: block.Id,
     BlockType: block.BlockType,
     Text: block.Text,
+    Confidence: block.Confidence,
     RowIndex: block.RowIndex,
     ColumnIndex: block.ColumnIndex,
     Geometry: block.Geometry
