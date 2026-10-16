@@ -41,8 +41,8 @@ Each row records how a requirement from the original specification is resolved. 
 | Emails must contain one or more image attachments | A message with no processable screenshot completes intake with status `REJECTED`, writes its evidence, and then fails the execution. | A silent empty success hides lost submissions. A failed execution shows up in the console and in alarms. |
 | Non-image attachments are ignored | Non-image attachments are recorded as `NOT_AN_IMAGE` rejections and stay only in the retained raw MIME message. Rejected images are stored with their rejection codes. | The submission record explains every attachment. |
 | Detect the header row dynamically, fall back to column order | The first row of the selected table is the header. Recognized labels map to fields. Any field left unmapped falls back to its standard position. | Matches the original intent with a deterministic rule. |
-| Team detection by row background colour, MCC colour names, FFA when one cluster | Kept. Clusters with the same colour name get a numeric suffix (`Red 2`). No colour data also means FFA. | Names stay unique per screenshot, so win/loss assignment never merges two teams. |
-| Win/loss from the top player row | Kept, for team games and FFA. | MCC lists the winning player or team first. |
+| Team detection by row background colour, MCC colour names, FFA when one cluster | Changed. Only two-team boards are supported, and free-for-all and three-team matches are not. A board whose player rows form one colour cluster, carry no colour, or form three or more clusters produces no rows, and the run succeeds and records why (§8.4). When both clusters get the same colour name, the second gets a numeric suffix (`Red 2`). | An unsupported board succeeds with no rows instead of failing, because the attachment `Map` tolerates no failed item (§6.1), so one failed screenshot would fail every other screenshot in the email. Names stay unique per screenshot, so win/loss assignment never merges the two teams. |
+| Win/loss from the top player row | Kept, for two-team boards. | MCC lists the winning player or team first. |
 | JSON logs with `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE` | Kept. Each line is one JSON object with `level`, `message` and context fields, written to standard output. | CloudWatch Logs indexes JSON fields. |
 | TAP unit tests for `processScoreboardImage` | Kept, plus tests for every handler, the normalizer, CSV escaping, comparison, materialization, deployment configuration, bundling and receipt rules, with coverage thresholds that fail the test command (§16). | The parser is only one of several places where a regression loses evidence. |
 | All buckets block public access and use encryption | Kept. The raw-email bucket uses SSE-S3. Every other bucket uses SSE-KMS with the foundation key and S3 Bucket Keys. | SES writes the raw message, and SSE-S3 needs no key grant to the SES service principal. Application data uses a customer-managed key. |
@@ -57,7 +57,7 @@ Each row records how a requirement from the original specification is resolved. 
 
 1. Accept scoreboard screenshots by email with no client software, account or upload page.
 2. Preserve every input and every provider output immutably, so any result can be traced to the bytes and code versions that produced it.
-3. Produce a quoted CSV of `Team,Player,Score,Kills,Assists,Deaths,Win,Loss` for each screenshot, supporting arbitrary team sizes and free-for-all matches.
+3. Produce a quoted CSV of `Team,Player,Score,Kills,Assists,Deaths,Win,Loss` for each two-team screenshot, with any number of players on each team. Other boards produce no rows and a recorded reason (§8.4).
 4. Record each OCR cell with its geometry, confidence, semantic field and deterministic validation result, ready for human review.
 5. Re-run extraction on stored evidence without changing earlier runs, and compare any two runs cell by cell.
 6. Materialize unlabeled training datasets with splits that never leak a screenshot across partitions.
@@ -207,7 +207,7 @@ A run's prefix derives from its source key (`<source prefix>/runs/<runId>`), so 
 | run event | `processing-event/v1` | `extract-text` | `type` (`RUN_STARTED`, `RUN_SUCCEEDED`, `RUN_FAILED`), `occurredAt`, `detail` |
 | `textract/request.json` | none | `extract-text` | `provider: AWS_TEXTRACT`, `operation: AnalyzeDocument`, `featureTypes: [TABLES]`, `invokedAt`, `inputSha256`, `inputSizeBytes` |
 | `textract/raw-response.json` | none | `extract-text` | the unmodified `AnalyzeDocument` response |
-| `normalized/observations.json` | `normalized-ocr/v2` | `extract-text` | `blocks`, `tables`, `cells`, `tokens`, `parser` (`version`, `rows`, `rowColors`), `validation` (§7.2) |
+| `normalized/observations.json` | `normalized-ocr/v2` | `extract-text` | `blocks`, `tables`, `cells`, `tokens`, `parser` (`version`, `rows`, `rowColors`, and `noRowsReason` when the team layout is unsupported, §8.4), `validation` (§7.2) |
 | run `completion.json` | `processing-run-completion/v1` | `extract-text` | `status`, `completedAt`; on success `textract` (response reference, response SHA-256, request reference, request ID) and `metrics` (table, cell, token and extracted row counts); on failure `request` and `error` |
 | `export/extracted-table.json` | `extracted-table/v1` | `write-extracted-csv` | `runId`, `rows`, `normalizedArtifact` |
 | `export/extracted.csv` | none | `write-extracted-csv` | §8.6 |
@@ -225,7 +225,7 @@ Every run manifest records these values. A change to a stage's behavior changes 
 | `preprocessingVersion` | `none-v1` |
 | `textractConfigurationVersion` | `textract-tables-v1` |
 | `textractNormalizerVersion` | `textract-normalizer-v2` |
-| `tableParserVersion` | `scoreboard-parser-v4` |
+| `tableParserVersion` | `scoreboard-parser-v5` |
 | `semanticMapperVersion` | `scoreboard-semantic-v2` |
 | `validationRulesVersion` | `scoreboard-validation-v2` |
 
@@ -272,7 +272,7 @@ A retried intake creates a new submission identifier, and a retried extraction c
 2. Read the original image and its Sharp metadata.
 3. Refuse the image with `SourceHashMismatchError` when its SHA-256 differs from `source.sha256`, `ImageTooLargeError` when it exceeds 10 MiB, or `UnsupportedImageFormatError` when it is not PNG or JPEG. Textract is not called.
 4. Write `textract/request.json`, call `AnalyzeDocument` with the image bytes and `FeatureTypes: ['TABLES']`, and write the full response to `textract/raw-response.json`.
-5. Sample row colours (§8.3), run `processScoreboardImage` (§8), and normalize every block (§7.2). Write `normalized/observations.json`.
+5. Sample row colours (§8.3), run `processScoreboardImage` (§8), and normalize every block (§7.2). Write `normalized/observations.json`. A board with an unsupported team layout yields no rows and still completes the run.
 6. Write a `SUCCEEDED` completion, append `RUN_SUCCEEDED`, log `Screenshot processed`, and return `ExtractTextOutput`.
 
 On any error after step 1, the stage writes a `FAILED` completion and `RUN_FAILED` with the request reference (when one exists) and the error name and message, then rethrows. A failure to record the failure is logged at `ERROR` and does not mask the original error.
@@ -303,7 +303,7 @@ A cell is `valid` when it is non-empty and has no invalid integer. `deterministi
 
 ## 8. Scoreboard parsing
 
-`processScoreboardImage(blocks, rowColors)` in `src/lib/scoreboard-logic.ts` is a pure function. It never calls AWS or Sharp.
+`processScoreboardImage(blocks, rowColors)` in `src/lib/scoreboard-logic.ts` is a pure function. It never calls AWS or Sharp. It returns `{ rows, noRowsReason? }`, where `noRowsReason` is set only when §8.4 rejects the team layout.
 
 ### 8.1 Table selection
 
@@ -335,9 +335,9 @@ Each flag records `field: 'player'`. The thresholds come from the two real Halo 
 
 ### 8.4 Team detection and naming
 
-1. Cluster rows greedily in input order. A row joins the nearest existing cluster when the Euclidean RGB distance is at most 40, and the cluster's mean updates. Otherwise it starts a new cluster.
-2. With no colours, or one cluster or fewer, the match is FFA and every team is empty.
-3. Otherwise name each cluster from the HSV values of its mean colour:
+1. Cluster the colours of the player rows greedily in input order. The header and rows §8.2 dropped take no part, so a shaded header cannot form a team. A row joins the nearest existing cluster when the Euclidean RGB distance is at most 40, and the cluster's mean updates. Otherwise it starts a new cluster.
+2. Only two-team boards are supported. When no player row has a colour, or the player rows form one cluster or three or more, the result has no rows and `noRowsReason` is `{ code: 'UNSUPPORTED_TEAM_LAYOUT', colorClusterCount }`. The count is 0 when no player row has a colour. Free-for-all and three-team boards end here.
+3. With exactly two clusters, name each cluster from the HSV values of its mean colour:
 
 | Name | Rule (hue in degrees, saturation and value from 0 to 1) |
 | --- | --- |
@@ -351,13 +351,12 @@ Each flag records `field: 'player'`. The thresholds come from the two real Halo 
 | Pink | hue 290 to 345 |
 | Fallbacks | value < 0.45 and saturation < 0.45 is Brown; hue 55 to 95 is Gold; otherwise the nearest hue target among Red 0, Orange 25, Gold 50, Green 120, Blue 225, Purple 275, Pink 315, Brown 20 |
 
-Rules apply in table order and the first match wins. When two clusters receive the same name, the second becomes `<name> 2`, the third `<name> 3`, and so on.
+Rules apply in table order and the first match wins. When both clusters receive the same name, the second becomes `<name> 2`. A player row without a colour has an empty team.
 
 ### 8.5 Win and loss
 
-- The winner is the player row with the lowest row index.
-- Team game: every row on the winner's team has `win = 1, loss = 0`. Every other row, including a row with no team, has `win = 0, loss = 1`.
-- FFA: the top row has `win = 1, loss = 0`, every other row `win = 0, loss = 1`, and `team` is empty.
+- The winning team is the team of the player row with the lowest row index.
+- Every row on the winning team has `win = 1, loss = 0`. Every other row, including a row with no team, has `win = 0, loss = 1`.
 
 ### 8.6 CSV format
 
@@ -469,7 +468,7 @@ interface MaterializeTrainingDataOutput {
 
 ### 10.2 Internal types
 
-`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `Confidence`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships) and `RowColor` (`rowIndex`, `r`, `g`, `b`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@mcc/cdk-config` defines `DeploymentConfig` (§13.3).
+`scoreboard-logic.ts` defines `TextractBlockLite` (the block fields the parser needs: `Id`, `BlockType`, `Text`, `Confidence`, `RowIndex`, `ColumnIndex`, the bounding box `Top` and `Height`, and relationships), `RowColor` (`rowIndex`, `r`, `g`, `b`), and the parser result `ScoreboardParseResult` (`rows` and the optional `noRowsReason`, a `NoRowsReason` with `code` and `colorClusterCount`). `compare-runs.ts` and `materialize-training-data.ts` declare the partial views of normalized artifacts and manifests they read. `@mcc/cdk-config` defines `DeploymentConfig` (§13.3).
 
 ### 10.3 Relationships
 
@@ -501,7 +500,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 
 | File | Public functions | Purpose |
 | --- | --- | --- |
-| `src/lib/scoreboard-logic.ts` | `processScoreboardImage(blocks, rowColors)` | Pure scoreboard parser (§8). |
+| `src/lib/scoreboard-logic.ts` | `processScoreboardImage(blocks, rowColors)` | Pure scoreboard parser (§8), returning rows and the reason they are empty for an unsupported team layout. |
 | `src/lib/textract-analysis.ts` | `analyzeDocumentInput(image)`; `toLiteBlock(block)`; `computeRowColors(image, width, height, blocks)` | The `AnalyzeDocument` request, parser block projection and row colour sampling (§8.3), shared by `extract-text` and `scripts/capture-textract.ts`. |
 | `src/lib/csv.ts` | `rowsToCsv(rows)` | Quoted CSV serializer (§8.6). |
 | `src/lib/evidence.ts` | `evidenceId()`; `sha256(bytes)`; `putJson(bucket, key, value)`; `now()` | Identifiers, hashing, create-only JSON writes and timestamps. |
@@ -642,7 +641,7 @@ Prod requires an Environment with required reviewers and administrator bypass di
 
 ## 15. Observability
 
-- Lambdas log JSON lines through `log(level, message, details)` with the levels `ERROR`, `WARN`, `INFO`, `DEBUG` and `TRACE`. Handlers log the start and end of intake, the processed screenshot with its row count, and any failure to record a failure.
+- Lambdas log JSON lines through `log(level, message, details)` with the levels `ERROR`, `WARN`, `INFO`, `DEBUG` and `TRACE`. Handlers log the start and end of intake, the processed screenshot with its row count and any `noRowsReason`, and any failure to record a failure.
 - Step Functions logs every state with execution data. The execution history shows each screenshot's path and error.
 - X-Ray tracing is active on every function and both state machines.
 - Evidence is the audit record. Submission completions and run completions carry counts, request IDs, response hashes and error summaries.
@@ -656,10 +655,10 @@ Tests use `tap`, run from `applications/match-to-csv/test/*.test.ts`, and never 
 
 | File | Covers |
 | --- | --- |
-| `scoreboard-logic.test.ts` | two-team match, FFA, three uneven teams, non-player row filtering, header fallback, choosing the scoreboard over an earlier decoy table, win/loss, player review flags |
+| `scoreboard-logic.test.ts` | two-team match, no rows and the reason for one-cluster, no-colour and three-cluster boards, header and non-player row colours kept out of clustering, non-player row filtering, header fallback, choosing the scoreboard over an earlier decoy table, win/loss, player review flags |
 | `scoreboard-fixtures.test.ts` | every `*.fixture.json` produces its `expectedRows`, with each listed misread kept as read and flagged, except the fields a `knownIssue` lists, which run as a `todo` test; the directory holds at least one fixture |
 | `normalization.test.ts` | semantic header mapping; independent mapping per table; invalid integer flags |
-| `extract-text-handler.test.ts` | a complete successful run; provider failure records and rethrow; hash mismatch never calls the provider |
+| `extract-text-handler.test.ts` | a complete successful run; a board that is not two-team succeeds with no rows and records `noRowsReason`; provider failure records and rethrow; hash mismatch never calls the provider |
 | `process-email.test.ts` | multiple attachments with an ephemeral prefix; rejected submission; independent rejection codes; failed completion when storage fails |
 | `write-extracted-csv.test.ts` | both export objects; resume after one exists; storage failures surface |
 | `csv.test.ts` | quoting of commas, quotes and numeric flags |
@@ -687,7 +686,7 @@ v1 is complete when all of the following hold:
 1. An email with two valid screenshots and one PDF to the dev recipient produces one submission with two `ACCEPTED` sources, one `NOT_AN_IMAGE` rejection, two runs with every §5.1 object, and a succeeded execution.
 2. An email with only an undersized image produces a `REJECTED` submission with `IMAGE_TOO_SMALL`, a stored original, and a failed execution.
 3. A Textract throttling error that persists through retries leaves `RUN_STARTED`, `RUN_FAILED`, the request record and a `FAILED` completion.
-4. A two-team screenshot produces a CSV with MCC colour names and the top team marked as winners; an FFA screenshot produces empty teams and one winner.
+4. A two-team screenshot produces a CSV with MCC colour names and the top team marked as winners. A screenshot whose player rows share one colour produces no rows, a `SUCCEEDED` run, and `parser.noRowsReason` with a cluster count of 1.
 5. Replaying a screenshot creates a second run without changing the first, and comparing the two runs reports zero changes when the stage versions are unchanged.
 6. Materializing runs from at least 20 screenshots places every cell of a screenshot in one split and records the split algorithm and seed.
 7. An ephemeral stack receives mail at its plus address, writes only under `ephemeral/<name>/`, and destroys cleanly.
@@ -696,7 +695,7 @@ v1 is complete when all of the following hold:
 
 ## 18. Risks and accepted limitations
 
-1. **Header and filtered rows take part in colour clustering.** Row colours are sampled for every table row, including the header and rows later dropped as non-player rows. A header with a distinct background forms its own cluster, which turns an FFA scoreboard into a one-team game where every player wins. Unit tests pass only player-row colours, so they do not catch this. P8.1 fixes it.
+1. **Only two-team boards produce rows.** Free-for-all and three-team screenshots produce no rows, and so does a two-team screenshot whose team colours merge at a distance of 40 or less or whose row colours could not be sampled. Each run succeeds, so the only signals are `parser.noRowsReason`, the `Screenshot processed` log line, and on a stable stack the zero-row alarm.
 2. **The top row decides the winner.** The parser trusts MCC's ordering. It does not read placement, detect ties or check scores.
 3. **Colour naming is heuristic.** The thresholds come from MCC's palette, not from a labeled corpus. Lighting in photographed screens can shift hues, and two similar teams can merge at a distance of 40 or less.
 4. **Only one table becomes CSV.** A scoreboard that Textract splits into several tables yields a partial CSV. The normalized evidence keeps every table, so a later parser can recover the rest by replay.
@@ -891,9 +890,9 @@ A change to a contract updates every consumer in the same PR.
 - **Files:** `src/lib/scoreboard-logic.ts`, `test/scoreboard-logic.test.ts`
 - **Provides:** `RowColor`, complete `CsvRow[]` output
 - **Acceptance:**
-  - Two-team, three-uneven-team and FFA tests produce the expected teams and flags.
+  - A two-team test produces the expected teams and flags.
+  - One-cluster, no-colour and three-cluster boards produce no rows and an `UNSUPPORTED_TEAM_LAYOUT` reason with the cluster count.
   - Duplicate colour names receive numeric suffixes.
-  - No colour data yields FFA.
 
 #### P3.3 CSV serializer (XS)
 
@@ -1034,7 +1033,7 @@ A change to a contract updates every consumer in the same PR.
 - **Provides:** reduced real-world regression cases
 - **Acceptance:**
   - Every `*.fixture.json` runs as its own test, and an empty directory fails.
-  - Fixtures cover at least a two-team match and an FFA match, with no real player names.
+  - Fixtures cover at least a two-team match, with no real player names.
 
 #### P6.2 Operator documentation and live validation (XS)
 
@@ -1064,7 +1063,7 @@ A change to a contract updates every consumer in the same PR.
 
 | ID | Slice | Size | Note |
 | --- | --- | --- | --- |
-| P8.1 | Cluster only player-row colours | S | §18 item 1. Pass colours for kept player rows only, and add a fixture whose header colour differs from an FFA body. Bumps `tableParserVersion`. |
+| P8.1 | Cluster only player-row colours | S | Done. §8.4 clusters only player-row colours. |
 | P8.2 | Read placement instead of trusting row order | M | §18 item 2. Needs a labeled corpus first. |
 | P8.3 | Calibrate colour naming against labeled screenshots | S | §18 item 3. Thresholds become data, with a fixture per MCC colour. |
 | P8.4 | Merge split scoreboard tables | M | §18 item 4. Replay recovers older screenshots. |

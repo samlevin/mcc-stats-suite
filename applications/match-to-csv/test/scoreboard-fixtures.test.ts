@@ -83,7 +83,8 @@ for (const file of fixtureFiles) {
   const filePath = path.join(fixturesDir, file);
   const raw = fs.readFileSync(filePath, 'utf8');
   const fixture = JSON.parse(raw) as ScoreboardFixture;
-  const run = () => processScoreboardImage(fixture.blocks, fixture.rowColors);
+  const run = () =>
+    processScoreboardImage(fixture.blocks, fixture.rowColors).rows;
   const known = fixture.knownIssue;
 
   if (!known) {

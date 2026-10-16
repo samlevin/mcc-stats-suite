@@ -47,7 +47,10 @@ function cell(
   };
 }
 
-/** A Textract-style capture with one scoreboard table and text outside it. */
+/**
+ * A Textract-style capture with one scoreboard table and text outside it.
+ * Player rows alternate red and blue, so the parser reads a two-team board.
+ */
 function capture(playerWords: Record<string, string[]>): TextractCapture {
   const rows = Object.entries(playerWords);
   const cells = [
@@ -87,9 +90,9 @@ function capture(playerWords: Record<string, string[]>): TextractCapture {
   return {
     rowColors: rows.map((_, index) => ({
       rowIndex: index + 2,
-      r: 200,
+      r: index % 2 ? 0 : 200,
       g: 0,
-      b: 0,
+      b: index % 2 ? 200 : 0,
     })),
     response: { Blocks: blocks },
   };
@@ -125,7 +128,7 @@ test('reduceCapture replaces names and clan tags word by word', () => {
     ['[CLAN1]', 'Player01', 'A', '[CLAN2', 'X]', '...', 'Player02'],
   );
   assert.deepEqual(
-    processScoreboardImage(fixture.blocks, fixture.rowColors).map(
+    processScoreboardImage(fixture.blocks, fixture.rowColors).rows.map(
       (row) => row.player,
     ),
     ['Player01 A', 'Player02'],

@@ -36,7 +36,7 @@ const versions = {
   preprocessingVersion: 'none-v1',
   textractConfigurationVersion: 'textract-tables-v1',
   textractNormalizerVersion: 'textract-normalizer-v2',
-  tableParserVersion: 'scoreboard-parser-v4',
+  tableParserVersion: 'scoreboard-parser-v5',
   semanticMapperVersion: 'scoreboard-semantic-v2',
   validationRulesVersion: 'scoreboard-validation-v2',
 };
@@ -161,7 +161,7 @@ export async function runExtraction(
       metadata.height ?? 0,
       blocks,
     );
-    const rows = processScoreboardImage(blocks, rowColors);
+    const { rows, noRowsReason } = processScoreboardImage(blocks, rowColors);
     const normalized = normalize(rawBlocks, source, runId);
     const normalizedArtifact = await dependencies.writeJson(
       source.bucket,
@@ -174,7 +174,12 @@ export async function runExtraction(
         tables: normalized.tables,
         cells: normalized.cells,
         tokens: normalized.tokens,
-        parser: { version: versions.tableParserVersion, rows, rowColors },
+        parser: {
+          version: versions.tableParserVersion,
+          rows,
+          rowColors,
+          ...(noRowsReason ? { noRowsReason } : {}),
+        },
         validation: normalized.cells.map((cell) => ({
           cellObservationId: cell.cellObservationId,
           ...cell.validation,
@@ -216,6 +221,7 @@ export async function runExtraction(
       screenshotId: source.screenshotId,
       runId,
       rowCount: rows.length,
+      ...(noRowsReason ? { noRowsReason } : {}),
     });
     dependencies.publishExtractionMetrics(rows.length);
     return { runId, source, rows, normalizedArtifact };
