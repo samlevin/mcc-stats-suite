@@ -31,6 +31,12 @@ const automationLintTargets = [
   ...automationTests,
 ];
 
+// Lints every Markdown file without type-checking or building any workspace.
+export const markdownLint = [
+  'npx',
+  ['eslint', '**/*.md', '--max-warnings', '0'],
+];
+
 // Every other scripts/*.test.mjs belongs to the full gate. Listing the
 // directory keeps new build and deployment tests in it without editing here.
 export function buildTests(
@@ -58,6 +64,9 @@ export function checks({ full, repository, mode, job = 'static' }) {
   if (job === 'bundle')
     return full ? [['npx', workspaceArguments(mode, 'bundle')]] : [];
   const commands = [['npm', ['run', 'format:check']]];
+  // Prettier ignores Markdown, so ESLint is the only Markdown check. The full
+  // gate's `eslint .` already covers it.
+  if (!full) commands.push(markdownLint);
   if (full)
     commands.push(
       ['npx', ['eslint', '.', '--max-warnings', '0']],

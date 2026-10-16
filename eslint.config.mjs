@@ -1,9 +1,12 @@
 import eslint from '@eslint/js';
+import markdown from '@eslint/markdown';
 import prettier from 'eslint-config-prettier';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+const javascriptFiles = ['**/*.{js,mjs,cjs}'];
 const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
+const markdownFiles = ['**/*.md'];
 
 export default tseslint.config(
   {
@@ -24,7 +27,7 @@ export default tseslint.config(
   },
   {
     ...eslint.configs.recommended,
-    files: ['**/*.{js,mjs,cjs}'],
+    files: javascriptFiles,
     languageOptions: {
       globals: globals.node,
     },
@@ -59,5 +62,31 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
     },
   },
-  prettier,
+  // eslint-config-prettier only turns off JavaScript and TypeScript rules that
+  // conflict with Prettier, so it applies to code files and never to Markdown.
+  {
+    ...prettier,
+    files: [...javascriptFiles, ...typescriptFiles],
+  },
+  // Markdown is checked for broken structure (link fragments, table column
+  // counts, reference links, images, headings), not reformatted. Prettier
+  // keeps ignoring Markdown, and code blocks inside it are not linted as code.
+  // GFM parses GitHub tables; YAML front matter covers skill and agent files.
+  ...markdown.configs.recommended.map((config) => ({
+    ...config,
+    files: markdownFiles,
+    language: 'markdown/gfm',
+    languageOptions: {
+      frontmatter: 'yaml',
+    },
+  })),
+  // Rules turned off for specific files, each with its reason.
+  {
+    // The template has its own title, then the specification an author
+    // copies, whose title is a second H1 placeholder (`# <Component name>`).
+    files: ['specs/TEMPLATE.md'],
+    rules: {
+      'markdown/no-multiple-h1': 'off',
+    },
+  },
 );

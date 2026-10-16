@@ -26,6 +26,7 @@ import {
   automationTests,
   buildTests,
   checks,
+  markdownLint,
   runChecks,
   workspaceArguments,
 } from './ci-checks.mjs';
@@ -95,14 +96,16 @@ test('infrastructure and documentation paths keep affected workspace mode', () =
 test('documentation and recognized repository scopes avoid workspace and infrastructure commands', () => {
   assert.deepEqual(checks({ full: false, repository: false }), [
     ['npm', ['run', 'format:check']],
+    markdownLint,
   ]);
   const commands = checks({ full: false, repository: true });
-  assert.equal(commands.length, 4);
+  assert.equal(commands.length, 5);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
   assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
   assert.ok(JSON.stringify(commands).includes('branch-name.test.mjs'));
   assert.ok(JSON.stringify(commands).includes('agent-policy.test.mjs'));
-  assert.deepEqual(commands[1], ['npm', ['run', 'agents:check']]);
+  assert.deepEqual(commands[1], markdownLint);
+  assert.deepEqual(commands[2], ['npm', ['run', 'agents:check']]);
 });
 
 test('agent workflow sources and generated definitions select the repository scope', () => {
@@ -184,8 +187,12 @@ test('automation script tests run only in the repository scope', () => {
         JSON.stringify(args) === JSON.stringify(['--test', ...automationTests]),
     ),
   );
-  // The full gate's eslint . already covers the automation scripts.
-  assert.equal(both.filter(([, args]) => args[0] === 'eslint').length, 1);
+  // The full gate's eslint . already covers the automation scripts and
+  // Markdown.
+  assert.deepEqual(
+    both.filter(([, args]) => args[0] === 'eslint'),
+    [['npx', ['eslint', '.', '--max-warnings', '0']]],
+  );
 });
 
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {
