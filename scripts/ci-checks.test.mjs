@@ -160,6 +160,7 @@ test('automation script tests run only in the repository scope', () => {
     '.github/workflows/tracker-issue-states.yml',
     '.github/workflows/tracker-pr-issue-status.yml',
     '.github/workflows/tracker-pr-metadata.yml',
+    '.github/workflows/tracker-project-membership.yml',
   ])
     assert.equal(classify(path), 'repository', path);
   // Workflows that build, deploy, or release always run the full gate.

@@ -42,6 +42,8 @@ test('workflow files and names match the convention table', () => {
       'tracker-pr-issue-status.yml':
         'Tracker: move closing issues to In review',
       'tracker-pr-metadata.yml': 'Tracker: copy issue metadata to PR',
+      'tracker-project-membership.yml':
+        'Tracker: add issues and PRs to the project',
     },
   );
   for (const [file, definition] of definitions) {
