@@ -87,6 +87,7 @@ test('toLiteBlock keeps the fields the parser reads', () => {
       Id: 'cell',
       BlockType: 'CELL',
       Text: undefined,
+      Confidence: 99,
       RowIndex: 2,
       ColumnIndex: 1,
       Geometry: { BoundingBox: { Top: 0.1, Height: 0.2 } },

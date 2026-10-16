@@ -204,7 +204,7 @@ test('reduceCapture refuses invalid mappings', () => {
   );
 });
 
-test('assertNoRealNames checks block text and expected rows', () => {
+test('assertNoRealNames checks block text, expected rows, and misreads', () => {
   const blocks = [word('w', 'Player02')];
   assert.doesNotThrow(() =>
     assertNoRealNames(
@@ -222,6 +222,17 @@ test('assertNoRealNames checks block text and expected rows', () => {
   );
   assert.throws(
     () => assertNoRealNames({ blocks: [word('w', 'Chiefly')] }, mapping),
+    /remains in the fixture/,
+  );
+  assert.throws(
+    () =>
+      assertNoRealNames(
+        {
+          blocks,
+          misreads: [{ expected: 'Player02', read: 'Master Chlef' }],
+        },
+        mapping,
+      ),
     /remains in the fixture/,
   );
 });
