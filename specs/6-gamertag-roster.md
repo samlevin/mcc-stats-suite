@@ -1,0 +1,963 @@
+# Gamertag Roster: Technical Specification
+
+**Status:** Draft; not implemented
+
+**Version:** 1.0-draft (first version)
+
+**Date:** October 15, 2026
+
+**Component:** the roster administration Lambda, function URL and CLI in `applications/admin`; player name resolution in `applications/match-to-csv` (`extract-text`, `write-extracted-csv`, CSV format); a new pure package `packages/roster` (`@mcc/roster`); roster and resolution types in `packages/contracts`; the roster table in `infrastructure/modules/foundation`; ephemeral-stack permissions in `scripts/local-cdk-bootstrap.mjs`
+
+**Runtime:** TypeScript, Node.js 22 on AWS Lambda (ARM64); the CLI runs on Node.js 22 on an operator's machine
+
+**Deployment:** the roster Lambda ships in the existing `admin` CDK stack and resolution in the existing `match-to-csv` stack, one per stable environment from GitHub Actions plus ephemeral developer stacks, through the guarded wrapper in `scripts/cdk-app.mjs`
+
+**Input:** gamertags entered by an operator through the CLI, and the parser rows `extract-text` produces for each run ([spec 1](1-mcc-analytics-engine.md) §8)
+
+**Persistent state:** an append-only roster change log in one DynamoDB table per environment, owned by the OpenTofu foundation and encrypted with the foundation application data key; immutable roster snapshots and per-row resolutions in the OpenTofu-owned evidence bucket
+
+**External dependencies at runtime:** DynamoDB, S3, KMS, SSM Parameter Store, Lambda function URLs with IAM authentication, CloudFormation (`DescribeStacks`, from the CLI and the evaluation script only), STS (`GetCallerIdentity`, from the CLI and the evaluation script only)
+
+**Out of scope:** player identity across gamertags and renames (the stats lakehouse, #159), consent to publish statistics (§1), a roster screen in the reviewer application, rewriting OCR text in normalized observations, correcting team, score or outcome values, resolving names in tables the parser did not select, and resolving names of runs written before this component without a replay
+
+The first real Halo 3 captures (#91) read 14 of 16 gamertags exactly. The two misses were look-alike or spacing errors that a comparison ignoring case, spaces and look-alike characters undoes. An operator keeps a roster of the league's known gamertags. Each `extract-text` run compares every player name it reads with the roster, records the result beside the name as read, and writes the roster gamertag into the CSV with a `PlayerMatch` column that says whether the name matched exactly, was resolved from a near reading, or matched nothing.
+
+**Readiness:** this revision authorizes filing Phases 0 to 4. P2.2 and P3.1 cannot merge until P1.1 is applied in dev and prod. The contracts in §10.1 freeze when P0.1 merges, and the thresholds in §7.3 stay initial values until P4.2 records the first check.
+
+---
+
+## 1. Resolved requirement decisions
+
+The issue (#163) lists the decisions this spec must record and a proposal from the conversation that led to it. The proposal is a starting point; rows that depart from it say so.
+
+| Requirement | Decision | Reason |
+| --- | --- | --- |
+| Where the roster is stored | One DynamoDB table per environment, `<project>-<env>-gamertag-roster`, created by the OpenTofu foundation with deletion protection, point-in-time recovery, `prevent_destroy` and server-side encryption with the foundation data key `alias/<project>-<env>-application-data` (§13.2). The foundation publishes its name and ARN under `/mcc/<env>/roster/`. CDK stacks only read those parameters and grant their Lambdas access. | The roster outlives every application stack, so OpenTofu owns it like the evidence bucket. DynamoDB gives the conditional transaction that serializes changes (§6.1). The evidence bucket is under Object Lock and suits immutable records, which is where snapshots go (§5.2), but not a mutable head pointer. |
+| How roster changes are recorded | The table is an append-only log. Each change is one `roster-change/v1` item, numbered from 1 without gaps, recording the action, the gamertag, the caller's IAM principal, an optional reason and the roster hash after the change. A `HEAD` item holds the latest version. A change item is never updated or deleted. The roster at version `v` is the fold of changes 1 to `v` (§5.1). | The log answers "who changed what, when" without a second store, and any version can be rebuilt exactly. A separate current-state item would be a second copy that can disagree with the log. |
+| How a run records the roster version it used | `extract-text` reads the roster before calling Textract and records a `RosterReference` (`namespace`, `rosterVersion`, `rosterSha256`, snapshot key) in `normalized/observations.json`, the run `completion.json` and `export/extracted-table.json`. It writes the version's snapshot to the evidence bucket create-only, so every version a run used exists as immutable evidence (§5.2, §6.2). | The resolution is a function of the name as read and the roster, so the roster is an input and is kept like every other input (spec 1 §2.1 goal 2). The snapshot keeps the run reproducible if the table is ever restored from a backup or lost. |
+| What `admin` exposes for adding, deactivating and listing gamertags | Both an API and a CLI, with one writer. The `RosterAdmin` Lambda in the `admin` stack serves a small JSON API through a Lambda function URL with `AWS_IAM` authentication (§4.1). The `roster` CLI in `applications/admin` signs requests with the operator's AWS credentials and is the only v1 client that changes the roster (§4.2); the threshold evaluation script reads it through the same API (§9.3). Routes add, deactivate, reactivate, list and show history. There is no delete. A route on spec 3's Cognito-authenticated reviewer API and a roster screen are backlog (P5.2). The proposal named an admin Lambda plus a CLI; this keeps it and puts the Lambda behind a function URL. | A function URL with IAM authentication gives the Lambda the caller's verified `userArn` for the change record, which a direct `Invoke` does not. Operators need `lambda:InvokeFunctionUrl`, and `lambda:InvokeFunction` only for calls made through the function URL (§13.4), and no table permission, so they cannot bypass validation and the conflict check by writing the table or invoking the function with a forged event. Spec 3's API and user pool do not exist yet, and the roster should not wait for them. |
+| The matching key | `rosterKey(name)`: Unicode NFKC, lowercase, remove all whitespace, replace each `rn` with `m`, then map `i l 1 \|` to `1`, `o 0` to `0`, `s 5` to `5` and `b 8` to `8` (§7.1). This is the proposal's set. Lowercasing comes first, so the uppercase `I` the proposal lists folds as `i`, and lowercase `i` joins the group. | The two misreads in #161 are an `l` read as `I` and a space before trailing digits, and both readings share a key with their true gamertag. Case folding before the look-alike map makes every case variant of a name share one key. Folding `i` with `l` merges a few real names; the conflict check catches those on the roster (next row). |
+| How the roster refuses two gamertags that share a key | An add or reactivate whose key equals an active entry's key is refused with `409 KEY_CONFLICT`, naming the entries. There is no override, so no two active entries ever share a key. An add whose gamertag equals any entry's, active or inactive, ignoring case is refused with `409 DUPLICATE_GAMERTAG` instead, because Xbox gamertags are unique ignoring case. When two real players' gamertags share a key, the operator adds at most one of them; a reading of the other's name then resolves to the one on the roster (§18.4). | #163 requires the roster to refuse two gamertags that share a key. Most conflicts are an operator typing the same player twice, which the refusal catches. With one active entry per key, a key-equal reading has exactly one candidate, so §7.3 never has to choose between key-equal entries. The cost falls on real players whose names fold together, which §18.4 accepts and the `PlayerMatch` column and spec 3 review expose. |
+| The near-match rule | The reading's key is compared with every active entry's key by Levenshtein distance. A unique best entry is chosen when its distance `d1` is within its budget, `min(2, floor(keyLength / 5))` (0 edits for keys of 1 to 4 characters, 1 for 5 to 9, 2 for 10 or more), and the runner-up distance `d2` is at least `d1 + 1` when `d1` is 0 and at least `d1 + 2` otherwise (§7.3). These are initial values (§9). The proposal allowed 1 edit up to 8 characters, 2 above, with a one-edit margin. | Both observed misreads need no edits once keys are compared, so nothing yet supports any edit budget. v1 starts stricter than the proposal: short names get none, and a near match needs a two-edit lead, because the worst outcome is an unknown player resolved to a known gamertag one edit away. Key-equal readings keep the one-edit margin, which the placeholder fixtures need (§9.1). |
+| One roster entry cannot resolve two rows of the same game | A game is the scoreboard table the parser selected in one run (spec 1 §8.1); the system has no match entity. After each row is resolved on its own, an entry claimed by an `EXACT` row cannot also be the `RESOLVED` entry of another row, and an entry that two or more rows would resolve to resolves none of them. Those rows become `UNMATCHED` with `ENTRY_CLAIMED` (§7.4). | A gamertag appears once per scoreboard. Choosing a winner between two near readings would need a second-best assignment rule with no evidence behind it; refusing both is safe and rare. Two rows that read the same name exactly stay `EXACT`, because the roster changed nothing, and spec 2 `H001_DUPLICATE_PLAYER` flags them. |
+| How an unmatched name is handled | Passed through as read and marked `UNMATCHED` with a reason. It does not hold the run, and it adds no `reviewFlags` code. | An unmatched name is usually a correct reading of a player who is not on the roster, so marking it "possibly misread" would be wrong. Spec 3 reviews every cell of every run anyway (spec 3 §7.1), so holding the run would delay the CSV without adding review. #161's flags still mark low-confidence readings (§8.1). |
+| Whether the CSV gains a match-status column | Yes. The CSV header becomes `Team,Player,Score,Kills,Assists,Deaths,Win,Loss,PlayerMatch`. `PlayerMatch` holds `EXACT`, `RESOLVED` or `UNMATCHED`. `Player` holds the roster gamertag for `EXACT` and `RESOLVED` rows and the name as read for `UNMATCHED` rows (§7.6). The column goes last. `CsvRow` in `@mcc/contracts` gains an optional `playerResolution`; `CsvRow.player` keeps the name as read. PR #169 for #161 left the header alone so this spec could decide. | The CSV is the output players read, and it should name the player. The status column tells a reader which names came from the roster. Appending keeps every existing column at its position. Keeping `CsvRow.player` as read means spec 2 features, spec 3 parser checks and every existing fixture see the same values as before. |
+| Whether the roster records consent, and what happens to an unknown gamertag | No. The roster records gamertags the league knows, not consent. Every name on a scoreboard is processed whether or not it is on the roster, and an unknown gamertag is passed through as `UNMATCHED`. Consent to publish a player's statistics belongs to the player-facing datasets (#159). | Screenshots already carry every player's name, and the pipeline stores them as evidence either way. A consent-only roster would leave non-consenting players off the roster, so a reading of their name one edit from a consenting player's gamertag would resolve to that player. Membership would also mean two things at once. |
+| Where resolution runs | In `extract-text`, as its own stage with `rosterMatcherVersion: roster-matcher-v1` (§5.5), right after `processScoreboardImage`. The roster is read before the Textract call. | The roster changes the CSV rows, which `extract-text` produces. Reading it before Textract means a roster failure never wastes a provider call. A separate stage version lets thresholds change without a parser version bump. |
+| OCR text is never overwritten | Normalized cells, `parser.rows[].player`, `ExtractTextOutput.rows[].player` and `extracted-table.json` rows keep the name as read. The resolution sits beside it as `playerResolution` in normalized observations and the export (§5.4). Only the CSV's `Player` column shows the roster gamertag. | Spec 1 §5.2 rule 6 and spec 2 §5.2 rule 7 forbid edits to observed values. The CSV is a rendering of the run, not evidence about the image. |
+| Roster contents in workflow state | `ExtractTextOutput` carries the roster reference but no `playerResolution`, so no roster gamertag enters Step Functions state or its execution logs. `write-extracted-csv` reads the resolutions from the run's normalized observations (§6.2). | Step Functions logs execution data to a log group that the application data key does not encrypt (spec 1 §18.9). The roster reference holds only a namespace, a version, a hash and a key. |
+| Replay with a newer roster | A replay is a new run and reads the roster as it is when the replay runs (spec 1 §6.2). Earlier runs keep their resolutions. Re-resolving without a new Textract call is backlog (P5.4). | Spec 1 §5.2 rule 3 already makes replay the only way to reprocess, and it keeps every run's inputs fixed. |
+| Renamed gamertags | A rename is a deactivation of the old gamertag and an add of the new one. The roster does not link them. | Linking gamertags to one person is player identity, which #159 owns (spec 3 §2.2). |
+| Shared matching code | The key, distance, resolver, error-type derivation, fold and hash live in a new pure package, `@mcc/roster`, used by `match-to-csv` and `admin`. | The admin conflict check and the run-time resolver must compute identical keys. Spec 3 §12 allows `admin` to import only `@mcc/contracts` and `@mcc/cdk-config`, and `@mcc/contracts` holds types only, so a third package is the smallest exception (§8.4). |
+| Ephemeral developer stacks | Each namespace has its own roster partition in the shared table: `ROSTER#stable` for stable stacks and `ROSTER#ephemeral/<name>` for ephemeral ones, enforced by `dynamodb:LeadingKeys` in IAM (§13.4). An ephemeral `admin` stack and `match-to-csv` stack of the same name share one partition. | Developers can test roster changes without touching the shared dev roster, the same way their evidence lives under `ephemeral/<name>/`. One table avoids a table per developer. |
+
+**Additional capabilities included:** idempotent change requests through a client request ID, a warning on add that lists active gamertags one key edit away, a change history route, per-run match counts in the run completion, and an evaluation script that measures the thresholds on real captures against the roster held in AWS, without writing the roster to disk or committing any name (P4.1).
+
+## 2. Goals and non-goals
+
+### 2.1 Goals
+
+1. A reading of a roster gamertag that differs only by case, spacing or the look-alike groups in §7.1 appears in the CSV as the roster gamertag, marked `RESOLVED`.
+2. Every resolution is recorded beside the name as read with the chosen gamertag, the distances, the error types and the roster version, and no stage changes the name as read.
+3. Any run's resolution can be reproduced from its normalized observations and its roster snapshot.
+4. Every roster change is an immutable record with the caller's IAM principal, and the roster at any version can be rebuilt from those records.
+5. A reading near two roster gamertags, or near a known gamertag but not near enough, is never resolved.
+6. Roster contents are stored only in AWS and never enter the repository.
+
+### 2.2 Non-goals
+
+- Correcting any value other than the player name in the CSV, or any value in normalized observations.
+- Deciding which person a gamertag belongs to, linking renamed gamertags, or grouping screenshots into matches (#159).
+- Recording or enforcing consent (§1).
+- Holding a run, or skipping review, because of a match status. Spec 3 reviews every cell.
+- Resolving names in runs written before P3.2, except through replay.
+- Measuring the thresholds before captures exist. §9 sets out how they are checked.
+
+## 3. Runtime architecture
+
+```text
+Operator
+  |  roster CLI (applications/admin), SigV4 with the operator's AWS credentials
+  v
+Lambda function URL, AuthType AWS_IAM  (admin stack)
+  |
+  v
+RosterAdmin Lambda --TransactWriteItems (HEAD condition)--> Roster table (OpenTofu)
+                                                              pk ROSTER#<namespace>
+                                                              sk HEAD, CHANGE#<version>
+                                                                 ^
+match-to-csv ExtractText Lambda                                  |
+  1.   manifest, RUN_STARTED                                     |
+  2-3. read image, verify hash                                   |
+  4.   read roster (consistent GetItem HEAD, Query CHANGE) ------+
+       write roster snapshot (create-only) ----------> Evidence bucket roster/versions/
+  5.   Textract AnalyzeDocument
+  6.   parse -> resolvePlayers (@mcc/roster) -> normalized/observations.json
+  7.   completion with roster reference and match counts
+  |
+  v
+WriteExtractedCsv Lambda -> export/extracted.csv (PlayerMatch column), export/extracted-table.json
+```
+
+**Ownership rules:** `roster-admin` is the only writer of the roster table. `extract-text` only reads the table and is the only writer of roster snapshots. `write-extracted-csv` only renders the run's normalized observations and what `extract-text` returned. `@mcc/roster` is pure: it performs no I/O, reads no clock and holds no state. Only Lambda entry points and the default dependencies of the CLI and the evaluation script construct AWS SDK clients; core functions receive injected dependencies.
+
+**Packaging:** `@mcc/roster` (`packages/roster`) exports the matcher and fold. `@mcc/contracts` exports the roster and resolution types (§10.1). The `RosterAdmin` handler lives in `applications/admin/src/lambdas/roster-admin.ts`, its store in `src/lib/`, and the CLI in `applications/admin/scripts/roster.ts`. Resolution in `match-to-csv` is a call into `@mcc/roster` from `extract-text`, with the table reader in `src/lib/roster-source.ts`.
+
+**Orchestration decision:** no new workflow. Resolution adds one stage to an existing Lambda, and roster changes are single synchronous requests.
+
+### 3.1 Execution policy
+
+- One roster change is one request, one transaction and one new version. Changes in one namespace are serialized by the condition on `HEAD` (§6.1).
+- One run reads exactly one roster version and resolves every player row of its selected table against it.
+- Change items are created once with `attribute_not_exists` and never updated or deleted. Snapshots are written with `If-None-Match: *`.
+- A failed roster read fails the run before Textract is called. Step Functions retries transient errors as spec 1 §6.3 lists; a retried extraction is a new run that reads the roster again.
+- Nothing reads a namespace from a request body. Stacks take their namespace from their deployment (§13.3).
+- Resolution never changes the name as read, and never adds, drops or reorders rows.
+
+## 4. Roster administration interface
+
+### 4.1 API routes
+
+The function URL serves these routes. `RosterAdmin` routes on method and path, and returns `404 ROUTE_NOT_FOUND` for anything else. Every request carries a SigV4 signature that Lambda checks before the function runs, and Lambda lets it through only when the caller is allowed both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` (§13.4); the handler reads the caller from `requestContext.authorizer.iam.userArn`. Request bodies are JSON of at most 4 KiB.
+
+| Method and path | Body | Behavior |
+| --- | --- | --- |
+| `GET /v1/gamertags?status=ACTIVE\|INACTIVE\|ALL` | none | Entries of the current roster with `gamertagId`, `gamertag`, `status`, `matchKey` (computed with the deployed matcher), `addedVersion` and `lastChangedVersion`, sorted by gamertag ignoring case, plus `rosterVersion` and `rosterSha256`. `status` defaults to `ACTIVE`. |
+| `GET /v1/changes?afterVersion=0&limit=100` | none | Change records with `rosterVersion` greater than `afterVersion`, oldest first, at most `limit` (1 to 500), and `nextAfterVersion` when more exist. |
+| `POST /v1/gamertags` | `{ gamertag, reason?, clientRequestId }` | Adds an active entry with a new `gamertagId` (`evidenceId()`, spec 1 §5.1). |
+| `POST /v1/gamertags/{gamertagId}/deactivate` | `{ reason?, clientRequestId }` | Marks an active entry inactive. It stays in the history and can be reactivated. |
+| `POST /v1/gamertags/{gamertagId}/reactivate` | `{ reason?, clientRequestId }` | Marks an inactive entry active again, after the same key check as an add. |
+
+A successful write returns `201` with `{ change, entry, rosterVersion, rosterSha256, warnings }`. `warnings.nearKeyGamertags` lists active gamertags whose key is one edit from the new entry's key, so the operator knows readings between them will be ambiguous. A write whose `clientRequestId` already appears in the log is a replay: it returns that change with `200` and writes nothing.
+
+### 4.2 CLI
+
+```text
+npm run roster --workspace @mcc/admin -- --environment <dev|prod> [--ephemeral <name>] <command>
+
+list [--inactive | --all]
+history [--after <version>]
+add <gamertag>... [--reason <text>]
+deactivate <gamertag> [--reason <text>]
+reactivate <gamertag> [--reason <text>]
+```
+
+- Before any request, the CLI runs the account check that `scripts/cdk-app.mjs` runs today, unchanged: `AWS_PROFILE` is required; the expected account is `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID` for the chosen environment, or the profile's `sso_account_id` when that variable is unset, and must be 12 digits; the STS caller account must equal it; and a profile whose name implies the other environment is refused. P2.3 moves that check into `scripts/lib/account-guard.mjs` without changing its behavior; `scripts/cdk-app.mjs`, the CLI and the evaluation script (§9.3) import it. `--ephemeral` is refused with `prod`.
+- It reads the function URL from the `RosterFunctionUrl` output of `admin-<env>` or `admin-e-<name>`, so no URL is configured or committed. The lookup and SigV4 signing live in `scripts/lib/roster-api.mjs`, which the evaluation script (§9.3) also uses.
+- `deactivate` and `reactivate` take a gamertag, find its entry by a case-insensitive exact match in `list --all`, and call the route with its `gamertagId`. No match, or more than one, exits non-zero without a request.
+- `add` with several gamertags sends one request per gamertag, in order, and stops at the first refusal.
+- Every write generates a UUID `clientRequestId` and retries a timed-out or `5xx` request up to 3 times with the same ID.
+- Writes against `prod` print the change and ask for confirmation unless `--yes` is given.
+- The CLI reads gamertags only from its arguments, never from a file, and prints them only to the terminal.
+- Exit status is 0 on success, 1 on a refused change, and 2 on a usage, account or transport error.
+
+### 4.3 Validation and errors
+
+A gamertag is trimmed, runs of whitespace become one space, and the result must match `^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$`, which is spec 2's default `playerNamePattern` (spec 2 §7.2, `C003`). `reason` is at most 256 characters. `clientRequestId` is a UUID. A body holds only the fields §4.1 lists for its route; any other field, such as an actor or an override, fails the schema.
+
+| Condition | Status and code | Writes |
+| --- | --- | --- |
+| Body fails the schema, or the gamertag fails the pattern | `400 INVALID_REQUEST`, `400 INVALID_GAMERTAG` | nothing |
+| No `gamertagId` in the roster | `404 GAMERTAG_NOT_FOUND` | nothing |
+| An entry, active or inactive, has the same gamertag ignoring case | `409 DUPLICATE_GAMERTAG`, with that entry | nothing |
+| An active entry shares the key, on add or reactivate; there is no override | `409 KEY_CONFLICT`, with the entries | nothing |
+| Deactivating an inactive entry, reactivating an active one | `409 ALREADY_INACTIVE`, `409 ALREADY_ACTIVE` | nothing |
+| The `HEAD` condition failed on 3 attempts in a row | `409 CONCURRENT_CHANGE` | nothing |
+| The fold of the log does not match `HEAD` (§6.1 step 2) | `500 ROSTER_INTEGRITY`, logged at `ERROR` | nothing |
+| Any other storage error after the SDK's retries | `503 UNAVAILABLE` | nothing; the CLI retries with the same `clientRequestId` |
+
+## 5. Storage and run records
+
+### 5.1 Roster table
+
+| Item | `pk` | `sk` | Attributes |
+| --- | --- | --- | --- |
+| Head | `ROSTER#<namespace>` | `HEAD` | `rosterVersion`, `rosterSha256`, `updatedAt` |
+| Change | `ROSTER#<namespace>` | `CHANGE#<rosterVersion, 10 digits>` | every `RosterChange` field (§10.1) |
+
+`<namespace>` is `stable` for stable stacks and `ephemeral/<name>` for ephemeral ones. A namespace with no `HEAD` item has version 0 and an empty roster.
+
+**Fold.** The roster at version `v` starts empty and applies changes 1 to `v` in order. `ADD` creates an active entry, `DEACTIVATE` makes one inactive and `REACTIVATE` makes one active again. A gap in versions, an `ADD` of an existing `gamertagId`, or an action on an entry in the wrong state fails the fold with `RosterIntegrityError`.
+
+**Hash.** `rosterSha256` is the SHA-256 of the UTF-8 JSON array of active entries `{ "gamertag", "gamertagId" }`, sorted by `gamertagId` bytewise, with object keys sorted and no whitespace. The empty roster hashes `[]`. Inactive entries do not affect the hash, because matching never reads them.
+
+### 5.2 Evidence layout
+
+```text
+[ephemeral/<name>/]roster/versions/{rosterVersion}.json
+[ephemeral/<name>/]submissions/{submissionId}/screenshots/{screenshotId}/runs/{runId}/
+  normalized/observations.json        roster reference; parser.rows[].playerResolution
+  completion.json                     roster reference; metrics.playerMatchCounts
+  export/extracted-table.json         roster reference; rows[].playerResolution
+  export/extracted.csv                PlayerMatch column
+```
+
+`{rosterVersion}` is zero-padded to 10 digits, so keys sort in version order. Version 0 has a snapshot with no entries.
+
+### 5.3 Rules
+
+1. Change items are created once and never updated or deleted. The `HEAD` item is the only item that changes.
+2. A snapshot's bytes are a deterministic function of the namespace and version, with no timestamp, so every writer of a version produces the same object.
+3. `extract-text` records a roster version on a run only after that version's snapshot exists and its `rosterSha256` matches.
+4. A resolution never changes `observedText`, `parser.rows[].player` or any other value as read.
+5. Every run records `rosterMatcherVersion` in its manifest `versions`, and the roster reference in its normalized observations, completion and export.
+
+### 5.4 Document schemas
+
+`normalized-ocr/v2`, `processing-run-completion/v1` and `extracted-table/v1` gain optional fields only, as #161 did with `reviewFlags`, so documents written before P3.1 still validate.
+
+| Object | `schemaVersion` | Writer | Contents |
+| --- | --- | --- | --- |
+| roster table change item | `roster-change/v1` | `roster-admin` | `RosterChange` (§10.1) |
+| `roster/versions/{rosterVersion}.json` | `roster-snapshot/v1` | `extract-text` | `RosterSnapshot`: `namespace`, `rosterVersion`, `rosterSha256`, active `entries` sorted by `gamertagId` |
+| `normalized/observations.json` | `normalized-ocr/v2` | `extract-text` | adds `roster` (`RosterReference`) and `parser.rows[].playerResolution` (`PlayerResolution`) |
+| run `completion.json` | `processing-run-completion/v1` | `extract-text` | on success adds `roster` and `metrics.playerMatchCounts` (`exact`, `resolved`, `unmatched`) |
+| `export/extracted-table.json` | `extracted-table/v1` | `write-extracted-csv` | adds `roster`; each row keeps `playerResolution` |
+| `export/extracted.csv` | none | `write-extracted-csv` | §7.6 |
+
+### 5.5 Stage versions
+
+`extract-text` adds one key to the run manifest's `versions` (spec 1 §5.4). Any change to the key, distance, thresholds, claim rule or error-type derivation bumps it in the same delivery.
+
+| Key | v1 value |
+| --- | --- |
+| `rosterMatcherVersion` | `roster-matcher-v1` |
+
+P3.3 also bumps `pipelineVersion` to `1.1.0`, because the CSV gains a column.
+
+## 6. Processes
+
+### 6.1 Roster change
+
+`changeRoster(request, dependencies)` in `roster-admin`:
+
+1. Read `userArn` from the request context. Validate the route and body (§4.3).
+2. Read `HEAD` with a consistent read, giving version `v`. Query the change items after the version cached in this execution environment up to `v`, with consistent reads, and fold them onto the cached roster (§5.1). Fail with `500 ROSTER_INTEGRITY` when the fold's hash differs from `HEAD.rosterSha256`.
+3. When a change in the log has the request's `clientRequestId`, return it with `200`.
+4. Check the request against the roster at `v` (§4.3) and compute the key conflict and near-key warnings with `@mcc/roster`.
+5. Build change `v + 1` and the new hash. In one `TransactWriteItems`, put the change item with `attribute_not_exists(sk)` and put the `HEAD` item with the condition `attribute_not_exists(sk)` when `v` is 0 or `rosterVersion = :v` otherwise.
+6. When the transaction is cancelled by a failed condition, return to step 2, at most 3 attempts in all, then return `409 CONCURRENT_CHANGE`.
+7. Log `Roster changed` with `action`, `gamertagId`, `rosterVersion` and `requestId`, and return `201`.
+
+### 6.2 Roster read and resolution in `extract-text`
+
+Spec 1 §7.1 gains one step and two step changes:
+
+1. Unchanged. `manifest.json` records `rosterMatcherVersion`.
+2. Unchanged.
+3. Unchanged.
+4. **New.** `rosterSource.read(namespace)` reads the roster as in §6.1 step 2 and fails with `RosterIntegrityError` on a hash mismatch. When this execution environment has not yet confirmed the version's snapshot, it writes the snapshot with `If-None-Match: *`. On `412` it reads the existing object and fails with `RosterSnapshotMismatchError` unless its `rosterSha256` matches.
+5. Textract, as spec 1 step 4.
+6. Sample row colours, run `processScoreboardImage` and normalize every block, as spec 1 step 5. Then call `resolvePlayers(rows, roster)` (§7), attach each row's `playerResolution`, and write normalized observations with the roster reference.
+7. Write the completion with the roster reference and `playerMatchCounts`, append `RUN_SUCCEEDED`, log `Screenshot processed` with the three counts, and return `ExtractTextOutput` with the roster reference. Its rows carry no `playerResolution`.
+
+`write-extracted-csv` reads `normalized/observations.json` from the `normalizedArtifact` it receives, checks that its `runId` and roster reference match the input, takes the rows with their `playerResolution` from `parser.rows`, writes them and the roster reference into `extracted-table.json`, and writes the CSV with §7.6. A run without resolutions, written before P3.2, renders as before with an empty `PlayerMatch`.
+
+### 6.3 Replay
+
+A replay (spec 1 §6.2) runs the same steps and reads the roster at its current version. The new run records that version beside the earlier run, which keeps its own. Comparing the two runs' `playerResolution` values shows what a roster change did.
+
+### 6.4 Retries and failure
+
+- `RosterAdmin` relies on the SDK's default retries and returns `503 UNAVAILABLE` for other storage errors. The CLI retries with the same `clientRequestId`, so a change that committed before the response was lost returns as a replay.
+- In `extract-text`, DynamoDB throttling and server errors surface as `ThrottlingException`, `ProvisionedThroughputExceededException` or `InternalServerError`, which the workflow already retries (spec 1 §6.3). `RosterIntegrityError` and `RosterSnapshotMismatchError` are not retried. Each failure writes the `FAILED` completion and `RUN_FAILED` as spec 1 §7.1 describes. Textract has not been called.
+
+## 7. Matching
+
+`resolvePlayers(rows, roster)` in `@mcc/roster` is pure and deterministic. Its input is the parser's rows, whose `player` is the name tidied by spec 1 §8.2 step 4 (icon words dropped, one leading clan tag removed, whitespace collapsed), and the active entries of one roster version.
+
+### 7.1 Matching key
+
+`rosterKey(text)` applies these steps in order:
+
+1. Unicode NFKC normalization.
+2. Lowercase.
+3. Remove every whitespace character.
+4. Replace each `rn` with `m`, left to right, without overlap.
+5. Replace each character in a look-alike group with the group's representative. Every other character is kept.
+
+| Group | Representative |
+| --- | --- |
+| `i`, `l`, `1`, `\|` | `1` |
+| `o`, `0` | `0` |
+| `s`, `5` | `5` |
+| `b`, `8` | `8` |
+
+| Text | Key |
+| --- | --- |
+| `Player05`, `PIayer05`, `player05` | `p1ayer05` |
+| `Player06`, `Player 06` | `p1ayer06` |
+| `Player10 B C` | `p1ayer108c` |
+| `Corn Dog` | `c0md0g` |
+
+### 7.2 Distance
+
+`keyDistance` is the Levenshtein distance between two keys over Unicode code points, with insertion, deletion and substitution each costing 1. Transpositions cost 2, because OCR reads characters in place and does not swap them. `textDistance` is the same distance between the name as read and the chosen gamertag, case-sensitive and without the key steps.
+
+### 7.3 Per-row rule
+
+For each row, with `asRead` the row's `player`:
+
+1. When the roster has no active entry, or `asRead` has more than 32 characters, the row is `UNMATCHED` with `NO_CANDIDATE` and null distances. No gamertag is longer than 21 characters, so a longer reading is never a near match, and the cap bounds the work.
+2. When an active entry's gamertag equals `asRead` exactly, the row is `EXACT` for that entry, with `keyDistance` and `textDistance` 0. Gamertags are unique ignoring case, so at most one entry matches.
+3. Otherwise compute the key distance to every active entry. Let `d1` be the smallest. When no entry at `d1` is within its own budget, the row is `UNMATCHED` with `NO_CANDIDATE`, so a reading far from every entry is never called ambiguous.
+4. When more than one entry is at `d1`, the row is `UNMATCHED` with `AMBIGUOUS`.
+5. Let `A` be the one entry at `d1` and `d2` the smallest distance among the other entries (none when `A` is the only entry). When `d2` exists and is below `d1 + margin(d1)`, the row is `UNMATCHED` with `AMBIGUOUS`. Otherwise it is `RESOLVED` to `A`.
+
+| Parameter | v1 value | Notes |
+| --- | --- | --- |
+| Budget of entry `A` | `min(2, floor(length of rosterKey(A) / 5))` | 0 edits for keys of 1 to 4 characters, 1 for 5 to 9, 2 for 10 or more. Measured on the roster entry, because a reading can have extra characters. |
+| `margin(0)` | 1 | A key-equal reading resolves when no other entry is key-equal, which always holds because no two active entries share a key (§1). |
+| `margin(d)` for `d >= 1` | 2 | A near reading resolves only when every other entry is at least two edits further away. |
+| Longest reading considered | 32 characters | Rule 1. |
+
+Every record carries `keyDistance` (`d1`, or 0 for `EXACT`) and `runnerUpDistance` (`d2`, or the smallest key distance to any other entry for `EXACT`), so the thresholds can be checked against recorded runs (§9).
+
+### 7.4 One entry per game
+
+After every row has a result from §7.3, for each entry chosen by more than one row:
+
+- When any row is `EXACT` for the entry, every row `RESOLVED` to it becomes `UNMATCHED` with `ENTRY_CLAIMED`.
+- Otherwise, when two or more rows are `RESOLVED` to it, all of them become `UNMATCHED` with `ENTRY_CLAIMED`.
+
+Rows never move to their second-best entry. Two rows `EXACT` for the same entry both stay `EXACT`, and spec 2 `H001_DUPLICATE_PLAYER` flags the pair. The rule is order-independent, so the same rows in any order give the same results.
+
+### 7.5 Error types
+
+A `RESOLVED` row records `errorTypes` from spec 3's `CellErrorType` vocabulary (spec 3 §7.3), derived from a minimal Levenshtein alignment of `asRead` to the gamertag on the raw, case-sensitive text. The alignment is traced back from the end, preferring a match or substitution, then a deletion from `asRead`, then an insertion, so it is unique.
+
+| Alignment step | Error type |
+| --- | --- |
+| A substitution, including a case-only change | `GLYPH_SUBSTITUTION` |
+| A character of `asRead` deleted | `EXTRA_CHARACTERS` |
+| A character of the gamertag inserted | `MISSING_CHARACTERS` |
+
+Types are sorted and unique, as spec 3 requires. `EXACT` and `UNMATCHED` rows have none. `PIayer05` resolved to `Player05` records `GLYPH_SUBSTITUTION`, and `Player 06` resolved to `Player06` records `EXTRA_CHARACTERS`. A reviewer correcting either cell in spec 3 would choose the same type.
+
+### 7.6 CSV rendering
+
+`rowsToCsv(rows)` writes the header `Team,Player,Score,Kills,Assists,Deaths,Win,Loss,PlayerMatch` and quotes every value as spec 1 §8.6 does.
+
+| `playerResolution.status` | `Player` | `PlayerMatch` |
+| --- | --- | --- |
+| `EXACT` | the gamertag, equal to the name as read | `EXACT` |
+| `RESOLVED` | the roster gamertag | `RESOLVED` |
+| `UNMATCHED` | the name as read | `UNMATCHED` |
+| no `playerResolution` | the name as read | empty |
+
+The CSV carries neither the name as read for `RESOLVED` rows nor `reviewFlags`. `extracted-table.json` carries both.
+
+## 8. Relationship with #161, spec 2 and spec 3
+
+### 8.1 Division of work with #161
+
+#161 is delivered by PR #169, which adds `reviewFlags` to `CsvRow`: `LOW_WORD_CONFIDENCE` when a player-name `WORD` scores below 50, and `SPLIT_TRAILING_DIGITS` when trailing digits are split into their own word and either word scores below 90. Flags never change the name, and PR #169 left the CSV header for this spec.
+
+| Concern | Covered by |
+| --- | --- |
+| Marking a reading Textract may have misread, from its `WORD` confidences, with or without a roster | #161 (`reviewFlags`) |
+| Naming the player when the reading matches a roster gamertag | this spec (`playerResolution`) |
+| Keeping the name as read in parser rows, normalized observations and the export | both; neither changes it |
+| The CSV header and `Player` column | this spec (§7.6) |
+| Readings of players who are not on the roster | #161 flags them when confidence is low; this spec marks them `UNMATCHED` |
+| Delivery | #161 closes with PR #169; the slices in §20 deliver this spec |
+
+The two stages are independent. `resolvePlayers` does not read `reviewFlags`, and the flag rules do not read the roster. A row can be flagged and resolved: in capture 2, `PIayer05` and `Player 06` carry #161's flags and are `RESOLVED` here. A `RESOLVED` row keeps its flags, because they describe the reading, which is unchanged. Requiring a flag before a near match may resolve is backlog P5.3, to be taken up if §9 finds unknown players resolved to known gamertags.
+
+### 8.2 Spec 2
+
+- **Player normalization.** `H001_DUPLICATE_PLAYER` compares names after tag removal, whitespace collapse and case folding (spec 2 §7.3). `rosterKey` starts from the tidied name, which already has its tag removed, folds case the same way, removes whitespace instead of collapsing it, and adds the look-alike groups. For ASCII names, which every gamertag is, two names `H001` treats as equal always share a roster key; names that share a key need not be equal under `H001`. `H001` keeps its own rule.
+- **Look-alike tables.** Spec 2 `C001_SUSPICIOUS_GLYPH` maps letters to digits in integer cells only (spec 2 §7.2). The roster's groups are symmetric classes for names, deliberately smaller, and neither replaces the other.
+- **Name pattern.** Roster entries must match spec 2's default `playerNamePattern` (§4.3). A later change to spec 2's pattern does not change the roster's validation; the two are separate constants.
+- **Inputs to scoring.** Spec 2 reads `observedText` and `parser.rows`, and `parser.rows[].player` stays as read, so spec 2 v1 is unaffected. Resolution fields are not features in `features-v1`. Adding them is a spec 2 decision under a new `featureSchemaVersion` (P5.6).
+
+### 8.3 Spec 3
+
+- **Shared vocabulary.** A resolution records the misread it undid with spec 3's `CellErrorType` (§7.5), and one cell's resolution and adjudication describe the same thing: the text as read (`asRead`, or the cell's `observedTextAtReview`) and the text it should be (`gamertag`, or the resolved text).
+- **Join.** A resolution belongs to row `i` of `parser.rows`. Spec 2 P0.3's `parser.provenance` gives that row's table row (`rowIndexes[i]`) and the `PLAYER` column (`columnFields`), which identify the player cell's `cellObservationId`, the key of its spec 3 cell adjudication.
+- **Agreement.** A label's resolved text, tidied with spec 1 §8.2 step 4, agrees with an `EXACT` or `RESOLVED` resolution when it equals the gamertag. An `UNMATCHED` row is a missed resolution when its tidied label equals the gamertag of an entry in the run's roster snapshot. Cells resolved `UNREADABLE` or `SKIPPED` have no label. P5.1 measures the matcher this way.
+- **Independence.** A resolution is not an adjudication. It is never written under `adjudications/`, never sets a `ValueSource`, and is not shown to reviewers in v1, because spec 3's evidence panel shows observed text and parser output only (spec 3 §9.1). Labels therefore measure the matcher instead of echoing it, and blind labels stay blind. Showing roster suggestions to reviewers would be a spec 3 change that records when a suggestion was shown, like `priorityShown` (P5.7).
+- **Validated tables.** The validated table's `player` comes from the reviewed cell (spec 3 §8.4), so the roster plays no part in it. #159 can link validated names to roster entries by gamertag.
+
+### 8.4 Recorded dependencies
+
+This spec edits no other spec. It needs the following from them, and the slice named in each row records the change in the spec it touches when it merges.
+
+| Dependency | Owner | Handled by |
+| --- | --- | --- |
+| `CellErrorType` exported from `@mcc/contracts` | spec 3 P0.2 | Whichever of P0.1 here and spec 3 P0.2 merges first defines it exactly as spec 3 §10.1 does; the other imports it. |
+| `admin` may import `@mcc/roster` | spec 3 §12, which allows only `@mcc/contracts` and `@mcc/cdk-config` | P2.1 adds the dependency; spec 3's next revision lists `@mcc/roster`. |
+| Roster resources share `AdminStack` and `scripts/local-cdk-bootstrap.mjs` | spec 3 P1.2, P3.4 | Whichever slice merges later keeps the other's resources and statements. |
+| `normalized-ocr/v2` read types in `@mcc/contracts` | spec 2 P0.2 | When spec 2 P0.2 has merged, P3.1 adds `roster` and `playerResolution` to the shared type; otherwise to `extract-text`'s local type, and spec 2 P0.2 moves them with the rest. |
+| `parser.provenance` | spec 2 P0.3 | Needed only for the spec 3 join (§8.3) and P5.1. |
+| Spec 1 §2.2, §5.3, §5.4, §7.1, §8.6, §10.1, §13 and §14 | spec 1 | P3.1, P3.2 and P3.3 update spec 1 in the same PR as the behavior. |
+
+## 9. Matching evidence
+
+### 9.1 The #91 fixtures
+
+`halo3-two-team-capture-1` and `halo3-two-team-capture-2` hold 16 player rows of 14 distinct placeholder gamertags. Capture 1 reads all 8 names exactly. Capture 2 reads 6 exactly and misreads 2. The 14 placeholders have 14 distinct keys, so the roster would accept all of them (§4.3). With a test roster of the 14 placeholders, the v1 rule gives:
+
+| Capture | Rows | Expected results |
+| --- | --- | --- |
+| 1 | 8 | 8 `EXACT` |
+| 2 | 8 | 6 `EXACT`; `PIayer05` `RESOLVED` to `Player05` with `keyDistance` 0, `runnerUpDistance` 1, `textDistance` 1, `GLYPH_SUBSTITUTION`; `Player 06` `RESOLVED` to `Player06` with `keyDistance` 0, `runnerUpDistance` 1, `textDistance` 1, `EXTRA_CHARACTERS` |
+
+Placeholders are much closer to each other than real gamertags are: `Player05` and `Player06` are one edit apart. Both resolutions therefore pass the key-equal margin with nothing to spare, and a key-equal margin of 2 would refuse them. The same closeness makes every near reading of a placeholder ambiguous. With `Player05` removed from the test roster, `PIayer05` is one edit from `Player06`, `Player08` and others, and becomes `UNMATCHED` with `AMBIGUOUS`. So the fixtures test key-equal resolution and the ambiguity refusal. They cannot test the edit budgets, which need synthetic cases (§16.1) and real names (§9.3).
+
+### 9.2 The #161 misreads
+
+Both misreads are differences the key removes: a look-alike substitution (`l` read as `I`, `WORD` confidence 39) and a space inserted before trailing digits (`WORD` confidences 55 and 88). Neither needs an edit after the key. No capture yet shows a misread that does, such as a dropped character or a substitution outside the §7.1 groups, so the budgets and the near-match margin in §7.3 are initial values without evidence behind them.
+
+### 9.3 Further captures
+
+P4.1 adds `applications/match-to-csv/scripts/evaluate-roster.ts`:
+
+```text
+npx tsx scripts/evaluate-roster.ts --environment <dev|prod> [--ephemeral <name>] [--roster-version <n>] --captures <dir> --truth <file>
+```
+
+- **Roster.** The script reads the roster from AWS, never from a file. It runs the same account check as the roster CLI (`scripts/lib/account-guard.mjs`, §4.2), finds `RosterFunctionUrl` the same way, and pages through `GET /v1/changes` with a SigV4 request signed by the operator's credentials, through `scripts/lib/roster-api.mjs`, which P2.3 adds for the CLI. It folds changes 1 to `--roster-version`, or to the latest version when the flag is absent, with `foldRoster` (§5.1), and stops with exit status 2 when the fold's hash differs from that change's `rosterSha256`. The roster stays in memory for one run. The script never writes it, or anything else, to disk, and needs no permission beyond the operator's (§13.4).
+- **Captures and truth.** `--captures` is a directory of capture files from `scripts/capture-textract.ts`, the Textract responses the capture scripts already keep outside the repository. `--truth` is a JSON file that gives, for each row of each capture, the `gamertagId` of the roster entry the row shows, taken from `roster list`, or `null` when the player is not on the roster. It holds IDs only, never a gamertag. The script exits 2 when a value is neither `null` nor an `evidenceId()` (spec 1 §5.1), or names no entry in the folded roster; an entry inactive at that version counts as not on the roster. Whether a reading is a misread is decided by comparing it with the entry's gamertag from the roster read from AWS. The script refuses both paths when they are inside a Git working tree, as the capture scripts do.
+
+It runs the parser and `resolvePlayers` and prints the roster version and hash it used, then counts and distance histograms, never a name:
+
+- rows by status and reason;
+- wrong resolutions: `EXACT` or `RESOLVED` to an entry other than the truth, including any entry when the truth is `null`;
+- missed resolutions: `UNMATCHED` rows whose truth is on the roster, by `keyDistance`;
+- `runnerUpDistance` of correct resolutions, and `keyDistance` of readings whose truth is not on the roster.
+
+The thresholds are checked on at least 30 screenshots from at least 5 sessions, about 240 rows, including players who are not on the roster. They are kept when that sample has no wrong resolution and resolves at least 90% of misread names whose truth is on the roster. A wrong resolution means tightening the budget or the margin. Missed resolutions within reach of the budget, with no wrong resolution, support loosening it. Either change is a new `rosterMatcherVersion` filed as its own issue; earlier runs keep their version, and a replay applies the new one. P4.2 records the first check's counts on its issue.
+
+### 9.4 Spec 3 labels
+
+Once spec 3 writes adjudications, every reviewed run measures the matcher against reviewer decisions (§8.3), including how often unknown players' readings fall within the budget of a roster gamertag. P5.1 reports those counts and replaces the P4.1 evaluation sample as the evidence for later threshold changes.
+
+## 10. Typed domain model
+
+### 10.1 Shared contracts
+
+`@mcc/contracts` exports:
+
+```typescript
+type CellErrorType =                     // spec 3 §7.3; defined once (§8.4)
+  | 'GLYPH_SUBSTITUTION' | 'MISSING_CHARACTERS' | 'EXTRA_CHARACTERS'
+  | 'SHIFTED_CELL' | 'MERGED_CELL' | 'OTHER';
+
+type RosterChangeAction = 'ADD' | 'DEACTIVATE' | 'REACTIVATE';
+
+interface RosterChange {
+  schemaVersion: 'roster-change/v1';
+  namespace: string;                     // 'stable' or 'ephemeral/<name>'
+  rosterVersion: number;                 // 1-based, no gaps
+  action: RosterChangeAction;
+  gamertagId: string;                    // evidenceId(), assigned by ADD
+  gamertag: string;                      // validated display text (§4.3)
+  reason: string | null;                 // at most 256 characters
+  actorArn: string;                      // the function URL caller's IAM userArn
+  clientRequestId: string;
+  changedAt: string;
+  rosterSha256: string;                  // roster hash after this change (§5.1)
+}
+
+interface RosterEntry { gamertagId: string; gamertag: string }
+
+interface RosterSnapshot {
+  schemaVersion: 'roster-snapshot/v1';
+  namespace: string;
+  rosterVersion: number;
+  rosterSha256: string;
+  entries: readonly RosterEntry[];       // active entries, sorted by gamertagId
+}
+
+interface RosterReference {
+  namespace: string;
+  rosterVersion: number;
+  rosterSha256: string;
+  snapshot: S3ObjectReference;
+}
+
+type PlayerMatchStatus = 'EXACT' | 'RESOLVED' | 'UNMATCHED';
+type UnmatchedReason = 'NO_CANDIDATE' | 'AMBIGUOUS' | 'ENTRY_CLAIMED';
+
+interface PlayerResolution {
+  status: PlayerMatchStatus;
+  asRead: string;                        // CsvRow.player, the tidied name as read
+  gamertagId: string | null;             // null when UNMATCHED
+  gamertag: string | null;               // null when UNMATCHED
+  keyDistance: number | null;            // d1; 0 for EXACT; null when no entry was compared
+  runnerUpDistance: number | null;       // d2; null when no other entry exists
+  textDistance: number | null;           // asRead to gamertag; null when UNMATCHED
+  errorTypes: readonly CellErrorType[];  // RESOLVED only, sorted
+  unmatchedReason: UnmatchedReason | null;
+}
+
+interface CsvRow {
+  team: string; player: string; score: string; kills: string;
+  assists: string; deaths: string; win: number; loss: number;
+  reviewFlags?: RowReviewFlag[];         // #161
+  playerResolution?: PlayerResolution;   // in normalized observations and the export from P3.2 on
+}
+
+interface ExtractTextOutput {
+  runId: string;
+  source: SourceScreenshot;
+  rows: CsvRow[];
+  normalizedArtifact: S3ObjectReference;
+  roster?: RosterReference;              // present on runs from P3.1 on
+}                                        // rows never carry playerResolution (§1)
+
+// Roster API bodies (§4.1)
+interface AddGamertagRequest { gamertag: string; reason?: string; clientRequestId: string }
+interface ChangeGamertagStatusRequest { reason?: string; clientRequestId: string }
+interface RosterChangeResponse {
+  change: RosterChange;
+  entry: RosterEntry & { status: 'ACTIVE' | 'INACTIVE' };
+  rosterVersion: number;
+  rosterSha256: string;
+  warnings: { nearKeyGamertags: readonly string[] };
+}
+```
+
+Request bodies are validated against a schema in `roster-admin` before any read. `asRead` is copied from parser output and never interpreted beyond §7; matching ignores readings over 32 characters.
+
+### 10.2 Relationships
+
+```text
+Namespace 1 -> 1 head -> many changes (versions 1..n)
+Roster version 1 -> 0..1 snapshot in the evidence bucket (written when a run first uses it)
+Gamertag entry 1 -> many changes (one ADD, then DEACTIVATE and REACTIVATE)
+Processing run 1 -> 1 roster version (from P3.1)
+Parser row 1 -> 0..1 player resolution -> 0..1 roster entry
+Roster entry 1 -> at most 1 RESOLVED row per run (§7.4)
+```
+
+## 11. Module and function catalog
+
+### 11.1 Entry points
+
+| File | Public functions | Purpose |
+| --- | --- | --- |
+| `applications/admin/src/lambdas/roster-admin.ts` | `handler(event)`; `changeRoster(request, dependencies)`; `readRoster(request, dependencies)` | The routes in §4.1. |
+| `applications/admin/scripts/roster.ts` | `main(argv, dependencies)` | The CLI in §4.2. |
+| `applications/match-to-csv/src/lambdas/extract-text.ts` | existing | Adds §6.2 steps 4, 6 and 7. |
+| `applications/match-to-csv/src/lambdas/write-extracted-csv.ts` | existing | Reads resolutions from normalized observations; writes the export and renders §7.6. |
+| `applications/match-to-csv/scripts/evaluate-roster.ts` | `main(argv, dependencies)` | §9.3. Reads the roster from AWS into memory only; refuses capture and truth paths in a Git working tree; writes no file; prints counts only. |
+
+### 11.2 Libraries
+
+| File | Public functions | Purpose |
+| --- | --- | --- |
+| `packages/roster/src/key.ts` | `rosterKey(text)`; `keyDistance(a, b)` | §7.1, §7.2. Pure. |
+| `packages/roster/src/resolve.ts` | `resolvePlayers(rows, entries)`; `errorTypesFor(asRead, gamertag)` | §7.3 to §7.5. Pure. |
+| `packages/roster/src/changes.ts` | `foldRoster(changes)`; `rosterSha256(entries)`; `checkChange(roster, request)` | §5.1, §4.3 checks and near-key warnings. Pure. |
+| `applications/admin/src/lib/roster-store.ts` | `DynamoRosterStore` (`readHead`, `readChanges`, `appendChange`) | Table reads and the conditional transaction (§6.1). |
+| `applications/match-to-csv/src/lib/roster-source.ts` | `DynamoRosterSource.read(namespace)`; `ensureSnapshot(reference, roster)` | §6.2 step 4, with a per-environment cache by version. |
+| `applications/match-to-csv/src/lib/csv.ts` | `rowsToCsv(rows)` | §7.6. |
+| `scripts/lib/roster-api.mjs` | `rosterFunctionUrl(environment, ephemeral, dependencies)`; `rosterRequest(url, method, path, body, dependencies)` | §4.2, §9.3. Reads `RosterFunctionUrl` from the admin stack and sends one request signed with SigV4 by the caller's credentials. Holds no state and writes no file. |
+
+### 11.3 Infrastructure code
+
+| File | Public API | Purpose |
+| --- | --- | --- |
+| `infrastructure/modules/foundation/roster.tf` | table, SSM parameters, outputs | §13.2. |
+| `applications/admin/cdk/lib/admin-stack.ts` | `AdminStack` | `RosterAdmin`, its function URL, IAM and outputs (§13.3). |
+| `applications/match-to-csv/cdk/lib/match-to-csv-stack.ts` | `MatchToCsvStack` | `ExtractText` environment and roster permissions. |
+| `scripts/local-cdk-bootstrap.mjs` | existing | Ephemeral permissions (§13.4). |
+| `docs/self-hosting/policies/roster-operator.json.template` | IAM policy template | The operator policy (§13.4). |
+
+## 12. Directory structure and ownership
+
+```text
+mcc-stats-suite/
+  packages/roster/                       # @mcc/roster: pure matcher, fold and hash
+    package.json
+    src/{key,resolve,changes,index}.ts
+    test/*.test.ts
+  packages/contracts/src/index.ts        # roster and resolution types
+  applications/admin/
+    src/lambdas/roster-admin.ts
+    src/lib/roster-store.ts
+    scripts/roster.ts                    # npm run roster
+    cdk/lib/admin-stack.ts
+    test/*.test.ts
+  applications/match-to-csv/
+    src/lib/{roster-source,csv}.ts
+    src/lambdas/{extract-text,write-extracted-csv}.ts
+    scripts/evaluate-roster.ts
+    test/fixtures/roster.fixture.json    # the 14 placeholder gamertags, never real names
+  infrastructure/modules/foundation/roster.tf
+  scripts/local-cdk-bootstrap.mjs
+  scripts/lib/{account-guard,roster-api}.mjs   # shared by cdk-app.mjs, the CLI and evaluate-roster
+  docs/self-hosting/policies/roster-operator.json.template
+```
+
+`@mcc/roster` imports only `@mcc/contracts` types and Node's `crypto`. It never imports an AWS SDK package. `admin` and `match-to-csv` import `@mcc/roster` and never each other. Release Please versions `@mcc/roster` like the other packages, and a change to it bumps both applications.
+
+## 13. Configuration and infrastructure
+
+### 13.1 Configuration
+
+The thresholds in §7.3 are constants in `@mcc/roster`, versioned by `rosterMatcherVersion`. There is no configuration file, because a threshold change must change the version recorded on every run. The namespace comes from the deployment (§13.3) and the table name from SSM.
+
+### 13.2 Persistent resources
+
+| Resource | Owner | Configuration |
+| --- | --- | --- |
+| Roster table `<project>-<env>-gamertag-roster` | OpenTofu foundation (P1.1) | On-demand billing; partition key `pk` and sort key `sk`, both strings; no secondary index, stream or TTL; server-side encryption with the foundation data key; point-in-time recovery on; deletion protection on; `prevent_destroy`. |
+| SSM parameters | OpenTofu foundation (P1.1) | `/mcc/<env>/roster/table-name` and `/mcc/<env>/roster/table-arn`. |
+| KMS data key, evidence bucket | OpenTofu foundation | Existing (spec 1 §13.1). Snapshots are encrypted like all evidence. |
+
+The table lives in `infrastructure/modules/foundation`, which both foundation roots already call and whose `*.tf` files their Terrateam `file_patterns` already match, so no Terrateam mapping changes.
+
+### 13.3 Application resources
+
+| Resource | Configuration |
+| --- | --- |
+| `RosterAdmin` (admin stack) | Named `<stack name>-RosterAdmin`; Node.js 22, ARM64, 512 MB, 10-second timeout, X-Ray, env `ROSTER_TABLE`, `ROSTER_NAMESPACE` |
+| Function URL | On `RosterAdmin`, `AuthType: AWS_IAM`, no CORS configuration, no resource-based policy for any principal (§13.4) |
+| Admin stack outputs | `RosterFunctionUrl`, `RosterFunctionName` |
+| `ExtractText` (match-to-csv stack) | Adds env `ROSTER_TABLE` and `ROSTER_NAMESPACE` |
+
+`ROSTER_NAMESPACE` is `stable` for stable stacks and `ephemeral/<name>` for ephemeral ones, taken from `DeploymentConfig`. Log groups follow each stack's existing retention.
+
+### 13.4 Permissions
+
+| Principal | Roster table | KMS data key | Evidence bucket |
+| --- | --- | --- | --- |
+| `RosterAdmin` | `GetItem`, `Query` and `PutItem`, with `dynamodb:LeadingKeys` equal to `ROSTER#<namespace>`; the §6.1 transaction holds two puts, so it needs only `PutItem` | decrypt, encrypt and generate data keys through DynamoDB (`kms:ViaService`) | none |
+| `ExtractText` | `GetItem` and `Query`, with the same `LeadingKeys` condition | the existing encrypt and decrypt grant, which covers DynamoDB | the existing `GetObject` and `PutObject`, which cover snapshots |
+| `WriteExtractedCsv` | none | the existing grant | adds `GetObject` on `<ns>submissions/*/runs/*/normalized/observations.json` |
+| Operators | none | none | none; they invoke `RosterAdmin` only through its function URL, under the operator policy below |
+
+No role has `UpdateItem`, `DeleteItem`, `BatchWriteItem` or any table-management action on the roster table. Ephemeral roles carry the local boundary and `/mcc-local/` path. The local execution role's existing `ManageEphemeralCompute` statement (`lambda:*` on `<app>-e-*` functions) already covers creating and deleting function URLs. P1.2 lets the local workload boundary allow the roster actions above only when the leading key is `ROSTER#ephemeral/${aws:PrincipalTag/Ephemeral}`, so an ephemeral stack can never read or write the stable roster.
+
+**Operator policy.** Lambda authorizes a request to a function URL with `AuthType: AWS_IAM` only when the signed caller is allowed both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` on the function ([function URL access control](https://docs.aws.amazon.com/lambda/latest/dg/urls-auth.html)). The admin stack adds no resource-based policy to `RosterAdmin`, so the caller's identity-based policy in the same account is the only grant. The operator policy is the minimum the CLI and the evaluation script (§9.3) need:
+
+| Statement | Action | Resource | Condition |
+| --- | --- | --- | --- |
+| `InvokeRosterFunctionUrl` | `lambda:InvokeFunctionUrl` | `function:admin-*-RosterAdmin` | `StringEquals` `lambda:FunctionUrlAuthType` = `AWS_IAM` |
+| `InvokeRosterThroughFunctionUrl` | `lambda:InvokeFunction` | `function:admin-*-RosterAdmin` | `Bool` `lambda:InvokedViaFunctionUrl` = `true` |
+| `ReadRosterFunctionUrl` | `cloudformation:DescribeStacks` | `stack/admin-*/*` | none |
+
+Resources are in the operator's account and Region. `admin-*-RosterAdmin` matches the stable functions (`admin-dev-RosterAdmin`, `admin-prod-RosterAdmin`) and ephemeral ones (`admin-e-<name>-RosterAdmin`) and no other function. The condition on `lambda:InvokeFunction` keeps the recorded actor trustworthy. A direct `Invoke` lets the caller send any event, including a `requestContext.authorizer.iam.userArn` that names someone else, and the handler cannot tell that event from one the function URL built. Under the condition, an operator's only way in is a signed function URL request, for which Lambda supplies the caller. The policy has no DynamoDB, KMS or S3 action.
+
+P2.2 commits the policy as `docs/self-hosting/policies/roster-operator.json.template`, with `ACCOUNT_ID` and `AWS_REGION` placeholders like the existing local deployer template, and documents granting it. The `mcc-<env>-admin` administrator profiles already allow every action in it; a role for people who only maintain the roster, such as an IAM Identity Center permission set, gets exactly this policy. §18.13 covers administrators, whose wider rights bypass it.
+
+### 13.5 Deployment
+
+P1.1 is applied in dev and prod before P2.2 or P3.1 merges. Both stacks deploy through `scripts/cdk-app.mjs` as today. The deploy preflight and post-deploy verification live in `.github/workflows/_delivery-deploy-environment.yml`. The preflights of both stacks fail when `/mcc/<env>/roster/table-name` is missing. Post-deploy verification for `admin` checks that `RosterFunctionUrl` answers an unsigned request with `403`. The first roster is loaded with `add` after P2.3; until then every run is `UNMATCHED`, which changes nothing a player sees except the new column.
+
+## 14. Security and privacy
+
+1. Roster contents never enter the repository. No roster file is committed. Tests use the placeholder names of the #91 fixtures and synthetic names. The CLI takes gamertags only as arguments. The evaluation script reads the roster from AWS, takes truth as roster IDs rather than gamertags, refuses capture and truth paths inside a Git working tree, and prints only counts.
+2. Roster contents live only in AWS under the application data key: change items in the roster table, which DynamoDB encrypts with the foundation data key, including its point-in-time backups; snapshots, resolutions and CSVs in the evidence bucket, encrypted with the same key. No roster file exists outside AWS. The CLI and the evaluation script read the roster through `RosterAdmin` and hold it in memory for one command, the CLI prints it only to the terminal, and neither writes it to disk (§4.2, §9.3).
+3. Lambda logs never contain gamertags, readings or `actorArn`, which can hold a session name such as an email address. `RosterAdmin` logs `action`, `gamertagId`, `rosterVersion`, status codes and `requestId`; `extract-text` logs match counts only. Step Functions execution data carries names as read, as spec 1 §18.9 records, but never a roster gamertag, because `ExtractTextOutput` rows carry no resolution (§1).
+4. Every roster request is signed with SigV4 and authorized by Lambda before the function runs, which requires both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` (§13.4). The handler takes the actor from the request context, never from the body, and the operator policy allows `lambda:InvokeFunction` only through the function URL, so an operator cannot supply a forged request context.
+5. `RosterAdmin` is the only writer. The operator policy holds no table permission, so every change an operator makes passes validation and the conflict check, and lands in the log. Administrators hold wider rights (§18.13).
+6. Namespaces come from the deployment, never from a request, and IAM `LeadingKeys` conditions confine every role to its own partition.
+7. Gamertags and readings are untrusted text. They are validated (§4.3) or length-capped (§7.3) before matching, used only as data, and never as keys or paths except through validated IDs.
+
+## 15. Observability
+
+- `RosterAdmin` writes one JSON log line per request with the fields in §14 item 3, and `Roster changed` per committed change.
+- `extract-text` adds `exact`, `resolved` and `unmatched` counts to its `Screenshot processed` line and to `completion.json` metrics. When spec 5's stage event exists, P3.2 adds the same three counts to it.
+- The audit record for "who changed the roster" is its change log (`GET /v1/changes`, `roster history`). The audit record for "why does this CSV name this player" is the run's `playerResolution` and roster snapshot.
+
+## 16. Testing, CI and release
+
+### 16.1 Tests
+
+Tests use each workspace's test runner and coverage thresholds, and never call AWS: `node --test` with `tsx` in `match-to-csv` and in `@mcc/roster`, which copies `match-to-csv`'s thresholds, and `tap` in `admin`, which spec 3 P0.1 chose.
+
+| File | Covers |
+| --- | --- |
+| `packages/roster/test/key.test.ts` | every row of the §7.1 tables; NFKC input; `rn` before folding; whitespace of every kind; `keyDistance` symmetry, transposition at 2, empty strings |
+| `packages/roster/test/resolve.test.ts` | each §7.3 outcome on synthetic names: empty roster, over-long reading, `EXACT`, key-equal `RESOLVED`, near `RESOLVED` at distance 1 and 2, `NO_CANDIDATE` past the budget for keys of 4, 5, 9 and 10 characters, `NO_CANDIDATE` for a tie past the budget, `AMBIGUOUS` on a tie within the budget and on a short margin; §7.4 with an `EXACT` claim, two `RESOLVED` claims, and two `EXACT` rows of one name; results independent of row order; `errorTypesFor` for substitution, case change, extra and missing characters and a mix |
+| `packages/roster/test/changes.test.ts` | fold of add, deactivate, reactivate; `RosterIntegrityError` on a gap, a repeated add and a wrong-state action; hash of `[]`; hash independent of change order for the same active set; inactive entries excluded; `checkChange` for every refusal in §4.3, including `KEY_CONFLICT` on an add and on a reactivate whose key equals an active entry's, and the near-key warning |
+| `applications/admin/test/roster-admin.test.ts` | every route and error code in §4.3; actor from the request context; a body with a field §4.1 does not list, such as `actorArn` or `allowSharedKey`, is `400 INVALID_REQUEST` and writes nothing; replay by `clientRequestId`; a failed `HEAD` condition retried and then `409 CONCURRENT_CHANGE`; `ROSTER_INTEGRITY` on a hash mismatch; no namespace read from a request; no gamertag or ARN in logs |
+| `applications/admin/test/roster-cli.test.ts` | argument parsing; the account check refuses a mismatched account and `--ephemeral` with `prod`; URL from stack outputs; prod confirmation and `--yes`; retries reuse `clientRequestId`; exit codes |
+| `applications/admin/test/app.test.ts` | function URL with `AWS_IAM` and no CORS; `RosterAdmin` named `<stack name>-RosterAdmin`; no `AWS::Lambda::Permission` in the stack, so no resource-based policy grants any principal an invoke; IAM actions and `LeadingKeys` conditions for stable and ephemeral stacks; outputs |
+| `applications/admin/test/roster-operator-policy.test.ts` | `docs/self-hosting/policies/roster-operator.json.template` holds exactly the three §13.4 statements; `lambda:InvokeFunction` appears only with `Bool` `lambda:InvokedViaFunctionUrl` `true`, and `lambda:InvokeFunctionUrl` only with `StringEquals` `lambda:FunctionUrlAuthType` `AWS_IAM`; no other action, no wildcard action and no DynamoDB, KMS or S3 action; the Lambda resource pattern matches the synthesized `RosterAdmin` name of a stable and an ephemeral stack and no other function in either |
+| `scripts/lib/roster-api.test.mjs` | the URL from the `RosterFunctionUrl` output of `admin-<env>` and `admin-e-<name>`; a missing output fails without a request; each request signed with SigV4 for service `lambda` with the caller's credentials and Region; nothing written to disk |
+| `applications/match-to-csv/test/roster-source.test.ts` | version 0 without `HEAD`; incremental fold from the cache; `RosterIntegrityError`; snapshot written once; `412` with a matching snapshot continues and with a different one fails `RosterSnapshotMismatchError` |
+| `applications/match-to-csv/test/extract-text-handler.test.ts` | the roster is read before Textract and a roster failure never calls it; normalized observations carry the roster reference and resolutions, the completion the reference and counts, and the output the reference with no `playerResolution` on any row; `parser.rows[].player` unchanged |
+| `applications/match-to-csv/test/write-extracted-csv.test.ts` | resolutions are read from normalized observations; a `runId` or roster reference mismatch fails; a run without resolutions renders an empty `PlayerMatch` |
+| `applications/match-to-csv/test/scoreboard-fixtures.test.ts` | with `test/fixtures/roster.fixture.json`, the §9.1 results for both captures, and `AMBIGUOUS` for `PIayer05` with `Player05` removed |
+| `applications/match-to-csv/test/csv.test.ts` | the header, every row of the §7.6 table, quoting |
+| `applications/match-to-csv/test/evaluate-roster.test.ts` | the account check runs before any request, and a refused account sends none; the roster comes only from `GET /v1/changes` through injected dependencies, and no argument names a roster file; paging; the fold stops at `--roster-version` or the latest version, and a hash mismatch exits 2; a truth value that is not `null` or an `evidenceId()`, such as a gamertag, or that names no entry, exits 2; an inactive truth entry counts as not on the roster; refuses capture and truth paths in a Git working tree; writes no file; output holds the roster version and hash, counts and histograms, and no name from the roster or the captures |
+| `infrastructure/modules/foundation/tests/` | table encryption with the data key, point-in-time recovery, deletion protection, keys, and both SSM parameters |
+
+### 16.2 CI and release
+
+CI runs format, lint, typecheck and tests for `@mcc/roster`, `admin` and `match-to-csv` on affecting changes, synthesizes both stacks, and runs `npm run tofu:check` for `infrastructure/` changes. Release Please versions `@mcc/roster`, and a change to it or to `@mcc/contracts` bumps every dependent application.
+
+### 16.3 Live validation
+
+In dev, an operator adds the league's gamertags with the CLI, sends one screenshot whose names include a roster player, a player not on the roster and, when one is available, a misread, then checks the CSV's `Player` and `PlayerMatch` columns, the run's `playerResolution` values and that `roster/versions/<version>.json` exists. The operator then deactivates one gamertag, replays the screenshot, and checks that the new run records the new version and marks that player `UNMATCHED` while the first run is unchanged.
+
+Authorization is checked against an ephemeral stack with a dev role that holds only the operator policy: `roster list` and `add` succeed, `aws lambda invoke` of `RosterFunctionName` is refused with `AccessDeniedException`, and the same role without the `InvokeRosterThroughFunctionUrl` statement gets `403` from a signed `roster list`.
+
+## 17. Acceptance criteria
+
+v1 (Phases 0 to 4) is complete when:
+
+1. With the 14 placeholder gamertags on a test roster, capture 1 yields 8 `EXACT` rows and capture 2 yields 6 `EXACT` rows and the two `RESOLVED` rows in §9.1, with `parser.rows[].player` still `PIayer05` and `Player 06`.
+2. A reading tied between two entries, or within the budget of one entry with another less than the margin further away, is `UNMATCHED` with `AMBIGUOUS`, and no entry is `RESOLVED` for two rows of one run.
+3. The CSV header ends in `PlayerMatch`, and each row's `Player` and `PlayerMatch` follow §7.6.
+4. Every run from P3.1 on records a roster reference whose snapshot exists and hashes to `rosterSha256`, and every run from P3.2 on records `rosterMatcherVersion` and a `playerResolution` on every row.
+5. Replaying a screenshot after a roster change creates a new run with the new version, and the earlier run's evidence is byte-for-byte unchanged.
+6. `add`, `deactivate`, `reactivate`, `list` and `history` work against dev through the CLI. Each change is one `roster-change/v1` item with the caller's ARN, a second add of a case variant is refused with `DUPLICATE_GAMERTAG`, and an add or reactivate whose key equals an active entry's is refused with `KEY_CONFLICT`, with no override. A role holding only the operator policy (§13.4) can run every command, and its direct `Invoke` of `RosterAdmin` is refused.
+7. An ephemeral stack reads and writes only its own roster partition.
+8. No roster content appears in the repository, in a log line, in a file outside AWS, or in the evaluation script's output.
+9. The first threshold check in §9.3 is recorded on P4.2's issue, with a keep or change decision.
+10. Every §16.1 test passes with each workspace's coverage thresholds, both stacks synthesize, and `npm run tofu:check` passes.
+
+## 18. Risks and accepted limitations
+
+1. **Unknown players near a roster gamertag are resolved to it.** A player who is not on the roster and whose name is within the budget of exactly one roster gamertag, with no other entry within the margin, appears in the CSV under that gamertag, marked `RESOLVED`. The budgets and margin (§7.3) limit this, the status column shows it, and spec 3 reviews every cell, so validated tables never carry it. §9.3 measures it, and P5.3 can require a #161 flag for near matches.
+2. **The thresholds have no near-match evidence.** Both observed misreads are key-equal (§9.2). The budgets and margin are initial values, checked by P4.2 and P5.1.
+3. **Placeholder fixtures are closer than real names.** They exercise key-equal resolution and ambiguity only (§9.1). Real-name checks happen outside the repository.
+4. **Folding merges some real names.** Lowercase `i` and `l`, `rn` and `m`, and the other groups can give two real gamertags one key. The roster refuses the second, with no override (§1), so at most one of them is on the roster. Every reading of the other player's name that shares the key, including a correct one, resolves to the gamertag on the roster and is marked `RESOLVED`. The operator can leave both off the roster instead, and then both pass through as `UNMATCHED`. Accepted because #163 requires the refusal; the `PlayerMatch` column shows the resolution, and spec 3 reviews every cell, so validated tables never carry it.
+5. **The roster lags the league.** A new player is `UNMATCHED` until someone adds them, and a renamed player is unmatched or matched under the old gamertag until someone changes the roster. Runs are not re-resolved except by replay.
+6. **Replay calls Textract again.** Applying a newer roster to an old run costs a provider call and creates a full new run. P5.4 adds re-resolution without Textract.
+7. **Roster history cannot be erased.** The change log is append-only, and snapshots sit under Object Lock. A player who asks to be removed can be deactivated, but their gamertag stays in the log, the snapshots and every screenshot already stored. P5.5 covers erasure on request.
+8. **Every run depends on the roster table.** When it is unavailable past the workflow's retries, runs fail before Textract and can be replayed. Accepted because DynamoDB on-demand with point-in-time recovery is more available than Textract, which every run already needs.
+9. **`write-extracted-csv` reads normalized observations.** Keeping roster gamertags out of workflow state (§1) costs one extra `GetObject` per run and a read permission the export stage did not need before. Names as read still reach Step Functions logs, as spec 1 §18.9 records.
+10. **Ephemeral roster partitions never expire.** They are a few items each. P5.8 adds cleanup.
+11. **Snapshots exist only for versions a run used.** A version no run read has only its change items, from which it can still be rebuilt.
+12. **The function URL is reachable from the internet.** Lambda rejects any request without a valid SigV4 signature from a principal allowed both `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` on the function (§13.4), before the function runs. Accepted because the URL is not secret and needs no further protection; a person with invoke rights can already change the roster through the CLI.
+13. **Administrators can bypass the operator policy.** The `mcc-<env>-admin` profiles, and any role with unrestricted `lambda:InvokeFunction` or DynamoDB write access to the table, could invoke `RosterAdmin` directly with a forged actor or write change items without validation. A write that breaks the fold still fails the next read with `ROSTER_INTEGRITY` (§6.1, §6.2), but a consistent one does not. Accepted because administrators can already change every resource in the account; people who only maintain the roster get the operator policy (§13.4), which allows neither.
+
+## 19. Reference documentation
+
+- DynamoDB transactions: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/transaction-apis.html
+- DynamoDB condition expressions: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Expressions.ConditionExpressions.html
+- DynamoDB fine-grained access control (`dynamodb:LeadingKeys`): https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/specifying-conditions.html
+- DynamoDB encryption at rest: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/EncryptionAtRest.html
+- DynamoDB point-in-time recovery: https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Point-in-time-recovery.html
+- Lambda function URL access control: https://docs.aws.amazon.com/lambda/latest/dg/urls-auth.html
+- Lambda function URL invocation and request payload: https://docs.aws.amazon.com/lambda/latest/dg/urls-invocation.html
+- S3 conditional writes: https://docs.aws.amazon.com/AmazonS3/latest/userguide/conditional-requests.html
+- Unicode normalization forms (NFKC): https://unicode.org/reports/tr15/
+- Levenshtein distance: https://xlinux.nist.gov/dads/HTML/Levenshtein.html
+
+## 20. Delivery plan: phases and slices
+
+This section is the backlog source for building the component. It is written to be turned directly into GitHub issues.
+
+### 20.1 How to file this plan
+
+- Each **phase** becomes one epic, titled with the phase title, with its goal and exit criteria as the body. Create epics only when someone explicitly asks for filing.
+- Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. File with `/mcc-create-github-issue`.
+- **Size** is XS, S or M. Split a slice by independently testable behavior when it outgrows one reviewable PR; the original Plan ID becomes the container.
+- **Blocked by** lists Plan IDs. "Spec 3 P<n>.<m>" names a slice of [spec 3](3-cell-labeling.md), and `#161` names the issue that PR #169 closes. Create native blocked-by links after every issue in the batch exists. Blockers in earlier phases still apply.
+- **Acceptance** bullets become the issue's acceptance criteria verbatim. Every slice also inherits §20.3.
+- **Spec** lists the sections the implementer must read. Link them; this document stays the source of truth.
+- Plan IDs are stable. Deferred slices keep their IDs and move to the backlog phase; new slices take the next free number in their phase.
+- Phase 5 is backlog.
+
+### 20.2 Seam contracts
+
+| Contract | Defined in | Main consumers |
+| --- | --- | --- |
+| `RosterChange`, `RosterSnapshot`, `RosterReference`, `PlayerResolution`, `CsvRow.playerResolution` and the API bodies (§10.1) | P0.1 | `roster-admin`, the CLI, `extract-text`, `write-extracted-csv`, `evaluate-roster`, P5.1, #159 |
+| `CellErrorType` (spec 3 §7.3) | P0.1 or spec 3 P0.2, whichever merges first | resolutions here, spec 3 adjudications |
+| `rosterKey`, `keyDistance`, `resolvePlayers`, `foldRoster`, `rosterSha256` and `roster-matcher-v1` (§5.1, §7) | P0.2 | `roster-admin`, `extract-text`, `evaluate-roster` |
+| Roster table key layout and the `HEAD` condition (§5.1, §6.1) | P1.1, P2.1 | `roster-admin`, `extract-text` |
+| `/mcc/<env>/roster/table-name` and `/mcc/<env>/roster/table-arn` | P1.1 | both stacks, both deploy preflights |
+| Snapshot key layout `roster/versions/{rosterVersion}.json` (§5.2) | P3.1 | `extract-text`, replay analysis, P5.1 |
+| Roster API routes and `RosterFunctionUrl` (§4.1, §13.3) | P2.1, P2.2 | the CLI, `evaluate-roster`, P5.2 |
+| Operator policy (§13.4) | P2.2 | operators, the CLI, `evaluate-roster` |
+| `scripts/lib/roster-api.mjs` (§4.2, §11.2) | P2.3 | the CLI, `evaluate-roster` |
+| CSV header with `PlayerMatch` (§7.6) | P3.3 | CSV readers |
+
+A change to a contract updates every consumer in the same PR.
+
+### 20.3 Definition of done for every slice
+
+- Handlers keep I/O behind an injected dependencies object; only default dependencies construct SDK clients. `@mcc/roster` stays pure.
+- New behavior has tests that run without AWS in the workspace's test runner (§16.1), and each workspace stays above its coverage thresholds.
+- `npm run check` passes. Slices that touch CDK also pass `npm run app:synth -- <app> --environment dev`, and for `match-to-csv` `npm run verify:bundle --workspace @mcc/match-to-csv`. Slices that touch `infrastructure/` pass `npm run tofu:check`.
+- Any change to matching behavior bumps `rosterMatcherVersion` (§5.5).
+- No real gamertag, domain, address or account ID appears in code, fixtures, logs or docs.
+- Operator-visible changes update `applications/admin/TESTING.md`, `applications/match-to-csv/README.md`, `docs/self-hosting/` or spec 1 in the same PR.
+
+### Phase 0: Contracts and matcher
+
+**Goal:** the shared types and a tested pure matcher.
+**Exit criteria:** every type in §10.1 is exported, and `@mcc/roster` passes its §16.1 tests.
+
+#### P0.1 Roster and resolution contracts (S)
+
+- **Blocked by:** #161 (PR #169) merged
+- **Spec:** §5.4, §10.1, §20.2
+- **Files:** `packages/contracts/src/index.ts`
+- **Provides:** every type in §10.1
+- **Acceptance:**
+  - The types compile and are exported, and `CsvRow.playerResolution` and `ExtractTextOutput.roster` are optional, so existing producers and fixtures compile unchanged.
+  - `CellErrorType` matches spec 3 §10.1 exactly, and is reused rather than redefined when spec 3 P0.2 has already exported it.
+  - `npm run release:check` passes.
+
+#### P0.2 Matcher package (M)
+
+- **Blocked by:** P0.1
+- **Spec:** §5.1, §7, §9.1, §12, §16.1
+- **Files:** `packages/roster/`, `release-please-config.json`, `.release-please-manifest.json`, `package-lock.json`
+- **Provides:** `rosterKey`, `keyDistance`, `resolvePlayers`, `errorTypesFor`, `foldRoster`, `rosterSha256`, `checkChange`
+- **Acceptance:**
+  - The `key`, `resolve` and `changes` rows of §16.1 pass.
+  - The package imports no AWS SDK package and performs no I/O.
+  - `resolvePlayers` on the 16 player names read in the #91 fixtures, copied into the package's tests, with the 14 placeholders gives exactly the results in §9.1.
+  - `npm run release:check` passes with the new package.
+
+### Phase 1: Foundation and ephemeral permissions
+
+**Goal:** the roster table exists in dev and prod, and ephemeral stacks can use their own partition.
+**Exit criteria:** P1.1 is applied in dev and prod, and P1.2 is merged.
+
+#### P1.1 Roster table (S)
+
+- **Blocked by:** none
+- **Spec:** §1, §5.1, §13.2, §14
+- **Files:** `infrastructure/modules/foundation/{roster,outputs}.tf`, `infrastructure/modules/foundation/tests/`
+- **Provides:** the table and `/mcc/<env>/roster/` parameters
+- **Acceptance:**
+  - The table uses the foundation data key, has point-in-time recovery and deletion protection on, and has `prevent_destroy`.
+  - Both SSM parameters exist, and no plan output shows roster contents.
+  - `npm run tofu:check` passes, and the PR states that applying it needs a person's approval.
+
+#### P1.2 Ephemeral roster permissions (S)
+
+- **Blocked by:** none
+- **Spec:** §13.4
+- **Files:** `scripts/local-cdk-bootstrap.mjs` and its tests
+- **Provides:** partition-scoped roster access for ephemeral stacks
+- **Acceptance:**
+  - A test shows the existing `ManageEphemeralCompute` statement allows `lambda:CreateFunctionUrlConfig` and `lambda:DeleteFunctionUrlConfig` on `admin-e-*` functions and not on stable functions.
+  - The local workload boundary allows the §13.4 roster actions only with `dynamodb:LeadingKeys` equal to `ROSTER#ephemeral/${aws:PrincipalTag/Ephemeral}`, and KMS use through DynamoDB.
+  - Existing bootstrap tests pass, and new tests cover each added statement and the refusal of `ROSTER#stable`.
+
+### Phase 2: Roster administration
+
+**Goal:** operators can maintain the roster in dev and prod.
+**Exit criteria:** §17 criteria 6 and 7 hold in dev, and prod deploys.
+
+#### P2.1 Roster admin Lambda (M)
+
+- **Blocked by:** P0.2
+- **Spec:** §4.1, §4.3, §5.1, §6.1, §6.4, §8.4
+- **Files:** `applications/admin/src/lambdas/roster-admin.ts`, `src/lib/roster-store.ts`, `applications/admin/package.json`, tests
+- **Provides:** `changeRoster`, `readRoster`, `DynamoRosterStore`
+- **Acceptance:**
+  - The `roster-admin.test.ts` row of §16.1 passes.
+  - The actor is read only from `requestContext.authorizer.iam.userArn`.
+  - When spec 3 P0.1 has not merged, this slice converts the admin workspace to TypeScript with `tap` as spec 3 P0.1 specifies. The boundary test allows only `@mcc/roster`, `@mcc/contracts` and `@mcc/cdk-config` from the monorepo.
+
+#### P2.2 Roster resources in the admin stack (S)
+
+- **Blocked by:** P2.1, P1.1, P1.2
+- **Spec:** §13.3 to §13.5, §14, §18.12, §18.13
+- **Files:** `applications/admin/cdk/`, `.github/workflows/_delivery-deploy-environment.yml` (an admin preflight and verification step), `docs/self-hosting/policies/roster-operator.json.template`, `docs/self-hosting/50-deploy-and-release-applications.md`, tests
+- **Provides:** `RosterFunctionUrl`, `RosterFunctionName`, the operator policy
+- **Acceptance:**
+  - The `app.test.ts` and `roster-operator-policy.test.ts` rows of §16.1 pass for stable and ephemeral stacks.
+  - The operator policy grants `lambda:InvokeFunctionUrl` and `lambda:InvokeFunction` on `RosterAdmin`, the latter only with `lambda:InvokedViaFunctionUrl` `true`, and the self-hosting guide shows how to grant it.
+  - The preflight fails when `/mcc/<env>/roster/table-name` is missing, and post-deploy verification gets `403` from an unsigned request.
+  - An ephemeral stack deploys, writes only `ROSTER#ephemeral/<name>` items and destroys cleanly.
+  - The PR gets independent review, because it changes a workflow under `.github/workflows/` and the operator access contract.
+
+#### P2.3 Roster CLI (S)
+
+- **Blocked by:** P2.1, P2.2
+- **Spec:** §4.2, §13.4, §14
+- **Files:** `applications/admin/scripts/roster.ts`, `applications/admin/package.json`, `applications/admin/TESTING.md`, `scripts/lib/account-guard.mjs`, `scripts/lib/roster-api.mjs`, `scripts/cdk-app.mjs`, tests
+- **Provides:** `npm run roster`, `scripts/lib/roster-api.mjs`
+- **Acceptance:**
+  - The `roster-cli.test.ts` and `roster-api.test.mjs` rows of §16.1 pass.
+  - `TESTING.md` documents every command, the account check, prod confirmation and the operator policy.
+  - `scripts/cdk-app.mjs` imports the moved check, and its existing tests pass unchanged. The PR gets independent review, because it touches an account check.
+  - After P2.2 deploys, every command works against an ephemeral stack from a role that holds only the operator policy.
+
+### Phase 3: Resolution in match-to-csv
+
+**Goal:** every new run records its roster version and resolves player names, and the CSV shows the result.
+**Exit criteria:** §17 criteria 1 to 5 hold in dev, and prod deploys.
+
+#### P3.1 Read the roster in extract-text (M)
+
+- **Blocked by:** P0.2, P1.1, P1.2
+- **Spec:** §5.2 to §5.4, §6.2 step 4, §6.4, §13.3 to §13.5
+- **Files:** `applications/match-to-csv/src/lib/roster-source.ts`, `src/lambdas/extract-text.ts`, `cdk/lib/match-to-csv-stack.ts`, `.github/workflows/_delivery-deploy-environment.yml`, spec 1 §5.3, §7.1, §13 and §14, tests
+- **Provides:** `DynamoRosterSource`, `ensureSnapshot`, the roster reference on runs
+- **Acceptance:**
+  - The `roster-source.test.ts` row of §16.1 passes, and the handler test shows the roster is read before Textract and a roster failure never calls it.
+  - Normalized observations, the completion and `ExtractTextOutput` carry the roster reference, and the snapshot exists before the run records it.
+  - P1.1 is applied in dev and prod before this merges, and the preflight fails without the roster parameter. The PR gets independent review, because it changes a workflow under `.github/workflows/`.
+
+#### P3.2 Resolve player names against the roster (M)
+
+- **Blocked by:** P3.1; #161 (PR #169) merged
+- **Spec:** §5.4, §5.5, §6.2 steps 6 and 7, §7.1 to §7.5, §9.1, §15
+- **Files:** `src/lambdas/extract-text.ts`, `test/fixtures/roster.fixture.json`, `test/scoreboard-fixtures.test.ts`, spec 1 §5.4, §8 and §10.1, tests
+- **Provides:** `playerResolution` on every row, `rosterMatcherVersion`, `playerMatchCounts`
+- **Acceptance:**
+  - Both #91 fixtures give the §9.1 results with the placeholder roster, and `PIayer05` is `AMBIGUOUS` without `Player05`.
+  - `parser.rows[].player`, `observedText` and `reviewFlags` are unchanged on every fixture.
+  - The run manifest records `rosterMatcherVersion: roster-matcher-v1`.
+
+#### P3.3 Add the match status to the CSV (S)
+
+- **Blocked by:** P3.2
+- **Spec:** §5.4, §5.5, §7.6
+- **Files:** `src/lib/csv.ts`, `src/lambdas/write-extracted-csv.ts`, `cdk/lib/match-to-csv-stack.ts`, `applications/match-to-csv/README.md`, spec 1 §2.2, §8.6 and §13.4, tests
+- **Provides:** the `PlayerMatch` column and the roster reference in `extracted-table.json`
+- **Acceptance:**
+  - The `csv.test.ts` and `write-extracted-csv.test.ts` rows of §16.1 pass, and `WriteExtractedCsv` gains only the `GetObject` grant in §13.4.
+  - `extracted-table.json` carries the roster reference and each row's `playerResolution`, and `pipelineVersion` is `1.1.0`.
+  - The README and spec 1 state that the CSV names the roster gamertag while every other artifact keeps the name as read.
+
+### Phase 4: Threshold evidence
+
+**Goal:** the first measurement of the thresholds on real captures, and live validation.
+**Exit criteria:** §17 criteria 8 and 9 hold.
+
+#### P4.1 Roster threshold evaluation (S)
+
+- **Blocked by:** P0.2, P2.3
+- **Spec:** §9.3, §13.4, §14
+- **Files:** `applications/match-to-csv/scripts/evaluate-roster.ts`, `test/fixtures/README.md`, tests
+- **Provides:** the evaluation script
+- **Acceptance:**
+  - The `evaluate-roster.test.ts` row of §16.1 passes.
+  - The script reads the roster only from AWS through `scripts/lib/roster-api.mjs`, accepts no roster file, and writes no file.
+  - The output lists the roster version and hash and every count and histogram in §9.3, and no name.
+  - `test/fixtures/README.md` explains the capture files and the ID-only truth file and where they are kept, and states that the roster is read from AWS and never saved.
+  - After P2.2 deploys, the script runs against an ephemeral stack's roster from a role that holds only the operator policy.
+
+#### P4.2 Live validation and first threshold check (XS)
+
+- **Blocked by:** P2.2, P2.3, P3.3, P4.1
+- **Spec:** §9.3, §16.3, §17
+- **Files:** `applications/admin/TESTING.md`
+- **Provides:** the recorded first check
+- **Acceptance:**
+  - The §16.3 steps pass in dev and are listed in `TESTING.md`.
+  - The issue records the §9.3 counts for at least 30 screenshots from at least 5 sessions, and a keep or change decision; a change is filed as a new issue for `roster-matcher-v2`.
+
+### Phase 5: Backlog (not filed with v1)
+
+| ID | Slice | Size | Note |
+| --- | --- | --- | --- |
+| P5.1 | Measure resolutions against spec 3 labels | S | §8.3, §9.4. Needs spec 3 P3.1 and spec 2 P0.3. |
+| P5.2 | Roster routes on spec 3's reviewer API for a Cognito group, and a roster screen | M | Needs spec 3 P3.4. |
+| P5.3 | Require a #161 review flag before a near match resolves | S | §18.1, if §9.3 or P5.1 finds wrong resolutions. |
+| P5.4 | Re-resolve a stored run against a newer roster without calling Textract | M | §18.6. Changes spec 1's run model. |
+| P5.5 | Erase a gamertag from the roster history on request | S | §18.7. |
+| P5.6 | Resolution fields as spec 2 features, or `H001` on the roster key | S | §8.2. A spec 2 decision. |
+| P5.7 | Show roster suggestions to spec 3 reviewers outside blind labels | S | §8.3. A spec 3 change. |
+| P5.8 | Clean up ephemeral roster partitions | XS | §18.10. |
+
+### 20.4 Dependency order and parallel lanes
+
+P0.1, P1.1 and P1.2 start together. P0.2 follows P0.1. The admin lane (P2.1 -> P2.2 -> P2.3) and the match-to-csv lane (P3.1 -> P3.2 -> P3.3) run in parallel once P0.2 merges, and P4.1 follows P2.3. P2.2 and P3.1 wait for P1.1 to be applied in both environments. The critical path is P0.1 -> P0.2 -> P2.1 -> P2.2 -> P2.3 -> P4.1 -> P4.2, and P4.2 also waits for P3.3. The first real feedback is P3.3 in dev with a roster loaded through P2.3, when live CSVs start naming players from the roster.
