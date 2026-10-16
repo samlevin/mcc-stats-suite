@@ -28,24 +28,28 @@ Use GitHub's blocked-by relationships for ordering. A blocked issue stays Ready 
 
 ## Claiming work
 
-Before changing code, assign yourself, move the issue to In progress, and post one comment with your approach, branch, likely files, and planned checks. When several agents share one GitHub identity, the comment must also name the agent. If you stop before opening a PR, say so in a comment.
+Before changing code, assign yourself, move the issue to In progress, and post one comment with your approach, branch, likely files, and planned checks. If you stop before opening a PR, say so in a comment.
 
 Without write access to the repository, you cannot assign yourself or change project status. Comment on the issue with your approach instead, and a maintainer will assign it and move it to In progress.
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
-People name their branch `<login>/<issue>-<slug>` with their GitHub login as the actor: `node scripts/branch-name.mjs <issue> --actor <login>` prints it. Agents use `agent` as the actor. Later stacked layers append `-part-2`, `-part-3`. AGENTS.md describes the slug rules.
+## Branch names
+
+Name your branch `<login>/<issue>-<slug>`, with your GitHub login as the actor. `node scripts/branch-name.mjs <issue> --actor <login>` prints the name from the issue title:
+
+- `<issue>` is the number of the leaf issue the PR closes, without `#`.
+- `<slug>` is that issue's title in lowercase, with accents dropped and every run of other characters turned into `-`. "Part N" in the title becomes `partN`. The slug is cut to 40 characters at a word boundary, and is `issue` when the title has no ASCII letters or digits.
+- When one leaf is split into stacked layers, layers after the first end in `-part-<n>`; add `--layer <n>` to print them. A branch stacked on another issue's PR uses its own issue's number and title.
+
+For example, `octocat/48-generate-and-enforce-branch-names-from` is the first branch for #48, and `octocat/48-generate-and-enforce-branch-names-from-part-2` is its second stacked layer. Once a branch is pushed, keep its name, even if the issue title changes later. Nothing in CI checks branch names.
 
 ## Pull requests and review
 
-People open their PR directly. Agents push the branch and get an `APPROVE` from `mcc-code-reviewer` before opening the PR for changes across components, shared contracts, security boundaries, or other substantial behavior. That review is always required, however small the diff, for changes to `infrastructure/`, `.terrateam/`, `.github/workflows/`, CDK account or environment checks, or anything else that changes how prod or shared resources are planned, applied, locked, deployed, or gated. Any other localized low-risk, documentation, or mechanical change may skip it and says so in the PR body. The reviewer reads the diff against the issue and the exact base and head SHAs, without running anything. Any change to the base or head before the PR opens means review again. Once the PR exists, formal review takes over. The repository ships these agents for Claude Code and Codex; `AGENTS.md` lists the entry points.
+Open your PR directly, and formal review happens on it. Coding agents follow extra review rules before they open one, which [AGENTS.md](AGENTS.md) describes.
 
-The final PR for a leaf closes it with `Closes #N` and references its parent. Titles follow the Conventional Commits rules in [CONTRIBUTING.md](CONTRIBUTING.md). When the PR opens, `tracker-pr-issue-status.yml` moves each closing issue to In review: from In progress for any author, and also from Ready for the owner and collaborators. Its run logs every skip with the reason; move the issue yourself only if it was skipped. Issues reach Done on merge, not when an agent hands off.
-
-Security review by `mcc-security-reviewer` happens only when a person asks for it (`/mcc-review-security` in Claude Code, `$mcc-review-security` in Codex).
+The final PR for a leaf closes it with `Closes #N` and references its parent. Titles follow the Conventional Commits rules in [CONTRIBUTING.md](CONTRIBUTING.md). When the PR opens, automation moves each closing issue to In review, as [Automation](ISSUE_TRIAGE.md#automation) describes. If its run logs a skip for your issue, move the issue yourself. Issues reach Done on merge.
 
 ## Size and stacks
 
 Past roughly 400 changed production lines against the immediate parent branch, split the PR into stacked layers. Tests, docs, generated files, and lockfiles don't count; executable infrastructure does. Early layers reference the issue and only the last one closes it. If the layers turn out to be independent outcomes, split the issue into sub-issues first.
-
-An explicit delivery request lets agents claim issues, move project status, commit, push, open ready-for-review PRs, and link stacks. Merges, deploys, infrastructure applies, and settings changes always need separate approval.
