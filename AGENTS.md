@@ -39,7 +39,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | File or draft issues | `/mcc-create-github-issue` | `$mcc-create-github-issue` | `mcc-issue-triager` (read-only metadata) |
 | Review a pushed branch or PR | `/mcc-review-code` | `$mcc-review-code` | `mcc-code-reviewer` (read-only, reports to you) |
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
-| Write a PR body, issue body, comment, or doc | `/mcc-write-prose` | `$mcc-write-prose` | none |
+| Write a PR body, issue body, comment, or doc | `/mcc-plain-language` | `$mcc-plain-language` | none |
 | Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits sources, regenerates both tools, verifies |
 | Plan and apply a PR's foundation roots while Terrateam cannot run, only when a person asks | `/mcc-apply-foundation` | `$mcc-apply-foundation` | none; the agent runs `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` itself, one approved step at a time |
 | Plan and apply the bootstrap roots at `origin/main`, dev then prod, only when a person asks | `/mcc-apply-bootstrap` | `$mcc-apply-bootstrap` | none; the agent runs `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` itself, one approved step at a time |
