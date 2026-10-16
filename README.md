@@ -1,5 +1,9 @@
 # MCC Stats Suite
 
+MCC Stats Suite turns post-game screenshots from Halo: The Master Chief Collection into match stats. Players email screenshots of the post-game scoreboard to the project's address. The system reads each one with OCR and writes its stats as a CSV, so nobody has to copy a scoreboard by hand. This documentation is for developers who contribute to the project or run their own copy of it. Only `match-to-csv`, the application that receives the email and produces the CSV, is built today. The other applications are placeholder stacks, and the specifications describe planned work.
+
+To work on the code, start with [Getting started](docs/getting-started.md). It takes you from a fresh clone to passing checks without AWS access, and then to your own stack in a dev account. [Glossary](#glossary) defines the project's terms.
+
 [![CI: checks](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-checks.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-checks.yml)
 [![CI: secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-secret-scan.yml)
 [![CI: PR title](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-pr-title.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-pr-title.yml)
@@ -8,9 +12,7 @@
 [![Delivery: roll back prod](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-rollback.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-rollback.yml)
 [![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
 
-MCC Stats Suite turns Halo: The Master Chief Collection post-game screenshots into structured, traceable data. The first intake path is email. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
-
-To work on the code, start with [Getting started](docs/getting-started.md). It takes you from a fresh clone to passing checks without AWS access, and then to your own stack in a dev account.
+Every value the system extracts can be traced back to the screenshot it came from. Email is the first intake path. A submitted message can contain several screenshots, and the system processes each attachment independently while preserving the original evidence.
 
 The project starts with OCR, but the stored evidence is meant to outlive the first parser. Every processing run retains source hashes, provider output, normalized cells, confidence, geometry, validation results, and code versions. That record supports replaying old screenshots through new pipelines, comparing results, labeling cells, and eventually training OCR quality models.
 
@@ -45,7 +47,16 @@ The monorepo separates product areas so they can be tested, versioned, and deplo
 | `packages/contracts` | Shared TypeScript evidence and processing contracts | Implemented and independently versioned |
 | `packages/cdk-config` | Shared environment validation, names, and deployment rules | Implemented and independently versioned |
 
-The plans under [`specs/`](specs/) describe future product work. They are design inputs, not proof that a feature is deployed.
+## Specifications
+
+The plans under [`specs/`](specs/) describe product work. They are design inputs, not proof that a feature is deployed.
+
+- [1. Match-to-CSV](specs/1-mcc-analytics-engine.md): specification for v1 delivery. It describes `match-to-csv`, the one application built so far.
+- [2. OCR Quality](specs/2-ocr-quality.md): draft, not implemented. It scores each OCR cell for how likely it is to be wrong.
+- [3. Cell Labeling](specs/3-cell-labeling.md): draft, not implemented. Reviewers confirm or correct every OCR cell in the `admin` application.
+- [4. Map Suggestions for Match Entry](specs/4-map-suggestions.md): early plan without a status line or the specification template, not implemented. It suggests the likely map when someone enters a match.
+- [5. Match-to-CSV observability](specs/5-match-to-csv-observability.md): draft, not implemented. It adds one structured log record per pipeline stage, plus metrics and alarms.
+- [Template](specs/TEMPLATE.md): the structure a new specification follows.
 
 ## Repository layout
 
@@ -85,3 +96,13 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 Pull requests run CI without deploying and need no AWS access. A merge to `main` deploys affected applications to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. Release Please versions applications and shared packages.
 
 See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
+
+## Glossary
+
+- **Bootstrap (OpenTofu):** the root `infrastructure/<environment>/bootstrap`, which an administrator applies once per account. It creates the OpenTofu state bucket, the GitHub OIDC provider, the CI roles, and the permissions boundary for application roles. CI never applies it. See [Bootstrap the dev and prod accounts](docs/self-hosting/10-bootstrap-accounts.md).
+- **Bootstrap (CDK):** `cdk bootstrap`, which creates the toolkit stack, asset storage, and roles that CDK needs to deploy into an account and Region. Each account has the default CDK bootstrap for GitHub Actions deploys. The dev account also has `mcclocal1`, a restricted bootstrap that ephemeral stacks use. See [Bootstrap CDK and grant local deploy access](docs/self-hosting/20-bootstrap-cdk.md).
+- **Foundation:** the OpenTofu roots `infrastructure/<environment>/foundation`. They hold the resources that outlive application releases: KMS keys, durable storage such as the evidence and raw-email buckets, the SES receipt rule set, the Turbo cache bucket and role, and the SSM parameters that applications read. See [Apply and change the foundation](docs/self-hosting/40-change-foundation.md).
+- **Ephemeral stack:** a developer's own copy of an application in the dev account, named `<application>-e-<name>` and deployed from a workstation with `--ephemeral <name>`. Tier 2 of [Getting started](docs/getting-started.md#tier-2-deploy-your-own-ephemeral-stack) creates one.
+- **Terrateam:** a service that runs OpenTofu plans and applies in GitHub Actions when someone comments on a pull request. This repository uses it to apply the foundation to dev and then prod. A self-hosted copy can apply the foundation another way. See [Apply the foundation with Terrateam](docs/self-hosting/70-optional-terrateam.md).
+- **Turbo:** [Turborepo](https://turborepo.dev/), which runs npm workspace scripts in dependency order, caches their results, and picks the workspaces a change affects.
+- **Leaf, container, and epic issues:** a leaf issue holds one logical change with acceptance criteria, and a pull request closes it. An issue with native sub-issues is a container. It never gets its own branch or pull request, and it closes when all its sub-issues close. An epic is a container someone explicitly asked for, usually tied to a milestone. See [Issues, containers, and epics](WORKFLOW.md#issues-containers-and-epics).
