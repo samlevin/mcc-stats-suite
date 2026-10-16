@@ -67,15 +67,22 @@ export function checks({ full, repository, mode, job = 'static' }) {
       ['node', ['--test', ...buildTests()]],
       ['npx', workspaceArguments(mode)],
     );
+  // The full gate's `eslint .` lints every file. Otherwise lint Markdown, which
+  // Prettier ignores, plus the automation scripts in the repository scope.
+  else
+    commands.push([
+      'npx',
+      [
+        'eslint',
+        ...(repository ? automationLintTargets : []),
+        '**/*.md',
+        '--max-warnings',
+        '0',
+      ],
+    ]);
   if (repository) {
     // Generated agent definitions must match their sources under .agents/.
     commands.push(['npm', ['run', 'agents:check']]);
-    // The full gate already lints every file.
-    if (!full)
-      commands.push([
-        'npx',
-        ['eslint', ...automationLintTargets, '--max-warnings', '0'],
-      ]);
     commands.push(['node', ['--test', ...automationTests]]);
   }
   return commands;

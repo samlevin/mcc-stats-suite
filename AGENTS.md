@@ -10,9 +10,9 @@ Run the narrowest set that covers your change, once before pushing. While iterat
 
 | Changed | Run |
 | --- | --- |
-| Docs only | `npm run format:check` |
+| Docs only | `npm run format:check`, `npx eslint '**/*.md' --max-warnings 0` |
 | `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs` |
-| `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
+| `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs '**/*.md' --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
 | A workspace | iterate with `npm test --workspace @mcc/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:check` (pinned OpenTofu formatting, backend-disabled init and validation for every environment root, plus module tests) |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev`; `npm run verify:bundle --workspace @mcc/match-to-csv` |

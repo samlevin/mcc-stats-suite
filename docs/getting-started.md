@@ -57,9 +57,9 @@ Run the narrowest set that covers your change before you push. While you iterate
 
 | Changed | Run |
 | --- | --- |
-| Docs only | `npm run format:check` |
+| Docs only | `npm run format:check`, `npx eslint '**/*.md' --max-warnings 0` |
 | `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs` |
-| `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
+| `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs '**/*.md' --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
 | A workspace | iterate with `npm test --workspace @mcc/<pkg>`; before you push, `npm run check` |
 | `infrastructure/` | `npm run tofu:check`, which needs OpenTofu but no AWS access |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev` and `npm run verify:bundle --workspace @mcc/match-to-csv`, which need Docker |
