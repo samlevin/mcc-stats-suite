@@ -6,6 +6,7 @@ import {
 } from './issue-pr-metadata.mjs';
 import {
   discover,
+  failureMessage,
   paginate,
   readItem,
   REPOSITORY,
@@ -167,11 +168,7 @@ if (
       dryRun: mode === 'true',
     });
   } catch (error) {
-    console.error(
-      error.code || error.status
-        ? 'GitHub API request failed; check authentication and Projects permissions.'
-        : error.message,
-    );
+    console.error(failureMessage(error));
     process.exitCode = 1;
   }
 }
