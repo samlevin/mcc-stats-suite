@@ -1,5 +1,5 @@
 import { pathToFileURL } from 'node:url';
-import { ghGraphql, REPOSITORY } from './issue-triage.mjs';
+import { failureMessage, ghGraphql, REPOSITORY } from './issue-triage.mjs';
 
 const KINDS = {
   issue: { field: 'issue', label: 'Issue' },
@@ -70,12 +70,7 @@ if (
       dryRun: mode === 'true',
     });
   } catch (error) {
-    // Do not print subprocess stderr, which can contain authentication details.
-    console.error(
-      error.code || error.status
-        ? 'GitHub API request failed; check authentication and Projects permissions.'
-        : error.message,
-    );
+    console.error(failureMessage(error));
     process.exitCode = 1;
   }
 }
