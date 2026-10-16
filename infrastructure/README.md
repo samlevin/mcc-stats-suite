@@ -1,6 +1,6 @@
 # OpenTofu infrastructure
 
-OpenTofu owns account bootstrap and persistent resources shared by application releases. Environment roots live under `dev` and `prod`; reusable implementations live under `modules`.
+This directory holds the OpenTofu side of the split that [How AWS is divided](../README.md#how-aws-is-divided) describes. Environment roots live under `dev` and `prod`; reusable implementations live under `modules`.
 
 | Root | Owner | Purpose |
 |---|---|---|
@@ -53,6 +53,16 @@ The foundation module defines a cache bucket named `<project>-<environment>-<acc
 Both foundation roots publish `foundation.turbo_cache_bucket_name` and `foundation.turbo_cache_key_arn`. The matching SSM parameters are `/mcc-ci/<environment>/turbo-cache/bucket-name` and `/mcc-ci/<environment>/turbo-cache/data-key-arn`, outside the application namespace described in [SSM parameter namespaces](#ssm-parameter-namespaces).
 
 Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo-cache` OIDC role when `github_oidc_subject_repository` is set. `github_turbo_cache_role_arn` publishes its ARN. See [Turbo cache](../docs/self-hosting/30-configure-github.md#turbo-cache) for activation and repository settings, and [Update bootstrap later](../docs/self-hosting/10-bootstrap-accounts.md#update-bootstrap-later) for the prerequisite bootstrap grant when using Terrateam.
+
+### How CI uses the cache
+
+Trusted `main` validation uses the dev bucket through `rharkor/caching-for-turbo@v2.5.1`. Dev deployments use that bucket; production promotion and rollback builds use the prod bucket. The cache role resolves and validates the environment's bucket and KMS SSM contracts. OS, architecture, and Node version isolate object prefixes.
+
+`MCC_BUILD_ENVIRONMENT` participates in Turbo task hashes, and the explicitly worktree-local cache prevents another checkout from supplying outputs. Each deployment job has a fresh runner and exactly one environment, including historical releases whose Turbo configuration predates this hash input.
+
+Pull requests use only their ephemeral local Turbo cache and never assume a cache role. The main-only role trust policy rejects PR subjects and refs. The remote API credentials are passed explicitly from the cache role to the action, including its session token, so later CDK credentials cannot replace that session. AWS credentials are removed from the build environment after the server starts.
+
+The action performs prefix-scoped bucket listing for hash lookup, but has no deletion grant or action cleanup settings; lifecycle expiry removes old objects.
 
 To empty a populated cache bucket manually, use an approved service workload role with a separately reviewed deletion grant, or wait for lifecycle expiry.
 

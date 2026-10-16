@@ -34,9 +34,11 @@ npm run app:destroy -- <application> --environment dev --ephemeral <name>
 
 ## Merge to production
 
+Pull requests never deploy applications. Only a push to `main` that passes CI deploys, and only the applications it affects. Foundation changes are applied with OpenTofu instead; see [Change the foundation later](40-change-foundation.md#change-the-foundation-later).
+
 1. Merge the pull request after its checks pass.
-2. `CI: checks` validates the merge commit and records which applications it affects. A shared-package change affects every consumer, and an empty selection deploys nothing.
-3. `Delivery: deploy to dev then prod` starts at that exact commit and runs one sequence per affected application. Each sequence deploys and verifies the application's `-dev` stack, then queues its `-prod` job.
+2. `CI: checks` validates the merge commit and records which applications it affects. A shared-package change affects every consumer. An infrastructure-only change affects none, and an empty selection deploys nothing.
+3. `Delivery: deploy to dev then prod` starts at that exact commit and runs one sequence per affected application. Each sequence deploys the application's `-dev` stack and verifies the resulting CloudFormation stack, then queues its `-prod` job. For `match-to-csv`, the verification also requires its Lambda functions and Step Functions state machines to be active.
 4. The production job waits for approval on the `prod` environment. Finish the application's smoke test in dev first; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv).
 5. Open the deployment run from the merged pull request’s approval comment or the Actions page. In the run, choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Deploy <application> to prod (waits for approval)`. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.

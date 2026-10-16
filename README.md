@@ -73,7 +73,7 @@ NPM workspaces provide package boundaries. Turbo follows their dependency graph 
 
 ## How AWS is divided
 
-OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, the SES receipt rule set, and SSM parameters that publish resource names and ARNs. Terrateam applies foundation changes to dev and then prod from the pull request, then merges it. Nothing applies from `main`. It also checks foundation drift weekly and opens an issue instead of applying a repair unattended.
+OpenTofu owns resources that survive application releases: encrypted storage, KMS keys, state, GitHub OIDC roles, permissions boundaries, the Glue catalog, the SES receipt rule set, and SSM parameters that publish resource names and ARNs. This repository applies foundation changes to dev and then prod from their pull request, before it merges, as [Change the foundation with Terrateam](docs/self-hosting/70-optional-terrateam.md#change-the-foundation-with-terrateam) describes.
 
 CDK owns application compute and orchestration: Lambda functions, Step Functions, EventBridge rules, IAM grants, and logs. The foundation owns the account-wide SES receipt rule set and the shared `<alias>@<domain>` rule; an ephemeral stack adds only its own `<alias>+<name>@<domain>` rule. The alias and domain are repository secrets that the foundation publishes to SSM. CDK reads the OpenTofu outputs from SSM Parameter Store. A resource has one owner; do not describe the same AWS resource in both systems.
 
@@ -93,9 +93,9 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 
 ## Develop and deploy
 
-Pull requests run CI without deploying and need no AWS access. A merge to `main` deploys affected applications to the project's `dev` environment at the merged commit. Each application then goes to `prod` after a required reviewer approves its `prod` deployment. Release Please versions applications and shared packages.
+Pull requests run CI without deploying and need no AWS access; [How CI selects checks](TESTING.md#how-ci-selects-checks) explains which checks run. [What happens after merge](CONTRIBUTING.md#what-happens-after-merge) covers deployment and releases.
 
-See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
+See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, and task states. Coding agents follow [AGENTS.md](AGENTS.md). [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
 
 ## Glossary
 
