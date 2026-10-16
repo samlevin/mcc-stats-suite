@@ -36,7 +36,7 @@ const versions = {
   preprocessingVersion: 'none-v1',
   textractConfigurationVersion: 'textract-tables-v1',
   textractNormalizerVersion: 'textract-normalizer-v2',
-  tableParserVersion: 'scoreboard-parser-v3',
+  tableParserVersion: 'scoreboard-parser-v4',
   semanticMapperVersion: 'scoreboard-semantic-v2',
   validationRulesVersion: 'scoreboard-validation-v2',
 };
