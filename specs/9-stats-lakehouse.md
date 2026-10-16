@@ -138,7 +138,7 @@ The rule invokes `IngestBronze` asynchronously with a retry policy of 3 attempts
 | Session association | `^sessions/([^/]+)/association/([0-9]{10})\.json$` | `sessionId`, `associationVersion` |
 | Map catalog | `^map-catalogs/(map-catalog-v[0-9]+)\.json$` | `mapCatalogVersion` |
 
-Every captured identifier except `mapCatalogVersion` must also match spec 3's `evidenceId()` pattern, `^[0-9a-z]+-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`.
+The captured `submissionId`, `screenshotId`, `runId` and `sessionId` must also match spec 3's `evidenceId()` pattern, `^[0-9a-z]+-[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$`.
 
 ### 4.3 Ingest validation
 
@@ -367,7 +367,7 @@ In `silver_player_match_stats`, `score`, `kills`, `assists` and `deaths` are the
 
 ## 8. Gold datasets
 
-`buildGold(silver, config)` in `src/lib/gold.ts` is pure and reads only silver. It uses only rows of countable matches with a non-null `player_key`.
+`buildGold(silver, config)` in `src/lib/gold.ts` is pure and reads only silver. It uses only rows of countable matches. Match scoreboards keep `UNREADABLE` rows, whose `player_key` is `null`; player summaries, player documents, leaderboards and rising players use only rows with a non-null `player_key`.
 
 ### 8.1 Definitions
 
@@ -470,6 +470,7 @@ This spec edits no other specification. The slice named in each row records the 
 | `foldRoster`, `rosterKey` and the roster types | spec 6 P0.1, P0.2 | P3.2 is blocked by spec 6 P0.2. |
 | Roster table and `/mcc/<env>/roster/` parameters | spec 6 P1.1 | P4.2 cannot merge until it is applied. |
 | Evidence bucket EventBridge notifications | spec 2 P1.1 | P4.2 cannot merge until it is applied. |
+| Roster gamertags copied into silver and gold under the lakehouse key, while spec 6 §14 item 2 says roster contents live only under the application data key | spec 6 | Spec 6's next revision extends §14 item 2 to the lakehouse buckets under the lakehouse key. |
 | Out-of-scope lines naming #159 for match records, player identity or consent | spec 3, spec 6, spec 7 | Each spec's next revision points player identity and consent to this spec and match records to spec 8. |
 | The player app's read access, audience and any opt-out (§1, §4.5) | the player app specification (none yet) | That specification reads §4.5 and §8.3 as its data contract. |
 | Data platform roots inactive in Terrateam | `infrastructure/`, `.terrateam/config.yml` | P1.1 activates them. |
@@ -703,7 +704,7 @@ The data-platform roots are inactive today: Terrateam runs neither, and the self
 | `BackfillBronze` | as `IngestBronze`, plus `ListBucket` with prefixes `<ns>submissions/`, `<ns>sessions/` and `<ns>map-catalogs/` | as `IngestBronze` | none | as `IngestBronze` |
 | `BuildLakehouse` | none | `GetObject` on `<ns>validated-tables/*`, `<ns>session-associations/*` and `<ns>map-catalogs/*`; `ListBucket` with those prefixes and `<ns>ingest-rejections/` | `GetObject`, `PutObject` on `<ns>builds/*`; gold also on `<ns>serving/current.json` | roster table `GetItem` and `Query` with `dynamodb:LeadingKeys` `ROSTER#<namespace>`; decrypt with the foundation data key through DynamoDB; encrypt and decrypt with the lakehouse key; Glue `GetTable`, `CreateTable`, `UpdateTable` on its database and its tables |
 
-`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. No role can read `textract/`, `normalized/`, `quality/`, `adjudications/`, `blind-adjudications/`, `review/`, `llm-review/`, `export/`, `source/`, `datasets/` or `risk/` in the evidence bucket, write to the evidence bucket, or call `DeleteObject`, `DeleteTable` or any bucket-configuration action. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. Operators query with Athena through their existing administrator roles.
+`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. An IAM `*` matches across `/`, so the allowed patterns above also match deeper keys, such as a spec 2 quality run's `manifest.json`. Each role that reads the evidence bucket therefore also has an explicit `Deny` of `s3:GetObject` on `<ns>submissions/*/runs/*/textract/*`, `.../normalized/*`, `.../quality/*`, `.../adjudications/*`, `.../blind-adjudications/*`, `.../review/*`, `.../llm-review/*` and `.../export/*`, on `<ns>submissions/*/screenshots/*/source/*`, and on `<ns>datasets/*` and `<ns>risk/*`. With those denies, no role can read OCR, quality, review, LLM review, export, source, dataset or risk evidence. No role can write to the evidence bucket, or call `DeleteObject`, `DeleteTable` or any bucket-configuration action. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. Operators query with Athena through their existing administrator roles.
 
 P1.2 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `data-pipeline-e-*` stacks can create and delete their functions, rule, schedule, queue and Glue database, and so the local workload boundary allows the actions above only under `ephemeral/<name>/` in the evidence and lakehouse buckets, only on the roster partition `ROSTER#ephemeral/<name>`, and only on Glue databases named for the stack.
 
@@ -745,7 +746,7 @@ Tests use `tap`, run from `applications/data-pipeline/test/*.test.ts`, and never
 | `gold.test.ts` | every §8.1 definition with `null` values; leaderboards exclude unrostered players and players under `leaderboardMinMatches`, with the tie order; rising players on a fixture with windows that end at `asOf`, not the clock; recent matches order |
 | `serving.test.ts` | JSON Lines keys sorted, `contentSha256` stable; the same inputs give byte-identical content for two `buildId` values; `inputsSha256` changes with a new key, a roster version or a version bump |
 | `build-lakehouse.test.ts` | unchanged inputs write nothing; `force` builds; publish order of §5.2 rule 4; a failure before the pointer leaves the old pointer; Glue tables created when missing and updated after; `RosterIntegrityError`; a correction (a second validated version) changes gold on the next build while bronze keeps version 1 |
-| `app.test.ts` | stable and ephemeral synthesis; the §4.1 patterns; schedule and reserved concurrency; IAM resource patterns in §13.4, including no evidence access outside them; the ephemeral Glue database |
+| `app.test.ts` | stable and ephemeral synthesis; the §4.1 patterns; schedule and reserved concurrency; IAM resource patterns in §13.4, including every explicit `Deny` on evidence subprefixes; the ephemeral Glue database |
 
 A fixture is a set of bronze documents and a roster with player data replaced by placeholders, plus the expected silver and gold rows.
 
@@ -769,7 +770,7 @@ v1 (Phases 0 to 4) is complete when:
 6. A validated name that differs from a roster gamertag only by case, Unicode normalization form or repeated whitespace links to that entry, and an unrostered name produces a hashed `player_key` with no gamertag in any S3 key or log line.
 7. Gold serving documents for players, matches, recent matches, leaderboards and rising players exist under the build the pointer names, and two builds of the same inputs have identical content hashes.
 8. A build with unchanged inputs publishes nothing, and a failed build leaves the previous pointer in place.
-9. No data-pipeline role can read OCR, quality, review, LLM review, dataset or risk evidence, write evidence, or delete a lakehouse object, as `app.test.ts` checks.
+9. No data-pipeline role can read OCR, quality, review, LLM review, dataset or risk evidence, write evidence, or delete a lakehouse object, and `app.test.ts` checks the allowed patterns and the explicit denies in §13.4.
 10. The data-platform roots plan and apply through Terrateam, and the lakehouse buckets expire `ephemeral/` objects.
 11. An ephemeral stack ingests and builds only its own namespace, and destroying it removes its Glue database and tables.
 12. Every §16.1 test passes with the coverage thresholds, and CDK synthesis succeeds.
