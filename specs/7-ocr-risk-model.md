@@ -20,7 +20,7 @@
 
 **Out of scope:** changing OCR text or any existing evidence, fine-tuning or replacing Textract, roster resolution (spec 6, #163), storing and resolving adjudications and the reviewer application ([spec 3](3-cell-labeling.md) as amended by #166), player identity and match records (#159), SageMaker (§8.9), any user interface
 
-Match-to-csv reads every scoreboard cell with Textract, spec 2 scores and records features for every cell, and spec 3 stores a decision for every cell, row and table. This specification decides who makes those decisions and when a run needs a person. Deterministic scoreboard constraints check each table, a vision model on Bedrock reviews every run from the first screenshot and writes spec 3 adjudications, people answer only escalations and a blind audit sample, and a shallow gradient-boosted model trained on the resulting labels later lets well-read runs skip the LLM. The goal is that no run waits on a person, with a measured upper bound on the error rate of the accepted data. This is the risk model specification that spec 2 §9.6 hands stages 2 and 3 to.
+Match-to-csv reads every scoreboard cell with Textract, spec 2 scores and records features for every cell, and spec 3 stores a decision for every cell, row and table. This specification decides who makes those decisions and when a run needs a person. Deterministic scoreboard constraints check each table, a vision model on Bedrock reviews every run from the first screenshot and writes spec 3 adjudications, people answer only escalations and a blind audit sample, and a shallow gradient-boosted model trained on the resulting labels later lets well-read runs skip the LLM. The goal is that no run waits on a person, with a measured upper bound on the cell error rate of the accepted data. This is the risk model specification that spec 2 §9.6 hands stages 2 and 3 to.
 
 **Readiness:** this revision authorizes filing Phases 0 and 1 now, and Phases 2 to 4 once P0.4 records a go decision. Phase 5 is filed when spec 3 P5.2 is filed. The per-screenshot LLM cost in §9.5 is an estimate until P0.4 measures it. Contracts in §5.3 and §10.1 freeze when P0.1 merges. Section references to spec 3 are to its 2.1-draft (#166, PR #171), and spec 6 is the gamertag roster specification (#163, PR #170); both are unmerged.
 
@@ -40,7 +40,7 @@ Match-to-csv reads every scoreboard cell with Textract, spec 2 scores and record
 | What the prompt shows | Two modes tied to spec 3's display mode (§7.1). `PRIORITY_HIDDEN` runs get a `BLIND` prompt: images, OCR text and cell positions only. `PRIORITY_SHOWN` runs get an `ASSISTED` prompt that also has the parser's teams and outcomes, failed constraints and roster candidates. | Spec 3 rejects a prompt with constraint results in a hidden run (spec 3 §4.5), and blind LLM labels are needed to measure the LLM and the roster matcher without anchoring. |
 | When an LLM correction is accepted | Only when the reviewed table passes every applicable hard constraint, breaks no soft constraint the OCR table passed, and has no duplicate player (§7.6). Otherwise the corrected and involved items are escalated to a person. | The issue requires it, and it is the check that a correction made the table more consistent rather than less. |
 | Bedrock outage, throttling and errors | Retried, then the run is held (`HELD` with a reason) and resumed hourly (§6.5, §6.6). A held run gets no adjudication, so spec 3 keeps it incomplete. | A run must never be accepted because the reviewer was unavailable. |
-| Cost limit | A monthly ceiling per stack in bundled configuration, enforced with a reservation in DynamoDB before every call (§6.5). When a call does not fit, the run is held with `BUDGET_EXHAUSTED` until the next UTC month or a higher ceiling. | A ceiling that holds instead of accepting keeps the error bound intact. Reserving before the call bounds the overshoot to zero. |
+| Cost limit | A monthly ceiling per stack in bundled configuration, enforced with a reservation in DynamoDB before every call (§6.5). When a call does not fit, the run is held with `BUDGET_EXHAUSTED` until the next UTC month or a higher ceiling. | A ceiling that holds instead of accepting keeps the error bound intact. Reserving an upper estimate before the call limits any overshoot to calls whose input exceeded 1.5 times its estimate. |
 | Human work | People answer escalations and review spec 3's blind audit sample, nothing else (§9.1). | The issue's definition of autonomy. Spec 3 2.1 already routes people this way. |
 | The automation gate and LLM labels | The release gate is never measured on LLM labels alone. Its error bound comes from human blind audit labels of cells the model would auto-accept (§8.6 G5). LLM labels train, calibrate and choose the threshold. | LLM errors are correlated across screenshots of one layout (spec 3 §18.17). A gate measured on its own reviewer's labels cannot see the errors that reviewer makes. |
 | The error target | `acceptedErrorTarget` is 0.1% of cells: the one-sided 95% upper bound of the error rate among accepted cells (§9.2). | Spec 2 §9.6 names 0.1% as its example. At about 60 cells per screenshot it allows roughly one wrong value per 17 screenshots. |
@@ -120,7 +120,7 @@ ReportAutonomy --> risk/reports/{reportId}.json
 
 - One review plan object is one automatic LLM review execution. Each attempt creates a new `llmReviewRunId`.
 - An automatic execution claims the run for its `llmReviewerVersion` (§5.4) with a create-only claim, like spec 2 §5.2. A second execution for the same run and version finds the claim and succeeds without calling Bedrock, unless the latest attempt under the claim is `HELD` and the execution is a `RESUME` (§6.5).
-- A run gets at most `maxInvocationsPerReview` (2) Bedrock calls per LLM review run: the first and one retry after invalid output.
+- An LLM review run gets at most `maxInvocationsPerReview` (2) Bedrock answers: the first and one retry after invalid output. Invocations that ended in a provider error (`ERROR`) do not count; Step Functions retries them (§6.6).
 - Every S3 write uses `If-None-Match: *`. Nothing deletes or rewrites evidence.
 - No adjudication is written for a held run, and no value is ever accepted without an adjudication from the LLM or a person, or, in stage 3, an auto-acceptance (§8.8).
 - Every Bedrock call goes to the stack's Region with the configured in-Region model ID (§14).
@@ -165,7 +165,7 @@ Each failed check records `observed`, `expectedMin`, `expectedMax` and `miss`, t
 
 **Pages of one summary (`K006`).** Two screenshots of the same submission are pages of one summary when both selected tables have profile `halo3-team-slayer-v1`, their images differ (`imageSha256`), and they share at least `minSharedPlayers` (4) player keys. A player key is spec 6's `rosterKey` of the tidied player name. Shared players are compared on team, score, kills, assists and deaths where both pages read the field. A player on one page only is not a failure, because a long board can need two pages.
 
-**Same game (`K007`).** Two runs from different submissions are the same game when both have the profile, the sorted multisets of their player keys are equal, and their `receivedAt` values are at most `sameGameWindowDays` (7) apart. The `GameIndex` table holds one item per scored run under the SHA-256 of the sorted player keys (`gameKey`), so `ScoreRun` finds candidates with one query. A disagreement compares this run against the other run's latest validated version (spec 3 §8.4) when one exists, otherwise against its parser rows.
+**Same game (`K007`).** Two runs from different submissions are the same game when both have the profile, the sorted multisets of their player keys are equal, and their `receivedAt` values are at most `sameGameWindowDays` (7) apart. The `GameIndex` table holds one item per scored run under the SHA-256 of the sorted player keys (`gameKey`), so `ScoreRun` finds candidates with one query. In `ScoreRun`, both checks compare parser rows only, because spec 2 features never come from spec 3 adjudications or validated tables (spec 2 §8.4 rule 1, spec 3 §8.6). `ApplyLlmReview`, which is not part of spec 2, compares the reviewed table with the peer's latest validated version (spec 3 §8.4) when one exists, otherwise with its parser rows.
 
 `ScoreRun` evaluates `K006` and `K007` against runs that completed before it. The first page or submission of a game to be scored finds no peer and records `NOT_EVALUATED` with `NO_PEER`; the second sees the first. `ApplyLlmReview` evaluates them again on the reviewed table (§7.6), when more peers may exist. `K007` defines a candidate group, not match identity, which #159 owns; when #159 defines a match ID, the grouping uses it.
 
@@ -266,7 +266,7 @@ Constraints become spec 2 signals and features through a change to spec 2's rule
 | `invocations/{invocationId}.request.json` | `llm-invocation-request/v1` | `invoke-llm-reviewer` | `invocationId`, `attempt`, `modelId`, `requestSha256` (of the Converse request with image bytes replaced by image keys), `invokedAt` |
 | `invocations/{invocationId}.json` | `llm-invocation/v1` | `invoke-llm-reviewer`, `apply-llm-review` (`NOT_CALLED` only) | `LlmInvocationRecord` (§10.1): status, the Converse request with image references, the full response, `stopReason`, `usage`, `costMicroUsd`, `latencyMs`, `validation` |
 | `decisions.json` | `llm-review-decisions/v1` | `apply-llm-review` | the validated decisions mapped to spec 3 items, the OCR and reviewed constraint results, each item's escalation reasons |
-| `outcome.json` | `llm-review-outcome/v1` | the three review Lambdas, `llm-review-maintenance` (`HOLD`) | `status` (`COMPLETED`, `ESCALATED`, `HELD`, `SKIPPED` or `FAILED`), `holdReason`, `skipReason`, counts of adjudications written, replayed and rejected by code, `escalationId`, `costMicroUsd`, `completedAt`, `error` |
+| `outcome.json` | `llm-review-outcome/v1` | `prepare-llm-review` (`SKIPPED`), `apply-llm-review` (`COMPLETED`, `ESCALATED`), `llm-review-maintenance` (`HELD`, `FAILED`) | `status` (`COMPLETED`, `ESCALATED`, `HELD`, `SKIPPED` or `FAILED`), `holdReason`, `skipReason`, counts of adjudications written, replayed and rejected by code, `escalationId`, `costMicroUsd`, `completedAt`, `error` |
 | dataset `manifest.json` | `risk-dataset/v1` | `build-risk-dataset` | §8.1 |
 | dataset JSONL lines | `risk-example/v1` | `build-risk-dataset` | §8.1 |
 | model `manifest.json` | `risk-model/v1` | `train-risk-model` | `modelId`, `modelVersion`, `datasetId`, `featureSchemaVersion`, `features` (ordered allowlist), training configuration, `seed`, library versions, image digest, `modelSha256`, `paritySha256`, calibration summary, `threshold`, `thresholdVersion`, `evaluationId`, `build` |
@@ -289,7 +289,7 @@ Constraints become spec 2 signals and features through a change to spec 2's rule
 | `datasetBuilderVersion` | `risk-dataset-v1` | dataset manifests |
 | `trainerVersion` | `risk-trainer-v1` | model manifests |
 
-`constraintsVersion`, `constraintsConfigVersion` and `riskModelConfigVersion` are spec 2 stage versions, so a change to any of them bumps spec 2's `qualityVersion` (spec 2 §5.4). A change to the prompt, the output contract, the crops or the acceptance rules bumps `llmReviewerVersion`, so the next plan of each run is reviewed under the new version and earlier claims do not block it.
+`constraintsVersion`, `constraintsConfigVersion` and `riskModelConfigVersion` are spec 2 stage versions, so a change to any of them bumps spec 2's `qualityVersion` (spec 2 §5.4). A change to the prompt, the output contract, the crops or the acceptance rules bumps `llmReviewerVersion`. Spec 3 writes one plan per run and never re-enqueues it (spec 3 §6.1), so the new version applies to runs enqueued after the deploy, and reaches earlier runs only through an operator `REREVIEW`.
 
 ## 6. LLM review workflow
 
@@ -301,7 +301,7 @@ The stack's EventBridge rule matches `aws.s3` `Object Created` events from the e
 | --- | --- | --- | --- |
 | `AUTOMATIC` | the plan event | create-only; an existing claim from another execution is a no-op | nothing; first decisions |
 | `RESUME` | `LlmReviewMaintenance` for a held run (§6.5) | requires the claim's latest LLM review run to be `HELD` | nothing |
-| `BACKFILL` | operator, for plans written before the stack existed | create-only, as `AUTOMATIC` | nothing |
+| `BACKFILL` | operator, for plans with no claim of any `llmReviewerVersion`, which were written before the stack existed | create-only, as `AUTOMATIC` | nothing |
 | `REREVIEW` | operator, after a prompt or model change | skipped | the current `LLM` head of each item; `HUMAN` heads are left alone |
 
 ### 6.2 Prepare
@@ -311,7 +311,7 @@ The stack's EventBridge rule matches `aws.s3` `Object Created` events from the e
 1. Validate the plan key. Read `review/plan.json`. Claim the run (§6.1) or return `skipped`.
 2. Create an `llmReviewRunId` and write `manifest.json`.
 3. Read the run `manifest.json`, `normalized/observations.json`, the latest `SUCCEEDED` quality result (spec 2 §5.2 rule 5) and, when the normalized observations carry spec 6's roster reference, the roster snapshot. Fail with `MissingArtifactError` when the parser provenance is absent.
-4. Compute the required items with spec 3 §7.1's scope: a table decision for every table, and a cell and row decision for every cell and row of every table in scope. With no required item, write a `SKIPPED` outcome with `NO_REQUIRED_ITEMS` and stop. With more than `maxCellsPerRun` (300) cells, return `RUN_TOO_LARGE`, and the workflow goes straight to Apply (§6.4) without calling Bedrock.
+4. Compute the required items with spec 3 §7.1's scope: a table decision for every table, and a cell and row decision for every cell and row of every table in scope. With no required item, write a `SKIPPED` outcome with `NO_REQUIRED_ITEMS` and stop. With more than `maxCellsPerRun` (300) cells, write `request.json` with the items and no images or prompt, return `RUN_TOO_LARGE`, and the workflow goes straight to Apply (§6.4) without calling Bedrock.
 5. Choose the prompt mode from the plan's `displayMode` (§7.1). Evaluate the constraints on the OCR table (§4.7) for the `ASSISTED` prompt.
 6. Build the images (§7.2) and write them under `inputs/`. Build the text input (§7.3), the rendered prompt and the call's estimated maximum cost (§6.5), and write `request.json`.
 7. Return the `request.json` reference.
@@ -320,29 +320,31 @@ The stack's EventBridge rule matches `aws.s3` `Object Created` events from the e
 
 `invokeLlmReviewer(input, dependencies)`:
 
-1. Read `request.json` and its images. Reserve the call's maximum cost (§6.5); when the reservation fails, throw `LlmBudgetExhaustedError`, which the workflow catches to hold the run. Create an `invocationId` and write the invocation request record.
+1. Read `request.json` and its images, and list the LLM review run's invocation records. When `maxInvocationsPerReview` of them are `VALID`, `INVALID` or `REFUSED`, return the latest. Reserve the call's maximum cost (§6.5); when the reservation fails, throw `LlmBudgetExhaustedError`, which the workflow catches to hold the run. Create an `invocationId` and write the invocation request record.
 2. Call `Converse` with the system prompt, one user message holding the images and the text input, the output tool (§7.4) with `toolChoice` `auto`, `maxTokens` `maxOutputTokens` (8,000) and `additionalModelRequestFields` from configuration. The client's request timeout is `requestTimeoutSeconds` (120), and the SDK makes one attempt; Step Functions retries (§6.6).
 3. On a response, compute the cost from `usage` and the configured prices, settle the reservation (§6.5), validate the output (§7.4) and write the invocation record with status `VALID`, `INVALID` or `REFUSED`.
 4. On a provider error, write the invocation record with status `ERROR` and the error name, release the reservation, and throw the mapped error (§6.6).
-5. When the output is `INVALID` and fewer than `maxInvocationsPerReview` calls have been made, repeat from step 1 with the same prompt, including the reservation.
+5. When the output is `INVALID` and fewer than `maxInvocationsPerReview` invocations have an answer, repeat from step 1 with the same prompt, including the reservation.
 6. Return the latest invocation record's reference.
 
 ### 6.4 Apply
 
 `applyLlmReview(input, dependencies)`:
 
-1. Read `request.json` and the latest invocation record. When its status is not `VALID`, or Prepare stopped with `RUN_TOO_LARGE`, escalate every required item (§7.6 rules 7 and 8) and go to step 6. For `RUN_TOO_LARGE`, first write an invocation record with status `NOT_CALLED`, because every escalation names one.
-2. Map each decision to a spec 3 `ADJUDICATE` payload (§7.5). In `REREVIEW` mode, list each item's primary chain under `adjudications/` and resolve its head (spec 3 §8.1) to set `supersedesAdjudicationId`. Invoke `LlmReviewWrite` for tables, then rows, then cells, each with a `clientRequestId` that is UUID version 5 of `<llmReviewRunId>:<item key>` under a fixed namespace, so a retried Apply replays instead of duplicating.
-3. Record each response. `409 HUMAN_DECIDED`, `409 ESCALATED` and `409 PRIORITY_HIDDEN` are recorded and skipped; `PRIORITY_HIDDEN` also logs at `ERROR`, because Prepare chose the wrong mode. Any other rejection fails the task with `LlmReviewWriteRejectedError`. A function error is retried (§6.6).
-4. Build the reviewed table, run `checkReviewedTable` (§4.7) and decide the escalations (§7.6), including rows the last write response listed as `OUTCOME_INCONSISTENT`.
-5. Write `decisions.json`. When any item is escalated, send one `ESCALATE` payload with every escalated item and the sorted reason codes.
+1. Read `request.json` and the latest invocation record. When its status is not `VALID`, or Prepare stopped with `RUN_TOO_LARGE`, every required item is escalated (§7.6 rules 7 and 8); go to step 4. For `RUN_TOO_LARGE`, first write an invocation record with status `NOT_CALLED`, because every escalation names one.
+2. Build the reviewed table from the decisions, run `checkReviewedTable` (§4.7) and spec 3 §8.3 condition 5 on it, and decide the escalations (§7.6). Every check is local, so the escalated set is known before anything is written.
+3. Write `decisions.json` with every decision, its spec 3 payload (§7.5) and its escalation reasons.
+4. When any item is escalated, send one `ESCALATE` payload with every escalated item and the sorted reason codes, before any adjudication. A run with an open escalation is never complete (spec 3 §8.3 condition 6), so spec 3 cannot write a validated version from LLM decisions the checks rejected.
+5. Write the adjudications of the items that are not escalated through `LlmReviewWrite`, tables first, then rows, then cells. Each has a `clientRequestId` that is UUID version 5 of `<llmReviewRunId>:<item key>` under a fixed namespace, so a retried Apply replays instead of duplicating. In `REREVIEW` mode, Apply first lists each item's primary chain under `adjudications/` and resolves its head (spec 3 §8.1) to set `supersedesAdjudicationId`. `409 HUMAN_DECIDED` and `409 ESCALATED` are recorded and skipped. `409 PRIORITY_HIDDEN` is recorded, skipped and logged at `ERROR`, because Prepare chose the wrong mode. Any other rejection fails the task with `LlmReviewWriteRejectedError`. A function error is retried (§6.6).
 6. Write `outcome.json` (`COMPLETED` or `ESCALATED`) and delete the run's hold item if one exists.
+
+An Apply that stops after step 4 leaves an open escalation and undecided items, so the run stays incomplete until a retry or a `REREVIEW` replays the writes. An Apply that stops before step 4 has written nothing to spec 3.
 
 ### 6.5 Budget, holds and resumption
 
 **Ceiling.** `monthlyBudgetUsd` is set per deployment type in bundled configuration: 50 USD for `prod`, 10 for `dev` and 2 for each ephemeral stack. A month is a UTC calendar month.
 
-**Reservation.** The `LlmReviewState` item `BUDGET#<yyyy-mm>` holds `committedMicroUsd`, the settled cost of finished calls plus outstanding reservations. Prepare computes the maximum cost `r` of one call: the estimated input tokens (§9.5's image formula plus one token per 3 characters of text) at the input price plus `maxOutputTokens` at the output price. Before each call, Invoke adds `r` with a conditional update whose condition is `committedMicroUsd <= :ceilingMinusR` (or the item does not exist and `r` fits). After the call, Invoke adds `actual - r`. A Lambda that dies between the two leaves the reservation counted, which can only hold runs early. `REBUILD` recomputes every month's item from invocation records.
+**Reservation.** The `LlmReviewState` item `BUDGET#<yyyy-mm>` holds `committedMicroUsd`, the settled cost of finished calls plus outstanding reservations. Prepare computes the maximum cost `r` of one call: the estimated input tokens (§9.5's image formula plus one token per 3 characters of text) multiplied by `reservationInputFactor` (1.5), at the input price, plus `maxOutputTokens` at the output price. The estimate is not exact, so the month's committed cost can pass the ceiling only when a call's billed input exceeds 1.5 times its estimate, and the next reservation then fails. Before each call, Invoke adds `r` with a conditional update whose condition is `committedMicroUsd <= :ceilingMinusR` (or the item does not exist and `r` fits). After the call, Invoke adds `actual - r`. A Lambda that dies between the two leaves the reservation counted, which can only hold runs early. `REBUILD` recomputes every month's item from invocation records.
 
 **Holds.** A hold writes a `HELD` outcome with one reason and puts the item `HOLD` / `<runId>` with the reason, `heldAt`, the plan key and the claim key. Holds come from Invoke's errors, through the workflow's `Catch` to `LlmReviewMaintenance`'s `HOLD` operation:
 
@@ -360,9 +362,9 @@ A held run has no LLM adjudication, so spec 3 keeps it `OPEN` and in no human qu
 
 | Task | Lambda timeout | Retried errors | Policy | After the last attempt |
 | --- | --- | --- | --- | --- |
-| Prepare | 2 minutes | `Lambda.*` service errors, `InternalError`, `SlowDown`, `ServiceUnavailable`, `ProvisionedThroughputExceededException`, `ThrottlingException` | 2 s, backoff 2, 3 attempts | `FAILED` outcome, execution fails, `LlmReviewFailed` metric |
-| Invoke | 5 minutes, enough for two 120-second calls | as Prepare, plus `LlmProviderThrottledError`, `LlmProviderUnavailableError`, `LlmProviderTimeoutError` | 10 s, backoff 2, 4 attempts (10, 20, 40 s) | provider errors: `HELD` with `PROVIDER_UNAVAILABLE`; `LlmProviderRejectedError` (not retried): `HELD` with `PROVIDER_REJECTED`; `LlmBudgetExhaustedError` (not retried): `HELD` with `BUDGET_EXHAUSTED`; others: `FAILED` |
-| Apply | 5 minutes | as Prepare, plus `Lambda.ServiceException`, `Lambda.TooManyRequestsException` from `LlmReviewWrite` | 2 s, backoff 2, 3 attempts | `FAILED` outcome; the next `REREVIEW` or a re-sent plan event repairs it, and replays are safe |
+| Prepare | 2 minutes | `Lambda.*` service errors, `InternalError`, `SlowDown`, `ServiceUnavailable`, `ProvisionedThroughputExceededException`, `ThrottlingException` | 2 s, backoff 2, 3 attempts | `FAILED` outcome, written by `LlmReviewMaintenance`'s `FAIL` operation once `manifest.json` exists; execution fails; `LlmReviewFailed` metric |
+| Invoke | 5 minutes, enough for two 120-second calls | as Prepare, plus `LlmProviderThrottledError`, `LlmProviderUnavailableError`, `LlmProviderTimeoutError` | 10 s, backoff 2, 4 attempts (10, 20, 40 s) | provider errors: `HELD` with `PROVIDER_UNAVAILABLE`; `LlmProviderRejectedError` (not retried): `HELD` with `PROVIDER_REJECTED`; `LlmBudgetExhaustedError` (not retried): `HELD` with `BUDGET_EXHAUSTED`; others: `FAILED`. Each goes through a `Catch` to `LlmReviewMaintenance` (`HOLD` or `FAIL`), because Invoke writes only invocation records |
+| Apply | 5 minutes | as Prepare, plus `Lambda.ServiceException`, `Lambda.TooManyRequestsException` from `LlmReviewWrite` | 2 s, backoff 2, 3 attempts | `FAILED` outcome through `FAIL`; an operator `REREVIEW` repairs it, and its writes replay safely. A re-sent plan event does not, because the claim makes it a no-op |
 
 Bedrock `ThrottlingException` maps to `LlmProviderThrottledError`; `ServiceUnavailableException`, `InternalServerException` and `ModelNotReadyException` to `LlmProviderUnavailableError`; `ModelTimeoutException` and the client timeout to `LlmProviderTimeoutError`; the three rejection exceptions to `LlmProviderRejectedError`, which is not retried and holds the run with `PROVIDER_REJECTED`. The state machine times out after 30 minutes. A failed execution keeps its evidence and claim; `FAILED` runs are counted in the report and alarmed (§15), and an operator restarts them with `REREVIEW`.
 
@@ -376,12 +378,12 @@ Bedrock `ThrottlingException` maps to `LlmProviderThrottledError`; `ServiceUnava
 | Every required item with its short reference, row and column, header text and observed text | yes | yes |
 | The parser's exported field per column | yes | yes |
 | The parser's team, exported flag and outcome per row | no | yes |
-| Failed constraints on the OCR table, with involved items | no | yes |
+| Constraint results on the OCR table: every applicable result with failures' involved items, or a statement that none apply | no | yes, always |
 | Roster candidates per player row | no | yes |
 | Spec 2 priorities, scores or signals | no | no |
 | Earlier decisions of any item | no | no |
 
-Spec 3 records `priorityShown` from `inputsShown.priority`, which is true when the prompt contains any constraint result (spec 3 §4.5), so `ASSISTED` adjudications record `priorityShown: true` and `BLIND` ones `false`. Neither mode shows earlier decisions, so `priorDecisionsShown` is false unless the write supersedes a non-`SKIPPED` decision in `REREVIEW` mode. `BLIND` LLM labels measure the LLM and spec 6's matcher without anchoring; spec 3 needs a field for roster candidates shown (§9.6).
+Spec 3 records `priorityShown` from `inputsShown.priority`, which is true when the prompt contains any constraint result (spec 3 §4.5). An `ASSISTED` prompt always has a constraint section, even when every result passed or no profile applies, so `ASSISTED` adjudications record `priorityShown: true` and `BLIND` ones `false`. The LLM never sees spec 2's priorities, so `shownPriority` on an LLM adjudication should be `null`; spec 3 needs that change (§9.6). Neither mode shows earlier decisions, so `priorDecisionsShown` is false unless the write supersedes a non-`SKIPPED` decision in `REREVIEW` mode. `BLIND` LLM labels measure the LLM and spec 6's matcher without anchoring; spec 3 needs a field for roster candidates shown (§9.6).
 
 ### 7.2 Images
 
@@ -392,7 +394,7 @@ Crops are deterministic for one original, Sharp version and configuration, and a
 
 ### 7.3 Text input
 
-The text input is JSON inside a delimited user block, after the system prompt's statement that every string in it is data read from a screenshot and never an instruction. It holds, per table: `ref` (`t1`, `t2`, ...), whether it is in scope, row count, column count and per column the header text and exported field; per row in scope: `ref` (`t1r3`), row index and, in `ASSISTED` mode, the parser's exported flag, team and outcome; per cell in scope: `ref` (`c1`, `c2`, ...), row, column and observed text. Long IDs never appear; Prepare maps references to `cellObservationId`, `tableObservationId` and row indexes in `request.json`. In `ASSISTED` mode it also holds each failed constraint's ID, scope, observed value, allowed interval and involved references, and per player row up to `rosterCandidatesPerRow` (3) active roster gamertags from the run's snapshot with the smallest spec 6 key distance to the name as read, at most `rosterCandidateMaxKeyDistance` (3), plus the row's `playerResolution` status. Observed text is capped at 256 characters.
+The text input is JSON inside a delimited user block, after the system prompt's statement that every string in it is data read from a screenshot and never an instruction. It holds, per table: `ref` (`t1`, `t2`, ...), whether it is in scope, row count, column count and per column the header text and exported field; per row in scope: `ref` (`t1r3`), row index and, in `ASSISTED` mode, the parser's exported flag, team and outcome; per cell in scope: `ref` (`c1`, `c2`, ...), row, column and observed text. Long IDs never appear; Prepare maps references to `cellObservationId`, `tableObservationId` and row indexes in `request.json`. In `ASSISTED` mode it also holds the constraint section, with each applicable result's ID, scope and status, and for each failure its observed value, allowed interval and involved references, or a statement that no profile applies; and per player row up to `rosterCandidatesPerRow` (3) active roster gamertags from the run's snapshot with the smallest spec 6 key distance to the name as read, at most `rosterCandidateMaxKeyDistance` (3), plus the row's `playerResolution` status. Observed text is capped at 256 characters.
 
 The system prompt is `config/prompts/llm-review-prompt-v1.md`. It describes the Halo MCC scoreboard, the decision vocabulary, the error types, the team colour names (spec 3 §13.1 `teamNames`), the output tool and the rules in §7.4. A released prompt is never edited; a change adds a new file and bumps `promptVersion` and `llmReviewerVersion`.
 
@@ -441,7 +443,7 @@ An optional `note` on any item is allowed by the schema and stored only in the i
 
 ### 7.6 Correction acceptance and escalation
 
-A correction is a `CORRECT` cell, a row decision whose derived spec 3 error types are not empty, or a table decision with `WRONG_TABLE`, `WRONG_COLUMN_MAPPING` or `MISSING_ROW`. A table's applicable constraints are those of its profile whose result is not `NOT_EVALUATED`, whether `PROVISIONAL` or `VALIDATED`.
+A correction is a `CORRECT` cell, a row decision whose derived spec 3 error types are not empty, or a table decision with `WRONG_TABLE`, `WRONG_COLUMN_MAPPING` or `MISSING_ROW`. A table's applicable constraints are those of its profile whose result on the OCR table is not `NOT_EVALUATED`, whether `PROVISIONAL` or `VALIDATED`. An applicable constraint that is `NOT_EVALUATED` on the reviewed table, for example because a correction made a kills value non-numeric, counts as failing there.
 
 | Rule | Condition | Escalated items | Reason code |
 | --- | --- | --- | --- |
@@ -450,13 +452,13 @@ A correction is a `CORRECT` cell, a row decision whose derived spec 3 error type
 | 3 | The LLM made corrections in a table it marked `SCOREBOARD` that has no profile. | the corrected items | `CORRECTION_UNCHECKED` |
 | 4 | A cell of a mapped field in a table the LLM marked `SCOREBOARD` is `UNREADABLE`. | the cell | `LLM_UNREADABLE` |
 | 5 | The model listed the item under `escalations`. | the item | `LLM_REQUESTED` |
-| 6 | The last write response lists rows with `OUTCOME_INCONSISTENT` (spec 3 §8.3). | those rows | `OUTCOME_INCONSISTENT` |
-| 7 | Both invocations returned `INVALID`, or one returned `REFUSED`. | every required item | `LLM_OUTPUT_INVALID` or `LLM_REFUSED` |
+| 6 | The reviewed table's player rows break spec 3 §8.3 condition 5 (`OUTCOME_INCONSISTENT`). | those rows | `OUTCOME_INCONSISTENT` |
+| 7 | Both answered invocations returned `INVALID`, or one returned `REFUSED`. | every required item | `LLM_OUTPUT_INVALID` or `LLM_REFUSED` |
 | 8 | The run has more than `maxCellsPerRun` cells. | every required item | `RUN_TOO_LARGE` |
 
 Soft constraint failures that the OCR table already had, and that the LLM did not change, never escalate on their own: a game that ended on time is not an error. Corrections in tables the LLM marked `NOT_SCOREBOARD` are accepted, because they never reach a validated table.
 
-The LLM's adjudications are written before the escalation under rules 1 to 6, so every item keeps an LLM label and the person sees the LLM's decision (spec 3 §9.2). Under rules 7 and 8 no adjudication is written. When the escalated items exceed spec 3's `maxEscalationItems` (256), the escalation lists every table item, then every row item, then cells in table, row and column order up to the limit; people can escalate the rest from the run view (spec 3 §7.8).
+Escalated items get no LLM adjudication. The escalation is sent first (§6.4 step 4), and spec 3 then rejects LLM writes to them (`409 ESCALATED`). Their label is the person's answer, and the LLM's decision stays in `decisions.json` for analysis. Items that are not escalated get their LLM adjudications. Under rules 7 and 8 no adjudication is written. When the escalated items exceed spec 3's `maxEscalationItems` (256), the escalation lists every table item, then every row item, then cells in table, row and column order up to the limit; people can escalate the rest from the run view (spec 3 §7.8).
 
 An escalation makes the run incomplete until a person answers it (spec 3 §7.8, §8.3). A run with no escalation is complete once the LLM's writes are in, and spec 3 writes its validated table.
 
@@ -529,9 +531,9 @@ G5 is the check that uses only human labels, with the same one-sided 95% Clopper
 | --- | --- | --- | --- |
 | 1 | `OFF` | the LLM reviews every required item; people answer escalations and audit | `REVIEW_ALL` |
 | 2 | `SHADOW`: assessments recorded, not used | as stage 1 | `REVIEW_ALL` |
-| 3 | `ROUTING` | auto-finalized runs: nobody, plus the audit of auto-accepted cells; other runs: the LLM, then people for escalations | `MODEL_FLAGGED`, `CONSTRAINT_FAILED`; people `ESCALATION`, `AUDIT_SAMPLE` |
+| 3 | `ROUTING` | auto-finalized runs: nobody, plus the audit of auto-accepted cells; other runs: the LLM, then people for escalations | `MODEL_FLAGGED`, `CONSTRAINT_FAILED`, or `REVIEW_ALL` in runs without a validated profile; people `ESCALATION`, `AUDIT_SAMPLE` |
 
-**Routing rule.** In stage 3 `ScoreRun` writes `QualityResult.routing` (§10.1). A run is auto-finalized when its selected table has a profile with every hard constraint `VALIDATED` and `PASS`, every soft constraint `PASS`, no spec 2 `STRUCTURE` signal, every in-scope cell `AUTO_ACCEPT`, and exactly one table is in spec 3's scope. Its cells, rows and tables are accepted as `AUTO_ACCEPTED` values by spec 3 (spec 3 P5.2). Any other run goes to the LLM reviewer with only the selected items: cells with `REVIEW_REQUIRED` and every item involved in a failed or unevaluated constraint, plus every row and table of the run, since the model scores cells only. An item involved in a failed constraint has `CONSTRAINT_FAILED`; every other selected item has `MODEL_FLAGGED`. Unselected cells of a routed run are auto-accepted.
+**Routing rule.** In stage 3 `ScoreRun` writes `QualityResult.routing` (§10.1). A run whose selected table has no profile with every hard constraint `VALIDATED` is never partly auto-accepted. It is reviewed as in stage 1, every item with `REVIEW_ALL`, and `routing.reasons` holds `NO_VALIDATED_PROFILE`. Otherwise, a run is auto-finalized when its selected table has a profile with every hard constraint `VALIDATED` and `PASS`, every soft constraint `PASS`, no spec 2 `STRUCTURE` signal, every in-scope cell `AUTO_ACCEPT`, and exactly one table is in spec 3's scope. Its cells, rows and tables are accepted as `AUTO_ACCEPTED` values by spec 3 (spec 3 P5.2). Any other run goes to the LLM reviewer with only the selected items: cells with `REVIEW_REQUIRED` and every item involved in a failed or unevaluated constraint, plus every row and table of the run, since the model scores cells only. An item involved in a failed constraint has `CONSTRAINT_FAILED`; every other selected item has `MODEL_FLAGGED`. Unselected cells of a routed run are auto-accepted.
 
 **When routing starts.** The maintainer promotes a model to `ROUTING` only when its gate is `PASS` and the autonomy report shows LLM review spend of at least `routingMinMonthlySpendUsd` (20 USD) in each of the last two full months. Below that, a gate `PASS` keeps the model in `SHADOW`, where it costs nothing and keeps being measured. The promotion pull request links the gate result and both reports.
 
@@ -566,6 +568,8 @@ People review two things: escalations, and spec 3's blind audit sample (`blindDo
 
 **Accepted data.** Let `s_LLM`, `s_HUMAN` and `s_AUTO` be the shares of current cell decisions of each kind in the latest validated versions of runs in the report window. The accepted-data bound is `U_ACCEPTED = s_LLM * U_LLM + s_HUMAN * U_HUMAN + s_AUTO * U_AUTO`, with each bound computed at confidence `1 - 0.05 / k` for the `k` populations with a non-zero share (Bonferroni), so the combined statement holds at 95%. A population with a non-zero share and `n` of 0 makes `U_ACCEPTED` undefined and the report status `INSUFFICIENT_SAMPLE`.
 
+**The bounds cover cells only.** Spec 3's blind audit samples cells, and a blind audit of rows and tables is spec 3 backlog P5.3. Row decisions (team and outcome) and table decisions (role and column mapping), whether made by the LLM or auto-accepted in stage 3, are not measured. In auto-finalized runs only the validated hard constraints that depend on teams and the winner (`K002`, `K005`) check them (§18.17). Every report states that `U_ACCEPTED` is a cell-level bound.
+
 The audit sample is drawn by a hash of a secret seed (spec 3 §7.6), independent of the decision and the reviewer, so each sample is uniform over its population and the bound applies to the whole population. The bound cannot see an error the LLM and the blind person both make (§18.4).
 
 ### 9.3 Audit share
@@ -580,7 +584,7 @@ A smaller share collects fewer audits, so the bound tightens more slowly but doe
 
 ### 9.4 Autonomy metric
 
-A run is **finalized without a person** when its first validated version (spec 3 §8.5) has no `HUMAN` count in `currentDecisionCounts` and the run had no escalation before that version's `createdAt`. A run **waits on a person** while it has an open escalation. **Fully autonomous** means no run waits on a person. It does not mean that no person ever audits: the audit sample is how the error bound is measured.
+A run is **finalized without a person** when it has a validated version (spec 3 §8.5), its first validated version has no `HUMAN` count in `currentDecisionCounts`, and the run has never had an escalation. Apply escalates before it writes adjudications (§6.4), so an escalated run has no validated version until a person answers. A run **waits on a person** while it has an open escalation. **Fully autonomous** means no run waits on a person. It does not mean that no person ever audits: the audit sample is how the error bound is measured.
 
 `ReportAutonomy` runs on the first day of each UTC month for the previous month, or when an operator invokes it with a window. It lists review plans, LLM review outcomes, escalations, adjudications and validated versions under the namespace, and writes `risk-autonomy-report/v1`:
 
@@ -642,6 +646,8 @@ This spec edits no other spec. Each dependency below is recorded in the spec it 
 | Escalation reason codes in §7.6 | spec 3 stores them uninterpreted (spec 3 §4.5) | P2.4 |
 | The shared account check in `scripts/lib/account-guard.mjs` | spec 6 P2.3 | P0.3: whichever merges first creates the module unchanged from `scripts/cdk-app.mjs` |
 | Evidence bucket EventBridge notifications | spec 2 P1.1 | P2.5 |
+| Spec 6's resolution fields as features, which spec 6 §8.2 and its backlog P5.6 leave to spec 2. This spec takes that decision in `features-v2`; the fields are `null` until spec 6 P3.2 writes resolutions. | spec 2, spec 6 P0.1 | P1.2 |
+| `shownPriority` is `null` on LLM adjudications, and spec 3 records the parser output and roster candidates an LLM prompt showed (§7.1) | spec 3 | P2.4 |
 
 ## 10. Typed domain model
 
@@ -675,8 +681,8 @@ interface ConstraintResult {
 interface RunRouting {                       // QualityResult.routing; stage 3 only (§8.8)
   mode: 'ROUTING';
   autoFinalize: boolean;
-  reasons: readonly string[];                // e.g. 'CELL_REVIEW_REQUIRED', 'CONSTRAINT_FAILED', 'NO_PROFILE'
-  selectedItems: readonly { item: ReviewItem; selectionReason: 'MODEL_FLAGGED' | 'CONSTRAINT_FAILED' }[];
+  reasons: readonly string[];                // e.g. 'CELL_REVIEW_REQUIRED', 'CONSTRAINT_FAILED', 'NO_VALIDATED_PROFILE'
+  selectedItems: readonly { item: ReviewItem; selectionReason: 'REVIEW_ALL' | 'MODEL_FLAGGED' | 'CONSTRAINT_FAILED' }[];
 }
 
 type PromptMode = 'BLIND' | 'ASSISTED';
@@ -748,7 +754,7 @@ interface LlmInvocationRecord {
 
 ```text
 Review plan 1 -> 0..many LLM review runs (automatic, resume, backfill, re-review)
-LLM review run 1 -> 1 request -> 0..2 invocations -> 0..1 decisions -> 0..1 outcome
+LLM review run 1 -> 1 request -> 0..many invocations (at most 2 answered, any number of ERROR) -> 0..1 decisions -> 0..1 outcome
 Invocation 1 -> many spec 3 LLM adjudications and 0..1 escalation (by invocationKey)
 Quality result table 1 -> 0..1 profile -> many constraint results
 Run 0..1 -> GameIndex item (by gameKey)
@@ -769,7 +775,7 @@ Every handler exports `handler` for Lambda and a core function that takes an inj
 | `src/lambdas/prepare-llm-review.ts` | `handler(event)`; `prepareLlmReview(input, dependencies)` | §6.2. |
 | `src/lambdas/invoke-llm-reviewer.ts` | `handler(event)`; `invokeLlmReviewer(input, dependencies)` | §6.3. The only Bedrock caller. |
 | `src/lambdas/apply-llm-review.ts` | `handler(event)`; `applyLlmReview(input, dependencies)` | §6.4. The only `LlmReviewWrite` caller. |
-| `src/lambdas/llm-review-maintenance.ts` | `handler(event)`; `hold`, `resumeHeld`, `backfill`, `rebuild`, `rereview` (each `(input, dependencies)`) | §6.1, §6.5. |
+| `src/lambdas/llm-review-maintenance.ts` | `handler(event)`; `hold`, `fail`, `resumeHeld`, `backfill`, `rebuild`, `rereview` (each `(input, dependencies)`) | §6.1, §6.5. |
 | `src/lambdas/build-risk-dataset.ts` | `handler(event)`; `buildRiskDataset(input, dependencies)` | §8.1. |
 | `src/lambdas/report-autonomy.ts` | `handler(event)`; `reportAutonomy(input, dependencies)` | §9.4. |
 | `training/src/risk_training/handler.py` | `handler(event, context)`; `train(dataset, config)`; `gate(model, dataset, config)` | §8.3 to §8.6. |
@@ -863,6 +869,7 @@ mcc-stats-suite/
   "monthlyBudgetUsd": { "prod": 50, "dev": 10, "ephemeral": 2 },
   "budgetAlarmFraction": 0.8,
   "resumeBatchSize": 20,
+  "reservationInputFactor": 1.5,
   "acceptedErrorTarget": 0.001,
   "minAutoAcceptRate": 0.5,
   "minAuditShare": 0.01,
@@ -894,7 +901,7 @@ Every file is bundled into the Lambdas and validated at cold start; an invalid f
 | `TrainRiskModel` | container image, ARM64, 10,240 MB, 15-minute timeout, 10 GB ephemeral storage, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `GIT_SHA` |
 | `ReportAutonomy` | Node.js 22, ARM64, 2,048 MB, 15-minute timeout, env `EVIDENCE_BUCKET`, `OBJECT_PREFIX`, `LLM_REVIEW_TABLE` |
 | `ScoreRun` (changed) | memory 1,536 MB; env adds `GAME_INDEX_TABLE` |
-| State machine `<stack>-llm-review` | Standard, 30-minute timeout, X-Ray, `ALL` logging with execution data (payloads hold keys, counts and reasons only); Prepare, Choice, Invoke, Choice, Apply, with the §6.6 retries and a `Catch` on Invoke's provider errors to a hold step in `LlmReviewMaintenance` |
+| State machine `<stack>-llm-review` | Standard, 30-minute timeout, X-Ray, `ALL` logging with execution data (payloads hold keys, counts and reasons only); Prepare, Choice, Invoke, Choice, Apply, with the §6.6 retries and a `Catch` on every task to `LlmReviewMaintenance` (`HOLD` for provider and budget errors, `FAIL` otherwise) |
 | State machine `<stack>-risk-training` | Standard, 40-minute timeout; `BuildRiskDataset` then `TrainRiskModel` |
 | EventBridge rule and DLQ | §6.1; the DLQ is spec 2's `<stack>-events-dlq` |
 | Schedules (EventBridge Scheduler) | hourly `RESUME`; weekly `<stack>-risk-training`, disabled until P4.5 enables it; monthly `ReportAutonomy`. Ephemeral stacks create none. |
@@ -906,7 +913,7 @@ Every file is bundled into the Lambdas and validated at cold start; an invalid f
 
 | Principal | Evidence bucket | Other |
 | --- | --- | --- |
-| `ScoreRun` (added) | `ListBucket` with prefix `<ns>submissions/`, for sibling runs; `GetObject` on `<ns>risk/models/*` and `<ns>roster/versions/*` | `GameIndex` `GetItem`, `Query`, `PutItem` |
+| `ScoreRun` (added) | `ListBucket` with prefix `<ns>submissions/`, for sibling runs; `GetObject` on `<ns>risk/models/*`, `<ns>risk/gates/*` and `<ns>roster/versions/*` | `GameIndex` `GetItem`, `Query`, `PutItem` |
 | `PrepareLlmReview` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*` and `<ns>roster/versions/*`; `PutObject` on `<ns>submissions/*/runs/*/llm-review/*` | none |
 | `InvokeLlmReviewer` | `GetObject` on `<ns>submissions/*/runs/*/llm-review/*`; `PutObject` on `<ns>submissions/*/runs/*/llm-review/*/invocations/*` | `bedrock:InvokeModel` on `arn:aws:bedrock:<region>::foundation-model/<modelId>` only; `LlmReviewState` `UpdateItem` |
 | `ApplyLlmReview` | `ListBucket` with prefix `<ns>submissions/`; `GetObject` on `<ns>submissions/*`; `PutObject` on `<ns>submissions/*/runs/*/llm-review/*` | `lambda:InvokeFunction` on the `LlmReviewWrite` ARN only; `LlmReviewState` `DeleteItem` on hold items |
@@ -952,14 +959,14 @@ TypeScript tests use `tap` under `applications/ocr-quality/test/`, Python tests 
 | --- | --- |
 | `constraints.test.ts` | every check in §4.2 passes on the two #91 fixtures, with a synthetic game variant `LINE` added because the reduced fixtures drop `LINE` blocks, with the numbers in §4.4; each fails on a seeded case with the right `miss` and involved items; `MISSING_VALUE` on a non-integer; `NO_PROFILE` on the FFA and `UNKNOWN` fixtures; `K005` fails on a Team Slayer table parsed as free-for-all |
 | `profiles.test.ts` | capture 1 headers (`SCORE` with a trailing symbol, `ASSI`, empty deaths) and capture 2 headers match; three matching headers do not; the game variant predicate with and without a `LINE` above the table |
-| `peers.test.ts` | page grouping needs 4 shared keys and different image hashes; game grouping needs equal key multisets within 7 days and different submissions; comparison with a peer's validated version when one exists |
+| `peers.test.ts` | page grouping needs 4 shared keys and different image hashes; game grouping needs equal key multisets within 7 days and different submissions; `ScoreRun` compares parser rows only and never reads a validated table; `ApplyLlmReview` compares with a peer's validated version when one exists |
 | `features-v2.test.ts` | every new feature present, `null` when not evaluated; roster fields `null` without a roster reference |
 | `llm-prompt.test.ts` | `BLIND` text has no parser team, outcome, constraint or roster field; `ASSISTED` has all; references map back to IDs; observed text over 256 characters is cut; prompt text is stable for a fixed input |
 | `llm-images.test.ts` | crop box with margins and clipping; long edge capped at 2,576 and never enlarged; context image at 1,280 |
 | `llm-output.test.ts` | every rule in §7.4 with a violating case; `ACCEPT` with a different value is invalid; refusal stop reasons; mapping to spec 3 payloads in §7.5, including `REREVIEW` supersession and deterministic `clientRequestId` |
 | `llm-escalation.test.ts` | each rule in §7.6 on seeded cases, including a correction that fixes a `K001` miss (accepted), one that breaks `K002` (escalated), a soft failure present before review (not escalated), a correction in an unprofiled scoreboard, and the 256-item cap order |
 | `llm-budget.test.ts` | reservation fits and fails at the ceiling; settle with actual cost; release on error; month rollover; rebuild from invocation records |
-| `prepare-llm-review.test.ts`, `invoke-llm-reviewer.test.ts`, `apply-llm-review.test.ts` | write order and create-only writes; claim and `RESUME` rules; reservation and request record before the call; a failed reservation throws `LlmBudgetExhaustedError` without a call; each Bedrock error mapped as §6.6; invalid output retried once, then escalated; held runs write no adjudication; spec 3 rejections handled as §6.4; replay after a partial Apply writes nothing new |
+| `prepare-llm-review.test.ts`, `invoke-llm-reviewer.test.ts`, `apply-llm-review.test.ts` | write order and create-only writes; the escalation precedes every adjudication, and an escalated run gets no validated version before its escalation; claim and `RESUME` rules; reservation and request record before the call; a failed reservation throws `LlmBudgetExhaustedError` without a call; each Bedrock error mapped as §6.6; invalid output retried once, then escalated; held runs write no adjudication; spec 3 rejections handled as §6.4; replay after a partial Apply writes nothing new |
 | `llm-review-maintenance.test.ts` | resume skips budget holds without headroom and respects the batch size; backfill finds plans without a claim; rebuild equals incremental state |
 | `risk-model.test.ts` | the fixture model's parity rows match within 1e-9; categorical `OTHER` codes; missing values follow the exported direction; hash or parity failure writes no `riskModel`; `ROUTING` without a `PASS` gate runs in `SHADOW` |
 | `build-risk-dataset.test.ts` | spec 2 §8.5 selection rules; `UNREADABLE` positive; `SKIPPED` excluded; grouping by image, submission and game key; split determinism for a seed; audit file truth with and without a disagreement resolution; no feature from adjudications |
@@ -986,10 +993,10 @@ After Phase 2 reaches dev, an operator sends the #91 screenshots to the dev addr
 
 1. A scored dev run gets an LLM review run with every §5.1 object and `LLM` adjudications for every required table, row and cell, each naming its invocation key, within 5 minutes of its review plan.
 2. A run of the `halo3-team-slayer-v1` profile with every evaluated constraint passing and only `ACCEPT` decisions completes with a validated version whose lineage has no `HUMAN` decision.
-3. A fixture run whose LLM output corrects a kills value so that `K002` fails is escalated with `CORRECTION_FAILS_CONSTRAINTS` naming the corrected cell and the involved cells, and the LLM adjudications exist.
+3. A fixture run whose LLM output corrects a kills value so that `K002` fails is escalated with `CORRECTION_FAILS_CONSTRAINTS` naming the corrected cell and the involved cells, the escalation exists before any LLM adjudication of the run, and no validated version is written before a person answers.
 4. A run of a `PRIORITY_HIDDEN` plan is reviewed with a `BLIND` prompt and its adjudications record `priorityShown: false`.
 5. A Bedrock throttling or outage error after the retries holds the run with `PROVIDER_UNAVAILABLE`, writes no adjudication, and the next hourly pass reviews it once Bedrock answers.
-6. A call that does not fit the monthly ceiling holds the run with `BUDGET_EXHAUSTED` before Bedrock is called, and the month's committed cost never exceeds the ceiling.
+6. A call whose reservation does not fit the monthly ceiling holds the run with `BUDGET_EXHAUSTED` before Bedrock is called, and the month's committed cost passes the ceiling only when a call's billed input exceeded 1.5 times its estimate.
 7. Two invalid outputs escalate every required item with `LLM_OUTPUT_INVALID`, and no adjudication is written.
 8. Every quality result of a profiled table records its constraint results, and `features-v2` rows carry the constraint and roster fields.
 9. A model trained on a synthetic dataset exports trees that `ScoreRun` evaluates within 1e-9 of LightGBM on the parity rows, and `SHADOW` mode fills `riskModel` without changing review.
@@ -1017,6 +1024,7 @@ After Phase 2 reaches dev, an operator sends the #91 screenshots to the dev addr
 14. **Prompt injection.** A screenshot could carry text aimed at the model. The damage is bounded to wrong labels for one run (§14 item 4), which the audit measures and the constraint checks partly catch.
 15. **Training is bounded by Lambda.** 15 minutes and 10 GB. §8.9 names the trigger for moving to SageMaker training jobs.
 16. **Price changes are manual.** Prices are configuration, so the budget is wrong if Bedrock changes them until a new configuration ships. The report compares computed cost with the month's billed Bedrock cost in the backlog (P6.5).
+17. **Row and table decisions are not audited.** The error bounds cover cells only (§9.2). A wrong team or outcome that still passes the validated constraints, such as two players with equal kills and deaths swapped between teams, is not measured. P6.8 adds an audit once spec 3 P5.3 exists.
 
 ## 19. Reference documentation
 
@@ -1146,7 +1154,7 @@ A change to a contract updates every consumer in the same PR.
 
 #### P1.2 Constraint signals, results and features-v2 in scoring (M)
 
-- **Blocked by:** P1.1; spec 2 P2.4, spec 2 P2.5, spec 2 P3.1
+- **Blocked by:** P1.1; spec 2 P2.4, spec 2 P2.5, spec 2 P3.1; spec 6 P0.1
 - **Spec:** §4.6, §5.4, §9.6
 - **Files:** `src/lib/rules/constraints.ts`, `src/lib/{scoring,features}.ts`, `src/lambdas/score-run.ts`, `packages/contracts/src/index.ts`, `specs/2-ocr-quality.md`
 - **Provides:** the `CONSTRAINT` group, constraint signals, `QualityResult.tables[].constraints`, `features-v2`
@@ -1233,7 +1241,8 @@ A change to a contract updates every consumer in the same PR.
 - **Provides:** `applyLlmReview`, `decideEscalations`
 - **Acceptance:**
   - The `llm-escalation` and `apply-llm-review` rows of §16.1 pass against a stubbed `LlmReviewWrite` that returns spec 3's codes.
-  - Writes are ordered tables, rows, cells, then one escalation, and a replayed Apply writes nothing new.
+  - Escalations are decided before any write and sent before any adjudication, and escalated items get no LLM adjudication. Other writes are ordered tables, rows, cells, and a replayed Apply writes nothing new.
+  - On a fixture with a rejected correction, the stubbed spec 3 never writes a validated version before the escalation exists.
   - Spec 3 lists the reason codes and the roster-candidates gap from §9.6 in the same PR.
 
 #### P2.5 Workflow, trigger, schedules and IAM (M)
@@ -1364,6 +1373,7 @@ A change to a contract updates every consumer in the same PR.
 - **Provides:** `QualityResult.routing`, selection reasons `MODEL_FLAGGED` and `CONSTRAINT_FAILED`
 - **Acceptance:**
   - A fixture run that meets every routing condition gets `autoFinalize: true`, and one that fails any condition lists the reason and its selected items.
+  - A run without a fully validated profile selects every item with `REVIEW_ALL`, and none of its cells is auto-accepted.
   - The LLM reviews only selected items, with their selection reasons.
   - `ROUTING` loads only with a `PASS` gate (§8.7).
 
@@ -1388,6 +1398,7 @@ A change to a contract updates every consumer in the same PR.
 | P6.5 | Compare computed LLM cost with billed Bedrock cost in the report | S | §18.16. |
 | P6.6 | Prompt caching of the system prompt and tool schema | XS | Saves input cost when reviews cluster within the cache lifetime. |
 | P6.7 | SageMaker training jobs | M | Only when §8.9's trigger is met. |
+| P6.8 | Row and table audit bounds in the report | S | §18.17; needs spec 3 P5.3, the blind audit of rows and tables. |
 
 ### 20.4 Dependency order and parallel lanes
 
