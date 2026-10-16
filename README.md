@@ -93,7 +93,7 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 
 ## Develop and deploy
 
-Pull requests run CI without deploying and need no AWS access. A merge to `main` deploys affected applications to the maintainer's `dev` environment at the merged commit. Each application then goes to `prod` after the maintainer approves it. Release Please versions applications and shared packages.
+Pull requests run CI without deploying and need no AWS access. A merge to `main` deploys affected applications to the project's `dev` environment at the merged commit. Each application then goes to `prod` after a required reviewer approves its `prod` deployment. Release Please versions applications and shared packages.
 
 See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the agent protocol. [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Inbox reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
 

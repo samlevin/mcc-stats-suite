@@ -1,6 +1,6 @@
 # Repository agent workflows
 
-This directory holds the shared sources for the MCC delivery workflows that ship with the repository for Claude Code and Codex. Contributors get the same roles, routing, checks, and handoffs in both tools without installing anything into their workstation configuration, and their own agents and skills keep working next to these.
+This directory holds the shared sources for the MCC delivery workflows that ship with the repository for Claude Code and Codex. Contributors get the same roles, routing, checks, and handoffs in both tools without installing anything into their workstation configuration.
 
 | Path | Purpose |
 | --- | --- |
@@ -25,30 +25,11 @@ The role and workflow sources name no repository. They carry `{{placeholders}}` 
 
 Both tools support both packaging forms, and the repository uses both, each for what it does well.
 
-Agents are the role-bearing unit. An agent definition carries the role boundary (read-only reviewer, implementer that may write and push), an isolated context, a tool allowlist in Claude Code and a permission profile in Codex, and the slot where the model and effort policy applies. The four required capabilities map onto six roles: `mcc-issue-triager`, `mcc-orchestrator`, `mcc-implementer`, `mcc-stack-manager`, `mcc-code-reviewer`, and `mcc-security-reviewer`.
+Agents are the role-bearing unit. An agent definition carries the role boundary (read-only reviewer, implementer that may write and push), an isolated context, a tool allowlist in Claude Code and a permission profile in Codex, and the slot where the model and effort policy applies. The repository defines six roles: `mcc-issue-triager`, `mcc-orchestrator`, `mcc-implementer`, `mcc-stack-manager`, `mcc-code-reviewer`, and `mcc-security-reviewer`.
 
 Skills are the entry points and the policy adapter. A skill is what a person invokes (`/mcc-implement`, `$mcc-implement`), it runs in the main thread where it can ask a question, and it is the only place that can apply the repository policy at spawn time. That last point decides the split for Codex: a Codex agent file that sets `model` or `model_reasoning_effort` takes precedence over every spawn-time value, so a pinned agent file would defeat prompt overrides. The generated Codex agents therefore carry neither field, and the skills pass the resolved values to `spawn_agent` on every dispatch. Codex also loads repository skills in an untrusted project but loads project agents only after trust, so a skill is the right place to tell the contributor that the agents are missing. In Claude Code the per-invocation `model` and `effort` parameters already override frontmatter, so the generated Claude agents pin the policy and the skills still pass the resolved values explicitly for the same reason: a dispatch must never depend on a session or contributor default.
 
 Issue creation is the one capability without an agent. It needs to ask the person about material unknowns, and a forked subagent cannot do that in either tool, so it runs in the main thread as a skill and spawns `mcc-issue-triager` for the independent classification.
-
-## Inventory and reconciliation
-
-The maintainer's personal setup had six Claude Code agents (`ticket-implementer`, `issue-orchestrator`, `code-reviewer`, `security-reviewer`, `issue-triager`, `stack-manager`) with skills `create-github-issue`, `review`, `write-prose`, and two for another tracker, and six Codex agents (`issue-implementer`, `task-orchestrator`, `code-reviewer`, `security-reviewer`, `issue-triager`, `stacked-pr-manager`) with skills `create-github-issue` and `write-prose`, plus personal routing in `~/.codex/AGENTS.md`, personal approval rules, and a personal `delivery.py` helper. The repository versions reconcile them as follows.
-
-| Behavior | Personal Claude | Personal Codex | Repository (both tools) |
-| --- | --- | --- | --- |
-| Naming | generic names | different generic names | `mcc-` prefix; one name per role in both tools |
-| Trackers | GitHub and another tracker | GitHub | GitHub Issues only; other tracker flows stay personal |
-| Container delivery | serial by default, parallel on request | serial by default, parallel on request | serial always; sibling leaves never run concurrently |
-| Pre-PR review | always | only above a risk threshold | the `AGENTS.md` threshold (cross-component, contract, security, substantial behavior); a skip is stated in the PR body |
-| Reviewer on an existing PR | never (rework goes to the implementer) | `review_mode=rework` | `review_mode=pre_pr` from the implementer; `review_mode=requested` from `mcc-review-code`, which never posts |
-| No-issue changes | not modeled | `no_issue=true` | not modeled; `WORKFLOW.md` starts every durable change as an issue |
-| Agent worktrees | `.claude/worktrees/` (tool-managed) | `/private/tmp/agent-*` | `.claude/worktrees/` and `.codex/worktrees/`, both ignored, inside the sandboxed workspace and outside temporary directories |
-| GitHub reads and pushes | `gh`, `git` | personal `delivery.py` wrapper | plain `gh` and `git`; the contributor's own approval rules apply |
-| Prose style | `write-prose` | `write-prose` (identical file) | `mcc-write-prose`, body copied verbatim with its attribution to the Anti-Slop Reference |
-| Model and effort | pinned in each agent file | pinned in each agent file | `policy.json`, applied per dispatch by the resolver |
-
-The personal `review` skill (multi-lens PR review that posts to GitHub) was not ported. The issue asks for read-only review that reports findings; `mcc-review-code` does that, and posting stays a separate human decision.
 
 ## Parity matrix
 
@@ -109,11 +90,13 @@ For example, a default Codex implementation reports `Requested settings: Policy:
 
 ## Discovery, trust, and versions
 
-Tested with Claude Code 2.1.299 and Codex CLI 0.162.1. The per-invocation `effort` parameter needs Claude Code 2.1.292 or later; Codex needs a release with `spawn_agent` (subagent workflows are on by default in current releases).
+The per-invocation `effort` parameter needs Claude Code 2.1.292 or later; Codex needs a release with `spawn_agent` (subagent workflows are on by default in current releases).
 
-Claude Code loads `.claude/agents/` and `.claude/skills/` by walking up from the working directory to the repository root, so they load from the root, a nested directory, and a linked worktree. No trust step gates them. A project agent with the same name as a personal agent would replace the personal one, and a personal skill would shadow a project skill of the same name, which is why every identifier here starts with `mcc-`. `/mcc-review-security` has `disable-model-invocation: true`, so only a person can start it.
+Claude Code loads `.claude/agents/` and `.claude/skills/` by walking up from the working directory to the repository root, so they load from the root, a nested directory, and a linked worktree. No trust step gates them. A project agent with the same name as a personal agent replaces the personal one, and a personal skill shadows a project skill of the same name. `/mcc-review-security` has `disable-model-invocation: true`, so only a person can start it.
 
-Codex loads `.agents/skills/` from every directory between the working directory and the repository root, in trusted and untrusted projects alike. It loads `.codex/agents/` only when the project is trusted (`trust_level = "trusted"` for the repository path in `~/.codex/config.toml`, which Codex writes when you accept the trust prompt). A linked worktree inherits the main checkout's trust. Until the project is trusted, `spawn_agent` reports an unknown `agent_type` for `mcc-*`, and the skills say so instead of continuing. Codex lists skills that share a name side by side rather than picking one, which the prefix also avoids. `$mcc-review-security` has `allow_implicit_invocation: false`, so Codex never picks it on its own.
+Codex loads `.agents/skills/` from every directory between the working directory and the repository root, in trusted and untrusted projects alike. It loads `.codex/agents/` only when the project is trusted (`trust_level = "trusted"` for the repository path in `~/.codex/config.toml`, which Codex writes when you accept the trust prompt). A linked worktree inherits the main checkout's trust. Until the project is trusted, `spawn_agent` reports an unknown `agent_type` for `mcc-*`, and the skills say so instead of continuing. Codex lists skills that share a name side by side rather than picking one. `$mcc-review-security` has `allow_implicit_invocation: false`, so Codex never picks it on its own.
+
+Every identifier here starts with `mcc-` so that it cannot collide with a contributor's own agents and skills in either tool.
 
 Trusting the folder is the only activation step in either tool. Nothing here installs, copies, symlinks, or registers anything outside the checkout, and a session in another repository does not see these definitions. Ordinary prerequisites stay yours: the tool itself, `gh` with authentication, the `gh stack` extension for stacked branches, and `npm ci` for the checks (the resolver itself runs without `node_modules`).
 
@@ -129,14 +112,4 @@ Trusting the folder is the only activation step in either tool. Nothing here ins
 - Claude Code honors `CLAUDE_CODE_EFFORT_LEVEL` above everything, including the repository policy and a prompt override. Leave it unset when you want the repository defaults.
 - Reports carry requested settings, never verified ones. Codex cannot verify a child's model from inside the child; the thread table or thread view is the ground truth.
 - Prompt overrides are read from natural language by the dispatching skill; the resolver validates the values but cannot see the request.
-- Codex approval rules are personal. The repository ships no exec policy, so a contributor's own rules decide which `git` and `gh` commands run without a prompt.
-
-## Validation record
-
-Run during delivery of #78 on 2026-10-14 with isolated fixtures (a throwaway repository, a nested directory, a linked worktree, and an unrelated directory; Codex with an empty `CODEX_HOME`, Claude Code with the maintainer's personal agents present to show coexistence):
-
-- Codex, untrusted project: `.agents/skills` loaded, `.codex/agents` did not. Trusted project: all six `mcc-*` agents and four implicit skills listed from the root, a nested directory, and a linked worktree whose own path was not trusted.
-- Claude Code: all six agents and four skills listed from the root, a nested directory, and a linked worktree; none in an unrelated directory; the personal `code-reviewer`, `ticket-implementer`, and `issue-orchestrator` stayed available.
-- Codex spawn, `mcc-issue-triager`: policy dispatch recorded `gpt-6-luna|low`; `effort xhigh` recorded `gpt-6-luna|xhigh`; a spawn with the fields omitted recorded the fixture's `[agents]` defaults `gpt-5.6-luna|medium`, confirming why the skills always pass both; `--model gpt-6-luna --effort ultra` exited 1 with `Unsupported codex effort "ultra" for model "gpt-6-luna"`.
-- Claude Code spawn, `mcc-issue-triager`, with `CLAUDE_CODE_SUBAGENT_MODEL=opus` and a `sonnet` session: policy dispatch reported `claude-haiku-5-5`; `model sonnet` reported `Sonnet 5.5` with effort still `low`; `effort ultra` exited 1 with the resolver's message.
-- `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs --max-warnings 0`, and `node --test scripts/*.test.mjs` pass.
+- Codex approval rules belong to each contributor. The repository ships no exec policy, so a contributor's own rules decide which `git` and `gh` commands run without a prompt.

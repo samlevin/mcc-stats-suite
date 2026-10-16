@@ -2,7 +2,7 @@
 
 These guides set up and operate your own MCC Stats Suite deployment: two AWS accounts, an OpenTofu foundation that you apply by hand or from any infrastructure CI/CD, and application stacks deployed by GitHub Actions.
 
-You do not need any of this to contribute. Contributors only need the local checks in [Getting started](../getting-started.md). A merged pull request deploys to the maintainer's environments automatically.
+You do not need any of this to contribute. Contributors only need the local checks in [Getting started](../getting-started.md). A merged pull request deploys to the upstream repository's `dev` environment automatically, and to `prod` after approval.
 
 Set up a new deployment in this order:
 
