@@ -2,7 +2,7 @@
 
 [Getting started](docs/getting-started.md) covers installing the repository and lists the checks to run for each kind of change. This guide explains what those checks cover and how CI selects them. From the repository root, `npm test` runs the repository script tests and then every workspace's tests.
 
-`npm run check`, the full local quality gate, verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes.
+`npm run check`, the full local quality gate, verifies Prettier formatting and ESLint rules before typechecking, tests, and builds. Prettier ignores Markdown, so ESLint's Markdown rules are the only check on `.md` files. Use `npm run format` and `npm run lint:fix` to apply safe automatic fixes. `lint:fix` fixes code only, so fix Markdown problems by hand.
 
 ## Workspace tests
 
@@ -40,7 +40,7 @@ CI selects checks from the committed changed files, using the baseline classifie
 
 Pull requests and pushes to `main` select gates by these rules:
 
-- Markdown-only changes run formatting. Recognized repository-only changes also run repository lint and issue-automation tests. Neither runs workspace tests or builds, CDK synthesis, bundle validation, or OpenTofu checks. The [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists the same checks to run locally.
+- Markdown-only changes run formatting and Markdown lint. Recognized repository-only changes also run repository lint and issue-automation tests. Neither runs workspace tests or builds, CDK synthesis, bundle validation, or OpenTofu checks. The [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists the same checks to run locally.
 - Application and package code runs the full application gate.
 - Dependencies, build configuration, CI selection, `.terrateam/config.yml`, and unknown paths run the full application gate and the infrastructure gate.
 - OpenTofu source and configuration files (`*.tf`, `*.tfvars`, and `*.hcl`) under `infrastructure/` select only the infrastructure gate. Infrastructure-only changes skip the application checks, including `check-workspaces`.

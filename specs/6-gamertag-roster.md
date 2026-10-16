@@ -351,7 +351,7 @@ The CSV carries neither the name as read for `RESOLVED` rows nor `reviewFlags`. 
 
 ### 8.1 Division of work with #161
 
-#161 is delivered by PR #169, which adds `reviewFlags` to `CsvRow`: `LOW_WORD_CONFIDENCE` when a player-name `WORD` scores below 50, and `SPLIT_TRAILING_DIGITS` when trailing digits are split into their own word and either word scores below 90. Flags never change the name, and PR #169 left the CSV header for this spec.
+Issue #161 is delivered by PR #169, which adds `reviewFlags` to `CsvRow`: `LOW_WORD_CONFIDENCE` when a player-name `WORD` scores below 50, and `SPLIT_TRAILING_DIGITS` when trailing digits are split into their own word and either word scores below 90. Flags never change the name, and PR #169 left the CSV header for this spec.
 
 | Concern | Covered by |
 | --- | --- |

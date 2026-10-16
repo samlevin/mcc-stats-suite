@@ -15,7 +15,7 @@
     "prelint": "npm run build:shared",
     "lint": "eslint . --max-warnings 0",
     "prelint:fix": "npm run build:shared",
-    "lint:fix": "eslint . --fix",
+    "lint:fix": "eslint . --fix --ignore-pattern '**/*.md'",
     "format": "prettier . --write --ignore-unknown",
     "format:check": "prettier . --check --ignore-unknown",
     "check": "npm run format:check && npm run lint && npm run release:check && npm run typecheck && npm test && npm run build",
@@ -34,6 +34,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@eslint/markdown": "^8.0.3",
     "@types/node": "^22.19.15",
     "aws-cdk": "2.1134.0",
     "esbuild": "0.28.1",
