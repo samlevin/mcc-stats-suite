@@ -7,6 +7,7 @@ import {
   type TextractBlockLite,
   type RowColor,
   type CsvRow,
+  type RowReviewFlag,
 } from '../src/lib/scoreboard-logic';
 
 interface ScoreboardFixture {
@@ -19,6 +20,16 @@ interface ScoreboardFixture {
    * fields are compared in a todo test, every other field must match.
    */
   knownIssue?: { issue: string; fields: (keyof CsvRow)[] };
+  /**
+   * OCR misreads the parser keeps as read and flags for review. The expected
+   * row whose `field` the screenshot shows as `expected` must come out as
+   * `read`, and that expected row must carry a review flag on the field.
+   */
+  misreads?: {
+    field: RowReviewFlag['field'];
+    expected: string;
+    read: string;
+  }[];
 }
 
 const fixturesDir = path.join(__dirname, 'fixtures');
@@ -33,6 +44,30 @@ test('scoreboard fixtures: directory has at least one fixture', () => {
     'expected one or more *.fixture.json files',
   );
 });
+
+/**
+ * The expected rows with each misread value replaced by the text Textract
+ * read, after checking that the fixture flags every misread row.
+ */
+function asRead(fixture: ScoreboardFixture, file: string): CsvRow[] {
+  const rows = fixture.expectedRows.map((row) => ({ ...row }));
+  for (const misread of fixture.misreads ?? []) {
+    const matches = rows.filter(
+      (row) => row[misread.field] === misread.expected,
+    );
+    assert.equal(
+      matches.length,
+      1,
+      `${file}: misread "${misread.expected}" must match one expected row`,
+    );
+    assert.ok(
+      matches[0].reviewFlags?.some((flag) => flag.field === misread.field),
+      `${file}: misread "${misread.expected}" must be flagged for review`,
+    );
+    matches[0][misread.field] = misread.read;
+  }
+  return rows;
+}
 
 function without(rows: CsvRow[], fields: (keyof CsvRow)[]) {
   return rows.map((row) =>
@@ -55,7 +90,7 @@ for (const file of fixtureFiles) {
     test(`scoreboard fixture: ${fixture.name}`, () => {
       assert.deepEqual(
         run(),
-        fixture.expectedRows,
+        asRead(fixture, file),
         `${file} should match expected rows`,
       );
     });
@@ -66,7 +101,7 @@ for (const file of fixtureFiles) {
     assert.ok(known.issue && known.fields.length > 0, `${file} knownIssue`);
     assert.deepEqual(
       without(run(), known.fields),
-      without(fixture.expectedRows, known.fields),
+      without(asRead(fixture, file), known.fields),
       `${file} should match expected rows outside ${known.fields.join(', ')}`,
     );
   });
@@ -74,7 +109,7 @@ for (const file of fixtureFiles) {
     `scoreboard fixture: ${fixture.name}`,
     { todo: `known mismatch, ${known.issue}` },
     () => {
-      assert.deepEqual(run(), fixture.expectedRows);
+      assert.deepEqual(run(), asRead(fixture, file));
     },
   );
 }

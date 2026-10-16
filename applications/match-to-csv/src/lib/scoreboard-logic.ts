@@ -15,6 +15,8 @@
 //   - Arbitrary team sizes (1v3v2, 4v3, etc.)
 //   - MCC official team colors (Red/Blue/Green/Orange/Gold/Purple/Brown/Pink)
 //   - Free-for-all (FFA) matches where Team is empty.
+//   - Review flags on player names Textract may have misread. Names always
+//     stay as read; a flag only marks the row for a person to check.
 
 //////////////////////
 // Public Interfaces //
@@ -22,7 +24,7 @@
 
 /**
  * Minimal version of a Textract Block that the pure logic needs.
- * We keep only the fields that matter for table layout and text.
+ * We keep only the fields that matter for table layout, text, and confidence.
  */
 export interface TextractRelationship {
   Type?: string;
@@ -42,6 +44,7 @@ export interface TextractBlockLite {
   Id?: string;
   BlockType?: string; // "TABLE", "CELL", "WORD", etc.
   Text?: string; // For WORD blocks
+  Confidence?: number; // Textract confidence, 0–100
   RowIndex?: number; // For CELL blocks
   ColumnIndex?: number; // For CELL blocks
   Geometry?: TextractGeometry;
@@ -51,8 +54,8 @@ export interface TextractBlockLite {
 /**
  * Final row we will write to the CSV.
  */
-export type { CsvRow } from '@mcc/contracts';
-import type { CsvRow } from '@mcc/contracts';
+export type { CsvRow, RowReviewFlag } from '@mcc/contracts';
+import type { CsvRow, RowReviewFlag } from '@mcc/contracts';
 
 /**
  * Average background color for one table row.
@@ -89,6 +92,15 @@ interface PlayerRow {
   kills?: string;
   assists?: string;
   deaths?: string;
+  reviewFlags: RowReviewFlag[];
+}
+
+/**
+ * One WORD child of a cell.
+ */
+interface CellWord {
+  text: string;
+  confidence?: number;
 }
 
 /**
@@ -108,6 +120,22 @@ interface TeamCluster {
  * we treat them as the same team color.
  */
 const COLOR_CLUSTER_THRESHOLD = 40;
+
+/**
+ * A gamertag word with a WORD confidence below this is flagged
+ * `LOW_WORD_CONFIDENCE`. In the real Halo 3 captures, correctly read gamertag
+ * words go as low as 52 and a misread went to 39, so the threshold sits
+ * between them.
+ */
+const LOW_WORD_CONFIDENCE_BELOW = 50;
+
+/**
+ * A gamertag that ends in a digits-only word after a word ending in a letter
+ * is flagged `SPLIT_TRAILING_DIGITS` when either word's confidence is below
+ * this. Gamertags may contain spaces, so the split alone is no evidence of a
+ * misread, but a real capture read `Player06` as `Player 06` at 55 and 88.
+ */
+const SPLIT_TRAILING_DIGITS_BELOW = 90;
 
 ///////////////////////////
 /// Main public function //
@@ -155,18 +183,23 @@ export function processScoreboardImage(
     }
   }
 
-  // 3) Build a 2D map: tableByRow[rowIndex][columnIndex] = text.
+  // 3) Build 2D maps: tableByRow[rowIndex][columnIndex] = text, and the
+  //    same position's WORD children with their confidence.
   const tableByRow: Map<number, Map<number, string>> = new Map();
+  const wordsByRow: Map<number, Map<number, CellWord[]>> = new Map();
 
   for (const cell of cellBlocks) {
     const rowIndex = cell.RowIndex!;
     const colIndex = cell.ColumnIndex!;
-    const text = getCellText(cell, blockMap); // combine WORD children into cell text
+    const words = getCellWords(cell, blockMap);
+    const text = joinWords(words); // combine WORD children into cell text
 
     if (!tableByRow.has(rowIndex)) {
       tableByRow.set(rowIndex, new Map());
+      wordsByRow.set(rowIndex, new Map());
     }
     tableByRow.get(rowIndex)!.set(colIndex, text);
+    wordsByRow.get(rowIndex)!.set(colIndex, words);
   }
 
   const rowIndices = Array.from(tableByRow.keys()).sort((a, b) => a - b);
@@ -211,9 +244,14 @@ export function processScoreboardImage(
     const player = tidyPlayerName(rawPlayer);
     if (!player) continue;
 
+    const playerWords = colMapping.player
+      ? (wordsByRow.get(r)!.get(colMapping.player) ?? [])
+      : [];
+
     const pr: PlayerRow = {
       rowIndex: r,
       player,
+      reviewFlags: playerReviewFlags(player, playerWords),
     };
 
     if (colMapping.score) pr.score = row.get(colMapping.score) ?? '';
@@ -291,6 +329,7 @@ export function processScoreboardImage(
       deaths: p.deaths ?? '',
       win,
       loss,
+      ...(p.reviewFlags.length ? { reviewFlags: p.reviewFlags } : {}),
     });
   }
 
@@ -302,25 +341,45 @@ export function processScoreboardImage(
 //////////////////////////////
 
 /**
- * Get the text inside a CELL by joining all its child WORD texts.
+ * Get the WORD children of a CELL, in relationship order, with their text and
+ * confidence.
  */
-function getCellText(
+function getCellWords(
   cell: TextractBlockLite,
   blockMap: Map<string, TextractBlockLite>,
-): string {
-  let text = '';
+): CellWord[] {
+  const words: CellWord[] = [];
   for (const rel of cell.Relationships ?? []) {
     if (rel.Type !== 'CHILD') continue;
     for (const id of rel.Ids ?? []) {
       const child = blockMap.get(id);
       if (!child) continue;
       if (child.BlockType === 'WORD' && child.Text) {
-        if (text) text += ' ';
-        text += child.Text;
+        words.push({ text: child.Text, confidence: child.Confidence });
       }
     }
   }
-  return text.trim();
+  return words;
+}
+
+/**
+ * Join a cell's words into its text, separated by spaces.
+ */
+function joinWords(words: CellWord[]): string {
+  return words
+    .map((word) => word.text)
+    .join(' ')
+    .trim();
+}
+
+/**
+ * Get the text inside a CELL by joining all its child WORD texts.
+ */
+function getCellText(
+  cell: TextractBlockLite,
+  blockMap: Map<string, TextractBlockLite>,
+): string {
+  return joinWords(getCellWords(cell, blockMap));
 }
 
 function tableHeaderScore(
@@ -350,12 +409,78 @@ function tableHeaderScore(
  * - Replace multiple spaces with a single space
  */
 function tidyPlayerName(raw: string): string {
-  const t = raw
-    .trim()
-    .split(/\s+/)
-    .filter((word) => /[\p{L}\p{N}[\]]/u.test(word))
-    .join(' ');
+  const t = raw.trim().split(/\s+/).filter(isNameWord).join(' ');
   return t.replace(/^\[[^\]]+]\s*/, '');
+}
+
+/**
+ * Whether a word survives tidyPlayerName's icon filter.
+ */
+function isNameWord(word: string): boolean {
+  return /[\p{L}\p{N}[\]]/u.test(word);
+}
+
+/**
+ * Flag a tidied player name that Textract may have misread. The name itself
+ * is never changed.
+ *
+ * The name's words are the last words of the cell after the icon filter,
+ * as many as the tidied name holds, so a clan tag's words never count.
+ * Words without a confidence are skipped, and a name with no known
+ * confidence gets no flags.
+ */
+function playerReviewFlags(
+  player: string,
+  cellWords: CellWord[],
+): RowReviewFlag[] {
+  const words = cellWords
+    .flatMap((word) =>
+      word.text
+        .trim()
+        .split(/\s+/)
+        .map((text) => ({ text, confidence: word.confidence })),
+    )
+    .filter((word) => isNameWord(word.text));
+  const nameWords = words.slice(-player.split(' ').length);
+  const flags: RowReviewFlag[] = [];
+
+  const lowest = lowestConfidence(nameWords);
+  if (lowest !== undefined && lowest < LOW_WORD_CONFIDENCE_BELOW) {
+    flags.push({
+      field: 'player',
+      code: 'LOW_WORD_CONFIDENCE',
+      wordConfidence: lowest,
+    });
+  }
+
+  const [before, last] = nameWords.slice(-2);
+  if (
+    nameWords.length >= 2 &&
+    /^\d+$/.test(last.text) &&
+    /\p{L}$/u.test(before.text)
+  ) {
+    const split = lowestConfidence([before, last]);
+    if (split !== undefined && split < SPLIT_TRAILING_DIGITS_BELOW) {
+      flags.push({
+        field: 'player',
+        code: 'SPLIT_TRAILING_DIGITS',
+        wordConfidence: split,
+      });
+    }
+  }
+
+  return flags;
+}
+
+/**
+ * The lowest known confidence among the words, or undefined when none is
+ * known.
+ */
+function lowestConfidence(words: CellWord[]): number | undefined {
+  const known = words.flatMap((word) =>
+    word.confidence === undefined ? [] : [word.confidence],
+  );
+  return known.length ? Math.min(...known) : undefined;
 }
 
 /**

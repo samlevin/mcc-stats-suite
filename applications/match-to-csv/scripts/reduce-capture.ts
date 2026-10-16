@@ -19,9 +19,9 @@
 // around a name or clan tag, such as a bracket misread as `I`, stay as read.
 // Blocks outside a TABLE (PAGE, LINE, and words that belong to no cell) are
 // dropped, and polygons and page numbers are removed from geometry. Everything
-// else is copied unchanged. When the output file exists, its `expectedRows`
-// and `knownIssue` are kept: expected rows are transcribed from the
-// screenshot by hand, never generated.
+// else is copied unchanged. When the output file exists, its `expectedRows`,
+// `knownIssue`, and `misreads` are kept: expected rows are transcribed from
+// the screenshot by hand, never generated.
 
 import fs from 'node:fs';
 import type {
@@ -83,12 +83,20 @@ export function reduceCapture(
 
 /** Throws when any real name or clan tag in the mapping occurs in a fixture's text. */
 export function assertNoRealNames(
-  fixture: { blocks: Block[]; expectedRows?: { player: string }[] },
+  fixture: {
+    blocks: Block[];
+    expectedRows?: { player: string }[];
+    misreads?: { expected: string; read: string }[];
+  },
   mapping: PlaceholderMapping,
 ): void {
   const texts = [
     ...fixture.blocks.flatMap((block) => (block.Text ? [block.Text] : [])),
     ...(fixture.expectedRows ?? []).map((row) => row.player),
+    ...(fixture.misreads ?? []).flatMap((misread) => [
+      misread.expected,
+      misread.read,
+    ]),
   ].map((text) => text.toLowerCase());
   for (const needle of sensitiveNeedles(mapping)) {
     if (texts.some((text) => text.includes(needle))) {
@@ -352,12 +360,14 @@ function main(argv: string[]): void {
     ? (JSON.parse(fs.readFileSync(options.output, 'utf8')) as {
         expectedRows?: { player: string }[];
         knownIssue?: unknown;
+        misreads?: { expected: string; read: string }[];
       })
     : {};
   const fixture = {
     ...reduced,
     expectedRows: existing.expectedRows ?? [],
     ...(existing.knownIssue ? { knownIssue: existing.knownIssue } : {}),
+    ...(existing.misreads ? { misreads: existing.misreads } : {}),
   };
   assertNoRealNames(fixture, mapping);
   fs.writeFileSync(options.output, `${JSON.stringify(fixture, null, 2)}\n`);
