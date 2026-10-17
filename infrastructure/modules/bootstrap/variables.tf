@@ -125,6 +125,17 @@ variable "create_cdk_deploy_role" {
   default     = true
 }
 
+variable "manage_local_cdk_policies" {
+  description = "Let the Terrateam role create, update, and delete the five local CDK permission policies and no other policy. Only dev has local CDK deployments."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.manage_local_cdk_policies || var.environment == "dev"
+    error_message = "manage_local_cdk_policies is allowed only in dev."
+  }
+}
+
 variable "terrateam_role_name" {
   description = "IAM role assumed by Terrateam through GitHub Actions OIDC."
   type        = string

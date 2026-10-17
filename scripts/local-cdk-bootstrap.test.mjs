@@ -1001,6 +1001,31 @@ test('the toolkit stack policy keeps the local policies from being deleted', () 
   );
 });
 
+test('only the dev Terrateam role may manage exactly the local policies', () => {
+  const grant = readFileSync(
+    'infrastructure/modules/bootstrap/local-cdk-policy-management.tf',
+    'utf8',
+  );
+  const list = grant.match(/local_cdk_policy_names = \[([^\]]*)\]/)?.[1];
+  assert.ok(list, 'bootstrap must list local_cdk_policy_names');
+  assert.deepEqual(
+    [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort(),
+    LOCAL_POLICY_RESOURCES.map(
+      (name) => resources[name].Properties.ManagedPolicyName,
+    ).sort(),
+  );
+  assert.match(
+    readFileSync('infrastructure/dev/bootstrap/main.tf', 'utf8'),
+    /^\s*manage_local_cdk_policies\s*=\s*true\s*$/m,
+  );
+  for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {
+    assert.doesNotMatch(
+      readFileSync(`infrastructure/prod/bootstrap/${file}`, 'utf8'),
+      /manage_local_cdk_policies/,
+    );
+  }
+});
+
 test('ephemeral deploys name the local change set unless deploying directly', () => {
   const named = ['--change-set-name', LOCAL_CHANGE_SET_NAME];
   assert.deepEqual(localDeployArguments([]), named);
