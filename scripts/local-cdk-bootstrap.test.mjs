@@ -611,6 +611,85 @@ test('runtime roles cannot mutate compute, deploy stacks, or assume another role
   );
 });
 
+test('runtime sends email only from a noreply address through this account and Region', () => {
+  const identity = (name, region = 'us-east-1', account = ACCOUNT) =>
+    `arn:aws:ses:${region}:${account}:identity/${name}`;
+  const from = (address) => ({ 'ses:FromAddress': address });
+  const noreply = from('noreply@example.test');
+  // In the SES sandbox, SES also checks the recipient's verified identity.
+  for (const name of ['example.test', 'player@example.test']) {
+    assert.equal(
+      allowed(runtime, 'ses:SendEmail', identity(name), noreply),
+      true,
+      name,
+    );
+  }
+  for (const [action, resource, context, label] of [
+    [
+      'ses:SendEmail',
+      identity('example.test'),
+      from('a@example.test'),
+      'another From address',
+    ],
+    ['ses:SendEmail', identity('example.test'), {}, 'no From address'],
+    [
+      'ses:SendEmail',
+      identity('example.test'),
+      from('xnoreply@example.test'),
+      'prefixed local part',
+    ],
+    [
+      'ses:SendEmail',
+      identity('example.test', 'us-west-2'),
+      noreply,
+      'another Region',
+    ],
+    [
+      'ses:SendEmail',
+      identity('example.test', 'us-east-1', '111111111111'),
+      noreply,
+      'another account',
+    ],
+    [
+      'ses:SendEmail',
+      `arn:aws:ses:us-east-1:${ACCOUNT}:configuration-set/x`,
+      noreply,
+      'configuration set',
+    ],
+    ['ses:SendRawEmail', identity('example.test'), noreply, 'raw email'],
+    ['ses:SendBulkEmail', identity('example.test'), noreply, 'bulk email'],
+    [
+      'ses:CreateEmailIdentity',
+      identity('example.test'),
+      noreply,
+      'identity administration',
+    ],
+  ]) {
+    assert.equal(allowed(runtime, action, resource, context), false, label);
+  }
+  const sesStatements = runtime.Statement.filter((entry) =>
+    [entry.Action].flat().some((action) => action.startsWith('ses:')),
+  );
+  assert.deepEqual(
+    sesStatements.map((entry) => [
+      entry.Sid,
+      entry.Effect,
+      entry.Action,
+      resolve(entry.Resource),
+      entry.Condition,
+    ]),
+    [
+      [
+        'SendNoReplyEmail',
+        'Allow',
+        'ses:SendEmail',
+        identity('*'),
+        { StringLike: { 'ses:FromAddress': 'noreply@*' } },
+      ],
+    ],
+  );
+});
+
 test('runtime reads only dev application parameters, one at a time', () => {
   for (const name of [
     'mcc/dev/match-to-csv/sender-allowlist',

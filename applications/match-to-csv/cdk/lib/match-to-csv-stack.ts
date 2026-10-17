@@ -39,6 +39,7 @@ import {
   METRIC_NAMESPACE,
   ZERO_ROW_EXTRACTIONS_METRIC,
 } from '../../src/lib/metrics';
+import { REPLY_LOCAL_PART } from '../../src/lib/reply-address';
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -124,7 +125,7 @@ export class MatchToCsvStack extends Stack {
     const emailDomainParameter = `${prefix}/email-domain`;
     // process-email replies from noreply@<domain> to a message without a
     // valid match date. The domain resolves at deploy time, so the sender
-    // address and the ses:SendEmail grant always name the same SES identity.
+    // address and the ses:SendEmail grant always name the same address.
     const emailDomain = ssm.StringParameter.valueForStringParameter(
       this,
       emailDomainParameter,
@@ -198,6 +199,10 @@ export class MatchToCsvStack extends Stack {
         ),
       }),
     );
+    // In the SES sandbox, SES also authorizes the send against each
+    // recipient's verified identity, so a grant on the domain identity alone
+    // gets AccessDenied. The grant therefore names every identity in this
+    // account and Region, and allows only the noreply@<domain> From address.
     processEmail.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['ses:SendEmail'],
@@ -205,9 +210,14 @@ export class MatchToCsvStack extends Stack {
           this.formatArn({
             service: 'ses',
             resource: 'identity',
-            resourceName: emailDomain,
+            resourceName: '*',
           }),
         ],
+        conditions: {
+          StringEquals: {
+            'ses:FromAddress': `${REPLY_LOCAL_PART}@${emailDomain}`,
+          },
+        },
       }),
     );
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);

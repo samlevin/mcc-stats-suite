@@ -622,7 +622,7 @@ It rejects ephemeral names in prod, names outside `^[a-z0-9][a-z0-9-]{0,19}$`, t
 | `CompareRuns` | none | `GetObject`, `PutObject` | encrypt, decrypt | none |
 | `MaterializeTrainingData` | none | `GetObject`, `PutObject` | encrypt, decrypt | none |
 
-`ProcessEmail` also has `ses:SendEmail` on `identity/<domain>` in its own account and Region, for the reply in §4.4. Every role carries the workload permissions boundary named in §13.3. Ephemeral roles use the `/mcc-local/` path, the only path the local bootstrap lets CloudFormation create or pass. No function has `DeleteObject` or any bucket-configuration permission.
+`ProcessEmail` also has `ses:SendEmail` on `identity/*` in its own account and Region, only with the `From` address `noreply@<domain>`, for the reply in §4.4. In the SES sandbox, SES also checks the grant against the recipient's identity, so the grant cannot name only the domain's identity. The local workload boundary allows `ses:SendEmail` only from a `noreply@` address. Every role carries the workload permissions boundary named in §13.3. Ephemeral roles use the `/mcc-local/` path, the only path the local bootstrap lets CloudFormation create or pass. No function has `DeleteObject` or any bucket-configuration permission.
 
 ### 13.5 Bundling
 

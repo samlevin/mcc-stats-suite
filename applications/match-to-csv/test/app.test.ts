@@ -70,7 +70,7 @@ test('process email reads only its environment sender allowlist parameter', () =
   }
 });
 
-test('process email may send only from its environment email domain identity', () => {
+test('process email may send only from noreply at its environment email domain', () => {
   for (const [environment, ephemeral] of [
     ['dev', undefined],
     ['prod', undefined],
@@ -106,6 +106,7 @@ test('process email may send only from its environment email domain identity', (
         policy.Properties.PolicyDocument.Statement as Array<{
           Action: string | string[];
           Resource: unknown;
+          Condition?: unknown;
         }>
       ).map((statement) => ({
         ...statement,
@@ -118,21 +119,38 @@ test('process email may send only from its environment email domain identity', (
     assert.equal(sesStatements.length, 1, label);
     assert.equal(sesStatements[0].Action, 'ses:SendEmail', label);
     assert.ok(sesStatements[0].roles.includes('ProcessEmail'), label);
-    assert.deepEqual(sesStatements[0].Resource, {
-      'Fn::Join': [
-        '',
-        [
-          'arn:',
-          { Ref: 'AWS::Partition' },
-          ':ses:',
-          { Ref: 'AWS::Region' },
-          ':',
-          { Ref: 'AWS::AccountId' },
-          ':identity/',
-          { Ref: domain.Ref },
+    // In the SES sandbox, SES also authorizes the send against the
+    // recipient's identity, so the grant names every identity in the stack's
+    // account and Region and limits the From address instead.
+    assert.deepEqual(
+      sesStatements[0].Resource,
+      {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            { Ref: 'AWS::Partition' },
+            ':ses:',
+            { Ref: 'AWS::Region' },
+            ':',
+            { Ref: 'AWS::AccountId' },
+            ':identity/*',
+          ],
         ],
-      ],
-    });
+      },
+      label,
+    );
+    assert.deepEqual(
+      sesStatements[0].Condition,
+      {
+        StringEquals: {
+          'ses:FromAddress': {
+            'Fn::Join': ['', ['noreply@', { Ref: domain.Ref }]],
+          },
+        },
+      },
+      label,
+    );
   }
 });
 

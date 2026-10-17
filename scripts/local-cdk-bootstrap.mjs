@@ -240,6 +240,14 @@ export function localBootstrap(template) {
           },
         },
       }),
+      // match-to-csv's process-email replies from noreply@<domain>. In the SES
+      // sandbox, SES also authorizes the send against each recipient's verified
+      // identity, so the boundary allows every identity in this account and
+      // Region and limits the From address. Each function's own policy names
+      // the exact address.
+      statement('SendNoReplyEmail', 'ses:SendEmail', arn('ses', 'identity/*'), {
+        Condition: { StringLike: { 'ses:FromAddress': 'noreply@*' } },
+      }),
       // None of these actions applies to a log group, so the statement names only
       // runnable resources and the boundary stays under the managed policy size limit.
       statement(

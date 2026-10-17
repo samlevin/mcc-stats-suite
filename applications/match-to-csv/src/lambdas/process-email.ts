@@ -20,6 +20,7 @@ import { bodyToBuffer, namespacedObjectKey, safeObjectName } from '../lib/s3';
 import { log } from '../lib/log';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 import { MAX_IMAGE_BYTES } from '../lib/image-limits';
+import { REPLY_LOCAL_PART } from '../lib/reply-address';
 
 const s3 = new S3Client({});
 const ssm = new SSMClient({});
@@ -530,9 +531,6 @@ export function parseMatchDate(text: string | undefined): string | undefined {
   if (day < 1 || day > lastDay) return undefined;
   return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
-
-/** The local part of the address replies come from; SSM supplies the domain. */
-const REPLY_LOCAL_PART = 'noreply';
 
 const MATCH_DATE_REPLY_BODY = [
   'Your email was not processed because its body must contain only the date of the match, written as M/D/YYYY, such as 10/17/2026.',
