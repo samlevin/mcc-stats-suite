@@ -6,21 +6,21 @@
 
 **Date:** October 17, 2026
 
-**Component:** a new `packages/ui` workspace (`@mcc/ui`) with tokens, brand assets, art and components; a new `packages/storybook` workspace (`@mcc/storybook`) that hosts the shared Storybook; mockup stories and domain components in `applications/admin` and `applications/player`; the `scripts/ideogram.mjs` image script; the `mcc-art-director` and `mcc-ux-designer` repository agents
+**Component:** two public packages published to npm, `packages/hhh-css` (`@hhh/css`: tokens, component CSS, original icons, medals and emblems) and `packages/hhh-react` (`@hhh/react`: React components); two private workspaces, `packages/art` (`@mcc/art`: logo, generated art and its manifest) and `packages/storybook` (`@mcc/storybook`: the shared Storybook); mockup stories and domain components in `applications/admin` and `applications/player`; the `scripts/ideogram.mjs` image script; the `mcc-art-director` and `mcc-ux-designer` repository agents
 
-**Runtime:** TypeScript and SCSS compiled by Vite. React 19 components on Base UI. The admin app is a Vite React single-page app (spec 3). The player app is an Astro site that renders the same React components to static HTML and hydrates only interactive islands.
+**Runtime:** plain CSS compiled from SCSS, and React 19 components on Base UI compiled to ESM. The admin app is a Vite React single-page app (spec 3). The player app is an Astro site that renders the same React components to static HTML and hydrates only interactive islands. Projects outside this repository can use `@hhh/css` with any framework or none.
 
-**Deployment:** none of its own. Each app bundles the components it imports and deploys with its own stack. Storybook publishes to Chromatic from GitHub Actions on every pull request and on `main`.
+**Deployment:** `@hhh/css` and `@hhh/react` publish to the public npm registry from GitHub Actions with npm trusted publishing when release-please cuts a release. Each app bundles the parts it imports and deploys with its own stack. Storybook publishes to Chromatic on every pull request and on `main`.
 
 **Headless components:** Base UI (`@base-ui/react`, 1.x)
 
-**Persistent state:** source-controlled tokens, SVG files, approved image masters and the art manifest in `packages/ui`. Nothing at runtime.
+**Persistent state:** source-controlled tokens, SVG files, approved image masters and art manifests. Published package versions on npm. Nothing at runtime.
 
-**External dependencies at runtime:** none. Fonts, images and code are served from each app's own origin. At design time: the Ideogram API (images) and Chromatic (visual review).
+**External dependencies at runtime:** none. Fonts, images and code are served from each app's own origin. At design time: the Ideogram API (images) and Chromatic (visual review). At release time: the npm registry.
 
-**Out of scope:** the admin sign-in page, which stays on the Cognito hosted login page (spec 3); Cognito user pools, app clients and identity provider configuration; app routing, data fetching and APIs; building domain components such as the evidence viewer or the leaderboard podium (designed here, built under the app specifications, §7.2); a light theme; languages other than English; native apps
+**Out of scope:** the admin sign-in page, which stays on the Cognito hosted login page (spec 3); Cognito user pools, app clients and identity provider configuration; app routing, data fetching and APIs, including how the player app loads its data (the player specification); building domain components such as the evidence viewer or the leaderboard podium (designed here, built under the app specifications, §7.2); a light theme; languages other than English; native apps; components for frameworks other than React
 
-HH.H is the visual identity of the MCC stats suite: dark, Halo 3 inspired, and built for iPhone first. This spec defines its brand kit, an authoritative style guide expressed as tokens, a tree-shakeable React component library that works in both the Vite admin app and the Astro player app, the agent workflows that produce art, mockups and components, and the tests that hold the look, accessibility and mobile performance to fixed numbers. Agents do the work of a front-end developer, a graphic designer and a UX designer. A person approves brand art, mockups and every committed image.
+HH.H is the visual identity of the MCC stats suite: dark, Halo 3 inspired, and built for iPhone first. This spec defines its brand kit, an authoritative style guide expressed as tokens, a tree-shakeable open-source design system (framework-agnostic CSS plus React components) that the Vite admin app, the Astro player app and outside projects install from npm, the agent workflows that produce art, mockups and components, and the tests that hold the look, accessibility and mobile performance to fixed numbers. Agents do the work of a front-end developer, a graphic designer and a UX designer. A person approves brand art, mockups and every committed image.
 
 ---
 
@@ -28,24 +28,26 @@ HH.H is the visual identity of the MCC stats suite: dark, Halo 3 inspired, and b
 
 | Requirement | Decision | Reason |
 | --- | --- | --- |
-| Base UI as the component foundation, unless there is a better option | Base UI 1.x (`@base-ui/react`) supplies behavior and accessibility for interactive components: dialog, popover, menu, tooltip, tabs, select, combobox, checkbox, radio, switch, field, OTP field, toast, navigation menu. Static components (headings, buttons without state, cards, layout, tables) are plain React elements. | Base UI ships no styles, exposes state as `data-*` attributes that SCSS modules can target, and publishes each component as its own subpath. React Aria was the alternative; it is larger and its strengths (i18n, date pickers) are not needed here. Base UI has no table and no date picker; §7 covers both. |
+| Base UI as the component foundation, unless there is a better option | Base UI 1.x (`@base-ui/react`) supplies behavior and accessibility for interactive components: dialog, popover, menu, tooltip, tabs, select, combobox, checkbox, radio, switch, field, OTP field, toast, navigation menu. Static components (headings, buttons without state, cards, layout, tables) are plain React elements. | Base UI ships no styles, exposes state as `data-*` attributes that the CSS can target, and publishes each component as its own subpath. React Aria was the alternative; it is larger and its strengths (i18n, date pickers) are not needed here. Base UI has no table and no date picker; §7 covers both. |
 | Works with a generic React app and an Astro app | One React implementation of every component. Astro renders React components to HTML at build time and ships no JavaScript for a component without a `client:*` directive. Each component is classified `static-safe` or `interactive` (§3.1). | Two implementations (React and `.astro`) would drift apart. The classification tells the player app which components cost zero JavaScript. |
-| No Tailwind; SCSS modules | Every component has one `*.module.scss` file. Global CSS is limited to the reset, token custom properties and font faces. CSS uses cascade layers in the order `reset, tokens, base, components, overrides`. | Layers let an app override a component from the `overrides` layer without raising selector specificity. |
-| Extensible, with good defaults | Components work with no props beyond content. Each accepts `className`, exposes the CSS custom properties listed in its docs (such as `--mcc-button-bg`), and interactive components pass Base UI's `render` prop through for composition. | Defaults cover the common case. The three escape hatches cover restyling, theming one instance and changing the rendered element. |
-| No bloat; tree shaking so each app ships only what it uses | `@mcc/ui` publishes one subpath export per component (`@mcc/ui/button`) and no root barrel. `package.json` marks `**/*.css` and `**/*.scss` as side effects. Apps consume the package as source through Vite. Size checks fail CI when a single-component import exceeds its budget (§9.2). | Barrel files defeat tree shaking in some bundlers and slow development servers. Consuming source inside the monorepo lets each app's own build drop unused code. |
-| Authoritative style guide | Design tokens in the Design Tokens Community Group format (`$value`, `$type`) under `packages/ui/tokens/` are the source of truth. Style Dictionary builds them into CSS custom properties, an SCSS map and a TypeScript module. Storybook documentation pages render the built tokens, so the guide cannot disagree with the code. | A written guide that is separate from the code goes stale. |
+| No Tailwind; SCSS modules | SCSS is the source, but it compiles to plain CSS with fixed, prefixed class names instead of CSS modules. Each component has one SCSS file that Sass compiles to its own CSS file in `@hhh/css` (`@hhh/css/button.css`). Classes follow `hhh-<block>`, `hhh-<block>__<element>` and `hhh-<block>--<modifier>`; component state comes from Base UI `data-*` attributes. Global CSS is limited to the reset, token custom properties and font faces. All design system CSS sits in cascade layers named `hhh.reset`, `hhh.tokens`, `hhh.base` and `hhh.components`. | CSS modules hash class names, so only a bundler and the React components could use them. Fixed class names let Vue, Svelte, Astro or plain HTML users style their own markup with `@hhh/css`. A consumer's own unlayered CSS beats every layered rule, so overrides need no specificity tricks, and the `hhh.` prefix keeps the layer and class names from colliding with a consumer's. |
+| Extensible, with good defaults | Components work with no props beyond content. Each accepts `className`, exposes the CSS custom properties listed in its docs (such as `--hhh-button-bg`), and interactive components pass Base UI's `render` prop through for composition. | Defaults cover the common case. The three escape hatches cover restyling, theming one instance and changing the rendered element. |
+| No bloat; tree shaking so each app ships only what it uses | `@hhh/css` publishes one CSS file per component plus `tokens.css` and `base.css`. `@hhh/react` publishes one subpath export per component (`@hhh/react/button`) with no root barrel, and each component module imports its own CSS file. `@hhh/react` marks `**/*.css` as a side effect. Both packages ship compiled output, and the apps in this repository consume that same output through npm workspaces. Size checks fail CI when a single-component import exceeds its budget (§9.2). | Barrel files defeat tree shaking in some bundlers and slow development servers. Testing the apps against the published output means outside users get exactly what the apps use. |
+| Usable outside this project | `@hhh/css` and `@hhh/react` are MIT-licensed public packages on the npm registry, versioned with semantic versioning by release-please, and published by GitHub Actions through npm trusted publishing with provenance. The npm scope is `@hhh`, which a person reserves (§18). | GitHub Packages was considered and rejected: its npm registry requires an access token to install even public packages, so every outside user would have to create a token and edit `.npmrc`. npm trusted publishing needs no stored token. |
+| Separate admin and player apps | Kept. The admin app is a Vite React app behind Cognito with MFA; the player app is an Astro site of mostly static pages. Both consume the published design system packages. | The player bundle never contains admin code or routes, the two apps sign in differently, and most player pages need no JavaScript. The design system does not need a single app to be shared, because both apps install the same packages. |
+| Authoritative style guide | Design tokens in the Design Tokens Community Group format (`$value`, `$type`) under `packages/hhh-css/tokens/` are the source of truth. Style Dictionary builds them into CSS custom properties, an SCSS map and a TypeScript module. Storybook documentation pages render the built tokens, so the guide cannot disagree with the code. | A written guide that is separate from the code goes stale. |
 | Show every proposed component, through a design service if possible | Storybook is the design surface, published to Chromatic. Mockups are coded page stories, not Figma frames. Reviewers open Chromatic links on an iPhone and approve or reject each story there. | Agents produce coded mockups as fast as frames, and the result shows real fonts, blur, motion and responsive behavior. A reviewer sees the real thing on the target device. Figma would add a second source of truth that no human designer maintains. |
 | Ideogram for images | Raster art comes from the Ideogram API through `scripts/ideogram.mjs`. Every committed image was approved by a person and has a manifest entry (§6.1). | Approval keeps the art bill and the repository size under control. The manifest makes each image reproducible and replaceable. |
 | Logo and vector creation by agents | The logo, icons, medals and emblems are SVG written by the art director agent. Ideogram concept sheets may come first; the committed artifact is always hand-written SVG. | Ideogram produces raster images only. SVG is sharp at every size, a few kilobytes, and themeable with tokens. |
-| Halo-like figures without official images | Accepted likeness, recorded as the owner's decision: a detailed helmet in the style of the Halo 3 protagonist on the player sign-in screen, a Halo 3 style energy sword in the logo, and armored figures closely resembling the protagonist for the first, second and third place podium. No official images, screenshots used as art, logos, wordmarks or fonts. Prompts describe the look and never name a character. Both apps show the Game Content Usage Rules notice (§14). | The owner chose likeness for a non-commercial fan project. The art stays swappable through the manifest if that changes (§18). |
+| Halo-like figures without official images | Accepted likeness, recorded as the owner's decision: a detailed helmet in the style of the Halo 3 protagonist on the player sign-in screen, a Halo 3 style energy sword in the logo, and armored figures closely resembling the protagonist for the first, second and third place podium. No official images, screenshots used as art, logos, wordmarks or fonts. Prompts describe the look and never name a character. Likeness art, the logo and all generated raster art live only in the private `@mcc/art` workspace and are never published to npm. The published packages carry only original icons, medals and emblems. Both apps show the Game Content Usage Rules notice (§14). | The owner chose likeness for a non-commercial fan project. Keeping it out of the published packages confines it to this project's own site instead of a library others redistribute, and keeps the packages small. The art stays swappable through the manifest if that changes (§18). |
 | Typeface: Square 721 or Eurostile Bold Extended (from the owner's reference notes) | Both are commercial fonts whose licenses do not allow self-hosting from a public repository. The display face is an open-licensed alternative: Saira (variable, width 50 to 125 and weight 100 to 900) by default, with Michroma as a specimen candidate. Body text uses the system font stack (`system-ui`, which is SF Pro on iPhone). The brand kit (P1.1) picks the final display face. | Saira covers condensed stat labels and extended Halo 3 style headings in one file. The system stack costs no download on the main target device. |
 | Halo 3 translucent curved panels with `backdrop-filter` blur | Allowed only on the sign-in card, dialogs, bottom sheets and the top bar, each with an opaque fallback when `backdrop-filter` is unsupported or `prefers-reduced-transparency` is set. Never on list rows, table rows or repeated cards. | Blur on scrolling content is expensive on iOS Safari and would break the INP and frame-rate budgets. |
 | Admin and player sign-in | The admin app keeps the Cognito hosted login page with username, password and MFA (spec 3). This spec supplies its logo, colors and background image as exported assets. The player app has a custom sign-in screen offering only single sign-on through Google, Microsoft and Apple, with no username or password fields (§8). | Custom admin sign-in would put admin credentials in our own JavaScript. Player sign-in through the authorize endpoint with a preselected provider never shows the hosted page, so it can be fully branded without handling any credential. |
-| Admin app and player app need different components | Two tiers (§7). `packages/ui` holds components with no domain knowledge. Domain components live in each app and use the same Storybook, Chromatic, Vitest and Playwright harness. | A shared package is a shared contract: every change updates all consumers and gets independent review. Admin-only domain widgets would carry that cost with no reuse. The harness, not the package boundary, provides visual fidelity testing. |
+| Admin app and player app need different components | Two tiers (§7). `@hhh/css` and `@hhh/react` hold components with no domain knowledge. Domain components live in each app and use the same Storybook, Chromatic, Vitest and Playwright harness. | A published package is a public contract: every breaking change is a major version for outside users, and every change updates both apps. Admin-only domain widgets would carry that cost with no reuse. The harness, not the package boundary, provides visual fidelity testing. |
 | Dark theme | Dark only in v1. Tokens are split into primitive, semantic and component tiers so a later theme replaces only semantic values. | Both apps are dark by design; a light theme doubles visual testing for no current user. |
 | Mobile-first, mostly iPhone, works on desktop | Styles are written for a 320 px wide viewport first and widen with `min-width` media queries and container queries. Playwright and Chromatic test 393 by 852 (iPhone 15 and 16) and 1440 by 900. | Most users are on iPhone. Container queries let a component adapt to the slot it sits in, not to the window. |
 
-**Additional capabilities included:** a token contrast check that fails CI, size budgets per component, Lighthouse budgets on reference consumer apps, an SVG lint for medals and icons, an art manifest check, and reduced motion and reduced transparency support in every component.
+**Additional capabilities included:** a token contrast check that fails CI, size budgets per component, Lighthouse budgets on reference consumer apps, an SVG lint for medals and icons, an art manifest check, a published-files check that keeps art, stories and tests out of npm tarballs, and reduced motion and reduced transparency support in every component.
 
 ## 2. Goals and non-goals
 
@@ -57,6 +59,7 @@ HH.H is the visual identity of the MCC stats suite: dark, Halo 3 inspired, and b
 4. The player reference pages meet the budgets in §9.1 under Lighthouse mobile emulation.
 5. Every committed image has a person's approval and a manifest entry that reproduces it.
 6. A Claude Code or Codex session can produce brand art, mockups or a component by following the repository agents, without a contributor's personal setup.
+7. A project outside this repository installs `@hhh/css` or `@hhh/react` from npm with no access token, and a plain HTML page styled only with `@hhh/css` matches the React component's appearance.
 
 ### 2.2 Non-goals
 
@@ -64,41 +67,42 @@ HH.H is the visual identity of the MCC stats suite: dark, Halo 3 inspired, and b
 - Building domain screens. The app specifications own them; this spec designs them as mockups.
 - Charts beyond a sparkline and a simple bar. A chart library is backlog (P4.1).
 - Real-user performance monitoring. Lab budgets gate v1; field data is backlog (P4.3).
-- Publishing `@mcc/ui` to npm. It is a private workspace package.
+- Publishing to GitHub Packages (§1).
+- Publishing the logo, likeness art or any generated raster art.
+- Components for Vue, Svelte or other frameworks. Those users get `@hhh/css` and write their own markup.
 
 ## 3. Architecture
 
 ```text
-packages/ui/tokens/*.tokens.json (DTCG)
+packages/hhh-css/tokens/*.tokens.json (DTCG)
   |
   v  Style Dictionary (build)
-packages/ui/src/styles/
-  +-- tokens.css        (CSS custom properties, layer `tokens`)
-  +-- _tokens.scss      (SCSS map and mixins)
-  +-- tokens.ts         (typed values for scripts and tests)
+@hhh/css dist/
+  +-- tokens.css, tokens.scss, tokens.json   (layer `hhh.tokens`)
+  +-- base.css                               (reset and font faces)
+  +-- <component>.css                        (Sass build of src/<component>.scss; layer `hhh.components`)
+  +-- icons/*.svg, medals/*.svg, emblems/*.svg
   |
-  v
-packages/ui/src/components/<name>/
-  +-- <Name>.tsx              (React; Base UI parts when interactive)
-  +-- <Name>.module.scss      (layer `components`; tokens only)
-  +-- <Name>.stories.tsx
+  v  imported per component
+@hhh/react dist/
+  +-- <component>/index.js   (React; Base UI parts when interactive; imports @hhh/css/<component>.css)
   |
-  v  subpath exports (`@mcc/ui/<name>`), consumed as source
-applications/admin (Vite SPA)              applications/player (Astro)
-  every component hydrated                   static-safe -> HTML only
-                                             interactive -> island (`client:visible`)
+  v  npm registry (public)          and npm workspaces (this repository)
+outside projects                    applications/admin (Vite SPA)       applications/player (Astro)
+  React: @hhh/react                   every component hydrated            static-safe -> HTML only
+  any other stack: @hhh/css                                               interactive -> island
 
-packages/storybook  <-- stories from packages/ui, applications/admin, applications/player
+packages/storybook  <-- stories from packages/hhh-react, applications/admin, applications/player
   +-- Vitest browser mode (interaction tests, axe)
   +-- Chromatic (hosted Storybook, visual baselines, human approval)
 
-Art: brief -> scripts/ideogram.mjs -> candidates on the PR branch -> person approves
-     -> packages/ui/art/masters/*.webp + art/manifest.json -> build derivatives (AVIF, WebP)
+Art (private): brief -> scripts/ideogram.mjs -> candidates on the PR branch -> person approves
+     -> packages/art/masters/*.webp + manifest.json -> build derivatives (AVIF, WebP) -> apps only
 ```
 
-**Ownership rules:** only `scripts/ideogram.mjs` calls the Ideogram API. Only the art build step (`packages/ui/scripts/build-art.mjs`) writes image derivatives. Component SCSS reads semantic and component tokens only, never primitives or literal colors. Components never import from `applications/*`. Apps never import component internals, only subpath exports.
+**Ownership rules:** only `scripts/ideogram.mjs` calls the Ideogram API. Only `packages/art/scripts/build-art.mjs` writes image derivatives. Component SCSS reads semantic and component tokens only, never primitives or literal colors. `@hhh/react` components render `@hhh/css` class names and never define styles of their own. Neither public package imports from `@mcc/art`, `packages/storybook` or `applications/*`. Apps import only package subpath exports, never internals.
 
-**Packaging:** `@mcc/ui` is private and consumed as source: its `exports` map points each subpath at a `.tsx` entry, and each app's Vite build compiles it. Its build step generates tokens, icon components and art derivatives. `@mcc/storybook` is private and has no exports.
+**Packaging:** `@hhh/css` builds with Style Dictionary and Sass into `dist/`. `@hhh/react` builds with TypeScript into ESM with one module per component (`preserveModules`) and type declarations. Both declare `files` so their npm tarballs contain only `dist/`, `README.md`, `LICENSE` and `package.json`. Turbo builds both before any app. `@mcc/art` and `@mcc/storybook` are private: `@mcc/art` exports the logo, raster art derivatives and the Cognito assets to the two apps, and `@mcc/storybook` has no exports.
 
 ### 3.1 Rendering policy
 
@@ -107,7 +111,7 @@ Art: brief -> scripts/ideogram.mjs -> candidates on the PR branch -> person appr
 | `static-safe` | Renders correct, complete HTML and CSS with no client JavaScript. No state, effects or event handlers are needed to show or use it; links and native form submission are allowed. | Rendered at build time with no `client:*` directive. Adds 0 bytes of JavaScript. | Hydrated as part of the app. |
 | `interactive` | Needs client JavaScript to work (overlays, menus, sorting, uploads). | Used only inside an island. `client:visible` by default, `client:idle` for always-visible controls such as the tab bar menu. `client:load` needs a measured reason in the PR. | Hydrated as part of the app; route-level code splitting. |
 
-- Each component's story declares its class in `parameters.mcc.rendering`, and the docs page shows it.
+- Each component's story declares its class in `parameters.hhh.rendering`, and the docs page and the package README show it.
 - A `static-safe` component must not import Base UI or call hooks other than `useId`. A lint rule enforces this.
 - Prefer platform features to JavaScript where they meet the UX bar: `<details>` for disclosure, the `popover` attribute for simple popovers, native `<input type="date">` and `<input type="datetime-local">`, CSS scroll snap for swipeable rows.
 
@@ -119,7 +123,8 @@ The brand kit (P1.1) and the first art set (P1.4) produce these artifacts, and a
 
 - Name: **HH.H**. Page titles read `<Page> - HH.H`.
 - Logo: a Halo 3 style energy sword with the HH.H wordmark beside or around it. Variants: full color on dark, single color (amber), single color (white), and a mark-only version legible at 32 px for favicons and app icons.
-- The logo is SVG with outlined text, so no font file ships with it. It never contains the Halo logo, the Halo wordmark or Microsoft trademarks.
+- The logo is SVG with outlined text, so no font file ships with it. It never contains the Halo logo, the Halo wordmark or Microsoft trademarks. It lives in `@mcc/art` and is not published.
+- The open-source packages carry the HH.H name but no logo. Their READMEs describe them as a design system inspired by Halo 3 menus and state that they are not affiliated with or endorsed by Microsoft.
 - Exported sizes for platforms: `favicon.svg`, 32 and 180 px PNG (`apple-touch-icon`), and 512 px PNG for a web manifest.
 
 ### 4.2 Palette
@@ -189,9 +194,10 @@ Rules:
 | Detailed helmet in the style of the Halo 3 protagonist | Player sign-in hero | Ideogram raster, transparent background |
 | Podium figures for first, second and third place | Player leaderboard podium | Ideogram raster, transparent background, three poses with gold, silver and bronze accents |
 | Environments: snowy canyon structures, green valley under a ring, industrial bay | Empty and error states, section heroes | Ideogram raster |
-| Medals and emblems | Player profiles, postgame, team pages | Hand-written SVG (P1.2) |
-| Icons | All components | Hand-written SVG, 24 px grid, 1.5 px stroke, square caps, mitered joins |
+| Medals and emblems | Player profiles, postgame, team pages | Hand-written original SVG (P1.2), published in `@hhh/css` |
+| Icons | All components | Hand-written SVG, 24 px grid, 1.5 px stroke, square caps, mitered joins, published in `@hhh/css` |
 
+- Raster assets in this table live in `@mcc/art` and are never published.
 - Art direction: cold blue light, deep shadows, warm ember highlights, cinematic depth. No text inside generated images.
 - Every raster image has a portrait mobile crop and a landscape desktop crop.
 - The owner's downloaded ring wallpaper is a mood reference only and is never uploaded or committed.
@@ -210,7 +216,7 @@ Short, direct, game-literate. Labels use sentence case except where uppercase is
 | Semantic | `color.action.primary.bg`, `color.text.secondary`, `space.inline.m` | Components and apps |
 | Component | `button.primary.bg`, `table.row.selected.border` | That component and app overrides |
 
-CSS custom properties take the token path with a `--mcc-` prefix: `--mcc-color-action-primary-bg`.
+CSS custom properties take the token path with a `--hhh-` prefix: `--hhh-color-action-primary-bg`.
 
 ### 5.2 Token groups
 
@@ -225,16 +231,17 @@ CSS custom properties take the token path with a `--mcc-` prefix: `--mcc-color-a
 | Elevation | `glow-amber`, `glow-plasma` at three strengths; `shadow-sheet` for sheets |
 | Motion | §4.4 durations and easings |
 | Layers (`z-index`) | base 0, sticky 100, nav 200, overlay 300, toast 400, tooltip 500 |
-| Safe areas | `env(safe-area-inset-*)` exposed as `--mcc-safe-top`, `--mcc-safe-bottom`, `--mcc-safe-left`, `--mcc-safe-right` |
+| Safe areas | `env(safe-area-inset-*)` exposed as `--hhh-safe-top`, `--hhh-safe-bottom`, `--hhh-safe-left`, `--hhh-safe-right` |
 | Touch | minimum target 44 by 44 CSS px |
 
 ### 5.3 Rules
 
 1. Component SCSS uses only semantic and component tokens. A Stylelint rule rejects literal colors, font sizes, `z-index` values and spacing in component styles.
-2. Styles are mobile first. Component layout responds to `@container` queries; page layout responds to `min-width` media queries.
-3. Use `100dvh`, never `100vh`, for full-height layouts.
-4. Inputs use at least 16 px text so iOS Safari does not zoom on focus.
-5. `-webkit-tap-highlight-color` is transparent, and every pressable element shows its own pressed state.
+2. Every class selector starts with `hhh-` and follows the block, element and modifier pattern in §1. Every rule sits inside an `hhh.` layer. Stylelint enforces both. Class names are part of the public API: renaming or removing one is a breaking change.
+3. Styles are mobile first. Component layout responds to `@container` queries; page layout responds to `min-width` media queries.
+4. Use `100dvh`, never `100vh`, for full-height layouts.
+5. Inputs use at least 16 px text so iOS Safari does not zoom on focus.
+6. `-webkit-tap-highlight-color` is transparent, and every pressable element shows its own pressed state.
 
 ## 6. Agent workflows
 
@@ -252,10 +259,11 @@ Both new roles use Playwright MCP for screenshots (P0.2). Playwriter attaches to
 
 1. The art director writes a brief per asset: purpose, placement, crops, palette, references by description, and likeness rules from §1.
 2. `scripts/ideogram.mjs` runs one batch: at most 8 images per brief and a per-batch cost cap (default 5 USD, `--max-usd` to change). It refuses to start when the estimated cost exceeds the cap, and refuses to run without `IDEOGRAM_API_KEY`.
-3. Candidates are converted to WebP (quality 85) and committed on the pull request branch under `packages/ui/art/candidates/<brief-id>/`, with a generated contact sheet in the PR body.
+3. Candidates are converted to WebP (quality 85) and committed on the pull request branch under `packages/art/candidates/<brief-id>/`, with a generated contact sheet in the PR body.
 4. A person approves candidates by ID in a PR comment. Raising the cap for a batch needs the same approval.
-5. The art director moves approved images to `packages/ui/art/masters/` (WebP, quality 90, longest side at most 2560 px), adds manifest entries, and deletes `candidates/` before the PR is marked ready. Squash merge keeps rejected candidates out of `main`.
-6. The art build creates derivatives at widths 480, 768, 1080, 1440, 1920 and 2560 in AVIF (quality 50) and WebP (quality 70) plus a 16 px blurred placeholder, under the ignored `packages/ui/art/dist/`.
+5. The art director moves approved images to `packages/art/masters/` (WebP, quality 90, longest side at most 2560 px), adds manifest entries, and deletes `candidates/` before the PR is marked ready. Squash merge keeps rejected candidates out of `main`.
+6. The art build creates derivatives at widths 480, 768, 1080, 1440, 1920 and 2560 in AVIF (quality 50) and WebP (quality 70) plus a 16 px blurred placeholder, under the ignored `packages/art/dist/`.
+7. Original SVG medals, emblems and icons follow the same approval step but are committed to `packages/hhh-css/src/` with entries in that package's own manifest.
 
 ### 6.2 Mockup flow
 
@@ -267,11 +275,13 @@ Both new roles use Playwright MCP for screenshots (P0.2). Playwriter attaches to
 
 ### 6.3 Component flow
 
-`mcc-implementer` builds each component slice from the approved mockups and this spec: component, SCSS module, stories with play functions, rendering class, docs, and size budget. Chromatic diffs against the mockup baselines show where the component differs from what was approved.
+`mcc-implementer` builds each component slice from the approved mockups and this spec: the SCSS in `@hhh/css`, the React component in `@hhh/react`, stories with play functions, a plain HTML story that uses only the CSS classes, rendering class, docs, and size budget. Chromatic diffs against the mockup baselines show where the component differs from what was approved.
 
 ## 7. Component catalog
 
-### 7.1 Design system tier (`packages/ui`)
+### 7.1 Design system tier (`@hhh/css` and `@hhh/react`)
+
+Every component below has a CSS file in `@hhh/css` and a React component in `@hhh/react`.
 
 | Slice | Components | Class | Base UI parts |
 | --- | --- | --- | --- |
@@ -283,7 +293,9 @@ Both new roles use Playwright MCP for screenshots (P0.2). Playwriter attaches to
 | Overlays (P3.6) | `Dialog`, `BottomSheet`, `Popover`, `Menu`, `Tooltip`, `Toast` | interactive | Dialog, Popover, Menu, Tooltip, Toast |
 | Data display (P3.7) | `DataTable`, `DataList`, `TeamGroup`, `RankRow`, `StatTile`, `Sparkline`, `BarMeter` | static-safe; sorting is an interactive add-on | none |
 | Feedback and status (P3.8) | `Badge`, `StatusBadge`, `Alert`, `Banner`, `Progress`, `Spinner`, `Skeleton`, `EmptyState`, `ErrorState` | static-safe | Progress |
-| Brand and art (P1.1, P1.2, P1.4) | `Logo`, icons, medal and emblem SVGs, `ArtImage` (responsive `<picture>` with placeholder) | static-safe | none |
+| Icons and art (P1.2, P3.8) | `Icon`, medal and emblem SVGs, `ArtImage` (responsive `<picture>` that takes sources and a placeholder from the caller) | static-safe | none |
+
+The logo and the generated art are not components. The apps import them from `@mcc/art`.
 
 Notes:
 
@@ -308,7 +320,7 @@ Designed in the mockups (P2.1, P2.2) and built under each app's specification.
 | Admin | Review queue and evidence viewer | `BottomSheet`, `Button`; pinch zoom and cell overlays are app code (spec 3) |
 | Admin | Roster | `DataTable`, `Dialog`, forms (spec 6) |
 
-A domain component moves into `packages/ui` only when its domain knowledge can be removed and both apps need it.
+A domain component moves into the published packages only when its domain knowledge can be removed and both apps need it.
 
 ## 8. Sign-in
 
@@ -317,13 +329,13 @@ A domain component moves into `packages/ui` only when its domain knowledge can b
 - The sign-in screen offers three buttons: Continue with Google, Continue with Microsoft, Continue with Apple. There are no username, password or email fields, and no account creation form.
 - `SsoButton` takes `provider` and `href`. The player app builds each `href` to its user pool's authorize endpoint with `identity_provider` set to `Google`, `SignInWithApple`, or the name it gives its Microsoft OIDC provider, plus PKCE and `state`. Cognito then skips its hosted page. `SsoButton` knows nothing about Cognito.
 - Each button follows its provider's published branding: Google's sign-in button guidelines, Microsoft's sign-in branding guidance, and Apple's Human Interface Guidelines for Sign in with Apple. These buttons are the one place where provider rules override the HH.H style. They sit on a HH.H card, in a fixed order, at full width on phones.
-- `AuthLayout` composes the ring, clouds and helmet as separate AVIF layers with a portrait crop on phones and a landscape crop on desktop. The helmet layer has `fetchpriority="high"` and is the LCP element. CSS-only motion (slow ring drift, star twinkle) stops under reduced motion.
+- `AuthLayout` takes its art layers as props, so the published component carries no art. The player app passes the ring, clouds and helmet from `@mcc/art` as separate AVIF layers with a portrait crop on phones and a landscape crop on desktop. The helmet layer has `fetchpriority="high"` and is the LCP element. CSS-only motion (slow ring drift, star twinkle) stops under reduced motion.
 - States: default, redirecting (button shows progress and the others disable), provider error (an `Alert` with retry), and session expired (a `Banner` above the buttons).
 - The page shows the Game Content Usage Rules notice in its footer (§14).
 
 ### 8.2 Admin
 
-The admin app uses the Cognito hosted login page with username, password and MFA, as spec 3 defines. This spec exports the logo (SVG and PNG), the ring background image at the sizes Cognito branding accepts, and the palette as hex values in `packages/ui/art/cognito/`. Applying them to the user pool belongs to the infrastructure that owns it.
+The admin app uses the Cognito hosted login page with username, password and MFA, as spec 3 defines. This spec exports the logo (SVG and PNG), the ring background image at the sizes Cognito branding accepts, and the palette as hex values in `packages/art/cognito/`. Applying them to the user pool belongs to the infrastructure that owns it.
 
 ## 9. Performance and accessibility budgets
 
@@ -372,7 +384,7 @@ iOS Safari 17 and later (the primary target), and the latest two major versions 
 ### 10.1 Core types
 
 ```typescript
-// @mcc/ui/types
+// @hhh/react/types
 type RenderingClass = 'static-safe' | 'interactive';
 
 type SsoProvider = 'google' | 'microsoft' | 'apple';
@@ -385,10 +397,11 @@ interface ComponentDocsParameters {
   readonly budgetBytes: { readonly js: number; readonly css: number };
 }
 
-// packages/ui/art/manifest.json, schemaVersion `mcc-art-manifest/v1`
+// packages/art/manifest.json and packages/hhh-css/art-manifest.json,
+// schemaVersion `mcc-art-manifest/v1`
 interface ArtManifestEntry {
   readonly id: string; // kebab-case, unique, stable
-  readonly file: string; // path under art/masters/ or art/svg/
+  readonly file: string; // path relative to the manifest's package
   readonly kind: 'raster' | 'vector';
   readonly briefId: string;
   readonly usage: readonly string[]; // components or screens that use it
@@ -413,33 +426,47 @@ interface ArtManifestEntry {
 }
 ```
 
-Validation: the art check (§16.1) rejects a master without an entry, an entry without a file, a raster entry without `generation` and `approval`, a master whose longest side exceeds 2560 px, and any file under `art/candidates/` on `main`. Prompts never contain personal data.
+Validation: the art check (§16.1) rejects a master without an entry, an entry without a file, a raster entry without `generation` and `approval`, a master whose longest side exceeds 2560 px, any file under `packages/art/candidates/` on `main`, and any `likeness: true` or raster entry in the `@hhh/css` manifest. Prompts never contain personal data.
 
 ### 10.2 Relationships
 
 ```text
 Token (primitive) 1 -> many Token (semantic) 1 -> many Token (component)
-Component 1 -> 1 SCSS module, 1 -> many stories, 0..many -> Base UI parts
+Component 1 -> 1 CSS file in @hhh/css, 1 -> 1 React component in @hhh/react, 1 -> many stories, 0..many -> Base UI parts
 ArtManifestEntry 1 -> 1 master file, 1 -> many derivatives
 Mockup story 1 -> 1 approved Chromatic baseline -> 1 real screen story
 ```
 
 ## 11. Module catalog
 
-### 11.1 `packages/ui`
+### 11.1 `packages/hhh-css` (`@hhh/css`, public)
 
 | File | Exports | Purpose |
 | --- | --- | --- |
-| `src/components/<name>/index.ts` | the component and its prop types | One subpath export per component |
-| `src/styles/global.scss` | none | Reset, token custom properties, font faces, layer order |
-| `src/styles/_mixins.scss` | `chamfer()`, `glow()`, `container()`, `bp()`, `focus-ring()`, `reduced-motion()` | Shared SCSS helpers |
-| `scripts/build-tokens.mjs` | none | Style Dictionary build |
-| `scripts/build-icons.mjs` | none | Generates icon React components from `src/icons/*.svg` |
-| `scripts/build-art.mjs` | none | Derivatives and placeholders with `sharp` |
-| `scripts/check-art.mjs` | none | Manifest check (§10.1) |
+| `src/<component>.scss` | `dist/<component>.css` | One CSS file per component |
+| `src/base.scss` | `dist/base.css` | Reset, font faces, layer order |
+| `src/_mixins.scss` | `chamfer()`, `glow()`, `container()`, `bp()`, `focus-ring()`, `reduced-motion()` | Shared SCSS helpers; also published for SCSS users |
+| `src/icons/`, `src/medals/`, `src/emblems/` | `dist/icons/*.svg` and the same for medals and emblems | Original SVG art |
+| `scripts/build-tokens.mjs` | `dist/tokens.css`, `dist/tokens.scss`, `dist/tokens.json` | Style Dictionary build |
 | `scripts/check-contrast.mjs` | none | Token contrast check |
 
-### 11.2 Repository scripts and agents
+### 11.2 `packages/hhh-react` (`@hhh/react`, public)
+
+| File | Exports | Purpose |
+| --- | --- | --- |
+| `src/<component>/index.ts` | the component and its prop types | One subpath export per component |
+| `scripts/build-icons.mjs` | `@hhh/react/icons/<name>` | Generates one icon component per `@hhh/css` icon |
+
+### 11.3 `packages/art` (`@mcc/art`, private)
+
+| File | Exports | Purpose |
+| --- | --- | --- |
+| `scripts/build-art.mjs` | `dist/` derivatives and placeholders | Responsive images with `sharp` |
+| `scripts/check-art.mjs` | none | Manifest check (§10.1) for both manifests |
+| `svg/logo/` | logo variants | HH.H logo |
+| `cognito/` | none | Assets for the admin hosted login |
+
+### 11.4 Repository scripts and agents
 
 | File | Purpose |
 | --- | --- |
@@ -449,27 +476,30 @@ Mockup story 1 -> 1 approved Chromatic baseline -> 1 real screen story
 ## 12. Directory structure and ownership
 
 ```text
-packages/ui/                       # @mcc/ui, design system tier
+packages/hhh-css/                  # @hhh/css, public on npm
   tokens/                          # DTCG token sources (authoritative style guide)
-  src/
-    components/<name>/             # component, SCSS module, stories, docs
-    icons/                         # SVG sources
-    styles/                        # global styles, mixins, generated tokens
-  art/
-    masters/                       # approved raster masters (WebP)
-    svg/                           # logo, medals, emblems
-    cognito/                       # exported assets for the admin hosted login
-    manifest.json
-    dist/                          # generated derivatives (ignored)
+  src/                             # component SCSS, base, mixins, icons, medals, emblems
+  art-manifest.json                # approvals for the original SVG art
+  test/html/                       # plain HTML pages that use only the CSS
+  dist/                            # build output (ignored; the only published code)
+packages/hhh-react/                # @hhh/react, public on npm
+  src/<component>/                 # component, stories, tests
   test/consumers/vite/             # reference Vite React app for size and Lighthouse checks
   test/consumers/astro/            # reference Astro app for size, zero-JS and Lighthouse checks
-packages/storybook/                # @mcc/storybook, shared Storybook and Vitest browser config
+  dist/                            # build output (ignored; the only published code)
+packages/art/                      # @mcc/art, private
+  masters/                         # approved raster masters (WebP)
+  svg/logo/                        # logo variants
+  cognito/                         # exported assets for the admin hosted login
+  manifest.json
+  dist/                            # generated derivatives (ignored)
+packages/storybook/                # @mcc/storybook, private: shared Storybook and Vitest browser config
 applications/admin/.../mockups/    # admin mockup stories (removed when screens ship)
 applications/player/.../mockups/   # player mockup stories (removed when screens ship)
 scripts/ideogram.mjs
 ```
 
-Import rules: `packages/ui` never imports from `applications/*` or `packages/storybook`. Apps import only `@mcc/ui/<name>` subpaths. ESLint enforces both.
+Import rules: `@hhh/css` imports nothing. `@hhh/react` imports only `@hhh/css`, `@base-ui/react` and React. Neither imports `@mcc/art`, `packages/storybook` or `applications/*`. Apps import only package subpath exports. ESLint enforces these rules, and the published-files check (§16.1) proves the tarballs contain nothing else.
 
 ## 13. Configuration and infrastructure
 
@@ -479,6 +509,7 @@ Import rules: `packages/ui` never imports from `applications/*` or `packages/sto
 | --- | --- | --- |
 | `IDEOGRAM_API_KEY` | Local environment of the person or agent running `scripts/ideogram.mjs` | Never committed, logged or passed to CI |
 | `CHROMATIC_PROJECT_TOKEN` | GitHub Actions secret, added by a person | Read only by the Chromatic workflow |
+| npm trusted publishers | npmjs.com package settings for `@hhh/css` and `@hhh/react`, configured by a person | Names this repository and the publish workflow file. No npm token is stored anywhere. |
 | Viewports | `packages/storybook` config | 393 by 852 and 1440 by 900 |
 
 ### 13.2 Infrastructure
@@ -487,7 +518,11 @@ None. The design system creates no AWS resources. Apps serve fonts and images fr
 
 ### 13.3 Deployment
 
-Chromatic publishes Storybook for each pull request and for `main`. Apps deploy the design system as part of their own bundles through their own stacks.
+- Chromatic publishes Storybook for each pull request and for `main`.
+- When release-please merges a release PR that bumps `@hhh/css` or `@hhh/react`, the publish workflow builds the package, runs the published-files check and `npm publish` with `id-token: write`. npm trusted publishing authenticates through GitHub OIDC and attaches provenance.
+- `@hhh/css` publishes before `@hhh/react` when both change, because `@hhh/react` depends on the matching `@hhh/css` version.
+- A person reserves the `@hhh` scope, configures the trusted publishers, and does any first publish that npm requires before a trusted publisher can be configured. Publishing never uses a long-lived token.
+- Apps deploy the design system as part of their own bundles through their own stacks.
 
 ## 14. Security, privacy and legal
 
@@ -498,6 +533,8 @@ Chromatic publishes Storybook for each pull request and for `main`. Apps deploy 
 5. Components work under a Content Security Policy without `unsafe-eval` and without inline `<script>`. Dynamic positions are set through the CSS Object Model, not inline style strings in server HTML.
 6. Both apps and Storybook show this notice, quoted verbatim from the rules' required form, with a link to the Game Content Usage Rules (`https://www.xbox.com/en-US/developers/rules`), because they display Halo screenshots and Halo-inspired art: "Halo: The Master Chief Collection © Microsoft Corporation. HH.H was created under Microsoft's "Game Content Usage Rules" using assets from Halo: The Master Chief Collection, and it is not endorsed by or affiliated with Microsoft."
 7. HH.H stays non-commercial: no ads, payments or paywalls. Its logo never uses a game logo, and no title suggests Microsoft made or endorses it.
+8. The published packages contain no Game Content: no screenshots, likeness art, logo or generated raster art. Their package names and descriptions do not use "Halo" as a name; a README may say "inspired by Halo 3 menus" and carries the non-affiliation statement.
+9. Releases are published only by the publish workflow through npm trusted publishing with provenance. The workflow has `id-token: write` and `contents: read` and no other secrets, and runs only for release-please releases on `main`.
 
 ## 15. Observability
 
@@ -513,9 +550,12 @@ Chromatic publishes Storybook for each pull request and for `main`. Apps deploy 
 | Layer | Covers |
 | --- | --- |
 | Token tests (`node --test`) | DTCG validity, naming, tier rules, contrast for every semantic text and background pair |
-| Stylelint (SCSS) | No literal colors, sizes, spacing or `z-index` in component styles; layer use |
+| Stylelint (SCSS) | No literal colors, sizes, spacing or `z-index` in component styles; `hhh-` class names; every rule in an `hhh.` layer |
 | ESLint | Import boundaries, no root barrel, no Base UI or hooks in `static-safe` components |
 | Vitest browser mode via the Storybook Vitest addon (Chromium and WebKit) | Every story renders; play functions test interaction, focus and keyboard; axe reports no WCAG 2.2 AA violation |
+| CSS-only pages (`packages/hhh-css/test/html/`) | Each component's plain HTML story matches its React story in Chromatic, proving `@hhh/css` works without React |
+| Published-files check | `npm pack --dry-run` for both public packages lists only `dist/`, `README.md`, `LICENSE` and `package.json`, with no stories, tests, source maps of private files or art from `@mcc/art` |
+| Clean install check | The reference apps install the packed tarballs from a temporary directory with no workspace links and no registry token, then build |
 | Chromatic | Visual baselines at 393 and 1440 px for every story, including mockups |
 | Playwright (reference apps) | WebKit with the iPhone 15 profile and Chromium desktop: zero script requests on a static Astro page, islands hydrate on view, reduced motion and reduced transparency emulation, safe-area layout, keyboard flows |
 | Size checks | §9.2 budgets per subpath from the reference apps |
@@ -528,18 +568,23 @@ Tests never call Ideogram, Chromatic or AWS. A real-iPhone check of the hosted S
 
 ### 16.2 CI and release
 
-CI runs token, lint, unit, Vitest browser, size and art checks for any change to `packages/ui`, `packages/storybook` or an app's stories, and Chromatic and Lighthouse CI on pull requests that touch them. New workflows follow the repository's GitHub Actions naming convention. P0.4 adds `@mcc/ui` and `@mcc/storybook` at version 1.0.0 to `package-lock.json`, `.release-please-manifest.json` and `release-please-config.json`, and `npm run release:check` passes.
+CI runs token, lint, unit, Vitest browser, size, art and published-files checks for any change to `packages/hhh-css`, `packages/hhh-react`, `packages/art`, `packages/storybook` or an app's stories, and Chromatic and Lighthouse CI on pull requests that touch them. New workflows follow the repository's GitHub Actions naming convention.
+
+P0.4 adds the four new workspaces to `package-lock.json`, `.release-please-manifest.json` and `release-please-config.json`, and `npm run release:check` passes. `@hhh/css` and `@hhh/react` start at version 0.1.0 and stay below 1.0.0 until P3 is complete; from 1.0.0 on, a removed or renamed class, prop, token or subpath is a major version. `@mcc/art` and `@mcc/storybook` are private at 1.0.0. Release-please writes each public package's changelog, and the publish workflow (§13.3) runs on its releases.
 
 ## 17. Acceptance criteria
 
-- [ ] Importing only `@mcc/ui/button` into the reference Vite app adds no other component's JavaScript or CSS to the bundle.
+- [ ] Importing only `@hhh/react/button` into the reference Vite app adds no other component's JavaScript or CSS to the bundle.
+- [ ] A plain HTML page that links only `@hhh/css/tokens.css`, `base.css` and `button.css` renders a button that matches the React story in Chromatic.
+- [ ] `npm install @hhh/css @hhh/react` works in an empty project with no registry configuration or token, and the npm package pages show provenance from this repository.
+- [ ] The published tarballs contain no likeness art, logo, generated raster art, stories or tests.
 - [ ] A reference Astro page built only from static-safe components loads with zero script requests in Playwright WebKit.
 - [ ] Every story passes axe in Vitest browser mode on Chromium and WebKit and has approved Chromatic baselines at both viewports.
 - [ ] The token check fails when a semantic text and background pair falls below the §4.2 contrast rule.
 - [ ] Reference app pages meet every §9.1 budget in Lighthouse CI.
-- [ ] Every file under `art/masters/` has a manifest entry with a person's approval, and `main` has no `art/candidates/`.
+- [ ] Every file under `packages/art/masters/` and every SVG in `@hhh/css` has a manifest entry with a person's approval, and `main` has no `packages/art/candidates/`.
 - [ ] The player sign-in components show only the Google, Microsoft and Apple buttons, follow each provider's branding, and show the Game Content Usage Rules notice.
-- [ ] The admin hosted login assets exist in `packages/ui/art/cognito/`.
+- [ ] The admin hosted login assets exist in `packages/art/cognito/`.
 - [ ] The `mcc-art-director` and `mcc-ux-designer` roles exist for Claude Code and Codex and pass `npm run agents:check`.
 
 ## 18. Risks and accepted limitations
@@ -553,6 +598,9 @@ CI runs token, lint, unit, Vitest browser, size and art checks for any change to
 7. **Display font size:** Saira with both axes may exceed the 80 KB font budget. P1.3 measures it and restricts the weight or width range if needed.
 8. **Provider button rules limit the brand:** the Google, Microsoft and Apple buttons cannot take the HH.H shape or colors.
 9. **Playwright WebKit is not iOS Safari:** it shares the engine but not every platform behavior (safe areas, keyboard, scroll). The manual real-iPhone check covers the gap.
+10. **npm scope availability:** the `@hhh/css` and `@hhh/react` packages do not exist on npm today, but whether the `@hhh` scope is free could not be confirmed without an npm account. A person reserves it before P3.10. If it is taken, a person picks another scope, and P3.10 renames the packages and every import in the same PR.
+11. **Public API cost:** class names, props, tokens and subpaths become a public contract, so changes need versioning discipline even when only this project's apps use them. The 0.x range during P3 keeps early changes cheap.
+12. **First publish:** npm appears to require a package to exist before a trusted publisher can be configured for it. If so, a person publishes 0.1.0 once by hand, configures the trusted publisher, and every later release goes through the workflow.
 
 ## 19. Reference documentation
 
@@ -572,6 +620,9 @@ CI runs token, lint, unit, Vitest browser, size and art checks for any change to
 - Sign in with Apple, Human Interface Guidelines: https://developer.apple.com/design/human-interface-guidelines/sign-in-with-apple
 - Microsoft identity platform sign-in branding: https://learn.microsoft.com/en-us/entra/identity-platform/howto-add-branding-in-apps
 - Game Content Usage Rules: https://www.xbox.com/en-US/developers/rules
+- npm trusted publishing: https://docs.npmjs.com/trusted-publishers
+- GitHub Packages npm registry (token required to install): https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-npm-registry
+- CSS cascade layers: https://developer.mozilla.org/en-US/docs/Web/CSS/@layer
 - WCAG 2.2: https://www.w3.org/TR/WCAG22/
 
 ## 20. Delivery plan: phases and slices
@@ -593,9 +644,10 @@ This section is the backlog source for building the design system. Nothing below
 | Contract | Defined in | Main consumers |
 | --- | --- | --- |
 | Token names and tiers (§5.1) | P1.3 | Every component, both apps |
-| Subpath export per component, no root barrel (§1) | P0.4 | Both apps |
+| `@hhh/react` subpath export per component, no root barrel (§1) | P0.4 | Both apps, outside React users |
+| `@hhh/css` file per component and `hhh-` class names (§1, §5.3) | P0.4 | `@hhh/react`, outside users of any framework |
 | Rendering class (§3.1) | P0.4 | Player app islands |
-| Art manifest `mcc-art-manifest/v1` (§10.1) | P0.3 | `ArtImage`, art check, both apps |
+| Art manifest `mcc-art-manifest/v1` (§10.1) | P0.3 | Art check, both apps |
 | `SsoButton` `provider` and `href` props (§8.1) | P3.5 | Player app sign-in |
 
 A change to a contract updates every consumer in the same PR.
@@ -604,6 +656,8 @@ A change to a contract updates every consumer in the same PR.
 
 - Components use tokens only, declare their rendering class, and stay within their §9.2 budget.
 - Every story passes axe and interaction tests and has Chromatic baselines at 393 and 1440 px.
+- Every component has a plain HTML story that uses only `@hhh/css` classes and matches its React story.
+- Each public package's README documents the new component's classes, props, CSS custom properties and rendering class.
 - Touch targets are at least 44 by 44 CSS px, and focus is visible.
 - The repository checks for the changed paths pass (`AGENTS.md` checks table), including `npm run check` for workspace changes.
 - No real credentials, personal data or real players' gamertags in stories, fixtures or prompts. Fixture gamertags are invented.
@@ -612,7 +666,7 @@ A change to a contract updates every consumer in the same PR.
 ### Phase 0: Specification and tooling
 
 **Goal:** the spec, browser tools for agents, the design agents, and the package and test harness exist.
-**Exit criteria:** a story in `packages/ui` runs through Vitest browser, Chromatic and the size and Lighthouse checks in CI.
+**Exit criteria:** a sample component in `@hhh/css` and `@hhh/react` runs through Vitest browser, Chromatic, the size, Lighthouse and published-files checks in CI.
 
 #### P0.1 Specify the HH.H design system (S)
 
@@ -642,18 +696,20 @@ A change to a contract updates every consumer in the same PR.
   - The Ideogram script reads `IDEOGRAM_API_KEY`, refuses to run without it, never prints it, and enforces the batch cap.
   - `.agents/policy.json` names model and effort for both roles, and `npm run agents:check` passes.
 
-#### P0.4 Design system package, Storybook and Vitest browser (M)
+#### P0.4 Design system packages, Storybook and Vitest browser (M)
 
 - **Blocked by:** P0.1
-- **Spec:** §3, §3.1, §11.1, §12, §16.1
-- **Files:** `packages/ui`, `packages/storybook`, `packages/ui/test/consumers/`, workspace and release metadata
-- **Provides:** subpath exports, the rendering class parameter, the shared Storybook, the reference Vite and Astro apps
+- **Spec:** §1, §3, §3.1, §11, §12, §16
+- **Files:** `packages/hhh-css`, `packages/hhh-react`, `packages/art`, `packages/storybook`, `packages/hhh-react/test/consumers/`, workspace and release metadata
+- **Provides:** the per-component CSS files and class naming, `@hhh/react` subpath exports, the rendering class parameter, the shared Storybook, the reference Vite and Astro apps
 - **Acceptance:**
-  - `packages/ui` builds with SCSS modules and exposes per-component subpath exports, with CSS marked as a side effect.
-  - One Storybook collects stories from `packages/ui`, `applications/admin` and `applications/player`.
+  - `@hhh/css` compiles one sample component's SCSS to its own CSS file with `hhh-` classes inside `hhh.` layers.
+  - `@hhh/react` builds to ESM with one module per component, type declarations and per-component subpath exports, and its sample component imports its CSS file.
+  - One Storybook collects stories from `packages/hhh-react`, `packages/hhh-css/test/html`, `applications/admin` and `applications/player`.
   - Vitest browser mode runs every story on Chromium and WebKit with interaction tests and axe.
-  - A sample component imported alone into the reference Vite app adds no other component's code.
-  - `npm run release:check` passes with the two new workspaces.
+  - The sample component imported alone into the reference Vite app adds no other component's code.
+  - `npm pack --dry-run` for both public packages lists only `dist/`, `README.md`, `LICENSE` and `package.json`, and both declare the MIT license.
+  - `npm run release:check` passes with the four new workspaces.
 
 #### P0.5 Visual, browser and performance checks in CI (M)
 
@@ -663,6 +719,7 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - Chromatic publishes Storybook and runs visual tests on pull requests at 393 and 1440 px.
   - Playwright runs the reference apps on WebKit with the iPhone 15 profile and on Chromium desktop, including the zero-script check for a static Astro page.
+  - The clean install check builds the reference apps from packed tarballs with no workspace links.
   - Size checks and Lighthouse CI fail the build when a §9 budget is exceeded.
   - The PR reports Chromatic snapshot use against the plan quota (§18.5).
 
@@ -675,19 +732,20 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** P0.3, P0.4
 - **Spec:** §4.1 to §4.4, §4.6
-- **Files:** `packages/ui/art/svg/`, `packages/ui/art/cognito/`, Storybook brand pages
+- **Files:** `packages/art/svg/logo/`, `packages/art/cognito/`, `packages/hhh-css/src/icons/`, Storybook brand pages
 - **Acceptance:**
   - The logo is a Halo 3 style energy sword with the HH.H wordmark, as SVG in the §4.1 variants and platform sizes.
   - The palette page shows every §4.2 value with contrast ratios for each text and background pair.
   - A type specimen compares Saira, Michroma and the system body font, and a person picks the display face.
-  - The admin hosted login assets exist in `packages/ui/art/cognito/`.
+  - The admin hosted login assets exist in `packages/art/cognito/`.
+  - The icon style page shows a starter set of original icons in `@hhh/css`.
   - A person approved the kit in Chromatic.
 
 #### P1.2 Medal and emblem set (M)
 
 - **Blocked by:** P1.1
 - **Spec:** §4.5, §9.2, §16.1
-- **Files:** `packages/ui/art/svg/medals/`, `packages/ui/art/svg/emblems/`
+- **Files:** `packages/hhh-css/src/medals/`, `packages/hhh-css/src/emblems/`, `packages/hhh-css/art-manifest.json`
 - **Acceptance:**
   - Medals cover multi-kill, spree, objective and placement achievements in original shapes, with no one-to-one copies of game medals.
   - Emblems combine an original foreground and background shape with two colors.
@@ -698,7 +756,7 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** P0.4, P1.1
 - **Spec:** §4.2 to §4.4, §5
-- **Files:** `packages/ui/tokens/`, `packages/ui/src/styles/`, `packages/ui/scripts/build-tokens.mjs`, `packages/ui/scripts/check-contrast.mjs`
+- **Files:** `packages/hhh-css/tokens/`, `packages/hhh-css/src/base.scss`, `packages/hhh-css/src/_mixins.scss`, `packages/hhh-css/scripts/build-tokens.mjs`, `packages/hhh-css/scripts/check-contrast.mjs`
 - **Provides:** token names and tiers
 - **Acceptance:**
   - Tokens cover every §5.2 group in primitive, semantic and component tiers.
@@ -711,7 +769,7 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** P0.3, P1.1
 - **Spec:** §4.5, §6.1, §10.1, §14
-- **Files:** `packages/ui/art/masters/`, `packages/ui/art/manifest.json`, `packages/ui/scripts/build-art.mjs`, `packages/ui/scripts/check-art.mjs`
+- **Files:** `packages/art/masters/`, `packages/art/manifest.json`, `packages/art/scripts/build-art.mjs`, `packages/art/scripts/check-art.mjs`
 - **Acceptance:**
   - A person approved the helmet hero, at least one ring environment, and the first, second and third place podium figures, each with mobile and desktop crops.
   - Every master has a manifest entry with generation and approval, and the art check passes.
@@ -813,6 +871,7 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - Status badges carry text, not color alone.
   - Skeletons match the layout of the content they replace, with no layout shift.
+  - `Icon` renders any `@hhh/css` icon with an accessible name or as decorative, and `ArtImage` renders caller-supplied AVIF and WebP sources with a placeholder and no layout shift.
 
 #### P3.9 Upload and OTP fields (S)
 
@@ -821,6 +880,18 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - `UploadField` selects several images from an iPhone photo library and shows per-file progress and retry.
   - `OtpField` wraps Base UI's OTP field with the §4.3 stat type.
+
+#### P3.10 Publish the design system packages to npm (S)
+
+- **Blocked by:** P0.5, P3.1
+- **Spec:** §1, §13.1, §13.3, §14, §16.2, §18.10, §18.12
+- **Files:** the publish workflow, release-please configuration, `packages/hhh-css/README.md`, `packages/hhh-react/README.md`
+- **Acceptance:**
+  - A release-please release of `@hhh/css` or `@hhh/react` on `main` runs the publish workflow, which builds, runs the published-files check, and publishes with npm trusted publishing and provenance, using no stored token.
+  - `@hhh/css` publishes before `@hhh/react` when both change.
+  - The workflow has only `id-token: write` and `contents: read`, and does not run on pull requests or forks.
+  - Both READMEs explain installation, the CSS-only and React usage, the rendering classes, the non-affiliation statement, and the MIT license.
+  - `npm install @hhh/css @hhh/react` works in an empty directory with no registry configuration.
 
 ### Phase 4: Backlog (not filed with v1)
 
@@ -834,4 +905,4 @@ A change to a contract updates every consumer in the same PR.
 
 ### 20.4 Dependency order and parallel lanes
 
-The critical path is P0.1 -> P0.3 -> P1.1 -> P1.4 -> P2.1 -> P3.1 -> P3.2 -> P3.3 -> P3.5. P0.2 runs beside P0.1, and P0.4 and P0.5 run beside P0.3. P1.2 and P1.3 run beside P1.4. After P3.2, layout, forms and overlays can run in parallel, and P3.7 and P3.8 can start after P3.1. The first real product feedback is the approved player mockups at the end of P2.1.
+The critical path is P0.1 -> P0.3 -> P1.1 -> P1.4 -> P2.1 -> P3.1 -> P3.2 -> P3.3 -> P3.5. P0.2 runs beside P0.1, and P0.4 and P0.5 run beside P0.3. P1.2 and P1.3 run beside P1.4. After P3.2, layout, forms and overlays can run in parallel, and P3.7, P3.8 and P3.10 can start after P3.1. P3.10 publishes 0.x versions as soon as the first components exist, so outside use can start before phase 3 ends. The first real product feedback is the approved player mockups at the end of P2.1.
