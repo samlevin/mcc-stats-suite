@@ -113,7 +113,7 @@ Art: brief -> scripts/ideogram.mjs -> candidates on the PR branch -> person appr
 
 ## 4. Brand
 
-The brand kit (P1.1) produces these artifacts and a person approves them. Values below are starting values. After P1.3 the token files are authoritative.
+The brand kit (P1.1) and the first art set (P1.4) produce these artifacts, and a person approves them. Values below are starting values. After P1.3 the token files are authoritative.
 
 ### 4.1 Name and logo
 
@@ -278,12 +278,12 @@ Both new roles use Playwright MCP for screenshots (P0.2). Playwriter attaches to
 | Typography (P3.1) | `Heading`, `Text`, `Eyebrow`, `StatValue`, `Gamertag`, `VisuallyHidden` | static-safe | none |
 | Buttons (P3.2) | `Button` (primary, secondary, ghost, destructive), `IconButton`, `LinkButton`, `ToggleButton`, `SegmentedControl` | `Button`, `IconButton`, `LinkButton` static-safe; others interactive | Toggle, ToggleGroup |
 | Layout and navigation (P3.3) | `AppShell`, `TopBar`, `BottomTabBar`, `SideRail`, `Stack`, `Cluster`, `Grid`, `Container`, `Card`, `Breadcrumbs`, `SkipLink` | static-safe except the mobile menu | NavigationMenu, Menu |
-| Forms (P3.4) | `Field`, `TextInput`, `PasswordInput`, `Select`, `Combobox`, `Checkbox`, `Radio`, `Switch`, `DateInput` (native), `OtpField`, `UploadField` | interactive except `Field`, `TextInput`, `DateInput` | Field, Select, Combobox, Checkbox, Radio, Switch, OTPField |
+| Forms (P3.4, P3.9) | `Field`, `TextInput`, `PasswordInput`, `Select`, `Combobox`, `Checkbox`, `Radio`, `Switch`, `DateInput` (native), `OtpField`, `UploadField` | interactive except `Field`, `TextInput`, `DateInput` | Field, Select, Combobox, Checkbox, Radio, Switch, OTPField |
 | Sign-in (P3.5) | `AuthLayout`, `SsoButton` (Google, Microsoft, Apple) | static-safe | none |
 | Overlays (P3.6) | `Dialog`, `BottomSheet`, `Popover`, `Menu`, `Tooltip`, `Toast` | interactive | Dialog, Popover, Menu, Tooltip, Toast |
 | Data display (P3.7) | `DataTable`, `DataList`, `TeamGroup`, `RankRow`, `StatTile`, `Sparkline`, `BarMeter` | static-safe; sorting is an interactive add-on | none |
 | Feedback and status (P3.8) | `Badge`, `StatusBadge`, `Alert`, `Banner`, `Progress`, `Spinner`, `Skeleton`, `EmptyState`, `ErrorState` | static-safe | Progress |
-| Brand and art (P1.1, P1.2) | `Logo`, icons, medal and emblem SVGs, `ArtImage` (responsive `<picture>` with placeholder) | static-safe | none |
+| Brand and art (P1.1, P1.2, P1.4) | `Logo`, icons, medal and emblem SVGs, `ArtImage` (responsive `<picture>` with placeholder) | static-safe | none |
 
 Notes:
 
@@ -548,7 +548,7 @@ CI runs token, lint, unit, Vitest browser, size and art checks for any change to
 2. **License to Microsoft:** under the Game Content Usage Rules, sharing an item grants Microsoft a royalty-free license to use it. Accepted; HH.H art is not a commercial asset.
 3. **Sign in with Apple needs a paid Apple Developer account** for the Services ID and key. The player specification owns that cost and setup. Until it exists, the Apple button stays hidden by configuration.
 4. **Lab metrics are not field metrics:** Lighthouse emulation approximates a mid-range phone. Real-user INP and LCP wait for P4.3.
-5. **Chromatic plan limits:** two viewports for every story may exceed the free snapshot quota. P0.4 measures usage and reports whether a paid plan or TurboSnap is needed; a person decides.
+5. **Chromatic plan limits:** two viewports for every story may exceed the free snapshot quota. P0.5 measures usage and reports whether a paid plan or TurboSnap is needed; a person decides.
 6. **Generated art consistency:** Ideogram results vary between batches. Character references and recorded seeds reduce drift but do not remove it; a person approves every image.
 7. **Display font size:** Saira with both axes may exceed the 80 KB font budget. P1.3 measures it and restricts the weight or width range if needed.
 8. **Provider button rules limit the brand:** the Google, Microsoft and Apple buttons cannot take the HH.H shape or colors.
@@ -576,9 +576,17 @@ CI runs token, lint, unit, Vitest browser, size and art checks for any change to
 
 ## 20. Delivery plan: phases and slices
 
-### 20.1 How this plan is filed
+This section is the backlog source for building the design system. Nothing below is filed until a person has reviewed this spec, except P0.1 (#228) and P0.2 (#229).
 
-The owner asked for one epic, so all phases sit under epic #227 instead of one epic per phase. Each slice below is already a leaf issue, linked as a native sub-issue with native blocked-by links. Sizes come from triage. An L slice splits into stacked layers when it outgrows one reviewable PR.
+### 20.1 How to file this plan
+
+- Each phase becomes one epic, titled with the phase title, with its goal and exit criteria as the body. Create epics only when someone explicitly asks for filing.
+- Each slice becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. File with `/mcc-create-github-issue`.
+- Size is XS, S or M. Split a slice by independently testable behavior when it outgrows one reviewable PR; the original Plan ID becomes the container.
+- Blocked by lists Plan IDs. Create native blocked-by links after every issue in the batch exists.
+- Acceptance bullets become the issue's acceptance criteria verbatim. Every slice also inherits §20.3.
+- Spec lists the sections the implementer must read. Link them; this document stays the source of truth.
+- Plan IDs are stable. Deferred slices keep their IDs and move to the backlog phase; new slices take the next free number in their phase.
 
 ### 20.2 Seam contracts
 
@@ -587,7 +595,7 @@ The owner asked for one epic, so all phases sit under epic #227 instead of one e
 | Token names and tiers (§5.1) | P1.3 | Every component, both apps |
 | Subpath export per component, no root barrel (§1) | P0.4 | Both apps |
 | Rendering class (§3.1) | P0.4 | Player app islands |
-| Art manifest `mcc-art-manifest/v1` (§10.1) | P0.3, P1.1 | `ArtImage`, art check, both apps |
+| Art manifest `mcc-art-manifest/v1` (§10.1) | P0.3 | `ArtImage`, art check, both apps |
 | `SsoButton` `provider` and `href` props (§8.1) | P3.5 | Player app sign-in |
 
 A change to a contract updates every consumer in the same PR.
@@ -596,6 +604,7 @@ A change to a contract updates every consumer in the same PR.
 
 - Components use tokens only, declare their rendering class, and stay within their §9.2 budget.
 - Every story passes axe and interaction tests and has Chromatic baselines at 393 and 1440 px.
+- Touch targets are at least 44 by 44 CSS px, and focus is visible.
 - The repository checks for the changed paths pass (`AGENTS.md` checks table), including `npm run check` for workspace changes.
 - No real credentials, personal data or real players' gamertags in stories, fixtures or prompts. Fixture gamertags are invented.
 - A real-iPhone check of the hosted Storybook is recorded in the PR.
@@ -605,49 +614,213 @@ A change to a contract updates every consumer in the same PR.
 **Goal:** the spec, browser tools for agents, the design agents, and the package and test harness exist.
 **Exit criteria:** a story in `packages/ui` runs through Vitest browser, Chromatic and the size and Lighthouse checks in CI.
 
-| ID | Slice | Issue | Size | Blocked by |
-| --- | --- | --- | --- | --- |
-| P0.1 | Specify the HH.H design system | #228 | S | none |
-| P0.2 | Configure Playwright MCP and Playwriter for repository agents | #229 | S | none |
-| P0.3 | Add design agents for art direction and UX design | #230 | M | P0.1, P0.2 |
-| P0.4 | Create the design system package and its test tooling | #231 | L | P0.1 |
+#### P0.1 Specify the HH.H design system (S)
+
+- **Filed as:** #228
+- **Blocked by:** none
+- **Spec:** this document
+- **Files:** `specs/10-design-system.md`
+- **Acceptance:** a person reviewed and approved this spec.
+
+#### P0.2 Configure Playwright MCP and Playwriter for repository agents (S)
+
+- **Filed as:** #229
+- **Blocked by:** none
+- **Spec:** §6, §14
+- **Files:** the Claude Code and Codex MCP configuration, `.agents/README.md`
+- **Acceptance:** as written in #229.
+
+#### P0.3 Design agents for art direction and UX design (M)
+
+- **Blocked by:** P0.1, P0.2
+- **Spec:** §6, §10.1, §13.1, §14
+- **Files:** `.agents/roles/`, `.agents/policy.json`, generated `.claude/` and `.codex/` output, `scripts/ideogram.mjs` and its tests
+- **Provides:** `mcc-art-director`, `mcc-ux-designer`, the Ideogram script and the art manifest schema
+- **Acceptance:**
+  - `mcc-art-director` runs the §6.1 image flow and writes the logo, icons and medals as SVG.
+  - `mcc-ux-designer` runs the §6.2 mockup flow and assembles a review packet.
+  - The Ideogram script reads `IDEOGRAM_API_KEY`, refuses to run without it, never prints it, and enforces the batch cap.
+  - `.agents/policy.json` names model and effort for both roles, and `npm run agents:check` passes.
+
+#### P0.4 Design system package, Storybook and Vitest browser (M)
+
+- **Blocked by:** P0.1
+- **Spec:** §3, §3.1, §11.1, §12, §16.1
+- **Files:** `packages/ui`, `packages/storybook`, `packages/ui/test/consumers/`, workspace and release metadata
+- **Provides:** subpath exports, the rendering class parameter, the shared Storybook, the reference Vite and Astro apps
+- **Acceptance:**
+  - `packages/ui` builds with SCSS modules and exposes per-component subpath exports, with CSS marked as a side effect.
+  - One Storybook collects stories from `packages/ui`, `applications/admin` and `applications/player`.
+  - Vitest browser mode runs every story on Chromium and WebKit with interaction tests and axe.
+  - A sample component imported alone into the reference Vite app adds no other component's code.
+  - `npm run release:check` passes with the two new workspaces.
+
+#### P0.5 Visual, browser and performance checks in CI (M)
+
+- **Blocked by:** P0.4
+- **Spec:** §9, §15, §16
+- **Files:** Chromatic, Playwright, size check and Lighthouse CI configuration, and the GitHub Actions workflows that run them
+- **Acceptance:**
+  - Chromatic publishes Storybook and runs visual tests on pull requests at 393 and 1440 px.
+  - Playwright runs the reference apps on WebKit with the iPhone 15 profile and on Chromium desktop, including the zero-script check for a static Astro page.
+  - Size checks and Lighthouse CI fail the build when a §9 budget is exceeded.
+  - The PR reports Chromatic snapshot use against the plan quota (§18.5).
 
 ### Phase 1: Brand and style guide
 
-**Goal:** an approved brand kit, medal and emblem set, and the token-based style guide.
-**Exit criteria:** a person approved the brand kit and medals, and the style guide docs pages render from tokens with the contrast check passing.
+**Goal:** an approved brand kit, first art set, medal and emblem set, and the token-based style guide.
+**Exit criteria:** a person approved the brand kit, art set and medals, and the style guide pages render from tokens with the contrast check passing.
 
-| ID | Slice | Issue | Size | Blocked by |
-| --- | --- | --- | --- | --- |
-| P1.1 | Create the HH.H brand kit | #232 | L | P0.3, P0.4 |
-| P1.2 | Create the HH.H medal and emblem set | #233 | M | P1.1 |
-| P1.3 | Build the design system style guide and tokens | #234 | M | P0.4, P1.1 |
+#### P1.1 Brand kit: logo, palette, type and icon style (M)
+
+- **Blocked by:** P0.3, P0.4
+- **Spec:** §4.1 to §4.4, §4.6
+- **Files:** `packages/ui/art/svg/`, `packages/ui/art/cognito/`, Storybook brand pages
+- **Acceptance:**
+  - The logo is a Halo 3 style energy sword with the HH.H wordmark, as SVG in the §4.1 variants and platform sizes.
+  - The palette page shows every §4.2 value with contrast ratios for each text and background pair.
+  - A type specimen compares Saira, Michroma and the system body font, and a person picks the display face.
+  - The admin hosted login assets exist in `packages/ui/art/cognito/`.
+  - A person approved the kit in Chromatic.
+
+#### P1.2 Medal and emblem set (M)
+
+- **Blocked by:** P1.1
+- **Spec:** §4.5, §9.2, §16.1
+- **Files:** `packages/ui/art/svg/medals/`, `packages/ui/art/svg/emblems/`
+- **Acceptance:**
+  - Medals cover multi-kill, spree, objective and placement achievements in original shapes, with no one-to-one copies of game medals.
+  - Emblems combine an original foreground and background shape with two colors.
+  - Each SVG passes the SVG lint, reads at 24 px, and stays within 4 KB gzip.
+  - A person approved the set from a Storybook contact sheet.
+
+#### P1.3 Style guide and tokens (M)
+
+- **Blocked by:** P0.4, P1.1
+- **Spec:** §4.2 to §4.4, §5
+- **Files:** `packages/ui/tokens/`, `packages/ui/src/styles/`, `packages/ui/scripts/build-tokens.mjs`, `packages/ui/scripts/check-contrast.mjs`
+- **Provides:** token names and tiers
+- **Acceptance:**
+  - Tokens cover every §5.2 group in primitive, semantic and component tiers.
+  - The contrast check fails when a semantic text and background pair breaks the §4.2 rule.
+  - Stylelint rejects literal colors, sizes, spacing and `z-index` in component styles.
+  - Display font files are Latin subsets with fallback metrics, within the §9.1 font budget.
+  - Storybook pages render each token group, the typography roles and the motion rules.
+
+#### P1.4 First approved art set (M)
+
+- **Blocked by:** P0.3, P1.1
+- **Spec:** §4.5, §6.1, §10.1, §14
+- **Files:** `packages/ui/art/masters/`, `packages/ui/art/manifest.json`, `packages/ui/scripts/build-art.mjs`, `packages/ui/scripts/check-art.mjs`
+- **Acceptance:**
+  - A person approved the helmet hero, at least one ring environment, and the first, second and third place podium figures, each with mobile and desktop crops.
+  - Every master has a manifest entry with generation and approval, and the art check passes.
+  - The art build produces AVIF and WebP derivatives and placeholders.
+  - No official logos, fonts or screenshots are committed.
 
 ### Phase 2: Mockups
 
 **Goal:** approved high-fidelity mockups of both apps' key screens.
 **Exit criteria:** every screen in §7.2 has an approved Chromatic baseline at both viewports.
 
-| ID | Slice | Issue | Size | Blocked by |
-| --- | --- | --- | --- | --- |
-| P2.1 | Mock up the player key screens in Storybook | #235 | L | P1.3 |
-| P2.2 | Mock up the admin key screens in Storybook | #236 | M | P1.3 |
+#### P2.1 Player key screens (M)
+
+- **Blocked by:** P1.3, P1.4
+- **Spec:** §6.2, §7.2, §8.1, §9.3
+- **Files:** player app `mockups/` stories
+- **Acceptance:**
+  - Screens: sign-in with Google, Microsoft and Apple, home, service record, match postgame, and leaderboard with podium.
+  - Each screen covers loading, empty and error states.
+  - The review packet lists findings and fixes, and a person approved each screen in Chromatic.
+
+#### P2.2 Admin key screens (M)
+
+- **Blocked by:** P1.3
+- **Spec:** §6.2, §7.2, §8.2, §9.3
+- **Files:** admin app `mockups/` stories
+- **Acceptance:**
+  - Screens: match upload, match list, review queue with the evidence viewer, and roster. Admin sign-in stays on the Cognito hosted page and is not mocked up.
+  - Each screen covers loading, empty and error states.
+  - The review packet lists findings and fixes, and a person approved each screen in Chromatic.
 
 ### Phase 3: Components
 
 **Goal:** the design system tier of §7.1.
 **Exit criteria:** every component in §7.1 meets §20.3 and matches the approved mockups.
 
-| ID | Slice | Issue | Size | Blocked by |
-| --- | --- | --- | --- | --- |
-| P3.1 | Typography components | #237 | M | P2.1, P2.2 |
-| P3.2 | Button components | #238 | M | P3.1 |
-| P3.3 | Layout and navigation components | #239 | M | P3.2 |
-| P3.4 | Form components | #240 | L | P3.2 |
-| P3.5 | Player sign-in screen components with SSO buttons | #241 | M | P3.3, P1.1, P2.1 |
-| P3.6 | Overlay components | #242 | M | P3.2 |
-| P3.7 | Data display components | #243 | M | P3.1 |
-| P3.8 | Feedback and status components | #244 | M | P3.1 |
+#### P3.1 Typography (M)
+
+- **Blocked by:** P2.1, P2.2
+- **Spec:** §4.3, §7.1
+- **Acceptance:**
+  - `Heading`, `Text`, `Eyebrow`, `StatValue`, `Gamertag` and `VisuallyHidden` are static-safe.
+  - Stat values use tabular figures, and gamertags never break a layout at 320 px wide.
+
+#### P3.2 Buttons (M)
+
+- **Blocked by:** P3.1
+- **Spec:** §4.4, §7.1
+- **Acceptance:**
+  - Every §7.1 button variant has default, hover, pressed, focus, disabled and loading states.
+  - The primary style uses the amber selection treatment from §4.4.
+
+#### P3.3 Layout and navigation (M)
+
+- **Blocked by:** P3.2
+- **Spec:** §5.2, §5.3, §7.1
+- **Acceptance:**
+  - The shell uses a bottom tab bar on phones and a side rail on desktop, and respects safe areas.
+  - Layout primitives respond to container size.
+
+#### P3.4 Form fields (M)
+
+- **Blocked by:** P3.2
+- **Spec:** §5.3, §7.1, §9.3
+- **Acceptance:**
+  - `Field`, `TextInput`, `PasswordInput`, `Select`, `Combobox`, `Checkbox`, `Radio`, `Switch` and `DateInput` exist.
+  - Inputs use at least 16 px text, and validation messages are announced to screen readers.
+
+#### P3.5 Player sign-in components (M)
+
+- **Blocked by:** P3.3, P1.4, P2.1
+- **Spec:** §8.1, §9.1, §14
+- **Provides:** `SsoButton` props
+- **Acceptance:**
+  - `AuthLayout` loads the approved art as layered AVIF with a portrait mobile crop, within the hero image budget, with CSS-only motion that stops under reduced motion.
+  - `SsoButton` supports Google, Microsoft and Apple and follows each provider's branding.
+  - There are no username, password or email fields, and the Game Content Usage Rules notice shows in the footer.
+
+#### P3.6 Overlays (M)
+
+- **Blocked by:** P3.2
+- **Spec:** §4.4, §7.1, §9.3
+- **Acceptance:**
+  - The bottom sheet is the default overlay on phones, and nothing is reachable only through a tooltip.
+  - Focus is trapped and restored, and Escape and back gestures close overlays.
+
+#### P3.7 Data display (M)
+
+- **Blocked by:** P3.1
+- **Spec:** §4.2, §7.1
+- **Acceptance:**
+  - Team rows use the team tokens and always carry a team label.
+  - Wide tables keep the first column sticky and show a scroll cue on phones; `DataList` switches between cards and table by container width.
+
+#### P3.8 Feedback and status (M)
+
+- **Blocked by:** P3.1, P1.4
+- **Spec:** §7.1, §9.3
+- **Acceptance:**
+  - Status badges carry text, not color alone.
+  - Skeletons match the layout of the content they replace, with no layout shift.
+
+#### P3.9 Upload and OTP fields (S)
+
+- **Blocked by:** P3.4
+- **Spec:** §7.1
+- **Acceptance:**
+  - `UploadField` selects several images from an iPhone photo library and shows per-file progress and retry.
+  - `OtpField` wraps Base UI's OTP field with the §4.3 stat type.
 
 ### Phase 4: Backlog (not filed with v1)
 
@@ -661,4 +834,4 @@ A change to a contract updates every consumer in the same PR.
 
 ### 20.4 Dependency order and parallel lanes
 
-The critical path is P0.1 -> P0.3 -> P1.1 -> P1.3 -> P2.1 -> P3.1 -> P3.2 -> P3.3 -> P3.5. P0.2 runs beside P0.1, and P0.4 runs beside P0.3. P1.2 runs beside P1.3. After P3.2, the layout, form and overlay slices can run in parallel lanes, and P3.7 and P3.8 can start after P3.1. The first real product feedback is the approved player mockups at the end of P2.1.
+The critical path is P0.1 -> P0.3 -> P1.1 -> P1.4 -> P2.1 -> P3.1 -> P3.2 -> P3.3 -> P3.5. P0.2 runs beside P0.1, and P0.4 and P0.5 run beside P0.3. P1.2 and P1.3 run beside P1.4. After P3.2, layout, forms and overlays can run in parallel, and P3.7 and P3.8 can start after P3.1. The first real product feedback is the approved player mockups at the end of P2.1.
