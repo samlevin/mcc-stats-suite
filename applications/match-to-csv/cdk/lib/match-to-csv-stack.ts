@@ -122,6 +122,13 @@ export class MatchToCsvStack extends Stack {
     // The foundation publishes the submission address's alias and domain.
     const emailAliasParameter = `${prefix}/email-alias`;
     const emailDomainParameter = `${prefix}/email-domain`;
+    // process-email replies from noreply@<domain> to a message without a
+    // valid match date. The domain resolves at deploy time, so the sender
+    // address and the ses:SendEmail grant always name the same SES identity.
+    const emailDomain = ssm.StringParameter.valueForStringParameter(
+      this,
+      emailDomainParameter,
+    );
     // An ephemeral stack's receipt rule keeps the alias and domain from its
     // last deploy, so its process-email checks each message's recipient
     // against the values the foundation publishes when the message arrives.
@@ -134,6 +141,7 @@ export class MatchToCsvStack extends Stack {
       {
         EVIDENCE_BUCKET: evidenceBucket.bucketName,
         SENDER_ALLOWLIST_PARAMETER: senderAllowlistParameter,
+        REPLY_FROM_DOMAIN: emailDomain,
         ...(deployment.ephemeral
           ? {
               EMAIL_ALIAS_PARAMETER: emailAliasParameter,
@@ -188,6 +196,18 @@ export class MatchToCsvStack extends Stack {
             resourceName: name.slice(1),
           }),
         ),
+      }),
+    );
+    processEmail.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ses:SendEmail'],
+        resources: [
+          this.formatArn({
+            service: 'ses',
+            resource: 'identity',
+            resourceName: emailDomain,
+          }),
+        ],
       }),
     );
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
@@ -370,10 +390,6 @@ export class MatchToCsvStack extends Stack {
       const emailAlias = ssm.StringParameter.valueForStringParameter(
         this,
         emailAliasParameter,
-      );
-      const emailDomain = ssm.StringParameter.valueForStringParameter(
-        this,
-        emailDomainParameter,
       );
       new ses.CfnReceiptRule(this, 'StoreRawEmail', {
         ruleSetName: ssm.StringParameter.valueForStringParameter(

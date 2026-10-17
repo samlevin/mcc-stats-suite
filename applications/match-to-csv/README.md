@@ -11,6 +11,7 @@ configured SES recipient
   -> raw MIME email in S3
   -> EventBridge and Step Functions
   -> sender screening (SES verdicts and optional allowlist)
+  -> match date from the email body
   -> attachment validation
   -> one SourceScreenshot per accepted image
   -> one ProcessingRun per screenshot
@@ -27,7 +28,17 @@ The receipt rules enable SES scanning, so SES prepends `X-SES-Spam-Verdict`, `X-
 
 For the optional sender allowlist, see [Manage the sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist). The self-hosting guide covers its behavior and how to create, update, or remove it through the AWS console or CLI.
 
-A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, or `RECIPIENT_NOT_ALLOWED`. A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses). They record the recipient check as `recipientCheck` (`NOT_CONFIGURED` for stable stacks, otherwise `ALLOWED` or `DENIED`, with the recipients SES recorded in its `Received` header).
+A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, `RECIPIENT_NOT_ALLOWED`, or `MATCH_DATE_INVALID` (see [Match date](#match-date)). A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses). They record the recipient check as `recipientCheck` (`NOT_CONFIGURED` for stable stacks, otherwise `ALLOWED` or `DENIED`, with the recipients SES recorded in its `Received` header).
+
+## Match date
+
+The plain-text body of each submission holds one string, the date of the match. Screenshots from one session can run past midnight, so the date cannot come from timestamps. After trimming whitespace, the body must be a calendar date written `M/D/YYYY`: month 1 to 12, a day that exists in that month, and a four-digit year. Leading zeros are accepted, so `5/2/2026` and `05/02/2026` are the same date.
+
+`process-email` checks the date only for a message that passed sender screening. A valid date is recorded as `matchDate` (`YYYY-MM-DD`) in `ingestion.json` and returned in `ProcessEmailOutput`. A missing or invalid date records `matchDate: null` and rejects the submission with `MATCH_DATE_INVALID` before any attachment is stored, so no screenshot reaches Textract.
+
+For `MATCH_DATE_INVALID` only, `process-email` replies to the `From` address from `noreply@<domain>`, where the domain is `/mcc/<environment>/match-to-csv/email-domain`, resolved when the stack deploys. The reply's subject is `Re: <original subject>`, its `In-Reply-To` and `References` headers name the original message ID, and its body says the email was not processed because the body must contain only the match date as `M/D/YYYY`. It asks the sender to send the email again to the submission address, because replies to the no-reply address are not read. Only an allowlisted sender gets a reply, so a message with no sender allowlist configured is rejected without one. No other rejection sends a reply. A failed send is logged with the SES error name only, and the recorded rejection stays as it is.
+
+`ProcessEmail` may call `ses:SendEmail` only on the domain's SES identity in its own account and Region. That identity exists outside OpenTofu. While an account is in the SES sandbox, SES delivers only to verified addresses, so replies to other senders fail and are logged. The local workload boundary that ephemeral stacks use does not allow `ses:SendEmail`, so an ephemeral stack logs a failed send instead of replying.
 
 ## Deployment
 

@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import type {
   AttachmentRejectionCode,
@@ -22,6 +23,7 @@ import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 
 const s3 = new S3Client({});
 const ssm = new SSMClient({});
+const ses = new SESv2Client({});
 const MIN_IMAGE_WIDTH = 640;
 const MIN_IMAGE_HEIGHT = 360;
 
@@ -45,7 +47,18 @@ interface ParsedEmail {
   headerLines?: readonly HeaderLine[];
   /** Addresses in the `From` header. */
   fromAddresses?: string[];
+  /** The plain-text body. */
+  text?: string;
   attachments: ParsedAttachment[];
+}
+
+/** A plain-text email that `process-email` sends through SES. */
+export interface ReplyMessage {
+  from: string;
+  to: string[];
+  subject: string;
+  body: string;
+  headers: Array<{ name: string; value: string }>;
 }
 
 /**
@@ -108,6 +121,7 @@ export interface ProcessEmailDependencies {
   /** A String parameter's value, or undefined when it does not exist. */
   getParameter(parameterName: string): Promise<string | undefined>;
   inspectImage(content: Buffer): Promise<ImageMetadata>;
+  sendEmail(message: ReplyMessage): Promise<void>;
   putObject(
     reference: S3ObjectReference,
     body: Buffer,
@@ -138,6 +152,7 @@ const defaultDependencies: ProcessEmailDependencies = {
       fromAddresses: (parsed.from?.value ?? []).flatMap((entry) =>
         entry.address ? [entry.address] : [],
       ),
+      text: parsed.text,
       attachments: parsed.attachments,
     };
   },
@@ -148,6 +163,27 @@ const defaultDependencies: ProcessEmailDependencies = {
   getParameter: (parameterName) => readParameter(parameterName),
   async inspectImage(content) {
     return sharp(content, { failOn: 'none' }).metadata();
+  },
+  async sendEmail(message) {
+    await ses.send(
+      new SendEmailCommand({
+        FromEmailAddress: message.from,
+        Destination: { ToAddresses: message.to },
+        Content: {
+          Simple: {
+            Subject: { Data: message.subject, Charset: 'UTF-8' },
+            Body: { Text: { Data: message.body, Charset: 'UTF-8' } },
+            Headers:
+              message.headers.length > 0
+                ? message.headers.map(({ name, value }) => ({
+                    Name: name,
+                    Value: value,
+                  }))
+                : undefined,
+          },
+        },
+      }),
+    );
   },
   async putObject(reference, body, contentType) {
     await s3.send(
@@ -251,6 +287,15 @@ export async function processEmail(
     allowlist,
     expectedRecipient,
   );
+  const matchDate = parseMatchDate(parsed.text);
+  // The date is checked only once screening passes, so the reply below never
+  // goes to a message that screening rejected.
+  const submissionRejectionCodes: SubmissionRejectionCode[] =
+    screening.rejectionCodes.length > 0
+      ? screening.rejectionCodes
+      : matchDate === undefined
+        ? ['MATCH_DATE_INVALID']
+        : [];
   const submissionId = dependencies.id();
   const submissionPrefix = namespacedObjectKey(`submissions/${submissionId}`);
   const screenshots: SourceScreenshot[] = [];
@@ -265,6 +310,7 @@ export async function processEmail(
       rawEmail: event,
       messageId: parsed.messageId,
       subject: parsed.subject,
+      matchDate: matchDate ?? null,
       receivedAt: dependencies.timestamp(),
       attachmentCount: parsed.attachments.length,
       sesVerdicts: screening.sesVerdicts,
@@ -274,9 +320,10 @@ export async function processEmail(
   );
 
   try {
-    // A screened-out message stores and analyzes nothing; the raw MIME stays.
+    // A screened-out message, or one without a valid match date, stores and
+    // analyzes nothing; the raw MIME stays.
     const attachments =
-      screening.rejectionCodes.length === 0 ? parsed.attachments : [];
+      submissionRejectionCodes.length === 0 ? parsed.attachments : [];
     for (const [index, attachment] of attachments.entries()) {
       const attachmentName = safeObjectName(
         attachment.filename ?? `attachment-${index + 1}`,
@@ -363,8 +410,8 @@ export async function processEmail(
     }
 
     const rejectionCodes: SubmissionRejectionCode[] =
-      screening.rejectionCodes.length > 0
-        ? screening.rejectionCodes
+      submissionRejectionCodes.length > 0
+        ? submissionRejectionCodes
         : screenshots.length === 0
           ? ['NO_PROCESSABLE_SCREENSHOTS']
           : [];
@@ -399,8 +446,16 @@ export async function processEmail(
       },
     );
 
-    if (screening.rejectionCodes.length > 0) {
-      throw new SubmissionRejectedError(screening.rejectionCodes);
+    if (submissionRejectionCodes.length > 0) {
+      if (submissionRejectionCodes.includes('MATCH_DATE_INVALID')) {
+        await replyMatchDateInvalid(
+          dependencies,
+          parsed,
+          screening.senderAllowlist,
+          submissionId,
+        );
+      }
+      throw new SubmissionRejectedError(submissionRejectionCodes);
     }
     if (!accepted) throw new NoProcessableScreenshotsError();
   } catch (error) {
@@ -443,7 +498,110 @@ export async function processEmail(
     screenshotCount: screenshots.length,
     rejectedAttachmentCount: rejectedAttachments.length,
   });
-  return { submissionId, screenshots, rejectedAttachments };
+  return {
+    submissionId,
+    matchDate: matchDate as string,
+    screenshots,
+    rejectedAttachments,
+  };
+}
+
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/**
+ * Reads the match date from a plain-text body. After trimming whitespace, the
+ * body must be one calendar date written `M/D/YYYY`: month 1-12, a day that
+ * exists in that month, and a four-digit year, with optional leading zeros.
+ * Returns the date as `YYYY-MM-DD`, or undefined for a missing or invalid body.
+ */
+export function parseMatchDate(text: string | undefined): string | undefined {
+  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text?.trim() ?? '');
+  if (!match) return undefined;
+  const [month, day, year] = match.slice(1).map(Number);
+  const leapYear = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  const lastDay =
+    month === 2 && leapYear ? 29 : (DAYS_IN_MONTH[month - 1] ?? 0);
+  if (day < 1 || day > lastDay) return undefined;
+  return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/** The local part of the address replies come from; SSM supplies the domain. */
+const REPLY_LOCAL_PART = 'noreply';
+
+const MATCH_DATE_REPLY_BODY = [
+  'Your email was not processed because its body must contain only the date of the match, written as M/D/YYYY, such as 10/17/2026.',
+  '',
+  'Please send it again to the submission address with only the date in the body. Replies to this no-reply address are not read.',
+  '',
+].join('\n');
+
+/**
+ * The error reply to a message without a valid match date: from
+ * `noreply@<domain>`, threaded under the original message when its ID is a
+ * well-formed `<id>`.
+ */
+export function matchDateReply(
+  email: Pick<ParsedEmail, 'messageId' | 'subject'>,
+  to: string[],
+  domain: string,
+): ReplyMessage {
+  const subject = (email.subject ?? '').replace(/[\r\n]+/g, ' ').trim();
+  const messageId = email.messageId?.trim();
+  const threaded =
+    messageId !== undefined &&
+    messageId.length <= 870 &&
+    /^<[\x21-\x3b\x3d\x3f-\x7e]+>$/.test(messageId);
+  return {
+    from: `${REPLY_LOCAL_PART}@${domain}`,
+    to,
+    subject: subject ? `Re: ${subject}` : 'Re:',
+    body: MATCH_DATE_REPLY_BODY,
+    headers: threaded
+      ? [
+          { name: 'In-Reply-To', value: messageId },
+          { name: 'References', value: messageId },
+        ]
+      : [],
+  };
+}
+
+/**
+ * Sends the match date error reply to the sender. Only allowlisted senders get
+ * one, so a reply goes only to an address on the allowlist. A failed send is
+ * logged and leaves the recorded rejection unchanged. No log line holds an
+ * address or email content.
+ */
+async function replyMatchDateInvalid(
+  dependencies: ProcessEmailDependencies,
+  email: ParsedEmail,
+  senderAllowlist: SenderAllowlistDecision,
+  submissionId: string,
+): Promise<void> {
+  if (senderAllowlist.status !== 'ALLOWED') {
+    log('WARN', 'Match date reply not sent: no sender allowlist', {
+      submissionId,
+    });
+    return;
+  }
+  const domain = process.env.REPLY_FROM_DOMAIN;
+  if (!domain) {
+    log('ERROR', 'Match date reply not sent: REPLY_FROM_DOMAIN is not set', {
+      submissionId,
+    });
+    return;
+  }
+  try {
+    await dependencies.sendEmail(
+      matchDateReply(email, senderAllowlist.fromAddresses, domain),
+    );
+    log('INFO', 'Match date reply sent', { submissionId });
+  } catch (error) {
+    // SES error messages can name addresses, so only the error name is logged.
+    log('ERROR', 'Unable to send the match date reply', {
+      submissionId,
+      error: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
 }
 
 /**

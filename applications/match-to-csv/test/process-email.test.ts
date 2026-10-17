@@ -4,11 +4,14 @@ import type { S3ObjectReference } from '@mcc/contracts';
 import {
   attachmentRejectionCodes,
   createParameterReader,
+  matchDateReply,
+  parseMatchDate,
   parseSenderAllowlist,
   parseSesRecipients,
   parseSesVerdicts,
   processEmail,
   type ProcessEmailDependencies,
+  type ReplyMessage,
 } from '../src/lambdas/process-email';
 
 afterEach(() => {
@@ -18,7 +21,12 @@ afterEach(() => {
   delete process.env.EMAIL_ALIAS_PARAMETER;
   delete process.env.EMAIL_DOMAIN_PARAMETER;
   delete process.env.RECIPIENT_SUBADDRESS;
+  delete process.env.REPLY_FROM_DOMAIN;
 });
+
+/** A valid match date body, as a person would type it. */
+const MATCH_DATE = '5/2/2026';
+const REPLY_DOMAIN = 'mail.example.test';
 
 interface ScreeningCase {
   headerLines?: Array<{ key: string; line: string }>;
@@ -31,6 +39,14 @@ interface ScreeningCase {
    * current parameter values, where undefined means the parameter is missing.
    */
   ephemeral?: { name: string; alias?: string; domain?: string };
+  /** The plain-text body. Defaults to a valid match date when absent. */
+  text?: string;
+  messageId?: string;
+  subject?: string;
+  /** Makes every reply send fail with this error. */
+  sendError?: Error;
+  /** Undefined leaves REPLY_FROM_DOMAIN unset; absent uses REPLY_DOMAIN. */
+  replyDomain?: string;
 }
 
 const ALIAS_PARAMETER = '/mcc/dev/match-to-csv/email-alias';
@@ -47,6 +63,9 @@ async function runScreening(options: ScreeningCase) {
     process.env.EMAIL_DOMAIN_PARAMETER = DOMAIN_PARAMETER;
     process.env.RECIPIENT_SUBADDRESS = options.ephemeral.name;
   }
+  const replyDomain =
+    'replyDomain' in options ? options.replyDomain : REPLY_DOMAIN;
+  if (replyDomain) process.env.REPLY_FROM_DOMAIN = replyDomain;
   const parameters: Record<string, string | undefined> = {
     [ALIAS_PARAMETER]: options.ephemeral?.alias,
     [DOMAIN_PARAMETER]: options.ephemeral?.domain,
@@ -55,6 +74,8 @@ async function runScreening(options: ScreeningCase) {
   const objectWrites: S3ObjectReference[] = [];
   const allowlistReads: string[] = [];
   const parameterReads: string[] = [];
+  const sends: ReplyMessage[] = [];
+  const logs: Array<Record<string, unknown>> = [];
   let inspections = 0;
   let id = 0;
   const dependencies: ProcessEmailDependencies = {
@@ -63,8 +84,11 @@ async function runScreening(options: ScreeningCase) {
     },
     async parseEmail() {
       return {
+        messageId: options.messageId,
+        subject: options.subject,
         headerLines: options.headerLines,
         fromAddresses: options.fromAddresses,
+        text: 'text' in options ? options.text : MATCH_DATE,
         attachments: [
           {
             filename: 'scoreboard.png',
@@ -86,6 +110,10 @@ async function runScreening(options: ScreeningCase) {
       inspections += 1;
       return { format: 'png', width: 1920, height: 1080 };
     },
+    async sendEmail(message) {
+      sends.push(message);
+      if (options.sendError) throw options.sendError;
+    },
     async putObject(reference) {
       objectWrites.push(reference);
     },
@@ -96,13 +124,21 @@ async function runScreening(options: ScreeningCase) {
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
   };
+  const consoleLog = console.log;
+  console.log = (line: string) => {
+    logs.push(JSON.parse(line) as Record<string, unknown>);
+  };
   const outcome = await processEmail(
     { bucket: 'raw', key: 'incoming/message' },
     dependencies,
-  ).then(
-    (result) => ({ result, error: undefined }),
-    (error: Error) => ({ result: undefined, error }),
-  );
+  )
+    .then(
+      (result) => ({ result, error: undefined }),
+      (error: Error) => ({ result: undefined, error }),
+    )
+    .finally(() => {
+      console.log = consoleLog;
+    });
   const find = (fragment: string): Record<string, any> => {
     const write = jsonWrites.find((candidate) =>
       candidate.key.includes(fragment),
@@ -118,6 +154,8 @@ async function runScreening(options: ScreeningCase) {
     objectWrites,
     allowlistReads,
     parameterReads,
+    sends,
+    logs,
     inspections: () => inspections,
   };
 }
@@ -139,6 +177,9 @@ test('processEmail accepts a listed sender with passing verdicts and records the
 
   assert.equal(run.error, undefined);
   assert.equal(run.result?.screenshots.length, 1);
+  assert.equal(run.result?.matchDate, '2026-05-02');
+  assert.equal(run.ingestion.matchDate, '2026-05-02');
+  assert.deepEqual(run.sends, [], 'an accepted submission gets no reply');
   assert.deepEqual(run.allowlistReads, [
     '/mcc/dev/match-to-csv/sender-allowlist',
   ]);
@@ -423,6 +464,9 @@ test('processEmail refuses a partial recipient configuration before writing evid
         async inspectImage() {
           throw new Error('not called');
         },
+        async sendEmail() {
+          throw new Error('not called');
+        },
         async putObject(reference) {
           writes.push(reference.key);
         },
@@ -540,6 +584,9 @@ test('processEmail writes no evidence when the allowlist read fails', async () =
         async inspectImage() {
           throw new Error('not called');
         },
+        async sendEmail() {
+          throw new Error('not called');
+        },
         async putObject(reference) {
           writes.push(reference.key);
         },
@@ -595,6 +642,7 @@ test('processEmail preserves images and returns every processable attachment', a
       return {
         messageId: 'message',
         subject: 'subject',
+        text: MATCH_DATE,
         attachments: [
           {
             filename: 'scoreboard.png',
@@ -631,6 +679,9 @@ test('processEmail preserves images and returns every processable attachment', a
       if (content.toString() === 'small')
         return { format: 'jpeg', width: 200, height: 100 };
       return { format: 'png', width: 1920, height: 1080 };
+    },
+    async sendEmail() {
+      throw new Error('not called');
     },
     async putObject(reference) {
       objectWrites.push(reference);
@@ -677,6 +728,7 @@ test('processEmail records and rejects an email without a screenshot', async () 
     },
     async parseEmail() {
       return {
+        text: MATCH_DATE,
         attachments: [
           { contentType: 'text/plain', content: Buffer.from('notes') },
         ],
@@ -689,6 +741,9 @@ test('processEmail records and rejects an email without a screenshot', async () 
       throw new Error('not called');
     },
     async inspectImage() {
+      throw new Error('not called');
+    },
+    async sendEmail() {
       throw new Error('not called');
     },
     async putObject() {
@@ -754,6 +809,7 @@ test('processEmail records a failed completion when evidence storage fails', asy
     },
     async parseEmail() {
       return {
+        text: MATCH_DATE,
         attachments: [
           { contentType: 'image/png', content: Buffer.from('image') },
         ],
@@ -767,6 +823,9 @@ test('processEmail records a failed completion when evidence storage fails', asy
     },
     async inspectImage() {
       return { format: 'png', width: 1920, height: 1080 };
+    },
+    async sendEmail() {
+      throw new Error('not called');
     },
     async putObject() {
       throw new Error('storage failed');
@@ -793,4 +852,274 @@ test('processEmail records a failed completion when evidence storage fails', asy
   assert.ok(
     jsonWrites.some((write) => write.value.type === 'SUBMISSION_FAILED'),
   );
+});
+
+test('the match date is one M/D/YYYY calendar date, with or without leading zeros', () => {
+  for (const [body, expected] of [
+    ['5/2/2026', '2026-05-02'],
+    ['05/02/2026', '2026-05-02'],
+    ['12/31/2026', '2026-12-31'],
+    ['1/1/0999', '0999-01-01'],
+    [' \r\n\t10/17/2026 \r\n', '2026-10-17'],
+    ['2/29/2024', '2024-02-29'],
+    ['2/29/2000', '2000-02-29'],
+  ] as const) {
+    assert.equal(parseMatchDate(body), expected, body);
+  }
+  for (const body of [
+    undefined,
+    '',
+    '  \r\n ',
+    'scores from tonight',
+    '13/1/2026',
+    '0/1/2026',
+    '1/0/2026',
+    '1/32/2026',
+    '4/31/2026',
+    '2/30/2026',
+    '2/29/2026',
+    '2/29/1900',
+    '1/1/26',
+    '1/1/20266',
+    '001/1/2026',
+    '2026-01-01',
+    '1-1-2026',
+    '1/1/2026 thanks',
+    '1/1/2026\n1/2/2026',
+  ]) {
+    assert.equal(parseMatchDate(body), undefined, JSON.stringify(body));
+  }
+});
+
+const listedSender = {
+  headerLines: sesHeaders('PASS', 'PASS'),
+  fromAddresses: ['player@example.test'],
+  allowlistParameter: '/mcc/dev/match-to-csv/sender-allowlist',
+  allowlist: ['player@example.test'],
+  messageId: '<original-id@example.test>',
+  subject: 'Tonight',
+};
+
+for (const [label, text] of [
+  ['an empty body', ''],
+  ['no plain-text body', undefined],
+  ['text', 'scores from tonight'],
+  ['month 13', '13/1/2026'],
+  ['February 30', '2/30/2026'],
+  ['a two-digit year', '1/1/26'],
+] as const) {
+  test(`processEmail rejects ${label} as MATCH_DATE_INVALID before storing any screenshot and replies`, async () => {
+    const run = await runScreening({ ...listedSender, text });
+
+    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assert.equal(run.result, undefined, 'no screenshot reaches the Map');
+    assert.deepEqual(run.objectWrites, [], 'no screenshot is stored');
+    assert.equal(run.inspections(), 0, 'no attachment is inspected');
+    assert.equal(run.ingestion.matchDate, null);
+    assert.equal(run.completion.status, 'REJECTED');
+    assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
+    assert.equal(run.completion.acceptedScreenshotCount, 0);
+    assert.equal(run.event.type, 'SUBMISSION_REJECTED');
+    assert.deepEqual(run.event.detail.rejectionCodes, ['MATCH_DATE_INVALID']);
+    assert.equal(run.sends.length, 1);
+    const [reply] = run.sends;
+    assert.equal(reply.from, 'noreply@mail.example.test');
+    assert.deepEqual(reply.to, ['player@example.test']);
+    assert.equal(reply.subject, 'Re: Tonight');
+    assert.deepEqual(reply.headers, [
+      { name: 'In-Reply-To', value: '<original-id@example.test>' },
+      { name: 'References', value: '<original-id@example.test>' },
+    ]);
+    assert.match(reply.body, /not processed/);
+    assert.match(
+      reply.body,
+      /only the date of the match, written as M\/D\/YYYY/,
+    );
+    assert.match(reply.body, /send it again to the submission address/);
+    assert.match(reply.body, /Replies to this no-reply address are not read/);
+  });
+}
+
+for (const [label, options, codes] of [
+  [
+    'a failed spam verdict',
+    { headerLines: sesHeaders('FAIL', 'PASS') },
+    ['SPAM_VERDICT_FAILED'],
+  ],
+  [
+    'a failed virus verdict',
+    { headerLines: sesHeaders('PASS', 'FAIL') },
+    ['VIRUS_VERDICT_FAILED'],
+  ],
+  [
+    'an unlisted sender',
+    { fromAddresses: ['stranger@example.test'] },
+    ['SENDER_NOT_ALLOWED'],
+  ],
+  [
+    'a failed recipient check',
+    {
+      headerLines: [
+        sesReceived('example-alias+bob@mail.example.com'),
+        ...sesHeaders('PASS', 'PASS'),
+      ],
+      ephemeral: current,
+    },
+    ['RECIPIENT_NOT_ALLOWED'],
+  ],
+] as Array<[string, ScreeningCase, string[]]>) {
+  test(`processEmail sends no reply for ${label}, even without a match date`, async () => {
+    const run = await runScreening({ ...listedSender, ...options, text: '' });
+
+    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assert.deepEqual(run.completion.rejectionCodes, codes);
+    assert.deepEqual(run.objectWrites, []);
+    assert.deepEqual(run.sends, []);
+  });
+}
+
+test('processEmail sends no reply when no attachment is processable', async () => {
+  process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.REPLY_FROM_DOMAIN = REPLY_DOMAIN;
+  const sends: ReplyMessage[] = [];
+  const jsonWrites: Array<{ key: string; value: any }> = [];
+  await assert.rejects(
+    processEmail(
+      { bucket: 'raw', key: 'incoming/message' },
+      {
+        async getRawEmail() {
+          return Buffer.from('mime');
+        },
+        async parseEmail() {
+          return { text: MATCH_DATE, attachments: [] };
+        },
+        async getSenderAllowlist() {
+          throw new Error('not called');
+        },
+        async getParameter() {
+          throw new Error('not called');
+        },
+        async inspectImage() {
+          throw new Error('not called');
+        },
+        async sendEmail(message) {
+          sends.push(message);
+        },
+        async putObject() {
+          throw new Error('not called');
+        },
+        async writeJson(bucket, key, value) {
+          jsonWrites.push({ key, value });
+          return { bucket, key };
+        },
+        id: () => 'id',
+        timestamp: () => '2026-01-01T00:00:00.000Z',
+      },
+    ),
+    { name: 'NoProcessableScreenshotsError' },
+  );
+  assert.equal(
+    jsonWrites.find((write) => write.key.endsWith('/ingestion.json'))?.value
+      .matchDate,
+    '2026-05-02',
+  );
+  assert.deepEqual(sends, []);
+});
+
+test('processEmail logs a failed reply without an address or email content and keeps the rejection', async () => {
+  const sendError = Object.assign(
+    new Error('Email address is not verified: player@example.test, Tonight'),
+    { name: 'MessageRejected' },
+  );
+  const run = await runScreening({ ...listedSender, text: '', sendError });
+
+  assert.equal(run.error?.name, 'SubmissionRejectedError');
+  assert.equal(run.sends.length, 1, 'the send was attempted');
+  assert.equal(run.completion.status, 'REJECTED');
+  assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
+  assert.equal(run.event.type, 'SUBMISSION_REJECTED');
+  const failure = run.logs.find(
+    (line) => line.message === 'Unable to send the match date reply',
+  );
+  assert.ok(failure, 'the failed send is logged');
+  assert.equal(failure.level, 'ERROR');
+  assert.equal(failure.error, 'MessageRejected');
+  const logged = JSON.stringify(run.logs);
+  for (const fragment of ['@example.test', 'Tonight', 'original-id']) {
+    assert.ok(!logged.includes(fragment), `logs omit ${fragment}`);
+  }
+});
+
+test('processEmail replies only to an allowlisted sender', async () => {
+  const run = await runScreening({
+    ...listedSender,
+    allowlistParameter: undefined,
+    allowlist: undefined,
+    text: '',
+  });
+
+  assert.equal(run.ingestion.senderAllowlist.status, 'NOT_CONFIGURED');
+  assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
+  assert.deepEqual(run.sends, []);
+  assert.ok(
+    run.logs.some(
+      (line) =>
+        line.level === 'WARN' &&
+        line.message === 'Match date reply not sent: no sender allowlist',
+    ),
+  );
+});
+
+test('processEmail sends no reply without a reply domain', async () => {
+  const run = await runScreening({
+    ...listedSender,
+    replyDomain: undefined,
+    text: '',
+  });
+
+  assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
+  assert.deepEqual(run.sends, []);
+  assert.ok(
+    run.logs.some(
+      (line) =>
+        line.level === 'ERROR' &&
+        line.message ===
+          'Match date reply not sent: REPLY_FROM_DOMAIN is not set',
+    ),
+  );
+});
+
+test('the match date reply threads only under a well-formed message ID', () => {
+  const to = ['player@example.test'];
+  assert.deepEqual(
+    matchDateReply(
+      { messageId: '<a.b+c@example.test>', subject: 'Line one\r\n line two' },
+      to,
+      REPLY_DOMAIN,
+    ),
+    {
+      from: 'noreply@mail.example.test',
+      to,
+      subject: 'Re: Line one  line two',
+      body: matchDateReply({}, to, REPLY_DOMAIN).body,
+      headers: [
+        { name: 'In-Reply-To', value: '<a.b+c@example.test>' },
+        { name: 'References', value: '<a.b+c@example.test>' },
+      ],
+    },
+  );
+  for (const messageId of [
+    undefined,
+    'no-brackets@example.test',
+    '<two@example.test> <ids@example.test>',
+    '<bad\r\nInjected: header>',
+    `<${'x'.repeat(870)}>`,
+  ]) {
+    assert.deepEqual(
+      matchDateReply({ messageId }, to, REPLY_DOMAIN).headers,
+      [],
+      JSON.stringify(messageId),
+    );
+  }
+  assert.equal(matchDateReply({}, to, REPLY_DOMAIN).subject, 'Re:');
 });
