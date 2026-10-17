@@ -39,3 +39,11 @@ output "github_turbo_cache_role_arn" {
 output "receipt_rule_set_name" {
   value = aws_ses_receipt_rule_set.inbound.rule_set_name
 }
+
+output "roster_table_name" {
+  value = aws_dynamodb_table.roster.name
+}
+
+output "roster_table_arn" {
+  value = aws_dynamodb_table.roster.arn
+}

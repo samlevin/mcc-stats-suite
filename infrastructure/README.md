@@ -5,7 +5,7 @@ This directory holds the OpenTofu side of the split that [How AWS is divided](..
 | Root | Owner | Purpose |
 |---|---|---|
 | `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
-| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the SES receipt rule set, and SSM resource contracts |
+| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the gamertag roster table, the SES receipt rule set, and SSM resource contracts |
 | `<environment>/data-platform` | OpenTofu, when activated | Shared analytics and lakehouse resources |
 | `dev/local-cdk` | OpenTofu, from Terrateam or by hand | The `CDKToolkitLocal` stack, the restricted CDK bootstrap for ephemeral stacks |
 
@@ -50,6 +50,10 @@ Everything under `/mcc/<environment>/` is application config: values that applic
 ## Inbound email contract
 
 Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, its activation, and the `<alias>@<domain>` rule, which stores mail under `incoming/<environment>/` in the raw-email bucket. The domain and alias are the sensitive `email_domain` and `email_alias` inputs; keep them out of version control and out of plain CI variables. Terrateam reads them from the `DEV_MCC_EMAIL_DOMAIN` and `DEV_MCC_EMAIL_ALIAS` or `PROD_MCC_EMAIL_DOMAIN` and `PROD_MCC_EMAIL_ALIAS` repository secrets. A local apply, including one through `mcc-apply-foundation`, reads the applied values back from the SSM parameters through the root's ignored `.envrc`. After changing a secret, bump `<environment>/foundation/external-inputs.revision` in a pull request so Terrateam plans the root. The rule set name, domain, and alias are published at `/mcc/<environment>/match-to-csv/receipt-rule-set-name`, `/mcc/<environment>/match-to-csv/email-domain`, and `/mcc/<environment>/match-to-csv/email-alias`. The domain identity and MX record are manual prerequisites.
+
+## Gamertag roster table
+
+Each foundation root owns the DynamoDB table `<project>-<environment>-gamertag-roster`, the roster change log described in [spec 6](../specs/6-gamertag-roster.md#51-roster-table). It uses on-demand billing, string keys `pk` and `sk`, and the foundation application data key, and it has point-in-time recovery, deletion protection, and `prevent_destroy` in both environments, whatever `force_destroy` says. The table name and ARN are published at `/mcc/<environment>/roster/table-name` and `/mcc/<environment>/roster/table-arn`. OpenTofu manages no roster items, so roster contents never appear in state or plan output. CDK stacks read the parameters to grant their Lambdas access.
 
 ## Turborepo cache storage contract
 

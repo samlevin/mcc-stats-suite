@@ -1,6 +1,6 @@
 # Apply and change the foundation
 
-The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/foundation`, hold KMS keys, durable storage, the SES receipt rule set, the Turbo cache bucket and role, and the SSM parameters that applications read. They are ordinary OpenTofu roots. Apply them by hand from an administrator session, or from any infrastructure CI/CD system that can run OpenTofu with AWS credentials for the target account. The commands below are the manual path; a CI/CD system runs the same `init`, `plan`, and `apply` steps with the same inputs. The merged commit is the foundation version; there is no separate release ID.
+The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/foundation`, hold KMS keys, durable storage, the gamertag roster table, the SES receipt rule set, the Turbo cache bucket and role, and the SSM parameters that applications read. They are ordinary OpenTofu roots. Apply them by hand from an administrator session, or from any infrastructure CI/CD system that can run OpenTofu with AWS credentials for the target account. The commands below are the manual path; a CI/CD system runs the same `init`, `plan`, and `apply` steps with the same inputs. The merged commit is the foundation version; there is no separate release ID.
 
 Whatever runs OpenTofu, keep these rules:
 
@@ -23,7 +23,7 @@ Each root's ignored `.envrc`, created from the `.envrc.example` in that director
 | `force_destroy` | variable default | `true` in dev, `false` in prod. |
 | `cache_service_role_arns` | optional | Extra same-account roles allowed to use the Turbo cache bucket. Defaults to none. |
 
-The identity that applies the foundation needs to manage KMS, S3, SES receipt rules, SSM parameters, and the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, plus read and write access to the state bucket. The administrator permission sets from [prerequisites](00-prerequisites.md) are enough. For a CI/CD identity, see [CI roles for the foundation](10-bootstrap-accounts.md#ci-roles-for-the-foundation). To use Terrateam, as the upstream repository does, follow [Apply the foundation with Terrateam](70-optional-terrateam.md).
+The identity that applies the foundation needs to manage KMS, S3, DynamoDB tables, SES receipt rules, SSM parameters, and the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, plus read and write access to the state bucket. The administrator permission sets from [prerequisites](00-prerequisites.md) are enough. For a CI/CD identity, see [CI roles for the foundation](10-bootstrap-accounts.md#ci-roles-for-the-foundation). To use Terrateam, as the upstream repository does, follow [Apply the foundation with Terrateam](70-optional-terrateam.md).
 
 ## Apply dev
 
