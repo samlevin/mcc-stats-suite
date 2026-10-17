@@ -5,7 +5,7 @@ This directory holds the OpenTofu side of the split that [How AWS is divided](..
 | Root | Owner | Purpose |
 |---|---|---|
 | `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
-| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the SES receipt rule set, and SSM resource contracts |
+| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the SES receipt rule set, SSM resource contracts, and in dev the local CDK permission policies |
 | `<environment>/data-platform` | OpenTofu, when activated | Shared analytics and lakehouse resources |
 
 ## Bootstrap

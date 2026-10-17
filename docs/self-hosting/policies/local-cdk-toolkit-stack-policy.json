@@ -4,13 +4,7 @@
       "Effect": "Deny",
       "Principal": "*",
       "Action": ["Update:Delete", "Update:Replace"],
-      "Resource": [
-        "LogicalResourceId/LocalWorkloadBoundary",
-        "LogicalResourceId/LocalExecutionBoundary",
-        "LogicalResourceId/LocalExecutionPolicy",
-        "LogicalResourceId/LocalExecutionComputePolicy",
-        "LogicalResourceId/LocalExecutionEventsPolicy"
-      ]
+      "Resource": ["LogicalResourceId/LocalBootstrapGuard"]
     },
     {
       "Effect": "Allow",

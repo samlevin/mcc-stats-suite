@@ -2,6 +2,8 @@
 
 The `mcclocal1` bootstrap limits local developers to ephemeral application stacks in dev. For setup, upgrades, removal, and local access, follow [Bootstrap CDK and grant local deploy access](self-hosting/20-bootstrap-cdk.md).
 
+`scripts/local-cdk-bootstrap.mjs` generates the bootstrap template, which defines the deployment, lookup, and publishing roles and the execution role. The dev foundation owns the execution role's policies and boundary and the runtime boundary, in `infrastructure/modules/foundation/local-cdk-policies.tf`, and the template attaches them by name. A permission change is a foundation pull request and needs no bootstrap upgrade.
+
 ## What the local bootstrap allows
 
 Ephemeral synthesis selects this bootstrap, its runtime boundary, and the IAM role path `/mcc-local/` automatically.
@@ -14,7 +16,7 @@ Ephemeral synthesis selects this bootstrap, its runtime boundary, and the IAM ro
 
 For ephemeral deploys, `scripts/cdk-app.mjs` passes `--change-set-name mcclocal1-deploy` and `--toolkit-stack-name CDKToolkitLocal` and rejects options that would bypass them ([details](self-hosting/50-deploy-and-release-applications.md)). Those checks only fail early; IAM refuses each option anyway.
 
-This policy covers the currently implemented resources. Review and extend it when an application introduces a new AWS resource type, and never replace it with `AdministratorAccess`.
+These policies cover the currently implemented resources. Review and extend them in the dev foundation when an application introduces a new AWS resource type, and never replace them with `AdministratorAccess`.
 
 ## Known limits
 
@@ -23,7 +25,7 @@ This policy covers the currently implemented resources. Review and extend it whe
 - The file-publishing role is left as CDK ships it and can overwrite any object in the local staging bucket. CDK skips uploading an asset whose content hash already exists, so one developer can replace an asset that another developer's next deploy reuses.
 - An ephemeral S3 rule can match object-created events for any bucket, so object keys and sizes in the shared buckets are visible to it. Object contents are not.
 
-These limits keep developers from accidentally affecting each other and from changing shared dev; they do not isolate developers from each other. The bootstrap's IAM policy names are account-wide, matching the shared workload boundary, so bootstrap one Region per account.
+These limits keep developers from accidentally affecting each other and from changing shared dev; they do not isolate developers from each other. The local policy names are account-wide, matching the shared workload boundary, and their Regional ARNs use the dev foundation's Region, so bootstrap only that Region.
 
 ## Validate the boundary
 
@@ -34,4 +36,4 @@ Use a disposable dev account with the dev foundation applied, and never run dest
 3. In policy simulation, check that `ExecuteChangeSet` for `cdk-deploy-change-set` is denied. Also check the execution role: it must be denied passing the default execution role, removing a runtime boundary, creating a role outside `/mcc-local/` or without the local boundary, and putting an EventBridge target on a `*-dev*` resource.
 4. Run `cdk bootstrap --qualifier mcclocal1 --toolkit-stack-name CDKToolkitLocal` without `--template` and confirm the stack policy rejects the update.
 
-After setting up local access, verify that a merge to `main` still deploys shared dev through GitHub Actions. The AWS-free tests in `scripts/local-cdk-bootstrap.test.mjs` evaluate the generated policies and synthesize every application; they do not replace this live validation.
+After setting up local access, verify that a merge to `main` still deploys shared dev through GitHub Actions. Two AWS-free suites do not replace this live validation. `infrastructure/modules/foundation/tests/local-cdk-policies.tftest.hcl` checks the five policies against the rules above. `scripts/local-cdk-bootstrap.test.mjs` evaluates the template's role policies and synthesizes every application to check that its resource names fall under those rules.

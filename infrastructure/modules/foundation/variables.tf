@@ -35,6 +35,16 @@ variable "create_github_cache_role" {
   default     = false
 }
 
+variable "create_local_cdk_policies" {
+  description = "Create the five local CDK permission policies that the mcclocal1 bootstrap attaches by name. Only dev has local CDK deployments."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.create_local_cdk_policies || var.environment == "dev"
+    error_message = "create_local_cdk_policies is allowed only in dev."
+  }
+}
+
 variable "github_oidc_subject_repository" {
   description = "Repository segment in OIDC subjects; set owner@ID/repo@ID when immutable subjects are enabled, matching bootstrap."
   type        = string

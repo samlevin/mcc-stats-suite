@@ -1,7 +1,7 @@
-# The dev foundation will own the local CDK permission policies; bootstrap
-# delegates only their lifecycle. The names match the ManagedPolicyName values
-# in scripts/local-cdk-bootstrap.mjs, which scripts/local-cdk-bootstrap.test.mjs
-# checks.
+# The dev foundation owns the local CDK permission policies
+# (infrastructure/modules/foundation/local-cdk-policies.tf); bootstrap delegates
+# only their lifecycle. infrastructure/modules/foundation/tests/
+# local-cdk-policy-names.tftest.hcl checks that the names match.
 locals {
   local_cdk_policy_names = [
     "mcc-stats-suite-local-workload-boundary",

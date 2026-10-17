@@ -4,7 +4,6 @@ import {
   APPLICATIONS as applications,
   LOCAL_CHANGE_SET_NAME,
   LOCAL_QUALIFIER,
-  LOCAL_ROLE_PATH,
 } from './cdk-targets.mjs';
 
 const sub = (value) => ({ 'Fn::Sub': value });
@@ -12,10 +11,8 @@ const arn = (service, resource) =>
   sub(
     `arn:${'${AWS::Partition}'}:${service}:${'${AWS::Region}'}:${'${AWS::AccountId}'}:${resource}`,
   );
-const roleArn = (resource) =>
-  sub(
-    `arn:${'${AWS::Partition}'}:iam::${'${AWS::AccountId}'}:role/${resource}`,
-  );
+const policyArn = (name) =>
+  sub(`arn:${'${AWS::Partition}'}:iam::${'${AWS::AccountId}'}:policy/${name}`);
 const statement = (Sid, Action, Resource, extra = {}) => ({
   Sid,
   Effect: 'Allow',
@@ -23,25 +20,23 @@ const statement = (Sid, Action, Resource, extra = {}) => ({
   Resource,
   ...extra,
 });
-const deny = (Sid, Action, Resource, extra = {}) => ({
-  ...statement(Sid, Action, Resource, extra),
-  Effect: 'Deny',
-});
 const document = (Statement) => ({ Version: '2012-10-17', Statement });
-const managedPolicy = (ManagedPolicyName, Statement) => ({
-  Type: 'AWS::IAM::ManagedPolicy',
-  Properties: { ManagedPolicyName, PolicyDocument: document(Statement) },
-});
 
-// Logical IDs of the policies this transform adds. The operator's stack policy protects
-// them from deletion, so a default re-bootstrap cannot silently restore administrator roles.
-export const LOCAL_POLICY_RESOURCES = [
-  'LocalWorkloadBoundary',
-  'LocalExecutionBoundary',
-  'LocalExecutionPolicy',
-  'LocalExecutionComputePolicy',
-  'LocalExecutionEventsPolicy',
+// The dev foundation owns the execution role's policies and boundary
+// (infrastructure/modules/foundation/local-cdk-policies.tf), so the policies
+// change through a foundation pull request instead of a bootstrap upgrade.
+export const LOCAL_EXECUTION_POLICIES = [
+  'mcc-stats-suite-local-cdk-execution',
+  'mcc-stats-suite-local-cdk-execution-compute',
+  'mcc-stats-suite-local-cdk-execution-events',
 ];
+export const LOCAL_EXECUTION_BOUNDARY =
+  'mcc-stats-suite-local-cdk-execution-boundary';
+
+// A resource the upstream template lacks. The operator's stack policy protects it from
+// deletion, so a default re-bootstrap, which would remove it, cannot silently restore
+// administrator roles.
+export const LOCAL_GUARD_RESOURCE = 'LocalBootstrapGuard';
 
 export function localBootstrap(template) {
   const result = structuredClone(template);
@@ -71,26 +66,6 @@ export function localBootstrap(template) {
   const stacks = applications.map((app) =>
     arn('cloudformation', `stack/${app}-e-*/*`),
   );
-  const roles = applications.map((app) =>
-    roleArn(`${LOCAL_ROLE_PATH.slice(1)}${app}-e-*`),
-  );
-  // Name-anchored per service, so neither unrelated names such as sysadmin-* nor
-  // aliases, executions, or streams of other resources match.
-  const functions = applications.map((app) =>
-    arn('lambda', `function:${app}-e-*`),
-  );
-  const stateMachines = applications.map((app) =>
-    arn('states', `stateMachine:${app}-e-*`),
-  );
-  const queues = applications.map((app) => arn('sqs', `${app}-e-*`));
-  const computeResources = [
-    ...functions,
-    ...stateMachines,
-    ...applications.map((app) => arn('states', `execution:${app}-e-*`)),
-    ...queues,
-    ...applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
-  ];
-  const rules = applications.map((app) => arn('events', `rule/${app}-e-*`));
   const bootstrapVersion = arn(
     'ssm',
     `parameter/cdk-bootstrap/${LOCAL_QUALIFIER}/version`,
@@ -100,129 +75,14 @@ export function localBootstrap(template) {
   // /mcc-ci/<environment>/. One prefix therefore covers every application.
   const applicationParameters = arn('ssm', 'parameter/mcc/dev/*');
   const deploymentParameters = [bootstrapVersion, applicationParameters];
-  const OWN_TAG = '${aws:PrincipalTag/Ephemeral}';
-  // ${!...} renders the literal IAM policy variable through Fn::Sub.
-  const OWN = OWN_TAG.replace('${', '${!');
-  const objects = (prefix) =>
-    sub(`arn:${'${AWS::Partition}'}:s3:::*/${prefix}`);
-  const viaS3 = {
-    StringEquals: { 'kms:ViaService': sub('s3.${AWS::Region}.amazonaws.com') },
-  };
   const localExecution = {
     'Fn::GetAtt': ['CloudFormationExecutionRole', 'Arn'],
   };
-  const runtimeBoundary = { Ref: 'LocalWorkloadBoundary' };
-  const withRuntimeBoundary = {
-    Condition: {
-      StringEquals: { 'iam:PermissionsBoundary': runtimeBoundary },
-    },
-  };
 
-  resources.LocalWorkloadBoundary = managedPolicy(
-    'mcc-stats-suite-local-workload-boundary',
-    [
-      statement(
-        'WorkloadActions',
-        [
-          'kms:DescribeKey',
-          'textract:AnalyzeDocument',
-          'logs:CreateLogDelivery',
-          'logs:GetLogDelivery',
-          'logs:UpdateLogDelivery',
-          'logs:DeleteLogDelivery',
-          'logs:ListLogDeliveries',
-          'logs:PutResourcePolicy',
-          'logs:DescribeResourcePolicies',
-          'logs:DescribeLogGroups',
-          'xray:PutTraceSegments',
-          'xray:PutTelemetryRecords',
-          'xray:GetSamplingRules',
-          'xray:GetSamplingTargets',
-        ],
-        '*',
-      ),
-      statement(
-        'WriteEphemeralLogs',
-        ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
-        applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
-      ),
-      // Functions read single dev application parameters at runtime, such as
-      // match-to-csv's sender allowlist and the submission address it checks.
-      // The boundary allows any application's; each function's own policy
-      // still names the exact parameters it reads.
-      statement(
-        'ReadApplicationParameters',
-        'ssm:GetParameter',
-        applicationParameters,
-      ),
-      // The app uses keys only for S3 server-side encryption.
-      statement(
-        'UseKeysThroughS3',
-        [
-          'kms:Decrypt',
-          'kms:Encrypt',
-          'kms:ReEncrypt*',
-          'kms:GenerateDataKey*',
-        ],
-        '*',
-        { Condition: viaS3 },
-      ),
-      // Each stack tags its roles Ephemeral=<name>, so a runtime reaches only its own
-      // ephemeral/<name>/ and incoming/<name>/ objects. Shared dev evidence is outside both.
-      statement(
-        'WriteEphemeralObjects',
-        's3:PutObject',
-        objects(`ephemeral/${OWN}/*`),
-      ),
-      statement('ReadEphemeralObjects', 's3:GetObject*', [
-        objects(`ephemeral/${OWN}/*`),
-        objects(`incoming/${OWN}/*`),
-      ]),
-      statement('ListEphemeralObjects', 's3:ListBucket', '*', {
-        Condition: { StringLike: { 's3:prefix': `ephemeral/${OWN_TAG}/*` } },
-      }),
-      // IAM's * also matches /, so the allows above would otherwise match these prefixes
-      // anywhere in a key, such as submissions/ephemeral/<name>/ in shared evidence.
-      deny('EphemeralPrefixesAtKeyRoot', 's3:*', [
-        objects('*/ephemeral/*'),
-        objects('*/incoming/*'),
-      ]),
-      // S3 ARNs carry no account, so the object allows would also match other accounts.
-      deny('OnlyThisAccountsBuckets', 's3:*', '*', {
-        Condition: {
-          StringNotEquals: { 's3:ResourceAccount': '${aws:PrincipalAccount}' },
-          Null: { 's3:ResourceAccount': 'false' },
-        },
-      }),
-      deny('ProtectSharedInboundEmail', 's3:*', objects('incoming/dev/*')),
-      statement(
-        'UseEphemeralCompute',
-        [
-          'lambda:InvokeFunction',
-          'states:StartExecution',
-          'states:DescribeExecution',
-          'states:StopExecution',
-          'states:GetExecutionHistory',
-          'sqs:SendMessage',
-        ],
-        computeResources,
-      ),
-      deny(
-        'NoDeploymentOrIdentityAdministration',
-        ['iam:*', 'sts:*', 'cloudformation:*', 'account:*', 'organizations:*'],
-        '*',
-      ),
-      deny(
-        'ProtectStableBootstrapAssets',
-        ['s3:*', 'ecr:*'],
-        [
-          sub('arn:${AWS::Partition}:s3:::cdk-hnb659fds-*'),
-          sub('arn:${AWS::Partition}:s3:::cdk-hnb659fds-*/*'),
-          arn('ecr', 'repository/cdk-hnb659fds-*'),
-        ],
-      ),
-    ],
-  );
+  // Creates nothing. See LOCAL_GUARD_RESOURCE.
+  resources[LOCAL_GUARD_RESOURCE] = {
+    Type: 'AWS::CloudFormation::WaitConditionHandle',
+  };
 
   // This repository makes no context lookups, so the lookup role reads only stack
   // metadata and the bootstrap version instead of inheriting ReadOnlyAccess.
@@ -340,188 +200,11 @@ export function localBootstrap(template) {
   // Never inherit AdministratorAccess or user-supplied execution policy parameters. The
   // identity policies hold the scoped grants (split to fit the managed policy size limit);
   // the boundary caps the role at those services and denies deployment and identity
-  // administration.
+  // administration. The dev foundation must exist before this template is deployed.
   const execution = resources.CloudFormationExecutionRole.Properties;
-  execution.ManagedPolicyArns = [
-    { Ref: 'LocalExecutionPolicy' },
-    { Ref: 'LocalExecutionComputePolicy' },
-    { Ref: 'LocalExecutionEventsPolicy' },
-  ];
-  execution.PermissionsBoundary = { Ref: 'LocalExecutionBoundary' };
-  const computeServices = ['lambda', 'states', 'sqs', 'logs'];
+  execution.ManagedPolicyArns = LOCAL_EXECUTION_POLICIES.map(policyArn);
+  execution.PermissionsBoundary = policyArn(LOCAL_EXECUTION_BOUNDARY);
 
-  resources.LocalExecutionBoundary = managedPolicy(
-    'mcc-stats-suite-local-cdk-execution-boundary',
-    [
-      statement(
-        'ExecutionServices',
-        [
-          ...computeServices.map((service) => `${service}:*`),
-          'events:*',
-          'ses:*ReceiptRule*',
-          's3:GetObject',
-          's3:GetBucketLocation',
-          'kms:Decrypt',
-          'kms:DescribeKey',
-          'ssm:GetParameter',
-          'ssm:GetParameters',
-          'iam:*Role*',
-          'iam:GetPolicy',
-          'iam:GetPolicyVersion',
-        ],
-        '*',
-      ),
-      deny(
-        'NoDeploymentOrIdentityAdministration',
-        [
-          'cloudformation:*',
-          'sts:*',
-          'account:*',
-          'organizations:*',
-          'iam:DeleteRolePermissionsBoundary',
-          'iam:CreateServiceLinkedRole',
-        ],
-        '*',
-      ),
-    ],
-  );
-
-  resources.LocalExecutionComputePolicy = managedPolicy(
-    'mcc-stats-suite-local-cdk-execution-compute',
-    [
-      statement(
-        'ManageEphemeralCompute',
-        computeServices.map((service) => `${service}:*`),
-        computeResources,
-      ),
-      // The AWS::Logs::LogGroup handler lists groups, which IAM checks against no group ARN.
-      statement('DescribeLogGroups', 'logs:DescribeLogGroups', '*'),
-    ],
-  );
-
-  resources.LocalExecutionEventsPolicy = managedPolicy(
-    'mcc-stats-suite-local-cdk-execution-events',
-    [
-      statement(
-        'ManageEphemeralRules',
-        [
-          'events:DescribeRule',
-          'events:DeleteRule',
-          'events:EnableRule',
-          'events:DisableRule',
-          'events:ListTargetsByRule',
-          'events:RemoveTargets',
-          'events:TagResource',
-          'events:UntagResource',
-          'events:ListTagsForResource',
-        ],
-        rules,
-      ),
-      // Rules may match only S3 events, so a local template cannot subscribe to the shared
-      // workflows' Step Functions events.
-      statement('PutEphemeralRules', 'events:PutRule', rules, {
-        Condition: {
-          'ForAllValues:StringEquals': { 'events:source': 'aws.s3' },
-          Null: { 'events:source': 'false' },
-        },
-      }),
-      // Rules may deliver only to ephemeral compute.
-      statement('PutEphemeralTargets', 'events:PutTargets', rules, {
-        Condition: {
-          'ForAllValues:ArnLike': {
-            'events:TargetArn': [...functions, ...stateMachines, ...queues],
-          },
-          Null: { 'events:TargetArn': 'false' },
-        },
-      }),
-    ],
-  );
-
-  resources.LocalExecutionPolicy = managedPolicy(
-    'mcc-stats-suite-local-cdk-execution',
-    [
-      statement(
-        'ManageEphemeralReceiptRules',
-        [
-          'ses:CreateReceiptRule',
-          'ses:UpdateReceiptRule',
-          'ses:DeleteReceiptRule',
-          'ses:DescribeReceiptRule',
-          'ses:DescribeReceiptRuleSet',
-        ],
-        '*',
-      ),
-      statement(
-        'ReadLambdaAssets',
-        ['s3:GetObject', 's3:GetBucketLocation'],
-        [
-          { 'Fn::GetAtt': ['StagingBucket', 'Arn'] },
-          sub('${StagingBucket.Arn}/*'),
-        ],
-      ),
-      // Lambda reads the code object with the caller's credentials; the staging bucket uses SSE-KMS.
-      statement('DecryptLambdaAssets', 'kms:Decrypt', '*', {
-        Condition: viaS3,
-      }),
-      statement(
-        'ReadConfiguration',
-        ['kms:DescribeKey', 'iam:GetPolicy', 'iam:GetPolicyVersion'],
-        '*',
-      ),
-      statement(
-        'ReadDeploymentParameters',
-        ['ssm:GetParameter', 'ssm:GetParameters'],
-        deploymentParameters,
-      ),
-      // Roles under the local path exist only through CreateRole with the runtime boundary.
-      statement(
-        'CreateBoundedRoles',
-        ['iam:CreateRole', 'iam:PutRolePermissionsBoundary'],
-        roles,
-        withRuntimeBoundary,
-      ),
-      statement(
-        'ChangeBoundedRolePolicies',
-        [
-          'iam:PutRolePolicy',
-          'iam:DeleteRolePolicy',
-          'iam:AttachRolePolicy',
-          'iam:DetachRolePolicy',
-        ],
-        roles,
-        withRuntimeBoundary,
-      ),
-      statement(
-        'ManageEphemeralRoles',
-        [
-          'iam:GetRole',
-          'iam:DeleteRole',
-          'iam:UpdateAssumeRolePolicy',
-          'iam:ListInstanceProfilesForRole',
-          'iam:GetRolePolicy',
-          'iam:ListRolePolicies',
-          'iam:ListAttachedRolePolicies',
-          'iam:TagRole',
-          'iam:UntagRole',
-          'iam:ListRoleTags',
-          'iam:UpdateRole',
-          'iam:UpdateRoleDescription',
-        ],
-        roles,
-      ),
-      statement('PassRuntimeRoles', 'iam:PassRole', roles, {
-        Condition: {
-          StringEquals: {
-            'iam:PassedToService': [
-              'lambda.amazonaws.com',
-              'states.amazonaws.com',
-              'events.amazonaws.com',
-            ],
-          },
-        },
-      }),
-    ],
-  );
   return result;
 }
 
