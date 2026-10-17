@@ -103,4 +103,6 @@ Update the closest durable document:
 - repository-wide orientation belongs in this file or the root README;
 - instructions that only coding agents follow belong in `AGENTS.md` or `.agents/`.
 
+Documentation and code comments describe the current state: what exists and how to set it up, bootstrap, deploy, and run it. They are not a log of problems and fixes, and they are not ordered by when things happened. This applies to the self-hosting guides, READMEs, these guides, specs, agent instructions, code comments, and any future documentation such as wiki pages. Write how something works, not what it used to do or which change made it so. Change history belongs in pull request descriptions, commit messages, and changelogs. A code comment may keep prior context only to explain an established regression that the code must not reintroduce.
+
 Do not put personal account structure, domain names, email addresses, or maintainer-specific setup in public documentation.

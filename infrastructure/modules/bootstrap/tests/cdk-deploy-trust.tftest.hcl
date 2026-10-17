@@ -16,8 +16,8 @@ override_data {
   values = { partition = "aws", dns_suffix = "amazonaws.com" }
 }
 
-# scripts/deployment-workflows.test.mjs checks the current callers and the two
-# names they had before the workflow rename in issue #133.
+# scripts/deployment-workflows.test.mjs checks the current callers' names and
+# the two names no workflow uses.
 run "cdk_role_trusts_every_deployment_caller" {
   command = plan
   plan_options { refresh = false }
@@ -37,7 +37,7 @@ run "cdk_role_trusts_every_deployment_caller" {
       "Delivery: deploy to dev then prod",
       "Delivery: roll back prod",
     ])
-    error_message = "The CDK entry role must trust exactly the current delivery and rollback workflow names and the names they had before the rename."
+    error_message = "The CDK entry role must trust exactly the current delivery and rollback workflow names and the two unused names."
   }
   assert {
     condition = one([

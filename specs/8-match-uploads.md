@@ -2,7 +2,7 @@
 
 **Status:** Draft; not implemented
 
-**Version:** 2.0-draft (replaces the 1.0-draft match sessions design: matches are created by an admin's upload, and no screenshot metadata or map selection places a screenshot)
+**Version:** 2.0-draft
 
 **Date:** October 15, 2026
 
@@ -22,23 +22,23 @@
 
 A match ends. An admin signs in to the admin application, picks that match's postgame scoreboard screenshots and uploads them. The upload request creates the match first: an opaque `matchId`, a slug of one random Halo term and a short random suffix such as `warthog-7k3q`, and the match's metadata. Only then does the admin application issue upload slots, so every screenshot is staged, checked and extracted already knowing its match. Match-to-csv carries the `matchId` from the upload into the screenshot's source and every run's manifest. A versioned match record lists the match's status and its screenshots, and match-to-csv runs, spec 7 and the stats lakehouse (#159) read it.
 
-**Readiness:** this revision authorizes filing Phases 0 to 5. Slices that build on the admin workspace, user pool or stack are blocked by the spec 3 slices named in their **Blocked by** lines. P3.2 cannot merge until P1.2 is applied in dev and prod, and P4.4 until P1.1, P1.2 and spec 2 P1.1 are. The contracts in §5.3 and §10.1 freeze when P0.1 merges. The slug word list in §7.2 is a proposal until P0.2 merges it, and the limits in §7.4 are initial values until P5.3 records the first live matches. Spec 9, the stats lakehouse (#159), merged while this revision was open and still reads the 1.0-draft contract; §8.4 lists what it must change.
+**Readiness:** this specification authorizes filing Phases 0 to 5. Slices that build on the admin workspace, user pool or stack are blocked by the spec 3 slices named in their **Blocked by** lines. P3.2 cannot merge until P1.2 is applied in dev and prod, and P4.4 until P1.1, P1.2 and spec 2 P1.1 are. The contracts in §5.3 and §10.1 freeze when P0.1 merges. The slug word list in §7.2 is a proposal until P0.2 merges it, and the limits in §7.4 are initial values until P5.3 records the first live matches. Spec 9, the stats lakehouse (#159), reads the session-association contract; §8.4 lists what it must change.
 
 ---
 
 ## 1. Resolved requirement decisions
 
-The issue (#167) first asked for host-run sessions in which the host selected each map before play and the admin application placed each uploaded screenshot by comparing its capture time with those selections. That design is withdrawn. Screenshot metadata is not reliable enough to piece map selections and postgame screens together, and the admin application no longer selects maps. The issue now states this flow: a match ends, an admin signs in and uploads its screenshots, and the upload creates the match, with its identifier, slug and metadata, before any image processing begins, because statistics are tied to matches.
+Issue #167 states this flow: a match ends, an admin signs in and uploads its screenshots, and the upload creates the match, with its identifier, slug and metadata, before any image processing begins, because statistics are tied to matches. Screenshot metadata is not reliable enough to place a screenshot by comparing its capture time with map selections, so the admin application does not select maps.
 
 | Requirement | Decision | Reason |
 | --- | --- | --- |
-| Who owns match records | The admin application owns matches and their screenshot membership. Its `MatchWrite` Lambda is the only writer of match events, and its `WriteMatchRecord` Lambda the only writer of match record versions. Match-to-csv writes only upload receipts. The stats lakehouse (#159) reads match records and never creates a match. This settles the ownership question #159 left open. | The admin creates the match when uploading. A match inferred later from statistics or metadata would be a guess. |
+| Who owns match records | The admin application owns matches and their screenshot membership. Its `MatchWrite` Lambda is the only writer of match events, and its `WriteMatchRecord` Lambda the only writer of match record versions. Match-to-csv writes only upload receipts. The stats lakehouse (#159) reads match records and never creates a match. | The admin creates the match when uploading. A match inferred later from statistics or metadata would be a guess. |
 | What creates a match | One `POST /api/v1/matches` request, which carries the descriptions of 1 to 10 screenshot files. It writes the `MATCH_CREATED` event before any upload intent or presigned POST exists (§6.1). A match is never created by intake, by a screenshot or by a metadata rule. | Every staged object is then already under a match, so intake, extraction, review and statistics never handle a screenshot whose match is unknown. |
 | How screenshots join a match | By the upload. A screenshot belongs to the match whose upload created it, recorded in its upload intent, its staging key, its `SourceScreenshot.intake.matchId` and its run manifest. EXIF data, file times and upload order are never read to place it. A screenshot never moves between matches: an admin excludes it from the wrong match and uploads it to the right one (§4.2). | The admin knows which match the screenshots show. Explicit membership needs no association rules, has nothing to tune and cannot be wrong silently. Moving would make one screenshot's match depend on event order in two matches. |
 | Identifiers | `matchId`, `uploadId` and `eventId` are `evidenceId()` values (spec 1 §5.1), issued by `MatchWrite`. `matchId` is the key in every evidence path, contract, run manifest and lakehouse table. People never see or type it. | One identifier format across evidence, sortable by creation time, with no meaning a person might rely on. |
 | Slug | Every match also has a `slug`: one lowercase Halo term from the pool in §7.2, a `-`, and a random suffix of at least 4 Crockford base32 characters, such as `warthog-7k3q` or `killtacular-m2x9`. It is unique across all matches of a namespace, reserved create-only at `match-slugs/{slug}.json` before the match is created, never changed and never reused, even for a voided match. When draws collide, the suffix grows by one character, so the pool cannot run out (§7.2). Admin screens, URLs and later the player app show the slug, and `GET /api/v1/match-slugs/{slug}` resolves it to a `matchId`. | A person can say, type and remember a slug; nobody can do that with an `evidenceId()`. One word keeps slugs short (8 to 17 characters), and the suffix carries the uniqueness, so the word list can stay small. Drawing both at random keeps the slug free of players, time, content and `matchId`. `crypto.randomInt` over a fixed alphabet needs no library; `shortid` is deprecated, and `nanoid` would add a dependency for the same few lines. |
 | Match metadata | `MATCH_CREATED` records `matchId`, `slug`, `slugWordsVersion`, `game` (`halo3`), `playedAt`, `playedAtSource`, an optional `note`, `declaredScreenshotCount`, `createdAt` (the event's `occurredAt`), the admin's Cognito `sub` and the build (§4.2, §10.1). The match record adds status, screenshots, uploads, flags and counts (§7.3). | These are the fields the other specs read: spec 7 needs membership and status, spec 3 needs nothing new, and the lakehouse needs a match, its time and its screenshots. A game code keeps the record valid when other MCC games get parser profiles. |
-| Maps, game variants and playlists | Not recorded in v1. The admin application has no map catalog and no map picker. Spec 4 (map suggestions) is removed. Reading a map or game variant printed on a postgame screen is backlog (P6.3). | The admin no longer selects maps, and screenshot metadata cannot place one. The current captures and parser fixtures carry only the scoreboard table. A field nobody can fill reliably would invite guesses. |
+| Maps, game variants and playlists | Not recorded in v1. The admin application has no map catalog and no map picker. Reading a map or game variant printed on a postgame screen is backlog (P6.3). | The admin does not select maps, and screenshot metadata cannot place one. The current captures and parser fixtures carry only the scoreboard table. A field nobody can fill reliably would invite guesses. |
 | Play time | `playedAt` defaults to the server time of `MATCH_CREATED` with `playedAtSource: UPLOAD_TIME`. The admin may enter an earlier time instead (`ADMIN_ENTERED`), from `maxPlayedAtAgeDays` before the request up to the request time, and may correct it later with `DETAILS_CORRECTED`. | The flow uploads right after the match ends, so upload time is close. An admin uploading the next morning knows better. Neither source reads image metadata. |
 | Match order | Matches are ordered by `playedAt`, then `matchId`. | `playedAt` is the best available time, and `matchId` sorts by creation time, which breaks ties deterministically. |
 | Where match events live | Each event is one create-only JSON object at `matches/{matchId}/events/{sequence}.json`, sequence 1 being `MATCH_CREATED`. `If-None-Match: *` refuses a second writer of the same number (§6.3). There is no match table. | The evidence bucket already gives immutable, Object Lock protected, append-only storage (spec 1 §5.2). Create-only sequence keys serialize the writers of one match without a new persistent resource. |
@@ -421,19 +421,19 @@ The contract guarantees:
 
 The lakehouse (#159) ingests every record version and selects the latest per match. A correction reaches it as a new version.
 
-### 8.2 Spec 4
+### 8.2 Maps
 
-Spec 4 (map suggestions for match entry) is removed in the same change as this revision, because the admin application no longer selects maps. Nothing else depended on it. A map recorded from a postgame screen would be a new specification (P6.3).
+No specification covers map suggestions or map selection, because the admin application does not select maps. A map recorded from a postgame screen would be a new specification (P6.3).
 
 ### 8.3 Spec 7
 
-Spec 7 reads match membership for `K006` and `K007` peers and for dataset grouping. This revision updates spec 7's references in the same change: a screenshot's match is its `intake.matchId`; its peers are the other `ACTIVE` screenshots of the highest record version of an `ACTIVE` match; the record version read is recorded as `matchVersion`; and spec 7's roles read `<ns>matches/*/record/*` and nothing else under `<ns>matches/`. Emailed screenshots still have no match and record `NO_MATCH_IDENTITY`.
+Spec 7 reads match membership for `K006` and `K007` peers and for dataset grouping: a screenshot's match is its `intake.matchId`; its peers are the other `ACTIVE` screenshots of the highest record version of an `ACTIVE` match; the record version read is recorded as `matchVersion`; and spec 7's roles read `<ns>matches/*/record/*` and nothing else under `<ns>matches/`. Emailed screenshots still have no match and record `NO_MATCH_IDENTITY`.
 
 ### 8.4 Spec 9, the stats lakehouse (#159)
 
-[Spec 9](9-stats-lakehouse.md) reads the 1.0-draft contract. Its next revision makes these changes:
+[Spec 9](9-stats-lakehouse.md) reads the session-association contract. Its next revision makes these changes:
 
-| 1.0-draft contract | Change |
+| Spec 9 reads | Change |
 | --- | --- |
 | `session-association/v1` under `sessions/*/association/*` | `match-record/v1` under `matches/*/record/*`, one current record per match. |
 | `map-catalog/v1`, `mapId`, `mapName`, `silver_maps` | Removed. v1 matches have no map. |
@@ -463,7 +463,7 @@ Spec 7 reads match membership for `K006` and `K007` peers and for dataset groupi
 | Content Security Policy `connect-src` for the attachments bucket | spec 3 §13.3 | P4.4 sets it; spec 3's next revision records it. |
 | Evidence bucket EventBridge notifications | spec 2 P1.1 | P4.4 cannot deploy until it is applied. |
 | Spec 1 sections in §8.5 | spec 1 | P3.1 and P3.2. |
-| Spec 7 references in §8.3 | spec 7 | This revision. |
+| Spec 7 references in §8.3 | spec 7 | Spec 7 §4.3 reads them. |
 | Lakehouse changes in §8.4 | spec 9 | Spec 9's next revision. |
 
 ## 9. Admin experience
@@ -812,7 +812,7 @@ In dev, an admin plays two matches. After each, the admin creates a match from a
 - [ ] `DETAILS_CORRECTED`, `MATCH_VOIDED` and `SCREENSHOT_EXCLUDED` with a stale `supersedesEventId` return `409 STALE_SUPERSESSION`. With the current one they write a new event, the earlier event is unchanged, and the next record version shows the change.
 - [ ] Every record change writes a new version with `previousMatchVersion`, and writing unchanged inputs writes nothing.
 - [ ] Given a run's manifest and its match's latest record, a consumer obtains the run's `matchId`, slug, `playedAt` and whether it counts, with no other input, for both the first run and a replay.
-- [ ] Spec 4 is deleted, and spec 7 reads match membership from `intake.matchId` and `match-record/v1`.
+- [ ] Spec 7 reads match membership from `intake.matchId` and `match-record/v1`.
 - [ ] Every §16.1 test passes with the coverage thresholds, both stacks synthesize, and `npm run tofu:check` passes.
 - [ ] The §16.3 live validation passes in dev.
 
@@ -832,7 +832,7 @@ In dev, an admin plays two matches. After each, the admin creates a match from a
 12. **Staged uploads expire after 30 days.** An upload with no receipt after 30 days must be uploaded again. An upload with a receipt never needs its staged copy again.
 13. **Failed intake attempts leave submissions without receipts.** They cost storage only, and receipts tell consumers which submission counts.
 14. **An execution that fails after intake needs an operator.** Nothing restarts it automatically, and alarms are backlog (P6.5).
-15. **Spec 9 still reads the 1.0-draft contract.** §8.4 lists its changes; its slices that read matches must not be filed before its next revision.
+15. **Spec 9 reads the session-association contract.** §8.4 lists its changes; its slices that read matches must not be filed before its next revision.
 
 ## 19. Reference documentation
 

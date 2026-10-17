@@ -58,7 +58,7 @@ Both stable roots create a dedicated `mcc-stats-suite-<environment>-github-turbo
 
 Trusted `main` validation uses the dev bucket through `rharkor/caching-for-turbo@v2.5.1`. Dev deployments use that bucket; production promotion and rollback builds use the prod bucket. The cache role resolves and validates the environment's bucket and KMS SSM contracts. OS, architecture, and Node version isolate object prefixes.
 
-`MCC_BUILD_ENVIRONMENT` participates in Turbo task hashes, and the explicitly worktree-local cache prevents another checkout from supplying outputs. Each deployment job has a fresh runner and exactly one environment, including historical releases whose Turbo configuration predates this hash input.
+`MCC_BUILD_ENVIRONMENT` participates in Turbo task hashes, and the explicitly worktree-local cache prevents another checkout from supplying outputs. Each deployment job has a fresh runner and exactly one environment, so a rollback to a release whose Turbo configuration lacks this hash input still cannot reuse another environment's outputs.
 
 Pull requests use only their ephemeral local Turbo cache and never assume a cache role. The main-only role trust policy rejects PR subjects and refs. The remote API credentials are passed explicitly from the cache role to the action, including its session token, so later CDK credentials cannot replace that session. AWS credentials are removed from the build environment after the server starts.
 
