@@ -149,7 +149,7 @@ npm --prefix <worktree path> ci --ignore-scripts --no-audit --no-fund
 
 ### CDK setup
 
-Every CDK status and bootstrap command runs as one `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`), `<stack>` (`CDKToolkit` or `CDKToolkitLocal`), and the worktree path. Like the root setup block, it reads the profile and Region only from that environment's bootstrap root `.envrc` in the main checkout, takes the account from the state bucket name that `.envrc` derives, removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value, and stops unless `aws sts get-caller-identity` reports that account and the state bucket's `Environment` tag equals `<env>`. It never reads the Region from `aws configure get region`. It refuses `CDKToolkitLocal` in prod. It prints none of the values.
+Every CDK status run and every bootstrap run is a `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`), `<stack>` (`CDKToolkit` or `CDKToolkitLocal`), and the worktree path. Like the root setup block, it reads the profile and Region only from that environment's bootstrap root `.envrc` in the main checkout, takes the account from the state bucket name that `.envrc` derives, removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value, and stops unless `aws sts get-caller-identity` reports that account and the state bucket's `Environment` tag equals `<env>`. It never reads the Region from `aws configure get region`. It refuses `CDKToolkitLocal` in prod. It prints none of the values.
 
 ```console
 bash <<'EOF'
@@ -248,7 +248,7 @@ Present the environment, stack, commit, and every line it printed. When it print
 
 ### Bootstrap a CDK stack (gated)
 
-Check the commit again as in step 2; if `main` moved, start over at preflight. Append the CDK status commands to the CDK setup block, then the stack's commands below. If the status now prints anything different from what the person approved, stop before the bootstrap: present the new status and ask again.
+Check the commit again as in step 2; if `main` moved, start over at preflight. Run the CDK setup block with the status commands again. If it prints anything different from what the person approved, stop: present the new status and ask again. Otherwise run the CDK setup block a second time with the stack's commands below appended. They use the template and stack description that the status run just wrote to the worktree.
 
 For `CDKToolkit`, in dev or prod, keep the execution policy that `docs/self-hosting/20-bootstrap-cdk.md` documents:
 
@@ -258,18 +258,21 @@ aws_env npx --no-install cdk bootstrap "aws://$ACCOUNT/$REGION" --no-notices \
   --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 ```
 
-For `CDKToolkitLocal`, in dev only, pass the template the status commands just generated, then apply the stack policy from the checked-out commit and turn on termination protection:
+For `CDKToolkitLocal`, in dev only, pass the template the status commands just generated. The stack policy file at the checked-out commit goes on before the update when the stack exists, so the update is checked against the policy that matches its template, and again after the bootstrap, which covers a stack it just created. Then turn on termination protection:
 
 ```console
+POLICY="file://$WT/docs/self-hosting/policies/local-cdk-toolkit-stack-policy.json"
+if [ "$(jq '.Stacks | length' "$WT/$E-$S.stack.json")" = 1 ]; then
+  aws_env aws cloudformation set-stack-policy --stack-name CDKToolkitLocal --stack-policy-body "$POLICY"
+fi
 aws_env npx --no-install cdk bootstrap "aws://$ACCOUNT/$REGION" --no-notices \
   --qualifier mcclocal1 --toolkit-stack-name CDKToolkitLocal --template "$T"
-aws_env aws cloudformation set-stack-policy --stack-name CDKToolkitLocal \
-  --stack-policy-body "file://$WT/docs/self-hosting/policies/local-cdk-toolkit-stack-policy.json"
+aws_env aws cloudformation set-stack-policy --stack-name CDKToolkitLocal --stack-policy-body "$POLICY"
 aws_env aws cloudformation update-termination-protection --stack-name CDKToolkitLocal \
   --enable-termination-protection
 ```
 
-Report what `cdk bootstrap` printed. If the stack policy rejects a `CDKToolkitLocal` update, the generated template is missing a local policy: stop and report, and never remove the stack policy. Then run the status for the next stack and gate it as above.
+Report what `cdk bootstrap` printed. If the stack policy rejects a `CDKToolkitLocal` update, the generated template and the stack policy file at this commit disagree: stop and report, and never remove the stack policy. Then run the status for the next stack and gate it as above.
 
 ## 5. Finish (no gate)
 
