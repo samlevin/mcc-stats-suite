@@ -1,8 +1,13 @@
 # The local CDK policy names and applications must agree with the bootstrap
 # grant, the bootstrap template, and cdk-config. The last two are outside
-# OpenTofu, so this suite reads them: CI runs it for a change to any of these
-# files. Paths in file() are relative to infrastructure/dev/foundation, the
-# root scripts/tofu-checks.sh runs these tests through.
+# OpenTofu, so this suite reads them. CI runs it when a pull request changes an
+# OpenTofu file under infrastructure/, scripts/cdk-targets.mjs, or
+# scripts/local-cdk-bootstrap.mjs, but not when it changes only
+# packages/cdk-config. The synthesis test in
+# scripts/local-cdk-bootstrap.test.mjs covers that case: it spells out the
+# boundary name and checks every ephemeral role against it. Paths in file() are
+# relative to infrastructure/dev/foundation, the root scripts/tofu-checks.sh
+# runs these tests through.
 provider "aws" {
   region                      = "us-east-1"
   access_key                  = "test"

@@ -745,7 +745,7 @@ The foundation knows nothing about either stack. The CORS rule names no CloudFro
 | `WriteMatchRecord` | `ListBucket` with prefix `<ns>matches/`; `GetObject` on `<ns>matches/*`; `PutObject` on `<ns>matches/*/record/*` | none | encrypt, decrypt |
 | `ProcessUpload` | `ListBucket` with prefix `<ns>matches/`, so a missing intent or receipt reads as `404`; `GetObject` on `<ns>matches/*/uploads/*/intent.json` and `<ns>matches/*/uploads/*/receipt.json`; `PutObject` on `<ns>submissions/*` and `<ns>matches/*/uploads/*/receipt.json` | `GetObject` and `GetObjectVersion` on `<ns>uploads/*` | encrypt, decrypt |
 
-`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. `ListBucket` with prefix `P` means an `s3:prefix` condition (`StringLike`) of `P*`. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject` or any bucket-configuration permission. No admin role can write under `submissions/` or to a `receipt.json`, and `ProcessUpload` cannot write events, intents, slugs or records. P4.4 extends `scripts/local-cdk-bootstrap.mjs` so the local workload boundary allows these actions for `admin-e-*` and `match-to-csv-e-*` roles in their own namespace.
+`<ns>` is empty for stable stacks and `ephemeral/<name>/` for ephemeral ones. `ListBucket` with prefix `P` means an `s3:prefix` condition (`StringLike`) of `P*`. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject` or any bucket-configuration permission. No admin role can write under `submissions/` or to a `receipt.json`, and `ProcessUpload` cannot write events, intents, slugs or records. P4.4 extends `infrastructure/modules/foundation/local-cdk-policies.tf` so the local workload boundary allows these actions for `admin-e-*` and `match-to-csv-e-*` roles in their own namespace.
 
 ### 13.5 Deployment
 
@@ -1032,7 +1032,7 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** P4.2, P4.3, P1.1, P1.2; spec 3 P1.2, P3.4; spec 2 P1.1
 - **Spec:** §13.3 to §13.5, §14
-- **Files:** `applications/admin/cdk/lib/admin-stack.ts`, `test/app.test.ts`, `scripts/local-cdk-bootstrap.mjs` and its tests
+- **Files:** `applications/admin/cdk/lib/admin-stack.ts`, `test/app.test.ts`, `infrastructure/modules/foundation/local-cdk-policies.tf` and `tests/local-cdk-policies.tftest.hcl`
 - **Provides:** deployable match routes and record writer
 - **Acceptance:**
   - The admin `app.test.ts` row of §16.1 passes for stable and ephemeral stacks.

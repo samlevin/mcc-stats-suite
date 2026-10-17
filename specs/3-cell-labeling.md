@@ -6,7 +6,7 @@
 
 **Date:** October 15, 2026
 
-**Component:** `applications/admin` (reviewer API, LLM adjudication writer, Lambdas, web application and CDK stack), with review and validated-table types in `packages/contracts`, the reviewer user pool in `infrastructure/modules/foundation`, and ephemeral-stack permissions in `scripts/local-cdk-bootstrap.mjs`
+**Component:** `applications/admin` (reviewer API, LLM adjudication writer, Lambdas, web application and CDK stack), with review and validated-table types in `packages/contracts`, the reviewer user pool in `infrastructure/modules/foundation`, and ephemeral-stack permissions in `infrastructure/modules/foundation/local-cdk-policies.tf`
 
 **Runtime:** TypeScript. Node.js 22 on AWS Lambda (ARM64) behind an API Gateway HTTP API; a React application built with Vite and served by CloudFront
 
@@ -942,7 +942,7 @@ mcc-stats-suite/
       test/                            # Vitest component tests and Playwright end-to-end tests
   packages/contracts/src/index.ts      # Review contracts and ValidatedTable
   infrastructure/modules/foundation/cognito.tf
-  scripts/local-cdk-bootstrap.mjs      # Ephemeral permissions for admin stacks
+  infrastructure/modules/foundation/local-cdk-policies.tf  # Ephemeral permissions for admin stacks
 ```
 
 `admin` imports only `@mcc/contracts` and `@mcc/cdk-config` from the monorepo and never imports `match-to-csv` or `ocr-quality` code. `web/` imports only `@mcc/contracts` types and never AWS SDK packages.
@@ -1011,7 +1011,7 @@ Log groups follow match-to-csv: three months in prod, two weeks otherwise, retai
 
 No role this stack creates has `lambda:InvokeFunction` on `LlmReviewWrite`, and the function has no resource-based policy, so only a same-account principal whose own IAM policy allows the call can invoke it. The OCR risk model specification (#165) grants that to the LLM reviewer's execution role and to no other workload role. `LlmReviewWrite`'s execution role is the only role that writes `LLM` adjudications; `ReviewWrite` can also write under `adjudications/`, but its code writes only `HUMAN` adjudications with the caller's verified `sub` (§4.2). Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject`, any bucket-configuration permission, or `PutObject` under `quality/`, `textract/`, `normalized/`, `export/` or `source/`.
 
-P1.2 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `admin-e-*` stacks can create and delete their HTTP API, distribution, CloudFront Function, Origin Access Control, response headers policy, site bucket, table and user pool client, and so the local workload boundary allows the table actions above on `admin-e-*` tables and KMS use through DynamoDB.
+P1.2 extends `infrastructure/modules/foundation/local-cdk-policies.tf` so ephemeral `admin-e-*` stacks can create and delete their HTTP API, distribution, CloudFront Function, Origin Access Control, response headers policy, site bucket, table and user pool client, and so the local workload boundary allows the table actions above on `admin-e-*` tables and KMS use through DynamoDB.
 
 ### 13.5 Deployment
 
@@ -1230,12 +1230,12 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** none
 - **Spec:** §13.3, §13.4
-- **Files:** `scripts/local-cdk-bootstrap.mjs` and its tests
+- **Files:** `infrastructure/modules/foundation/local-cdk-policies.tf` and `tests/local-cdk-policies.tftest.hcl`
 - **Provides:** ephemeral permissions in §13.4 for `admin-e-*` resources
 - **Acceptance:**
   - The local execution role can create, update and delete the resource types in §13.3 only when they are named `admin-e-*`, and can create user pool clients only on the dev pool.
   - The local workload boundary allows the `ReviewState` actions in §13.4 on `admin-e-*` tables and KMS use through DynamoDB, and nothing on shared tables.
-  - Existing bootstrap tests pass, and new tests cover each added statement.
+  - Existing local CDK policy tests pass, and new tests cover each added statement.
 
 ### Phase 2: Review library
 

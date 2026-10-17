@@ -6,7 +6,7 @@
 
 **Date:** October 15, 2026
 
-**Component:** the roster administration Lambda, function URL and CLI in `applications/admin`; player name resolution in `applications/match-to-csv` (`extract-text`, `write-extracted-csv`, CSV format); a new pure package `packages/roster` (`@mcc/roster`); roster and resolution types in `packages/contracts`; the roster table in `infrastructure/modules/foundation`; ephemeral-stack permissions in `scripts/local-cdk-bootstrap.mjs`
+**Component:** the roster administration Lambda, function URL and CLI in `applications/admin`; player name resolution in `applications/match-to-csv` (`extract-text`, `write-extracted-csv`, CSV format); a new pure package `packages/roster` (`@mcc/roster`); roster and resolution types in `packages/contracts`; the roster table in `infrastructure/modules/foundation`; ephemeral-stack permissions in `infrastructure/modules/foundation/local-cdk-policies.tf`
 
 **Runtime:** TypeScript, Node.js 22 on AWS Lambda (ARM64); the CLI runs on Node.js 22 on an operator's machine
 
@@ -387,7 +387,7 @@ This spec edits no other spec. It needs the following from them, and the slice n
 | --- | --- | --- |
 | `CellErrorType` exported from `@mcc/contracts` | spec 3 P0.2 | Whichever of P0.1 here and spec 3 P0.2 merges first defines it exactly as spec 3 §10.1 does; the other imports it. |
 | `admin` may import `@mcc/roster` | spec 3 §12, which allows only `@mcc/contracts` and `@mcc/cdk-config` | P2.1 adds the dependency; spec 3's next revision lists `@mcc/roster`. |
-| Roster resources share `AdminStack` and `scripts/local-cdk-bootstrap.mjs` | spec 3 P1.2, P3.4 | Whichever slice merges later keeps the other's resources and statements. |
+| Roster resources share `AdminStack` and `infrastructure/modules/foundation/local-cdk-policies.tf` | spec 3 P1.2, P3.4 | Whichever slice merges later keeps the other's resources and statements. |
 | `normalized-ocr/v2` read types in `@mcc/contracts` | spec 2 P0.2 | When spec 2 P0.2 has merged, P3.1 adds `roster` and `playerResolution` to the shared type; otherwise to `extract-text`'s local type, and spec 2 P0.2 moves them with the rest. |
 | `parser.provenance` | spec 2 P0.3 | Needed only for the spec 3 join (§8.3) and P5.1. |
 | Spec 1 §2.2, §5.3, §5.4, §7.1, §8.6, §10.1, §13 and §14 | spec 1 | P3.1, P3.2 and P3.3 update spec 1 in the same PR as the behavior. |
@@ -563,7 +563,7 @@ Roster entry 1 -> at most 1 RESOLVED row per run (§7.4)
 | `infrastructure/modules/foundation/roster.tf` | table, SSM parameters, outputs | §13.2. |
 | `applications/admin/cdk/lib/admin-stack.ts` | `AdminStack` | `RosterAdmin`, its function URL, IAM and outputs (§13.3). |
 | `applications/match-to-csv/cdk/lib/match-to-csv-stack.ts` | `MatchToCsvStack` | `ExtractText` environment and roster permissions. |
-| `scripts/local-cdk-bootstrap.mjs` | existing | Ephemeral permissions (§13.4). |
+| `infrastructure/modules/foundation/local-cdk-policies.tf` | existing | Ephemeral permissions (§13.4). |
 | `docs/self-hosting/policies/roster-operator.json.template` | IAM policy template | The operator policy (§13.4). |
 
 ## 12. Directory structure and ownership
@@ -587,7 +587,7 @@ mcc-stats-suite/
     scripts/evaluate-roster.ts
     test/fixtures/roster.fixture.json    # the 14 placeholder gamertags, never real names
   infrastructure/modules/foundation/roster.tf
-  scripts/local-cdk-bootstrap.mjs
+  infrastructure/modules/foundation/local-cdk-policies.tf
   scripts/lib/{account-guard,roster-api}.mjs   # shared by cdk-app.mjs, the CLI and evaluate-roster
   docs/self-hosting/policies/roster-operator.json.template
 ```
@@ -831,12 +831,12 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** none
 - **Spec:** §13.4
-- **Files:** `scripts/local-cdk-bootstrap.mjs` and its tests
+- **Files:** `infrastructure/modules/foundation/local-cdk-policies.tf` and `tests/local-cdk-policies.tftest.hcl`
 - **Provides:** partition-scoped roster access for ephemeral stacks
 - **Acceptance:**
   - A test shows the existing `ManageEphemeralCompute` statement allows `lambda:CreateFunctionUrlConfig` and `lambda:DeleteFunctionUrlConfig` on `admin-e-*` functions and not on stable functions.
   - The local workload boundary allows the §13.4 roster actions only with `dynamodb:LeadingKeys` equal to `ROSTER#ephemeral/${aws:PrincipalTag/Ephemeral}`, and KMS use through DynamoDB.
-  - Existing bootstrap tests pass, and new tests cover each added statement and the refusal of `ROSTER#stable`.
+  - Existing local CDK policy tests pass, and new tests cover each added statement and the refusal of `ROSTER#stable`.
 
 ### Phase 2: Roster administration
 

@@ -978,7 +978,7 @@ Every file is bundled into the Lambdas and validated at cold start; an invalid f
 
 `ListBucket` with prefix `P` means the bucket action with an `s3:prefix` condition (`StringLike`) of `P*`. Invoke's condition limits it to listing invocation records, which §6.3 step 1 needs before every call. Spec 8 owns everything under `<ns>matches/`; roles here read only its match record versions, and none writes there.
 
-Every role has KMS decrypt and encrypt on the data key, the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject`, any bucket-configuration permission, any Bedrock action other than `InvokeModel`, any inference profile ARN, or `PutObject` under `quality/` except `ScoreRun`. `ApplyLlmReview` is the only role in the stack with `lambda:InvokeFunction` on `LlmReviewWrite`. P1.5 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `ocr-quality-e-*` stacks can create and delete their DynamoDB table, and so the local workload boundary allows `bedrock:InvokeModel` on foundation models in the Region and `lambda:InvokeFunction` on `admin-e-*` functions. Container image assets already use the bootstrap ECR repository it permits.
+Every role has KMS decrypt and encrypt on the data key, the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. No role has `DeleteObject`, any bucket-configuration permission, any Bedrock action other than `InvokeModel`, any inference profile ARN, or `PutObject` under `quality/` except `ScoreRun`. `ApplyLlmReview` is the only role in the stack with `lambda:InvokeFunction` on `LlmReviewWrite`. P1.5 extends `infrastructure/modules/foundation/local-cdk-policies.tf` so ephemeral `ocr-quality-e-*` stacks can create and delete their DynamoDB table, and so the local workload boundary allows `bedrock:InvokeModel` on foundation models in the Region and `lambda:InvokeFunction` on `admin-e-*` functions. Container image assets already use the ECR repository that the local bootstrap template creates.
 
 ### 13.5 Deployment
 
@@ -1257,12 +1257,12 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** none
 - **Spec:** §13.3, §13.4
-- **Files:** `scripts/local-cdk-bootstrap.mjs` and its tests
+- **Files:** `infrastructure/modules/foundation/local-cdk-policies.tf` and `tests/local-cdk-policies.tftest.hcl`
 - **Provides:** ephemeral `ocr-quality-e-*` stacks with the `LlmReviewState` table and the LLM reviewer's Bedrock and `LlmReviewWrite` calls
 - **Acceptance:**
   - The local execution role can create, update and delete DynamoDB tables only when they are named `ocr-quality-e-*`.
   - The local workload boundary allows the table actions in §13.4 on `ocr-quality-e-*` tables, `bedrock:InvokeModel` on foundation models in the deployment Region and no inference profile, and `lambda:InvokeFunction` on `admin-e-*` functions.
-  - Existing bootstrap tests pass, and new tests cover each added statement.
+  - Existing local CDK policy tests pass, and new tests cover each added statement.
 
 ### Phase 2: LLM reviewer
 

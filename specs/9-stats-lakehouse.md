@@ -6,7 +6,7 @@
 
 **Date:** October 15, 2026
 
-**Component:** `applications/data-pipeline` (ingestion and build Lambdas, pure silver and gold libraries, bundled configuration and CDK stack), with lakehouse and serving types in `packages/contracts`, lifecycle and activation changes in `infrastructure/modules/data-platform` and its two roots, and ephemeral-stack permissions in `scripts/local-cdk-bootstrap.mjs`
+**Component:** `applications/data-pipeline` (ingestion and build Lambdas, pure silver and gold libraries, bundled configuration and CDK stack), with lakehouse and serving types in `packages/contracts`, lifecycle and activation changes in `infrastructure/modules/data-platform` and its two roots, and ephemeral-stack permissions in `infrastructure/modules/foundation/local-cdk-policies.tf`
 
 **Runtime:** TypeScript, Node.js 22 on AWS Lambda (ARM64)
 
@@ -660,7 +660,7 @@ mcc-stats-suite/
   packages/contracts/src/index.ts       # §10.1
   infrastructure/modules/data-platform/
   infrastructure/{dev,prod}/data-platform/
-  scripts/local-cdk-bootstrap.mjs       # Ephemeral permissions for data-pipeline stacks
+  infrastructure/modules/foundation/local-cdk-policies.tf  # Ephemeral permissions for data-pipeline stacks
 ```
 
 `data-pipeline` imports only `@mcc/contracts`, `@mcc/cdk-config` and `@mcc/roster` from the monorepo, never `match-to-csv`, `admin` or `ocr-quality` code, and the workspace boundary test enforces it (P0.1).
@@ -726,7 +726,7 @@ The data-platform roots are inactive today: Terrateam runs neither, and the self
 
 Glue authorizes a call against the resource it names and every ancestor of it, so a table action needs the table, its database and the catalog, and the build fails before the serving pointer without the catalog ARN ([Glue resource ARNs](https://docs.aws.amazon.com/glue/latest/dg/glue-specifying-resource-arns.html)). The catalog ARN grants nothing on other databases' tables, because each call is also checked against the table and database ARNs, which name only `<database>`, the database `GLUE_DATABASE` names. Every role carries the workload permissions boundary and, for ephemeral stacks, the `/mcc-local/` path. Operators query with Athena through their existing administrator roles.
 
-P1.2 extends `scripts/local-cdk-bootstrap.mjs` so ephemeral `data-pipeline-e-*` stacks can create and delete their functions, rule, schedule, queue and Glue database, and so the local workload boundary allows the actions above only under `ephemeral/<name>/` in the evidence and lakehouse buckets, only on the roster partition `ROSTER#ephemeral/<name>`, and only on Glue databases named for the stack. Each Glue statement, in the execution role and in the boundary, lists the regional catalog ARN beside the database and table ARNs named for the stack. Deleting the database with the stack also needs its children, so the execution role's `DeleteDatabase` statement lists the catalog, the database, `table/<database>/*` and `userDefinedFunction/<database>/*`.
+P1.2 extends `infrastructure/modules/foundation/local-cdk-policies.tf` so ephemeral `data-pipeline-e-*` stacks can create and delete their functions, rule, schedule, queue and Glue database, and so the local workload boundary allows the actions above only under `ephemeral/<name>/` in the evidence and lakehouse buckets, only on the roster partition `ROSTER#ephemeral/<name>`, and only on Glue databases named for the stack. Each Glue statement, in the execution role and in the boundary, lists the regional catalog ARN beside the database and table ARNs named for the stack. Deleting the database with the stack also needs its children, so the execution role's `DeleteDatabase` statement lists the catalog, the database, `table/<database>/*` and `userDefinedFunction/<database>/*`.
 
 ### 13.5 Deployment
 
@@ -909,13 +909,13 @@ A change to a contract updates every consumer in the same PR.
 
 - **Blocked by:** none
 - **Spec:** §13.3, §13.4
-- **Files:** `scripts/local-cdk-bootstrap.mjs` and its tests
+- **Files:** `infrastructure/modules/foundation/local-cdk-policies.tf` and `tests/local-cdk-policies.tftest.hcl`
 - **Provides:** ephemeral permissions in §13.4 for `data-pipeline-e-*` resources
 - **Acceptance:**
   - The local execution role can create, update and delete the resource types in §13.3 only when they are named for a `data-pipeline-e-*` stack, including its Glue database.
   - The local workload boundary allows lakehouse bucket access only under `ephemeral/<name>/`, roster reads only on `ROSTER#ephemeral/<name>`, and Glue table actions only in the stack's database.
   - Every Glue statement in the execution role and the boundary lists the regional catalog ARN beside the stack's database and table ARNs, and the `DeleteDatabase` statement also lists the database's tables and user-defined functions (§13.4).
-  - Existing bootstrap tests pass, and new tests cover each added statement, including the catalog ARN in each Glue statement.
+  - Existing local CDK policy tests pass, and new tests cover each added statement, including the catalog ARN in each Glue statement.
 
 ### Phase 2: Bronze
 
