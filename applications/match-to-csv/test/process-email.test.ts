@@ -5,6 +5,7 @@ import {
   attachmentRejectionCodes,
   createParameterReader,
   matchDateReply,
+  parseEmail,
   parseMatchDate,
   parseSenderAllowlist,
   parseSesRecipients,
@@ -41,6 +42,11 @@ interface ScreeningCase {
   ephemeral?: { name: string; alias?: string; domain?: string };
   /** The plain-text body. Defaults to a valid match date when absent. */
   text?: string;
+  /**
+   * Raw MIME for the real parser. When set, headerLines, fromAddresses, text,
+   * messageId, and subject are ignored.
+   */
+  rawEmail?: string;
   messageId?: string;
   subject?: string;
   /** Makes every reply send fail with this error. */
@@ -80,9 +86,10 @@ async function runScreening(options: ScreeningCase) {
   let id = 0;
   const dependencies: ProcessEmailDependencies = {
     async getRawEmail() {
-      return Buffer.from('mime');
+      return Buffer.from(options.rawEmail ?? 'mime');
     },
-    async parseEmail() {
+    async parseEmail(rawEmail) {
+      if (options.rawEmail !== undefined) return parseEmail(rawEmail);
       return {
         messageId: options.messageId,
         subject: options.subject,
@@ -939,6 +946,93 @@ for (const [label, text] of [
     assert.match(reply.body, /Replies to this no-reply address are not read/);
   });
 }
+
+/** A MIME message from the listed sender whose content starts with `content`. */
+function mimeMessage(content: string[]): string {
+  return [
+    'From: Player <player@example.test>',
+    'To: submissions@example.test',
+    'Subject: Tonight',
+    'Message-ID: <original-id@example.test>',
+    'MIME-Version: 1.0',
+    ...content,
+    '',
+  ].join('\r\n');
+}
+
+/** A multipart/mixed MIME message with these body parts and one PNG attachment. */
+function mimeWithScreenshot(parts: string[][]): string {
+  return mimeMessage([
+    'Content-Type: multipart/mixed; boundary="mixed"',
+    '',
+    ...parts.flatMap((part) => ['--mixed', ...part]),
+    '--mixed',
+    'Content-Type: image/png; name="scoreboard.png"',
+    'Content-Disposition: attachment; filename="scoreboard.png"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    Buffer.from('png').toString('base64'),
+    '--mixed--',
+  ]);
+}
+
+const htmlPart = [
+  'Content-Type: text/html; charset=utf-8',
+  '',
+  `<p>${MATCH_DATE}</p>`,
+];
+const plainPart = (body: string) => [
+  'Content-Type: text/plain; charset=utf-8',
+  '',
+  body,
+];
+
+// By default MailParser converts HTML to text when the HTML is the whole
+// message or sits beside a text/plain part, so the first and last bodies would
+// read as a valid date without skipHtmlToText.
+for (const [label, rawEmail] of [
+  ['an HTML-only message', mimeMessage(htmlPart)],
+  ['an HTML part with a screenshot', mimeWithScreenshot([htmlPart])],
+  [
+    'an HTML part beside an empty text/plain part',
+    mimeWithScreenshot([plainPart(''), htmlPart]),
+  ],
+] as const) {
+  test(`processEmail rejects ${label} parsed from MIME as MATCH_DATE_INVALID and replies`, async () => {
+    const run = await runScreening({ ...listedSender, rawEmail });
+
+    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assert.equal(run.ingestion.matchDate, null);
+    assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
+    assert.deepEqual(run.objectWrites, []);
+    assert.equal(run.sends.length, 1);
+    assert.deepEqual(run.sends[0].to, ['player@example.test']);
+    assert.equal(run.sends[0].subject, 'Re: Tonight');
+  });
+}
+
+test('processEmail accepts the text/plain date of a multipart/alternative body parsed from MIME', async () => {
+  const run = await runScreening({
+    ...listedSender,
+    rawEmail: mimeWithScreenshot([
+      [
+        'Content-Type: multipart/alternative; boundary="alternative"',
+        '',
+        '--alternative',
+        ...plainPart(MATCH_DATE),
+        '--alternative',
+        ...htmlPart,
+        '--alternative--',
+      ],
+    ]),
+  });
+
+  assert.equal(run.error, undefined);
+  assert.equal(run.result?.matchDate, '2026-05-02');
+  assert.equal(run.ingestion.matchDate, '2026-05-02');
+  assert.equal(run.result?.screenshots.length, 1);
+  assert.deepEqual(run.sends, []);
+});
 
 for (const [label, options, codes] of [
   [

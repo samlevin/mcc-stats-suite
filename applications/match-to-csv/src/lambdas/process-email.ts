@@ -136,6 +136,24 @@ export interface ProcessEmailDependencies {
   timestamp(): string;
 }
 
+/**
+ * Parses raw MIME. `text` holds only text/plain parts: HTML is never converted
+ * to text, so an HTML-only body has no match date.
+ */
+export async function parseEmail(rawEmail: Buffer): Promise<ParsedEmail> {
+  const parsed = await simpleParser(rawEmail, { skipHtmlToText: true });
+  return {
+    messageId: parsed.messageId,
+    subject: parsed.subject,
+    headerLines: parsed.headerLines,
+    fromAddresses: (parsed.from?.value ?? []).flatMap((entry) =>
+      entry.address ? [entry.address] : [],
+    ),
+    text: parsed.text,
+    attachments: parsed.attachments,
+  };
+}
+
 const defaultDependencies: ProcessEmailDependencies = {
   async getRawEmail(input) {
     const object = await s3.send(
@@ -143,19 +161,7 @@ const defaultDependencies: ProcessEmailDependencies = {
     );
     return bodyToBuffer(object.Body);
   },
-  async parseEmail(rawEmail) {
-    const parsed = await simpleParser(rawEmail);
-    return {
-      messageId: parsed.messageId,
-      subject: parsed.subject,
-      headerLines: parsed.headerLines,
-      fromAddresses: (parsed.from?.value ?? []).flatMap((entry) =>
-        entry.address ? [entry.address] : [],
-      ),
-      text: parsed.text,
-      attachments: parsed.attachments,
-    };
-  },
+  parseEmail,
   async getSenderAllowlist(parameterName) {
     const value = await readParameter(parameterName);
     return value === undefined ? undefined : parseSenderAllowlist(value);

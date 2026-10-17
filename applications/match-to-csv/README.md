@@ -32,7 +32,7 @@ A screened-out message keeps its raw MIME object. Its `completion.json` has stat
 
 ## Match date
 
-The plain-text body of each submission holds one string, the date of the match. Screenshots from one session can run past midnight, so the date cannot come from timestamps. After trimming whitespace, the body must be a calendar date written `M/D/YYYY`: month 1 to 12, a day that exists in that month, and a four-digit year. Leading zeros are accepted, so `5/2/2026` and `05/02/2026` are the same date.
+The plain-text body of each submission holds one string, the date of the match. Screenshots from one session can run past midnight, so the date cannot come from timestamps. After trimming whitespace, the body must be a calendar date written `M/D/YYYY`: month 1 to 12, a day that exists in that month, and a four-digit year. Leading zeros are accepted, so `5/2/2026` and `05/02/2026` are the same date. Only a text/plain part counts: HTML is never converted to text, so an HTML-only email has no match date.
 
 `process-email` checks the date only for a message that passed sender screening. A valid date is recorded as `matchDate` (`YYYY-MM-DD`) in `ingestion.json` and returned in `ProcessEmailOutput`. A missing or invalid date records `matchDate: null` and rejects the submission with `MATCH_DATE_INVALID` before any attachment is stored, so no screenshot reaches Textract.
 
