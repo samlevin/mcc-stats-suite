@@ -1,23 +1,27 @@
 # Bootstrap CDK and grant local deploy access
 
-CDK bootstrap is separate from the OpenTofu bootstrap. Run it once in each account and workload Region, dev first, with the administrator profile:
+CDK bootstrap is separate from the OpenTofu bootstrap. Run it once in each account and workload Region, dev first, with the administrator profile, and again after a CDK upgrade. No workflow runs it. Creating `CDKToolkit` creates IAM roles, and the GitHub CDK entry role can only assume `cdk-*` roles that already exist.
+
+You can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex to run the commands on this page for you. An agent cannot start it for you. After the OpenTofu bootstrap roots, or right away if you reply `cdk` when `main` has nothing to plan there, it creates or upgrades `CDKToolkit` in dev, then in prod, then `CDKToolkitLocal` in dev. Before each stack it shows the deployed and pinned bootstrap versions, skips a stack that is already current, and waits for your approval. The commands below stay the reference.
+
+Pass the Region explicitly. `aws configure get region` prints nothing when the profile sets no Region. Use the workload Region that the bootstrap root's `.envrc` exports as `TF_VAR_aws_region`. The account ID comes from the profile's `sso_account_id`:
 
 ```console
 cd "$(git rev-parse --show-toplevel)"
-export AWS_PROFILE=mcc-dev-admin
-aws sso login --profile "$AWS_PROFILE"
-aws sts get-caller-identity --profile "$AWS_PROFILE"
-npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$(aws configure get region)" \
+export AWS_PROFILE=mcc-dev-admin AWS_REGION=<workload Region>
+aws sso login
+aws sts get-caller-identity
+npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$AWS_REGION" \
   --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 ```
 
-Verify the account ID before approving. The account ID and Region come from the profile's `sso_account_id` and `region`. For prod, enter the prod bootstrap directory so `direnv` loads the prod profile:
+Verify the account ID before approving. For prod, run the same commands with the prod administrator profile:
 
 ```console
-cd infrastructure/prod/bootstrap
-aws sso login --profile "$AWS_PROFILE"
-aws sts get-caller-identity --profile "$AWS_PROFILE"
-npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$(aws configure get region)" \
+export AWS_PROFILE=mcc-prod-admin AWS_REGION=<workload Region>
+aws sso login
+aws sts get-caller-identity
+npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$AWS_REGION" \
   --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 ```
 
@@ -31,14 +35,15 @@ Keep the default `hnb659fds` bootstrap for GitHub Actions. Local developers use 
 
 ```console
 cd "$(git rev-parse --show-toplevel)"
-aws sts get-caller-identity --profile mcc-dev-admin
+export AWS_PROFILE=mcc-dev-admin AWS_REGION=<workload Region>
+aws sts get-caller-identity
 npx cdk bootstrap --show-template | node scripts/local-cdk-bootstrap.mjs > /tmp/mcc-local-bootstrap.yaml
-npx cdk bootstrap "aws://$(aws configure get sso_account_id --profile mcc-dev-admin)/$(aws configure get region --profile mcc-dev-admin)" \
-  --profile mcc-dev-admin --qualifier mcclocal1 \
+npx cdk bootstrap "aws://$(aws configure get sso_account_id)/$AWS_REGION" \
+  --qualifier mcclocal1 \
   --toolkit-stack-name CDKToolkitLocal --template /tmp/mcc-local-bootstrap.yaml
-aws cloudformation set-stack-policy --profile mcc-dev-admin --stack-name CDKToolkitLocal \
+aws cloudformation set-stack-policy --stack-name CDKToolkitLocal \
   --stack-policy-body file://docs/self-hosting/policies/local-cdk-toolkit-stack-policy.json
-aws cloudformation update-termination-protection --profile mcc-dev-admin \
+aws cloudformation update-termination-protection \
   --stack-name CDKToolkitLocal --enable-termination-protection
 ```
 
@@ -48,7 +53,7 @@ See [Local CDK bootstrap design](../local-cdk-bootstrap-design.md) for the allow
 
 ### Upgrade the local bootstrap
 
-After a CDK upgrade, always regenerate the template through `scripts/local-cdk-bootstrap.mjs` and pass it with `--template`, using the first three commands above. Never run `cdk bootstrap` for `mcclocal1` without `--template`. If the stack policy rejects an update, the template is missing a local policy: fix the template instead of removing the stack policy.
+After a CDK upgrade, always regenerate the template through `scripts/local-cdk-bootstrap.mjs` and pass it with `--template`, using the first five commands above. Never run `cdk bootstrap` for `mcclocal1` without `--template`. If the stack policy rejects an update, the template is missing a local policy: fix the template instead of removing the stack policy.
 
 ### Remove the local bootstrap
 
