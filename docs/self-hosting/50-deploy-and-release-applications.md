@@ -122,7 +122,7 @@ After saving the dev allowlist, wait one minute for cached values to expire, the
 
 ## Releases
 
-Release Please versions each application and the shared `@mcc/cdk-config` and `@mcc/contracts` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
+Release Please versions each application and the shared `@mcc/cdk-config`, `@mcc/contracts`, and `@mcc/roster` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
 
 A release does not gate deployment. The release commit deploys like any other merge. The tags exist so you can roll back to a known version.
 

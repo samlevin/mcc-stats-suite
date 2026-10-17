@@ -46,6 +46,7 @@ The monorepo separates product areas so they can be tested, versioned, and deplo
 | `applications/player` | Read-only statistics API and interface | Deployable boundary; feature work remains |
 | `packages/contracts` | Shared TypeScript evidence and processing contracts | Implemented and independently versioned |
 | `packages/cdk-config` | Shared environment validation, names, and deployment rules | Implemented and independently versioned |
+| `packages/roster` | Gamertag matching against the roster, roster fold, and roster hash | Implemented and independently versioned; no application uses it yet |
 
 ## Specifications
 
