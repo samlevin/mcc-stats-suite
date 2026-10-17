@@ -1,11 +1,11 @@
-// test/processScoreboardImage.test.ts
+// test/scoreboard-logic.test.ts
 //
-// Unit tests for processScoreboardImage using tap (TAP-compatible).
+// Unit tests for processScoreboardImage using node:test.
 // These tests are intentionally very detailed and heavily commented,
 // so that a junior developer can understand what's going on.
 //
 // To run:
-//   npx tap --ts test/processScoreboardImage.test.ts
+//   npm test --workspace @mcc/match-to-csv
 //
 // The tests cover:
 //   1) Simple 2-team match (Red vs Blue) with clear color separation.

@@ -12,7 +12,7 @@ export const LOCAL_TOOLKIT_STACK_NAME = 'CDKToolkitLocal';
 // The local deployment role executes only change sets with this name.
 export const LOCAL_CHANGE_SET_NAME = `${LOCAL_QUALIFIER}-deploy`;
 // Ephemeral stacks create every IAM role under this path. A role's path cannot change, so
-// the local bootstrap's role permissions never reach roles that existed before it.
+// the local bootstrap's role permissions never reach roles outside it.
 export const LOCAL_ROLE_PATH = '/mcc-local/';
 
 // Returns the arguments an ephemeral deploy adds, or throws for options the local

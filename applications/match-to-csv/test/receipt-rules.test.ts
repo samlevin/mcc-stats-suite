@@ -70,8 +70,8 @@ test('stable stacks leave inbound email to the foundation', () => {
         `/mcc/${environment}/match-to-csv/receipt-rule-set-name`,
       ),
     );
-    // The deploy workflow no longer passes --parameters EmailDomain=, so a
-    // leftover parameter without a default would fail every stable deploy.
+    // The deploy workflow passes no --parameters EmailDomain=, so an
+    // EmailDomain parameter without a default would fail every stable deploy.
     assert.equal(json.Parameters?.EmailDomain, undefined);
     assert.equal(json.Outputs?.ReceiptRuleSetName, undefined);
   }

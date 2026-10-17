@@ -2,7 +2,7 @@
 
 **Status:** Specification for v1 delivery
 
-**Version:** 2.0-draft (replaces the original system specification; see §1)
+**Version:** 2.0-draft
 
 **Date:** October 14, 2026
 
@@ -22,30 +22,28 @@
 
 Halo: The Master Chief Collection (MCC) players email post-game scoreboard screenshots to a fixed address. This component turns each screenshot into OCR evidence and a per-screenshot CSV of player statistics. It keeps every input and every provider response so later features can replay, compare, label and train on them without asking players to resend anything.
 
-**Changes in 2.0-draft:** the original specification described a Lambda chain that preprocessed images, cropped the scoreboard with Rekognition, and wrote one CSV per match to an output bucket that CDK created. This revision sends the original image to Textract unchanged, records every stage as immutable evidence, runs each screenshot through a Step Functions workflow, adds replay, run comparison and training-data materialization, and moves every persistent resource to the OpenTofu foundation. §1 records each decision. Where the original text and this revision disagree, this revision wins.
-
 ---
 
 ## 1. Resolved requirement decisions
 
-Each row records how a requirement from the original specification is resolved. These are product decisions.
+Each row records how a requirement is resolved. These are product decisions.
 
-| Original requirement | Decision | Reason |
+| Requirement | Decision | Reason |
 | --- | --- | --- |
 | Preprocess each image: EXIF auto-rotation, landscape enforcement, sharpening, Rekognition `DetectText` crop with full-image fallback | No preprocessing. Textract receives the stored original bytes after an integrity check. The run manifest records `preprocessingVersion: none-v1`. | Textract is built for unprocessed images, and sharpening or resizing can add artifacts that lower accuracy. Sending the original keeps every provider coordinate aligned with the stored evidence, which row-colour sampling and later labeling depend on. A crop would need its own stored artifact, failure modes and tests. |
-| Debug mode writes a cropped PNG to `matches/<matchId>/cropped/` and logs crop dimensions | Removed. Every run always writes its complete evidence (§5), so there is no debug flag. | With no crop there is nothing to debug. Full evidence on every run is more useful than an opt-in partial record. |
+| Debug mode writes a cropped PNG to `matches/<matchId>/cropped/` and logs crop dimensions | No debug mode. Every run writes its complete evidence (§5), so there is no debug flag. | With no crop there is nothing to debug. Full evidence on every run is more useful than an opt-in partial record. |
 | One CSV per match | One CSV per processing run, which is one per screenshot attempt. | The system has no match entity. Grouping screenshots into matches belongs to the match-entry and association features. One email can carry screenshots of different matches. |
-| CSV written to a dedicated output bucket | The CSV and its structured table are written under the run in the evidence bucket (`export/extracted.csv`, `export/extracted-table.json`). | The CSV is derived evidence and belongs next to the observations it came from. The foundation still provisions an output bucket and an attachments bucket for later features; v1 writes to neither. |
+| CSV written to a dedicated output bucket | The CSV and its structured table are written under the run in the evidence bucket (`export/extracted.csv`, `export/extracted-table.json`). | The CSV is derived evidence and belongs next to the observations it came from. The foundation provisions an output bucket and an attachments bucket for later features; v1 writes to neither. |
 | CDK provisions the raw-email, attachments and output buckets, the SES receipt rule set and the IAM policies | OpenTofu (`infrastructure/modules/foundation`) owns every persistent resource: the KMS key, all buckets, the receipt rule set, its activation, the shared `<alias>@<domain>` rule and the SSM parameters. CDK owns compute: Lambda functions, state machines, the EventBridge rule, the dead-letter queue, log groups and IAM roles. | Data must outlive application stacks, and no resource may be managed by two tools. The one exception is the ephemeral `<alias>+<name>@<domain>` receipt rule, which an ephemeral stack adds to the foundation rule set and removes with itself. |
 | Architecture: SES -> S3 -> handler Lambda -> preprocess Lambda -> CSV | SES -> raw-email bucket -> EventBridge `Object Created` -> Step Functions Standard workflow -> intake Lambda -> `Map` over screenshots -> extraction Lambda -> export Lambda. | A state machine gives per-screenshot isolation, bounded concurrency, declared retries, an execution history and a replay entry point. |
 | Emails must contain one or more image attachments | A message with no processable screenshot completes intake with status `REJECTED`, writes its evidence, and then fails the execution. | A silent empty success hides lost submissions. A failed execution shows up in the console and in alarms. |
 | Non-image attachments are ignored | Non-image attachments are recorded as `NOT_AN_IMAGE` rejections and stay only in the retained raw MIME message. Rejected images are stored with their rejection codes. | The submission record explains every attachment. |
-| Detect the header row dynamically, fall back to column order | The first row of the selected table is the header. Recognized labels map to fields. Any field left unmapped falls back to its standard position. | Matches the original intent with a deterministic rule. |
-| Team detection by row background colour, MCC colour names, FFA when one cluster | Changed. Only two-team boards are supported, and free-for-all and three-team matches are not. A board whose player rows form one colour cluster, carry no colour, or form three or more clusters produces no rows, and the run succeeds and records why (§8.4). When both clusters get the same colour name, the second gets a numeric suffix (`Red 2`). | An unsupported board succeeds with no rows instead of failing, because the attachment `Map` tolerates no failed item (§6.1), so one failed screenshot would fail every other screenshot in the email. Names stay unique per screenshot, so win/loss assignment never merges the two teams. |
-| Win/loss from the top player row | Kept, for two-team boards. | MCC lists the winning player or team first. |
-| JSON logs with `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE` | Kept. Each line is one JSON object with `level`, `message` and context fields, written to standard output. | CloudWatch Logs indexes JSON fields. |
-| TAP unit tests for `processScoreboardImage` | Kept, plus tests for every handler, the normalizer, CSV escaping, comparison, materialization, deployment configuration, bundling and receipt rules, with coverage thresholds that fail the test command (§16). | The parser is only one of several places where a regression loses evidence. |
-| All buckets block public access and use encryption | Kept. The raw-email bucket uses SSE-S3. Every other bucket uses SSE-KMS with the foundation key and S3 Bucket Keys. | SES writes the raw message, and SSE-S3 needs no key grant to the SES service principal. Application data uses a customer-managed key. |
+| Detect the header row dynamically, fall back to column order | The first row of the selected table is the header. Recognized labels map to fields. Any field left unmapped falls back to its standard position. | A fixed header row is deterministic, and the positional fallback still maps a field whose label Textract misreads. |
+| Team detection by row background colour, MCC colour names, FFA when one cluster | Only two-team boards are supported, and free-for-all and three-team matches are not. A board whose player rows form one colour cluster, carry no colour, or form three or more clusters produces no rows, and the run succeeds and records why (§8.4). When both clusters get the same colour name, the second gets a numeric suffix (`Red 2`). | An unsupported board succeeds with no rows instead of failing, because the attachment `Map` tolerates no failed item (§6.1), so one failed screenshot would fail every other screenshot in the email. Names stay unique per screenshot, so win/loss assignment never merges the two teams. |
+| Win/loss from the top player row | The top player row decides win and loss on two-team boards (§8.5). | MCC lists the winning player or team first. |
+| JSON logs with `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE` | Each line is one JSON object with `level`, `message` and context fields, written to standard output. | CloudWatch Logs indexes JSON fields. |
+| TAP unit tests for `processScoreboardImage` | Tests cover `processScoreboardImage`, every handler, the normalizer, CSV escaping, comparison, materialization, deployment configuration, bundling and receipt rules, with coverage thresholds that fail the test command (§16). | The parser is only one of several places where a regression loses evidence. |
+| All buckets block public access and use encryption | Every bucket blocks public access and is encrypted. The raw-email bucket uses SSE-S3. Every other bucket uses SSE-KMS with the foundation key and S3 Bucket Keys. | SES writes the raw message, and SSE-S3 needs no key grant to the SES service principal. Application data uses a customer-managed key. |
 | SES has explicit `PutObject` permission | The raw-email bucket policy allows `ses.amazonaws.com` to put objects only under `incoming/`, only from this account and only from a receipt rule set in this account. It denies every request without TLS. | Limits the service grant to the prefix SES needs. |
 | Least-privilege Lambda IAM | Each function receives only the S3, KMS and Textract actions it uses (§13.4), inside a permissions boundary. | Textract `AnalyzeDocument` has no resource-level permissions, so it is granted on `*` to the extraction function only. |
 
@@ -1063,7 +1061,6 @@ A change to a contract updates every consumer in the same PR.
 
 | ID | Slice | Size | Note |
 | --- | --- | --- | --- |
-| P8.1 | Cluster only player-row colours | S | Done. §8.4 clusters only player-row colours. |
 | P8.2 | Read placement instead of trusting row order | M | §18 item 2. Needs a labeled corpus first. |
 | P8.3 | Calibrate colour naming against labeled screenshots | S | §18 item 3. Thresholds become data, with a fixture per MCC colour. |
 | P8.4 | Merge split scoreboard tables | M | §18 item 4. Replay recovers older screenshots. |

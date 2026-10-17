@@ -54,8 +54,11 @@ The plans under [`specs/`](specs/) describe product work. They are design inputs
 - [1. Match-to-CSV](specs/1-mcc-analytics-engine.md): specification for v1 delivery. It describes `match-to-csv`, the one application built so far.
 - [2. OCR Quality](specs/2-ocr-quality.md): draft, not implemented. It scores each OCR cell for how likely it is to be wrong.
 - [3. Cell Labeling](specs/3-cell-labeling.md): draft, not implemented. Reviewers confirm or correct every OCR cell in the `admin` application.
-- [4. Map Suggestions for Match Entry](specs/4-map-suggestions.md): early plan without a status line or the specification template, not implemented. It suggests the likely map when someone enters a match.
 - [5. Match-to-CSV observability](specs/5-match-to-csv-observability.md): draft, not implemented. It adds one structured log record per pipeline stage, plus metrics and alarms.
+- [6. Gamertag Roster](specs/6-gamertag-roster.md): draft, not implemented. It matches each player name OCR reads against a roster of known gamertags and writes the roster gamertag into the CSV.
+- [7. OCR Risk Model and Autonomous Review](specs/7-ocr-risk-model.md): draft, not implemented. Scoreboard rules, an LLM reviewer, and a trained risk model decide which runs need a person.
+- [8. Matches from Admin Uploads](specs/8-match-uploads.md): draft, not implemented. An admin creates a match by uploading its scoreboard screenshots in the `admin` application.
+- [9. Stats Lakehouse](specs/9-stats-lakehouse.md): draft, not implemented. It turns reviewed scoreboards into the statistics the `player` application shows.
 - [Template](specs/TEMPLATE.md): the structure a new specification follows.
 
 ## Repository layout

@@ -6,6 +6,7 @@ Lines starting with `> Guide:` explain what a section must contain. Delete them 
 
 ## How to use this template
 
+- **Describe the design, not its history.** The spec states the design as it stands. What changed between versions, and why, goes in the pull request that changes the spec, never in the spec.
 - **Write for the implementer.** Someone with only this document and the repository should be able to build the component and know when it is done. Describe the design in the present tense ("`extract-text` writes the request before calling Textract"), even before it exists.
 - **Be specific.** Give numbers, names, limits, schema versions, key layouts and error names. "Bounded concurrency" is not a requirement; "a `Map` with a maximum concurrency of 2" is.
 - **Keep the section order.** Sections 1 to 3 and 10 to 20 are fixed. Sections 4 to 9 are domain sections: rename them, merge them or add more, then renumber everything after them and fix cross-references.
@@ -13,7 +14,7 @@ Lines starting with `> Guide:` explain what a section must contain. Delete them 
 - **Prefer tables for anything enumerable:** inputs, error codes, schemas, resources, permissions, tests, slices.
 - **Mark optional sections.** Delete an optional section that does not apply, rather than leaving it empty.
 - **Record every limitation.** Each accepted limitation in §18 either explains why it is acceptable or names the backlog slice that fixes it.
-- **When code already exists, the code wins.** When retrofitting a spec to an implementation, describe what the repository does, record each change from earlier text in §1, and list known defects in §18 instead of specifying them as requirements.
+- **When code already exists, the code wins.** When retrofitting a spec to an implementation, describe what the repository does, record each decision in §1, and list known defects in §18 instead of specifying them as requirements.
 - **Follow the prose rules** in `.agents/workflows/plain-language.md`. Use ASCII apart from `§`, no em dashes, code symbols in backticks, one paragraph per line.
 - **Never include** credentials, account IDs, domains, email addresses, real user data, state or plans. This repository is public.
 
@@ -23,7 +24,7 @@ Lines starting with `> Guide:` explain what a section must contain. Delete them 
 
 **Status:** <Draft | Specification for v1 delivery | Revised specification; feasibility gates pending>
 
-**Version:** <1.0-draft> (<one-line reason for this version, such as "revised after review round 2">)
+**Version:** <1.0-draft>
 
 **Date:** <Month D, YYYY>
 
@@ -43,19 +44,17 @@ Lines starting with `> Guide:` explain what a section must contain. Delete them 
 
 <Two or three sentences: who uses this, what goes in, what comes out, and why it matters to the rest of the system.>
 
-**Changes in <version>:** <What changed since the previous version, as one paragraph. Name each contract change. Keep the notes for the last few versions and move older ones to the document history.>
-
-**Readiness (optional):** <What this revision authorizes next, which gates have not passed yet, and when contracts may freeze. Never claim a gate passed without evidence.>
+**Readiness (optional):** <What this specification authorizes next, which gates have not passed yet, and when contracts may freeze. Never claim a gate passed without evidence.>
 
 ---
 
 ## 1. Resolved requirement decisions
 
-> Guide: one row per requirement that was ambiguous, contradictory or changed from an earlier text. These are product decisions. Do not claim a provider guarantees more than it does.
+> Guide: one row per requirement that was ambiguous or contradictory, or that this spec decides differently from the request. These are product decisions. Do not claim a provider guarantees more than it does.
 
 | Requirement | Decision | Reason |
 | --- | --- | --- |
-| <original or ambiguous requirement> | <what this spec decides, concretely> | <why; name the risk or cost it avoids> |
+| <ambiguous or contradictory requirement> | <what this spec decides, concretely> | <why; name the risk or cost it avoids> |
 | Preprocess each image before OCR | No preprocessing. The provider receives the stored original bytes. | Keeps provider coordinates aligned with stored evidence; avoids artifacts and an extra stored artifact. |
 | "Single-shot API calls" vs repository tools | One inference request per round and no model tool calls. Deterministic tools gather context first. | Bounds cost and behavior. The cost is lower recall on very large changes (§18). |
 
@@ -379,10 +378,10 @@ A change to a contract updates every consumer in the same PR.
 
 <The critical path through the blocked-by graph, which slices can run in parallel, and the first milestone that gives real product feedback.>
 
-## 21. Review round <n> acceptance map (optional)
+## 21. Review findings acceptance map (optional)
 
-> Guide: add one section per external review round. Each row maps a finding to the contract that answers it and the evidence that will prove it. A mapped finding is not evidence that its fix has passed.
+> Guide: one row per open review finding. Each row maps the finding to the contract that answers it and the evidence that will prove it. Remove a row once its evidence has passed. A mapped finding is not evidence that its fix has passed.
 
-| Finding or recommendation | Revised contract | Required evidence |
+| Finding or recommendation | Contract | Required evidence |
 | --- | --- | --- |
 | <finding> | <§ and contract change> | <slice and test that proves it> |

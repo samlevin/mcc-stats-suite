@@ -204,7 +204,7 @@ const readParameter = createParameterReader(async (parameterName) => {
     }
     if (error instanceof Error && error.name === 'AccessDeniedException') {
       // Ephemeral roles are capped by the local CDK bootstrap's boundary, and
-      // a bootstrap from before runtime parameter reads denies every read.
+      // a boundary that does not allow ssm:GetParameter denies every read.
       throw Object.assign(
         new Error(
           `Cannot read SSM parameter ${parameterName}: ${error.message}. For an ephemeral stack, re-run the local CDK bootstrap (docs/self-hosting/20-bootstrap-cdk.md) so its boundary allows ssm:GetParameter.`,
