@@ -95,6 +95,56 @@ run "names_match_the_bootstrap_template_and_cdk_config" {
   }
 }
 
+# The dev root must create the policies on a fresh account, where none exist
+# yet, because the local bootstrap needs them first. A root plan cannot run
+# here: the imports in recovery-imports.tf read AWS. So this run plans the
+# module and reads the root's files.
+run "dev_root_creates_the_policies_without_importing_them" {
+  command = plan
+  plan_options { refresh = false }
+  module { source = "../../modules/foundation" }
+  variables {
+    environment               = "dev"
+    create_local_cdk_policies = true
+    email_alias               = "example-alias"
+    email_domain              = "mail.example.com"
+  }
+
+  override_data {
+    target = data.aws_region.current
+    values = { region = "us-east-1" }
+  }
+
+  override_resource {
+    target = aws_kms_key.data
+    values = { arn = "arn:aws:kms:us-east-1:000000000000:key/00000000-0000-0000-0000-000000000000" }
+  }
+
+  override_data {
+    target = data.aws_ssm_parameters_by_path.match_to_csv
+    values = {
+      names  = ["/mcc/dev/match-to-csv/email-alias"]
+      values = ["example-alias"]
+    }
+  }
+
+  assert {
+    condition = (
+      length(aws_iam_policy.local_cdk) == 5 &&
+      can(regex("(?m)^\\s*create_local_cdk_policies\\s*=\\s*true\\s*$", file("main.tf")))
+    )
+    error_message = "infrastructure/dev/foundation/main.tf must set create_local_cdk_policies = true, which creates the five local CDK policies."
+  }
+
+  assert {
+    condition = length(aws_iam_policy.local_cdk) == 5 && !anytrue([
+      for path in fileset(".", "*.tf") :
+      can(regex("(?m)^\\s*to\\s*=\\s*module\\.foundation\\.aws_iam_policy\\.local_cdk", file(path)))
+    ])
+    error_message = "The dev foundation root must not import the local CDK policies, or a fresh account cannot create them."
+  }
+}
+
 run "bootstrap_grant_covers_exactly_these_policies" {
   command = plan
   plan_options { refresh = false }
