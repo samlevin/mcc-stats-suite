@@ -1,4 +1,4 @@
-// scoreboardLogic.ts
+// scoreboard-logic.ts
 //
 // This file contains the "brain" of your MCC parser.
 // It does NOT talk to AWS, S3, Rekognition, Textract, or sharp.

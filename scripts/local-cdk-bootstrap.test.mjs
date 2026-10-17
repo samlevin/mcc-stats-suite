@@ -292,7 +292,7 @@ test('every application allows ephemeral roles and compute and excludes shared n
   }
 });
 
-test('shared and legacy stacks are outside the ephemeral namespace', () => {
+test('shared stacks and names without the -e- prefix are outside the ephemeral namespace', () => {
   for (const name of [
     'admin-dev',
     'match-to-csv-dev-replay',
@@ -357,11 +357,11 @@ test('deployment and execution read only bootstrap and application parameters', 
 
 test('execution creates and changes only bounded roles under the local path', () => {
   const ephemeral = localRole('match-to-csv-e-alice-ServiceRole-hash');
-  // Roles from before the local bootstrap, or made by hand, sit at path /.
-  const legacy = role('match-to-csv-e-alice-ServiceRole-hash');
+  // Roles outside the local path, such as roles made by hand, sit at path /.
+  const rootPathRole = role('match-to-csv-e-alice-ServiceRole-hash');
   assert.equal(executes('iam:CreateRole', ephemeral), false);
   assert.equal(executes('iam:CreateRole', ephemeral, bounded), true);
-  assert.equal(executes('iam:CreateRole', legacy, bounded), false);
+  assert.equal(executes('iam:CreateRole', rootPathRole, bounded), false);
   for (const action of [
     'iam:PutRolePolicy',
     'iam:DeleteRolePolicy',
@@ -370,7 +370,11 @@ test('execution creates and changes only bounded roles under the local path', ()
   ]) {
     assert.equal(executes(action, ephemeral, bounded), true, action);
     assert.equal(executes(action, ephemeral), false, `${action} unbounded`);
-    assert.equal(executes(action, legacy, bounded), false, `${action} legacy`);
+    assert.equal(
+      executes(action, rootPathRole, bounded),
+      false,
+      `${action} root path`,
+    );
   }
   for (const action of [
     'iam:GetRole',
@@ -383,7 +387,7 @@ test('execution creates and changes only bounded roles under the local path', ()
     'iam:UpdateRoleDescription',
   ]) {
     assert.equal(executes(action, ephemeral), true, action);
-    assert.equal(executes(action, legacy), false, `${action} legacy`);
+    assert.equal(executes(action, rootPathRole), false, `${action} root path`);
     assert.equal(
       executes(action, localRole('match-to-csv-dev-ServiceRole-hash')),
       false,
@@ -392,7 +396,7 @@ test('execution creates and changes only bounded roles under the local path', ()
   }
   const toLambda = { 'iam:PassedToService': 'lambda.amazonaws.com' };
   assert.equal(executes('iam:PassRole', ephemeral, toLambda), true);
-  assert.equal(executes('iam:PassRole', legacy, toLambda), false);
+  assert.equal(executes('iam:PassRole', rootPathRole, toLambda), false);
   assert.equal(
     executes(
       'iam:PassRole',
@@ -999,6 +1003,31 @@ test('the toolkit stack policy keeps the local policies from being deleted', () 
       (entry) => entry.Effect === 'Allow' && entry.Resource === '*',
     ),
   );
+});
+
+test('only the dev Terrateam role may manage exactly the local policies', () => {
+  const grant = readFileSync(
+    'infrastructure/modules/bootstrap/local-cdk-policy-management.tf',
+    'utf8',
+  );
+  const list = grant.match(/local_cdk_policy_names = \[([^\]]*)\]/)?.[1];
+  assert.ok(list, 'bootstrap must list local_cdk_policy_names');
+  assert.deepEqual(
+    [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort(),
+    LOCAL_POLICY_RESOURCES.map(
+      (name) => resources[name].Properties.ManagedPolicyName,
+    ).sort(),
+  );
+  assert.match(
+    readFileSync('infrastructure/dev/bootstrap/main.tf', 'utf8'),
+    /^\s*manage_local_cdk_policies\s*=\s*true\s*$/m,
+  );
+  for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {
+    assert.doesNotMatch(
+      readFileSync(`infrastructure/prod/bootstrap/${file}`, 'utf8'),
+      /manage_local_cdk_policies/,
+    );
+  }
 });
 
 test('ephemeral deploys name the local change set unless deploying directly', () => {

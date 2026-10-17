@@ -64,9 +64,8 @@ variable "terrateam_workflow_path" {
 variable "cdk_workflow_names" {
   description = "Names of the top-level GitHub Actions workflows that call the reusable deployment workflow. GitHub puts the caller's name, not the reusable workflow's, in the OIDC workflow claim."
   type        = list(string)
-  # The first two are the workflow names from before the #133 rename. Keep them
-  # until a follow-up removes them after delivery and rollback succeed with the
-  # new names.
+  # No workflow uses the first two names. Remove them in a bootstrap change once
+  # delivery and rollback succeed under the last two.
   default = [
     "deploy-applications",
     "rollback-aws-application",
@@ -123,6 +122,17 @@ variable "create_cdk_deploy_role" {
   description = "Create the GitHub OIDC provider and CDK deployment entry role for a stable account."
   type        = bool
   default     = true
+}
+
+variable "manage_local_cdk_policies" {
+  description = "Let the Terrateam role create, update, and delete the five local CDK permission policies and no other policy. Only dev has local CDK deployments."
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.manage_local_cdk_policies || var.environment == "dev"
+    error_message = "manage_local_cdk_policies is allowed only in dev."
+  }
 }
 
 variable "terrateam_role_name" {

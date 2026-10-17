@@ -82,6 +82,6 @@ npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
 
 If CDK reports `sts:AssumeRole` denied, check that the role names in the policy match the `CDKToolkitLocal` account, Region, and `mcclocal1` qualifier. Do not fix the error with a broad AWS managed policy.
 
-An `AccessDenied` that names `cdk-mcclocal1-cfn-exec-role` during a deploy, or `mcc-stats-suite-local-workload-boundary` at runtime, means the local policy lacks an action the application now needs. Extend `scripts/local-cdk-bootstrap.mjs`, then upgrade the local bootstrap as above. Never re-run the default bootstrap.
+An `AccessDenied` that names `cdk-mcclocal1-cfn-exec-role` during a deploy, or `mcc-stats-suite-local-workload-boundary` at runtime, means the local policy lacks an action the application needs. Extend `scripts/local-cdk-bootstrap.mjs`, then upgrade the local bootstrap as above. Never re-run the default bootstrap.
 
 Next: [Configure GitHub and Release Please](30-configure-github.md).

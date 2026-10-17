@@ -1,6 +1,6 @@
-// These imports recover resources created before the foundation roots used
-// persistent S3 state. Keep them as a record of resource origin; once an
-// address is in state, its import is a no-op.
+// These imports adopt foundation resources that exist in AWS but not in
+// state, as docs/self-hosting/60-recover-and-troubleshoot.md describes. Once
+// an address is in state, its import is a no-op.
 
 data "aws_caller_identity" "foundation_recovery" {}
 

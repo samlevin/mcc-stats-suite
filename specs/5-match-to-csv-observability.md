@@ -2,7 +2,7 @@
 
 **Status:** Draft
 
-**Version:** 1.3-draft (revised after review round 3)
+**Version:** 1.3-draft
 
 **Date:** October 15, 2026
 
@@ -22,12 +22,6 @@
 
 The operator of match-to-csv needs to answer three questions without a full-stack application: what happened to one emailed submission, where each recent upload is now, and whether the pipeline is slow or producing poor OCR. This spec answers them with one structured log record per pipeline stage. In dev and prod the record is also a CloudWatch metric (through EMF). Logs Insights queries join the records by submission and by Step Functions execution. The design adds nine custom metrics and two alarms, so its fixed cost is a few dollars a month. Ephemeral developer stacks only write the log records, and developers read them with a scoped grant on the local deployer permission set.
 
-**Changes in 1.3:** P1.2 is blocked by P1.3, so ephemeral stacks turn metrics off before they emit stage events (§20.4).
-
-**Changes in 1.2:** `EMF_METRICS_ENABLED` now defaults to on and only ephemeral stacks set it to `false`, so no slice can stop the existing metrics before its configuration ships (§3.1, §20.3). The developer grant scopes `GetQueryResults` to ephemeral log groups, adds `GetLogGroupFields` for console queries, and drops `DescribeQueries` (§8.2). P1.4 adds console and negative checks.
-
-**Changes in 1.1:** Ephemeral stacks publish no EMF metrics, new or existing, and get no alarms, saved queries or dashboard (§7.1, §13.2). The local deployer permission set gains read access to ephemeral log groups only (§8.2, P1.4). Upload status is computed per execution by comparing exported screenshots with the expected count, and it reads Step Functions failure records, so it covers failures before `submissionId` exists and invocations that wrote no event (§8.1, Q2). Q5 reports failed attempts and every rejection, including partial attachment rejections, and no longer claims to find final failures. `rejectionCodes` and `attachmentRejectionCodes` are sorted comma-joined strings, and `write-csv` adds `exportedScreenshotId` (§6.1). P0.2 now depends on P0.1 and P2.1 on P1.3, and P2.1 validates the queries against real logs (§20).
-
 ---
 
 ## 1. Resolved requirement decisions
@@ -40,7 +34,7 @@ The operator of match-to-csv needs to answer three questions without a full-stac
 | Metric dimensions | New metrics use the single dimension set `[["Stage"]]`. IDs, reason codes, error names and `workflow` are event fields and never dimensions. | CloudWatch bills each metric name and dimension combination as one custom metric. A high-cardinality dimension creates one billed metric per value. |
 | Ephemeral stacks | Log only. They write the same stage events without an `_aws` block, and write no `ExtractedRows` or `ZeroRowExtractions` record. They get no alarms, saved queries or dashboard. | Ephemeral stacks share the dev account and region, so their samples would merge into the stable dev stack's `Stage`-dimensioned metrics and alarms. Developers need the logs, not metrics. |
 | Developer access to ephemeral logs | The `MccStatsSuiteLocalCdkDeploy` policy template gains read and query access to `match-to-csv-e-*` log groups only (§8.2). | The template grants no CloudWatch Logs access today, so developers cannot tail or query their own stacks. Scoping to the ephemeral prefix keeps stable dev logs out of reach. |
-| Existing `ExtractedRows` and `ZeroRowExtractions` metrics | Unchanged in dev and prod. They keep the `FunctionName` dimension, so the zero-row alarm and its history keep working. | Changing their dimension would break the alarm from #89 for no gain. |
+| Existing `ExtractedRows` and `ZeroRowExtractions` metrics | Unchanged in dev and prod. They keep the `FunctionName` dimension, so the zero-row alarm and its history keep working. | Changing their dimension would break the zero-row alarm for no gain. |
 | Step Functions logging | The ingest workflow logs at `ERROR` with `includeExecutionData: false`. The Infrequent Access log class is not used. | `ALL` with execution data logs every transition's payload, including every extracted row, and is the largest log volume in the stack. `ERROR` still records the execution failure, timeout and abort events Q2 reads. The class cannot be changed on an existing log group, and at `ERROR` the volume is too small for its discount to matter. |
 | Log format | Lambdas use the JSON log format with application log level `INFO` and system log level `INFO`. | Platform records become structured JSON. `INFO` keeps the `platform.report` record that Q6 reads. |
 | End-to-end latency | Measured from the time EventBridge reports the raw email object was created to the time `write-extracted-csv` stores the CSV. | That is the delay the sender sees, apart from SES delivery. `process-email`'s own `receivedAt` excludes EventBridge and Step Functions start-up time. |

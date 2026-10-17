@@ -557,8 +557,8 @@ function runPrerequisites(stub) {
 test('match-to-csv prerequisites pass and mask the published domain', () => {
   const result = runPrerequisites({});
   assert.equal(result.status, 0, result.stderr + result.stdout);
-  // Masked before any other use. Revisions that still read MCC_EMAIL_DOMAIN
-  // declare the receipt rules the foundation owns, so nothing exports it.
+  // Masked before any other use. Nothing exports MCC_EMAIL_DOMAIN, because a
+  // release whose stack reads it declares receipt rules the foundation owns.
   assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
   assert.equal(result.githubEnv, '');
   assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
@@ -737,15 +737,15 @@ const trustedWorkflowNames = () => {
   return [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort();
 };
 
-test('CDK entry role trusts the current callers and only the retired pre-rename names', () => {
+test('CDK entry role trusts the current callers and only the two unused names', () => {
   const callers = deploymentCallerNames();
   assert.deepEqual(callers, [
     'Delivery: deploy to dev then prod',
     'Delivery: roll back prod',
   ]);
   const trusted = trustedWorkflowNames();
-  // Bootstrap trusted the new names before issue #133 renamed both callers.
-  // It keeps the names from before the rename until a follow-up removes them.
+  // Bootstrap also trusts deploy-applications and rollback-aws-application,
+  // which no workflow uses, until a bootstrap change removes them.
   assert.deepEqual(
     trusted,
     [...callers, 'deploy-applications', 'rollback-aws-application'].sort(),
