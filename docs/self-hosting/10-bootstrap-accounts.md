@@ -85,7 +85,7 @@ tofu -chdir=infrastructure/dev/bootstrap test -test-directory=../../modules/boot
 
 Then run `tofu plan` in each bootstrap root and apply only the reviewed change.
 
-Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc` and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply.
+Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc` and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply. It then offers the CDK bootstraps from [Bootstrap CDK and grant local deploy access](20-bootstrap-cdk.md), one approval per stack.
 
 ### Trusted deployment workflows
 
