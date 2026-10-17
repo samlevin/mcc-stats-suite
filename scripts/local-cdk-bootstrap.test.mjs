@@ -600,6 +600,15 @@ test('runtime roles cannot mutate compute, deploy stacks, or assume another role
     false,
     'shared dev log groups',
   );
+  assert.equal(
+    allowed(
+      runtime,
+      'logs:PutLogEvents',
+      `arn:aws:logs:us-east-1:${ACCOUNT}:log-group:/aws/vendedlogs/states/match-to-csv-e-alice:log-stream:x`,
+    ),
+    true,
+    'its own log groups',
+  );
 });
 
 test('runtime reads only dev application parameters, one at a time', () => {
@@ -774,7 +783,7 @@ test('runtime lists only its own ephemeral prefix', () => {
   );
 });
 
-test('runtime uses keys only through S3 and invokes only ephemeral compute', () => {
+test('runtime uses keys only through S3 or DynamoDB and invokes only ephemeral compute', () => {
   assert.equal(
     allowed(runtime, 'kms:Decrypt', '*', {
       'kms:ViaService': 's3.us-east-1.amazonaws.com',
@@ -830,6 +839,158 @@ test('runtime uses keys only through S3 and invokes only ephemeral compute', () 
     'xray:GetSamplingTargets',
   ]) {
     assert.equal(allowed(runtime, action, '*'), true, action);
+  }
+});
+
+const table = (name, account = ACCOUNT) =>
+  `arn:aws:dynamodb:us-east-1:${account}:table/${name}`;
+const devRoster = table('mcc-stats-suite-dev-gamertag-roster');
+// A roster request from a role tagged Ephemeral=<tag> that reads these partitions.
+const rosterRead = (keys, tag = 'alice') => ({
+  'aws:PrincipalTag/Ephemeral': tag,
+  'dynamodb:LeadingKeys': keys,
+});
+
+test('runtime boundary adds exactly the roster read and DynamoDB decrypt statements', () => {
+  const bySid = (sid) => runtime.Statement.find((entry) => entry.Sid === sid);
+  const read = bySid('ReadOwnRosterPartition');
+  assert.deepEqual(
+    [read.Effect, read.Action, resolve(read.Resource), read.Condition],
+    [
+      'Allow',
+      ['dynamodb:GetItem', 'dynamodb:Query'],
+      table('*-dev-gamertag-roster'),
+      {
+        'ForAllValues:StringEquals': {
+          'dynamodb:LeadingKeys':
+            'ROSTER#ephemeral/${aws:PrincipalTag/Ephemeral}',
+        },
+        Null: { 'dynamodb:LeadingKeys': 'false' },
+      },
+    ],
+  );
+  const decrypt = bySid('DecryptThroughDynamoDB');
+  assert.deepEqual(
+    [
+      decrypt.Effect,
+      decrypt.Action,
+      decrypt.Resource,
+      resolve(decrypt.Condition.StringEquals['kms:ViaService']),
+    ],
+    ['Allow', 'kms:Decrypt', '*', 'dynamodb.us-east-1.amazonaws.com'],
+  );
+  // No other statement grants a DynamoDB action.
+  assert.deepEqual(
+    runtime.Statement.filter((entry) =>
+      [entry.Action].flat().some((action) => action.startsWith('dynamodb:')),
+    ).map((entry) => entry.Sid),
+    ['ReadOwnRosterPartition'],
+  );
+});
+
+test('runtime reads only its own roster partition', () => {
+  for (const action of ['dynamodb:GetItem', 'dynamodb:Query']) {
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRoster,
+        rosterRead(['ROSTER#ephemeral/alice']),
+      ),
+      true,
+      action,
+    );
+    for (const [keys, why] of [
+      [['ROSTER#stable'], 'the stable roster'],
+      [['ROSTER#ephemeral/bob'], "another developer's roster"],
+      [['ROSTER#ephemeral/alice', 'ROSTER#stable'], 'a mixed request'],
+      [['ROSTER#ephemeral/alice/x'], 'a longer key'],
+      [undefined, 'no leading key'],
+    ]) {
+      assert.equal(
+        allowed(runtime, action, devRoster, rosterRead(keys)),
+        false,
+        `${action} ${why}`,
+      );
+    }
+    // The stable roster stays refused for a stack named stable.
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRoster,
+        rosterRead(['ROSTER#stable'], 'stable'),
+      ),
+      false,
+      `${action} the stable roster for a stack named stable`,
+    );
+    assert.equal(
+      allowed(runtime, action, devRoster, {
+        'dynamodb:LeadingKeys': ['ROSTER#ephemeral/alice'],
+      }),
+      false,
+      `${action} an untagged role`,
+    );
+    for (const resource of [
+      table('mcc-stats-suite-prod-gamertag-roster'),
+      table('mcc-stats-suite-dev-other'),
+      `${devRoster}/index/by-key`,
+      table('mcc-stats-suite-dev-gamertag-roster', '111111111111'),
+    ]) {
+      assert.equal(
+        allowed(
+          runtime,
+          action,
+          resource,
+          rosterRead(['ROSTER#ephemeral/alice']),
+        ),
+        false,
+        `${action} ${resource}`,
+      );
+    }
+  }
+  for (const action of [
+    'dynamodb:PutItem',
+    'dynamodb:UpdateItem',
+    'dynamodb:DeleteItem',
+    'dynamodb:BatchGetItem',
+    'dynamodb:BatchWriteItem',
+    'dynamodb:TransactWriteItems',
+    'dynamodb:Scan',
+    'dynamodb:DeleteTable',
+  ]) {
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRoster,
+        rosterRead(['ROSTER#ephemeral/alice']),
+      ),
+      false,
+      action,
+    );
+  }
+});
+
+test('runtime decrypts through DynamoDB but never encrypts there or decrypts elsewhere', () => {
+  const viaDynamoDB = { 'kms:ViaService': 'dynamodb.us-east-1.amazonaws.com' };
+  assert.equal(allowed(runtime, 'kms:Decrypt', '*', viaDynamoDB), true);
+  for (const action of [
+    'kms:Encrypt',
+    'kms:GenerateDataKey',
+    'kms:ReEncryptTo',
+  ]) {
+    assert.equal(allowed(runtime, action, '*', viaDynamoDB), false, action);
+  }
+  for (const service of [
+    'dynamodb.us-west-2.amazonaws.com',
+    'ssm.us-east-1.amazonaws.com',
+  ]) {
+    assert.equal(
+      allowed(runtime, 'kms:Decrypt', '*', { 'kms:ViaService': service }),
+      false,
+      service,
+    );
   }
 });
 
