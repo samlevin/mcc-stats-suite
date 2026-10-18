@@ -502,7 +502,8 @@ function runPrerequisites(stub) {
     '/mcc/dev/match-to-csv/data-key-arn',
     '/mcc/dev/match-to-csv/receipt-rule-set-name',
     '/mcc/dev/match-to-csv/email-domain',
-  ].slice(0, stub.parameterCount ?? 6);
+    '/mcc/dev/roster/table-name',
+  ].slice(0, stub.parameterCount ?? 7);
   const values = {
     '/mcc/dev/match-to-csv/receipt-rule-set-name': 'mcc-match-to-csv-dev',
     '/mcc/dev/match-to-csv/email-domain': 'mail.example.com',
@@ -562,7 +563,7 @@ test('match-to-csv prerequisites pass and mask the published domain', () => {
   assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
   assert.equal(result.githubEnv, '');
   assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
-  // The step asks for exactly the six parameters and checks the published
+  // The step asks for exactly the seven parameters and checks the published
   // domain, not some other value, against SES and DNS.
   assert.deepEqual(result.calls, [
     'aws ssm get-parameters --names /cdk-bootstrap/hnb659fds/version ' +
@@ -570,7 +571,8 @@ test('match-to-csv prerequisites pass and mask the published domain', () => {
       '/mcc/dev/match-to-csv/evidence-bucket-name ' +
       '/mcc/dev/match-to-csv/data-key-arn ' +
       '/mcc/dev/match-to-csv/receipt-rule-set-name ' +
-      '/mcc/dev/match-to-csv/email-domain --output json',
+      '/mcc/dev/match-to-csv/email-domain ' +
+      '/mcc/dev/roster/table-name --output json',
     'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
     'aws ses get-identity-verification-attributes --identities mail.example.com ' +
       '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
@@ -603,6 +605,11 @@ for (const [name, stub, message] of [
   [
     'a foundation parameter is missing',
     { parameterCount: 5 },
+    'parameters are missing',
+  ],
+  [
+    'the roster table parameter is missing',
+    { parameterCount: 6 },
     'parameters are missing',
   ],
   [

@@ -42,9 +42,9 @@ For `MATCH_DATE_INVALID` only, `process-email` replies to the `From` address fro
 
 ## Deployment
 
-Apply the matching environment foundation before deploying the application. The foundation creates the raw-message bucket, immutable evidence bucket, KMS key, and required SSM parameters.
+Apply the matching environment foundation before deploying the application. The foundation creates the raw-message bucket, immutable evidence bucket, KMS key, gamertag roster table, and required SSM parameters.
 
-GitHub Actions deploys stable environments. Its preflight checks verify the target account, CDK bootstrap parameter, foundation parameters, SES identity status, and inbound MX target. The workflow builds native dependencies for Linux ARM64 and inspects both Sharp-using Lambda assets before deployment.
+GitHub Actions deploys stable environments. Its preflight checks verify the target account, CDK bootstrap parameter, foundation parameters including `/mcc/<environment>/roster/table-name`, SES identity status, and inbound MX target. The workflow builds native dependencies for Linux ARM64 and inspects both Sharp-using Lambda assets before deployment.
 
 Local developer stacks are explicit:
 
@@ -60,11 +60,22 @@ Stable stacks publish CloudWatch alarms to the `match-to-csv-<environment>-alarm
 
 To receive alarm email, create a `String` parameter named `/mcc/<environment>/match-to-csv/alarm-email` that holds the address, then redeploy. The deploy workflow subscribes the address only when the parameter exists, and CloudFormation reads the value at deploy time, so the address stays out of the repository, the template, and the workflow logs. SNS sends a confirmation email, and the subscription delivers alarms only after someone confirms it.
 
+## Roster
+
+`extract-text` reads the gamertag roster before it calls Textract ([spec 1.2 §6.2](../../specs/1.2-gamertag-roster.md#62-roster-read-and-resolution-in-extract-text)). It reads the roster table's `HEAD` item and change log for its namespace, `stable` in stable stacks and `ephemeral/<name>` in ephemeral ones, and checks that the change log reproduces the hash in `HEAD`. It then writes that version's snapshot to `roster/versions/<version>.json` in the evidence bucket, create-only. A warm Lambda reads only the changes after the version it last read, and writes or checks each snapshot once.
+
+Every run records the roster version it read as `roster` (`namespace`, `rosterVersion`, `rosterSha256`, and the snapshot's bucket and key) in its normalized observations, its successful completion, and `ExtractTextOutput`. A run records a version only after that version's snapshot exists. A namespace with no roster changes is version 0 with no entries, so runs succeed before an operator loads the roster.
+
+A change log that does not reproduce `HEAD` fails the run with `RosterIntegrityError`, and a stored snapshot whose hash differs fails it with `RosterSnapshotMismatchError`. Neither is retried, and neither run calls Textract. DynamoDB throttling and server errors use the workflow's existing retries.
+
+`ExtractText` may only call `GetItem` and `Query` on the roster table, and only in its own `ROSTER#<namespace>` partition. Logs record the roster version, never a gamertag.
+
 ## Evidence layout
 
 Stable stacks start at `submissions/`. Ephemeral stacks place the entire tree under `ephemeral/<name>/`.
 
 ```text
+roster/versions/{rosterVersion}.json
 submissions/{submissionId}/
   ingestion.json
   completion.json

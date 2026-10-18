@@ -23,6 +23,12 @@ import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 import { log } from '../lib/log';
 import { publishExtractionMetrics } from '../lib/metrics';
 import {
+  DynamoRosterSource,
+  dynamoRosterTable,
+  s3SnapshotStore,
+  type LoadedRoster,
+} from '../lib/roster-source';
+import {
   processScoreboardImage,
   type RowColor,
   type TextractBlockLite,
@@ -64,6 +70,11 @@ export interface ExtractTextDependencies {
   ): Promise<S3ObjectReference>;
   /** Publishes the extracted row count, which alarms on zero-row runs. */
   publishExtractionMetrics(rowCount: number): void;
+  /**
+   * Reads this deployment's roster and makes sure its snapshot exists in the
+   * evidence bucket (spec 1.2 §6.2 step 4).
+   */
+  readRoster(bucket: string): Promise<LoadedRoster>;
   id(): string;
   timestamp(): string;
   build: { gitSha: string; environment: string };
@@ -87,6 +98,7 @@ const defaultDependencies: ExtractTextDependencies = {
   calculateRowColors: computeRowColors,
   writeJson: putJson,
   publishExtractionMetrics: (rowCount) => publishExtractionMetrics(rowCount),
+  readRoster: (bucket) => rosterSource().read(rosterNamespace(), bucket),
   id: evidenceId,
   timestamp: now,
   build: {
@@ -94,6 +106,32 @@ const defaultDependencies: ExtractTextDependencies = {
     environment: process.env.DEPLOYMENT_ENVIRONMENT ?? 'LOCAL',
   },
 };
+
+let defaultRosterSource: DynamoRosterSource | undefined;
+
+/** One roster source per execution environment, so its cache outlives an invocation. */
+function rosterSource(): DynamoRosterSource {
+  if (!defaultRosterSource) {
+    const tableName = process.env.ROSTER_TABLE;
+    if (!tableName) {
+      throw namedError('RosterConfigurationError', 'ROSTER_TABLE is not set');
+    }
+    defaultRosterSource = new DynamoRosterSource(
+      dynamoRosterTable(tableName),
+      s3SnapshotStore(s3),
+      process.env.OBJECT_PREFIX ?? '',
+    );
+  }
+  return defaultRosterSource;
+}
+
+function rosterNamespace(): string {
+  const namespace = process.env.ROSTER_NAMESPACE;
+  if (!namespace) {
+    throw namedError('RosterConfigurationError', 'ROSTER_NAMESPACE is not set');
+  }
+  return namespace;
+}
 
 export async function handler(
   event: ProcessingRunInput,
@@ -133,6 +171,9 @@ export async function runExtraction(
     const image = await dependencies.getImage(source.bucket, source.key);
     const metadata = await dependencies.inspectImage(image);
     validateTextractImage(image, metadata, source.sha256);
+    // The roster is read before Textract, so a roster failure never costs a
+    // provider call.
+    const { reference: roster } = await dependencies.readRoster(source.bucket);
     const invokedAt = dependencies.timestamp();
     request = await dependencies.writeJson(
       source.bucket,
@@ -170,6 +211,7 @@ export async function runExtraction(
         schemaVersion: 'normalized-ocr/v2',
         runId,
         screenshotId: source.screenshotId,
+        roster,
         blocks: normalized.blocks,
         tables: normalized.tables,
         cells: normalized.cells,
@@ -195,6 +237,7 @@ export async function runExtraction(
         runId,
         status: 'SUCCEEDED',
         completedAt: dependencies.timestamp(),
+        roster,
         textract: {
           rawResponse,
           rawResponseSha256: sha256(Buffer.from(JSON.stringify(result))),
@@ -221,10 +264,11 @@ export async function runExtraction(
       screenshotId: source.screenshotId,
       runId,
       rowCount: rows.length,
+      rosterVersion: roster.rosterVersion,
       ...(noRowsReason ? { noRowsReason } : {}),
     });
     dependencies.publishExtractionMetrics(rows.length);
-    return { runId, source, rows, normalizedArtifact };
+    return { runId, source, rows, normalizedArtifact, roster };
   } catch (error) {
     const failure = errorSummary(error);
     await Promise.all([

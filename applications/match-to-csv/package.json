@@ -15,12 +15,14 @@
     "ci:test": "CDK_VALIDATION=false node --import tsx --test --test-concurrency=2 --experimental-test-coverage --test-coverage-include=\"cdk/**\" --test-coverage-include=\"src/**\" --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=60 test/*.test.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.992.0",
     "@aws-sdk/client-s3": "^3.992.0",
     "@aws-sdk/client-sesv2": "^3.992.0",
     "@aws-sdk/client-ssm": "^3.992.0",
     "@aws-sdk/client-textract": "^3.992.0",
     "@mcc/cdk-config": "1.0.0",
     "@mcc/contracts": "1.0.0",
+    "@mcc/roster": "1.0.0",
     "mailparser": "^3.9.3",
     "sharp": "^0.35.3"
   },

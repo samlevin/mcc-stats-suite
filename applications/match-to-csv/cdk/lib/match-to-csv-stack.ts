@@ -116,6 +116,16 @@ export class MatchToCsvStack extends Stack {
         `${prefix}/data-key-arn`,
       ),
     );
+    // The foundation owns the gamertag roster table (spec 1.2 §13.2). Each stack
+    // reads only its own namespace's partition: `stable` for stable stacks and
+    // `ephemeral/<name>` for ephemeral ones.
+    const rosterTableName = ssm.StringParameter.valueForStringParameter(
+      this,
+      `/mcc/${deployment.environment}/roster/table-name`,
+    );
+    const rosterNamespace = deployment.ephemeral
+      ? `ephemeral/${deployment.ephemeral}`
+      : 'stable';
 
     // Operators create this optional parameter out of band; sender addresses
     // never live in source or OpenTofu state.
@@ -161,6 +171,8 @@ export class MatchToCsvStack extends Stack {
       {
         ...lambdaEnvironment,
         ...buildEnvironment,
+        ROSTER_TABLE: rosterTableName,
+        ROSTER_NAMESPACE: rosterNamespace,
       },
       2048,
       true,
@@ -234,6 +246,27 @@ export class MatchToCsvStack extends Stack {
       new iam.PolicyStatement({
         actions: ['textract:AnalyzeDocument'],
         resources: ['*'],
+      }),
+    );
+    // Read-only, and only in this stack's partition. Null refuses a request
+    // that names no leading key, which ForAllValues would otherwise allow.
+    // The data key grant above covers DynamoDB's decryption of the items.
+    extractText.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+        resources: [
+          this.formatArn({
+            service: 'dynamodb',
+            resource: 'table',
+            resourceName: rosterTableName,
+          }),
+        ],
+        conditions: {
+          'ForAllValues:StringEquals': {
+            'dynamodb:LeadingKeys': `ROSTER#${rosterNamespace}`,
+          },
+          Null: { 'dynamodb:LeadingKeys': 'false' },
+        },
       }),
     );
 

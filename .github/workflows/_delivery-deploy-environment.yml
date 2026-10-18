@@ -183,9 +183,10 @@ jobs:
               "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/data-key-arn" \
               "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/receipt-rule-set-name" \
               "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/email-domain" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/roster/table-name" \
             --output json)"
-          if [ "$(jq '.Parameters | length' <<<"${PARAMETERS}")" != "6" ]; then
-            echo "::error::CDK bootstrap or match-to-csv foundation parameters are missing"
+          if [ "$(jq '.Parameters | length' <<<"${PARAMETERS}")" != "7" ]; then
+            echo "::error::CDK bootstrap, match-to-csv foundation or roster table parameters are missing"
             exit 1
           fi
           parameter() {
