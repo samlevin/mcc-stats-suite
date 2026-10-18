@@ -337,3 +337,99 @@ test('ephemeral stacks create no alarms, topic, or subscription', () => {
   template.resourceCountIs('AWS::SNS::Topic', 0);
   template.resourceCountIs('AWS::SNS::Subscription', 0);
 });
+
+test('extract text reads only its own roster partition of the foundation roster table', () => {
+  for (const [environment, ephemeral, namespace] of [
+    ['dev', undefined, 'stable'],
+    ['prod', undefined, 'stable'],
+    ['dev', 'test', 'ephemeral/test'],
+  ] as const) {
+    const label = `${environment} ${ephemeral ?? 'stable'}`;
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const parameters = template.toJSON().Parameters as Record<
+      string,
+      { Type: string; Default?: string }
+    >;
+    const [fn] = Object.values(
+      template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: Match.stringLikeRegexp('-ExtractText$') },
+      }),
+    );
+    const variables = fn.Properties.Environment.Variables as Record<
+      string,
+      unknown
+    >;
+    assert.equal(variables.ROSTER_NAMESPACE, namespace, label);
+    // The table name resolves from the foundation's parameter at deploy time.
+    const tableName = variables.ROSTER_TABLE as { Ref: string };
+    assert.deepEqual(
+      parameters[tableName.Ref],
+      {
+        Type: 'AWS::SSM::Parameter::Value<String>',
+        Default: `/mcc/${environment}/roster/table-name`,
+      },
+      label,
+    );
+
+    const statements = Object.values(
+      template.findResources('AWS::IAM::Policy'),
+    ).flatMap((policy) =>
+      (
+        policy.Properties.PolicyDocument.Statement as Array<{
+          Action: string | string[];
+          Resource: unknown;
+          Condition?: unknown;
+        }>
+      ).map((statement) => ({
+        ...statement,
+        roles: JSON.stringify(policy.Properties.Roles),
+      })),
+    );
+    // One read-only statement, on ExtractText only.
+    const dynamoStatements = statements.filter((statement) =>
+      [statement.Action]
+        .flat()
+        .some((action) => action.startsWith('dynamodb:')),
+    );
+    assert.equal(dynamoStatements.length, 1, label);
+    const [statement] = dynamoStatements;
+    assert.ok(statement.roles.includes('ExtractText'), label);
+    assert.deepEqual(
+      statement.Action,
+      ['dynamodb:GetItem', 'dynamodb:Query'],
+      label,
+    );
+    assert.deepEqual(
+      statement.Resource,
+      {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            { Ref: 'AWS::Partition' },
+            ':dynamodb:',
+            { Ref: 'AWS::Region' },
+            ':',
+            { Ref: 'AWS::AccountId' },
+            ':table/',
+            { Ref: tableName.Ref },
+          ],
+        ],
+      },
+      label,
+    );
+    assert.deepEqual(
+      statement.Condition,
+      {
+        'ForAllValues:StringEquals': {
+          'dynamodb:LeadingKeys': `ROSTER#${namespace}`,
+        },
+        Null: { 'dynamodb:LeadingKeys': 'false' },
+      },
+      label,
+    );
+  }
+});

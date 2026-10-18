@@ -6,6 +6,8 @@ import {
   runExtraction,
   type ExtractTextDependencies,
 } from '../src/lambdas/extract-text';
+import type { RosterReference } from '@mcc/contracts';
+import { RosterIntegrityError } from '@mcc/roster';
 import type {
   RowColor,
   ScoreboardParseResult,
@@ -24,11 +26,31 @@ const source = {
   heightPx: 1080,
 };
 
+/** The fields these tests read from a run's recorded documents. */
+interface RecordedDocument {
+  roster?: RosterReference;
+  status?: string;
+  parser?: { rows: unknown[] };
+  error?: { name: string };
+  request?: unknown;
+}
+
+const roster: RosterReference = {
+  namespace: 'ephemeral/tester',
+  rosterVersion: 3,
+  rosterSha256: 'a'.repeat(64),
+  snapshot: {
+    bucket: 'evidence',
+    key: 'ephemeral/tester/roster/versions/0000000003.json',
+  },
+};
+
 function dependencies(
   writes: Array<{ key: string; value: any }>,
   analyze: ExtractTextDependencies['analyze'],
   image: Buffer = Buffer.from('image'),
   publishedRowCounts: number[] = [],
+  calls: string[] = [],
 ): ExtractTextDependencies {
   let id = 0;
   return {
@@ -38,7 +60,17 @@ function dependencies(
     async inspectImage() {
       return { format: 'png', width: 1920, height: 1080 };
     },
-    analyze,
+    async analyze(input) {
+      calls.push('analyze');
+      return analyze(input);
+    },
+    async readRoster(bucket) {
+      calls.push(`roster:${bucket}`);
+      return {
+        reference: roster,
+        entries: [{ gamertagId: 'entry-1', gamertag: 'PlayerOne' }],
+      };
+    },
     async calculateRowColors() {
       return [];
     },
@@ -302,4 +334,108 @@ test('runExtraction records no reason for a two-team board', async () => {
   );
   assert.deepEqual(parser.rows, result.rows);
   assert.ok(!('noRowsReason' in parser));
+});
+
+test('runExtraction reads the roster before Textract and records its reference', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  const calls: string[] = [];
+  const result = await runExtraction(
+    { source },
+    {
+      ...dependencies(
+        writes,
+        async () => ({ $metadata: {}, Blocks: scoreboardBlocks() }),
+        undefined,
+        undefined,
+        calls,
+      ),
+      async calculateRowColors() {
+        return [
+          { rowIndex: 2, r: 230, g: 20, b: 20 },
+          { rowIndex: 3, r: 20, g: 20, b: 230 },
+        ];
+      },
+    },
+  );
+
+  assert.deepEqual(calls, ['roster:evidence', 'analyze']);
+  const written = (suffix: string) =>
+    writes.find((write) => write.key.endsWith(suffix))?.value as
+      RecordedDocument | undefined;
+  assert.deepEqual(written('/normalized/observations.json')?.roster, roster);
+  assert.equal(written('/completion.json')?.status, 'SUCCEEDED');
+  assert.deepEqual(written('/completion.json')?.roster, roster);
+  assert.deepEqual(result.roster, roster);
+  // The output carries only the reference: no roster gamertag enters
+  // workflow state, and the names stay as read.
+  assert.deepEqual(
+    result.rows.map((row) => row.player),
+    ['PlayerOne', 'PlayerTwo'],
+  );
+  assert.ok(result.rows.every((row) => !('playerResolution' in row)));
+  assert.deepEqual(
+    written('/normalized/observations.json')?.parser?.rows,
+    result.rows,
+  );
+});
+
+test('runExtraction fails a run whose roster cannot be read without calling Textract', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  const calls: string[] = [];
+  await assert.rejects(
+    runExtraction(
+      { source },
+      {
+        ...dependencies(
+          writes,
+          async () => {
+            throw new Error('provider must not be called');
+          },
+          undefined,
+          undefined,
+          calls,
+        ),
+        async readRoster() {
+          calls.push('roster');
+          throw new RosterIntegrityError(
+            'The change log does not reproduce HEAD version 3',
+          );
+        },
+      },
+    ),
+    { name: 'RosterIntegrityError' },
+  );
+
+  assert.deepEqual(calls, ['roster']);
+  assert.ok(
+    !writes.some((write) => write.key.includes('/textract/')),
+    'no Textract request is recorded',
+  );
+  const completion = writes.find((write) =>
+    write.key.endsWith('/completion.json'),
+  )?.value as RecordedDocument | undefined;
+  assert.equal(completion?.status, 'FAILED');
+  assert.equal(completion?.error?.name, 'RosterIntegrityError');
+  assert.equal(completion?.request, undefined);
+  assert.ok(writes.some((write) => write.value.type === 'RUN_FAILED'));
+});
+
+test('runExtraction checks the source hash before reading the roster', async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    runExtraction(
+      { source: { ...source, sha256: 'different' } },
+      dependencies(
+        [],
+        async () => {
+          throw new Error('provider must not be called');
+        },
+        undefined,
+        undefined,
+        calls,
+      ),
+    ),
+    { name: 'SourceHashMismatchError' },
+  );
+  assert.deepEqual(calls, []);
 });
