@@ -36,7 +36,7 @@ Keep the default `hnb659fds` bootstrap for GitHub Actions. Local developers use 
 - `bootstrap-template.yaml`, which `scripts/local-cdk-bootstrap.mjs` generates from the CDK bootstrap template of the `aws-cdk` version pinned in `package-lock.json`; and
 - the [stack policy](../../infrastructure/dev/local-cdk/stack-policy.json), `stack-policy.json`.
 
-Terrateam plans and applies the root like the dev foundation root, as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam). CloudFormation creates the stack's IAM roles and policies with the caller's credentials, so apply the dev bootstrap first: it grants the dev Terrateam role access to this stack and its IAM resources ([Bootstrap the Terrateam role](70-optional-terrateam.md#bootstrap-the-terrateam-role)). Without Terrateam, a dev administrator applies the root with OpenTofu, using its `.envrc` created from `.envrc.example`, as in [Apply dev](40-change-foundation.md#apply-dev). Nobody runs `cdk bootstrap` for `mcclocal1`.
+Terrateam plans and applies the root like the dev foundation root, as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam), except that the apply comment is `terrateam apply dev and local-cdk`. CloudFormation creates the stack's IAM roles and policies with the caller's credentials, so apply the dev bootstrap first: it grants the dev Terrateam role access to this stack and its IAM resources ([Bootstrap the Terrateam role](70-optional-terrateam.md#bootstrap-the-terrateam-role)). Without Terrateam, a dev administrator applies the root with OpenTofu, using its `.envrc` created from `.envrc.example`, as in [Apply dev](40-change-foundation.md#apply-dev). Nobody runs `cdk bootstrap` for `mcclocal1`.
 
 The stack policy stops any update from deleting or replacing the local policies. A stock `cdk bootstrap --qualifier mcclocal1` would otherwise replace the local roles' policies with the upstream `AdministratorAccess` execution policy, which every local developer can then use. The root's `prevent_destroy` stops any plan from deleting the stack.
 
@@ -50,7 +50,7 @@ To change the local permissions, edit `scripts/local-cdk-bootstrap.mjs`. To upgr
 npm run cdk:local-template
 ```
 
-A test fails while the committed template differs from a fresh generation, or when it is larger than 51,200 bytes, the CloudFormation limit for an inline template body. Open a pull request, then review the Terrateam plan for `infrastructure/dev/local-cdk` and apply dev. If the stack policy rejects an update, the template is missing a local policy: fix the generator instead of removing the stack policy.
+A test fails while the committed template differs from a fresh generation, or when it is larger than 51,200 bytes, the CloudFormation limit for an inline template body. Open a pull request, comment `terrateam plan`, review the plan for `infrastructure/dev/local-cdk`, then comment `terrateam apply dev and local-cdk`. If the stack policy rejects an update, the template is missing a local policy: fix the generator instead of removing the stack policy.
 
 ### Remove the local bootstrap
 

@@ -74,8 +74,8 @@ export function localBootstrap(template) {
   result.Parameters.Qualifier.Default = LOCAL_QUALIFIER;
   // An operator cannot accidentally turn this template into the stable bootstrap.
   result.Parameters.Qualifier.AllowedValues = [LOCAL_QUALIFIER];
-  // Only this account's principals may assume the local roles, even if an operator
-  // passes --trust or --trust-for-lookup.
+  // Only this account's principals may assume the local roles, even if the stack's
+  // TrustedAccounts or TrustedAccountsForLookup parameters are set.
   for (const name of trustedRoles) {
     const trust = resources[name].Properties.AssumeRolePolicyDocument;
     trust.Statement = trust.Statement.filter((entry) => !entry['Fn::If']);
