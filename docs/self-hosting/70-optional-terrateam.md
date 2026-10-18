@@ -86,7 +86,7 @@ Terrateam takes a lock only when it applies a root, and the merge releases it. M
 
 When Terrateam cannot run, a person can invoke `/mcc-apply-foundation` in Claude Code or `$mcc-apply-foundation` in Codex for one pull request. An agent cannot start it for you. It reads the inputs from each foundation root's ignored `.envrc` in your checkout, which you create from the `.envrc.example` in that root. It checks the account, plans and applies dev before prod, applies only the saved plans that person reviewed, and squash-merges with the pull request title, stopping for approval before every step. Because Terrateam never applied that pull request, the merge takes no Terrateam lock.
 
-For [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist), apply the import pull request with `terrateam plan` and `terrateam apply dev and foundation`, then `terrateam plan prod and foundation` and `terrateam apply prod and foundation`.
+Do not apply a [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist) import pull request with Terrateam. Its import blocks must never merge, and Terrateam merges a pull request once its applies succeed and its checks pass. Apply it by hand as the recovery steps describe.
 
 ## Drift issues
 
