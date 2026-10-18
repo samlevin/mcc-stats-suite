@@ -18,9 +18,10 @@ This usually means OpenTofu ran without its S3 backend, so the resources exist i
 
 1. Read the complete apply logs and list every resource that was created.
 2. Confirm the state bucket and Region variables point at the intended environment, and check whether the environment's state object already holds those resources. Never import one AWS object to two addresses.
-3. Add declarative `import` blocks for the existing resources in a pull request. Confirm the new dev plan initializes the S3 backend and imports the resources instead of creating them.
-4. Apply dev, then require an empty dev plan.
+3. Add declarative `import` blocks for the existing resources in a pull request. Confirm the new dev plan initializes the S3 backend and imports the resources instead of creating them. Never merge this pull request, because `main` must plan on a fresh account. The dev root plan test in `npm run tofu:check` plans `infrastructure/dev/foundation` as on a fresh account, so dev import blocks fail the required checks. No test plans the prod root.
+4. Apply dev by hand from the pull request's head commit, as [Apply and change the foundation](40-change-foundation.md) describes, then require an empty dev plan. Do not use Terrateam, which merges the pull request after its applies when the checks pass, or `mcc-apply-foundation`, which merges it and stops on a failed check.
 5. Repeat for prod from the same commit: plan, apply, and require an empty prod plan.
+6. Close the pull request without merging. The resources are now in state, so dev and prod plans from `main` must be empty.
 
 A failed apply can leave unmanaged duplicates, such as a KMS key created before its alias failed. Before scheduling deletion of a duplicate key, confirm no alias, SSM parameter, bucket encryption setting, application configuration, or stored object references it. Keep the full KMS waiting period, and do not add the duplicate to state.
 
