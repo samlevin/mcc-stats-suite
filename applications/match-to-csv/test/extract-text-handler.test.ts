@@ -6,7 +6,7 @@ import {
   runExtraction,
   type ExtractTextDependencies,
 } from '../src/lambdas/extract-text';
-import type { RosterReference } from '@mcc/contracts';
+import type { CsvRow, RosterReference } from '@mcc/contracts';
 import { RosterIntegrityError } from '@mcc/roster';
 import type {
   RowColor,
@@ -30,9 +30,19 @@ const source = {
 interface RecordedDocument {
   roster?: RosterReference;
   status?: string;
-  parser?: { rows: unknown[] };
+  parser?: { rows: CsvRow[] };
   error?: { name: string };
   request?: unknown;
+  versions?: Record<string, string>;
+  metrics?: { playerMatchCounts?: Record<string, number> };
+}
+
+function withoutResolution(rows: CsvRow[] = []): CsvRow[] {
+  return rows.map((row) => {
+    const copy = { ...row };
+    delete copy.playerResolution;
+    return copy;
+  });
 }
 
 const roster: RosterReference = {
@@ -332,13 +342,15 @@ test('runExtraction records no reason for a two-team board', async () => {
       ['PlayerTwo', 'Blue', 0],
     ],
   );
-  assert.deepEqual(parser.rows, result.rows);
+  assert.deepEqual(withoutResolution(parser.rows), result.rows);
   assert.ok(!('noRowsReason' in parser));
 });
 
-test('runExtraction reads the roster before Textract and records its reference', async () => {
+test('runExtraction reads the roster before Textract and records its reference', async (t) => {
   const writes: Array<{ key: string; value: any }> = [];
   const calls: string[] = [];
+  const logLines: string[] = [];
+  t.mock.method(console, 'log', (line: string) => logLines.push(line));
   const result = await runExtraction(
     { source },
     {
@@ -373,9 +385,45 @@ test('runExtraction reads the roster before Textract and records its reference',
     ['PlayerOne', 'PlayerTwo'],
   );
   assert.ok(result.rows.every((row) => !('playerResolution' in row)));
+  const parserRows = written('/normalized/observations.json')?.parser?.rows;
+  assert.deepEqual(withoutResolution(parserRows), result.rows);
+
+  // Each parser row records its resolution beside the name as read.
   assert.deepEqual(
-    written('/normalized/observations.json')?.parser?.rows,
-    result.rows,
+    parserRows?.map((row) => [
+      row.player,
+      row.playerResolution?.status,
+      row.playerResolution?.gamertagId,
+      row.playerResolution?.unmatchedReason,
+    ]),
+    [
+      ['PlayerOne', 'EXACT', 'entry-1', null],
+      ['PlayerTwo', 'UNMATCHED', null, 'NO_CANDIDATE'],
+    ],
+  );
+  assert.equal(
+    written('/manifest.json')?.versions?.rosterMatcherVersion,
+    'roster-matcher-v1',
+  );
+  const counts = { exact: 1, resolved: 0, unmatched: 1 };
+  assert.deepEqual(
+    written('/completion.json')?.metrics?.playerMatchCounts,
+    counts,
+  );
+  const processed = logLines
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .find((line) => line.message === 'Screenshot processed');
+  assert.deepEqual(
+    {
+      exact: processed?.exact,
+      resolved: processed?.resolved,
+      unmatched: processed?.unmatched,
+    },
+    counts,
+  );
+  assert.ok(
+    logLines.every((line) => !line.includes('PlayerOne')),
+    'logs never name a gamertag',
   );
 });
 

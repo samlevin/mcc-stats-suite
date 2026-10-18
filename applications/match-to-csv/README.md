@@ -66,9 +66,11 @@ To receive alarm email, create a `String` parameter named `/mcc/<environment>/ma
 
 Every run records the roster version it read as `roster` (`namespace`, `rosterVersion`, `rosterSha256`, and the snapshot's bucket and key) in its normalized observations, its successful completion, and `ExtractTextOutput`. A run records a version only after that version's snapshot exists. A namespace with no roster changes is version 0 with no entries, so runs succeed before an operator loads the roster.
 
+After parsing, `extract-text` resolves each player name against that roster version ([spec 1.2 §7](../../specs/1.2-gamertag-roster.md#7-matching)) and records the result as `playerResolution` beside the name in `parser.rows` of the normalized observations: `EXACT` when a roster gamertag equals the name as read, `RESOLVED` with the roster gamertag when the name is a near reading of exactly one gamertag, or `UNMATCHED` with a reason. The name as read, its `reviewFlags`, and every cell's `observedText` stay unchanged, and `ExtractTextOutput` rows carry no `playerResolution`. The successful completion records the `exact`, `resolved`, and `unmatched` counts as `metrics.playerMatchCounts`, the `Screenshot processed` log line carries the same counts, and the run manifest records `rosterMatcherVersion: roster-matcher-v1`. While the roster is empty, every row is `UNMATCHED` with `NO_CANDIDATE`.
+
 A change log that does not reproduce `HEAD` fails the run with `RosterIntegrityError`, and a stored snapshot whose hash differs fails it with `RosterSnapshotMismatchError`. Neither is retried, and neither run calls Textract. DynamoDB throttling and server errors use the workflow's existing retries.
 
-`ExtractText` may only call `GetItem` and `Query` on the roster table, and only in its own `ROSTER#<namespace>` partition. Logs record the roster version, never a gamertag.
+`ExtractText` may only call `GetItem` and `Query` on the roster table, and only in its own `ROSTER#<namespace>` partition. Logs record the roster version and match counts, never a gamertag.
 
 ## Evidence layout
 
