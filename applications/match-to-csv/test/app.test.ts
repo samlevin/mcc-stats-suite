@@ -70,6 +70,90 @@ test('process email reads only its environment sender allowlist parameter', () =
   }
 });
 
+test('process email may send only from noreply at its environment email domain', () => {
+  for (const [environment, ephemeral] of [
+    ['dev', undefined],
+    ['prod', undefined],
+    ['dev', 'test'],
+  ] as const) {
+    const label = `${environment} ${ephemeral ?? 'stable'}`;
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const json = template.toJSON() as {
+      Parameters: Record<string, { Type: string; Default?: string }>;
+    };
+    const [fn] = Object.values(
+      template.findResources('AWS::Lambda::Function', {
+        Properties: { FunctionName: Match.stringLikeRegexp('-ProcessEmail$') },
+      }),
+    );
+    // The domain resolves from the foundation's parameter at deploy time, so
+    // the template holds only the parameter name.
+    const domain = fn.Properties.Environment.Variables.REPLY_FROM_DOMAIN as {
+      Ref: string;
+    };
+    assert.deepEqual(json.Parameters[domain.Ref], {
+      Type: 'AWS::SSM::Parameter::Value<String>',
+      Default: `/mcc/${environment}/match-to-csv/email-domain`,
+    });
+
+    const statements = Object.values(
+      template.findResources('AWS::IAM::Policy'),
+    ).flatMap((policy) =>
+      (
+        policy.Properties.PolicyDocument.Statement as Array<{
+          Action: string | string[];
+          Resource: unknown;
+          Condition?: unknown;
+        }>
+      ).map((statement) => ({
+        ...statement,
+        roles: JSON.stringify(policy.Properties.Roles),
+      })),
+    );
+    const sesStatements = statements.filter((statement) =>
+      [statement.Action].flat().some((action) => action.startsWith('ses:')),
+    );
+    assert.equal(sesStatements.length, 1, label);
+    assert.equal(sesStatements[0].Action, 'ses:SendEmail', label);
+    assert.ok(sesStatements[0].roles.includes('ProcessEmail'), label);
+    // In the SES sandbox, SES also authorizes the send against the
+    // recipient's identity, so the grant names every identity in the stack's
+    // account and Region and limits the From address instead.
+    assert.deepEqual(
+      sesStatements[0].Resource,
+      {
+        'Fn::Join': [
+          '',
+          [
+            'arn:',
+            { Ref: 'AWS::Partition' },
+            ':ses:',
+            { Ref: 'AWS::Region' },
+            ':',
+            { Ref: 'AWS::AccountId' },
+            ':identity/*',
+          ],
+        ],
+      },
+      label,
+    );
+    assert.deepEqual(
+      sesStatements[0].Condition,
+      {
+        StringEquals: {
+          'ses:FromAddress': {
+            'Fn::Join': ['', ['noreply@', { Ref: domain.Ref }]],
+          },
+        },
+      },
+      label,
+    );
+  }
+});
+
 for (const [environment, ephemeral, retention] of [
   ['dev', undefined, 14],
   ['prod', undefined, 90],

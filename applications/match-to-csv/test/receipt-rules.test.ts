@@ -51,8 +51,10 @@ test('stable stacks leave inbound email to the foundation', () => {
     const defaults = Object.values(json.Parameters ?? {}).map(
       (parameter) => parameter.Default,
     );
+    // A stable stack resolves the domain only for its reply address and
+    // ses:SendEmail grant, and never the alias.
     assert.ok(
-      !defaults.includes(`/mcc/${environment}/match-to-csv/email-domain`),
+      defaults.includes(`/mcc/${environment}/match-to-csv/email-domain`),
     );
     assert.ok(
       !defaults.includes(`/mcc/${environment}/match-to-csv/email-alias`),

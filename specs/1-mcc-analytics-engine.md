@@ -45,7 +45,7 @@ Each row records how a requirement is resolved. These are product decisions.
 | TAP unit tests for `processScoreboardImage` | Tests cover `processScoreboardImage`, every handler, the normalizer, CSV escaping, comparison, materialization, deployment configuration, bundling and receipt rules, with coverage thresholds that fail the test command (§16). | The parser is only one of several places where a regression loses evidence. |
 | All buckets block public access and use encryption | Every bucket blocks public access and is encrypted. The raw-email bucket uses SSE-S3. Every other bucket uses SSE-KMS with the foundation key and S3 Bucket Keys. | SES writes the raw message, and SSE-S3 needs no key grant to the SES service principal. Application data uses a customer-managed key. |
 | SES has explicit `PutObject` permission | The raw-email bucket policy allows `ses.amazonaws.com` to put objects only under `incoming/`, only from this account and only from a receipt rule set in this account. It denies every request without TLS. | Limits the service grant to the prefix SES needs. |
-| Least-privilege Lambda IAM | Each function receives only the S3, KMS and Textract actions it uses (§13.4), inside a permissions boundary. | Textract `AnalyzeDocument` has no resource-level permissions, so it is granted on `*` to the extraction function only. |
+| Least-privilege Lambda IAM | Each function receives only the S3, KMS, Textract and SES actions it uses (§13.4), inside a permissions boundary. | Textract `AnalyzeDocument` has no resource-level permissions, so it is granted on `*` to the extraction function only. |
 
 **Additional capabilities included:** append-only submission and run events, immutable writes enforced by S3 conditional requests, source hash verification before OCR, versioned pipeline stages recorded in every run, replay of a stored screenshot as a new run, cell-level comparison of two runs, deterministic training-data splits, ephemeral per-developer stacks with their own email address and object namespace, pre-deployment checks of SES and DNS, and post-deployment health checks.
 
@@ -67,7 +67,7 @@ Each row records how a requirement is resolved. These are product decisions.
 - Creating matches, associating screenshots with matches, or deduplicating screenshots of the same match.
 - Correcting OCR text. Unknown layouts stay `UNKNOWN`, and suspicious values are flagged, never changed.
 - Adjudication, labeling, anomaly detection or model inference. Specs 2 and 3 cover those, reading the evidence this component writes.
-- Replying to the sender, or authenticating senders beyond SES spam and virus scanning.
+- Authenticating senders beyond SES spam and virus scanning.
 - Public access to any artifact, or any user interface.
 - Exactly-once processing. Retries can produce extra submissions or runs; evidence is never overwritten (§18).
 
@@ -154,6 +154,18 @@ The intake Lambda parses the message with `mailparser` and walks attachments in 
 
 Codes accumulate, so one attachment can carry several. An image with no codes becomes an accepted `SourceScreenshot` with `acquisitionType: SCREENSHOT`; v1 never sets `PHOTO` or `OTHER`, which are reserved for later classification. Attachment names are normalized with NFKC, reduced to `[a-zA-Z0-9._-]`, trimmed of leading and trailing hyphens and cut to 160 characters, falling back to `attachment-<n>`.
 
+### 4.4 Match date and error reply
+
+The plain-text body of each email holds one string, the date of the match. Screenshots of one session can run from 10pm to 1am the next day, so the date cannot be derived from timestamps.
+
+- After trimming whitespace, the body must be a calendar date written `M/D/YYYY`: month 1 to 12, a day that exists in that month, and a four-digit year. Leading zeros are accepted.
+- The intake Lambda checks the date after sender screening (SES verdicts, the sender allowlist and the recipient check) and before attachment acceptance (§4.3). A valid date is recorded as `matchDate` (`YYYY-MM-DD`) in `ingestion.json` and returned in `ProcessEmailOutput`.
+- A missing or invalid date rejects the submission with `MATCH_DATE_INVALID`. No attachment is stored and `ProcessEmailOutput` is never returned, so no screenshot reaches the attachments `Map` or Textract. The raw MIME stays.
+- For `MATCH_DATE_INVALID` only, and only when the sender allowlist lists the sender, the Lambda replies to the `From` address from `noreply@<domain>`. The domain is the `/mcc/<env>/match-to-csv/email-domain` parameter, resolved at deploy time. The subject is `Re: <original subject>`, `In-Reply-To` and `References` name the original message ID, and the plain-text body says the email was not processed because its body must contain only the match date as `M/D/YYYY`. It asks the sender to send the email again to the submission address, because replies to the no-reply address are not read.
+- No other rejection sends a reply. Screening runs first and the reply needs an allowlisted sender, so a reply goes only to an address on the allowlist.
+- A failed send is logged with the SES error name, never an address or email content, and does not change the rejection record.
+- Each account's SES domain identity, with DKIM and a custom MAIL FROM, exists outside OpenTofu. An account in the SES sandbox delivers only to verified addresses.
+
 ## 5. Evidence model and storage layout
 
 ### 5.1 Layout
@@ -197,9 +209,9 @@ A run's prefix derives from its source key (`<source prefix>/runs/<runId>`), so 
 
 | Object | `schemaVersion` | Writer | Contents |
 | --- | --- | --- | --- |
-| `ingestion.json` | `email-submission/v1` | `process-email` | `submissionId`, `rawEmail` (bucket and key), `messageId`, `subject`, `receivedAt`, `attachmentCount` |
+| `ingestion.json` | `email-submission/v1` | `process-email` | `submissionId`, `rawEmail` (bucket and key), `messageId`, `subject`, `matchDate` (`YYYY-MM-DD`, or `null` when the body holds no valid date, §4.4), `receivedAt`, `attachmentCount`, `sesVerdicts`, `senderAllowlist`, `recipientCheck` |
 | `source/metadata.json` | `source-screenshot/v1` | `process-email` | every `SourceScreenshot` field, `fileSizeBytes`, `originalFilename`, `contentDisposition`, `contentId`, `uploadedAt`, `processingStatus` (`ACCEPTED` or `REJECTED`), `rejectionCodes`, Sharp `metadata`, `metadataError` |
-| submission `completion.json` | `email-submission-completion/v1` | `process-email` | `status` (`SUCCEEDED`, `REJECTED` or `FAILED`), `completedAt`, `acceptedScreenshotCount`, `rejectedAttachments`, `error` when failed |
+| submission `completion.json` | `email-submission-completion/v1` | `process-email` | `status` (`SUCCEEDED`, `REJECTED` or `FAILED`), `completedAt`, `acceptedScreenshotCount`, `rejectedAttachments`, `rejectionCodes` unless failed (empty on success; a rejection lists its `SubmissionRejectionCode` values, such as `MATCH_DATE_INVALID` from §4.4), `error` when failed |
 | submission event | `submission-event/v1` | `process-email` | `type` (`SUBMISSION_ACCEPTED`, `SUBMISSION_REJECTED`, `SUBMISSION_FAILED`), `occurredAt`, `detail` |
 | `manifest.json` | `processing-run/v1` | `extract-text` | `runId`, `screenshotId`, `inputArtifact` (the source with `kind: ORIGINAL`), `versions`, `build` (`gitSha`, `environment`), `startedAt` |
 | run event | `processing-event/v1` | `extract-text` | `type` (`RUN_STARTED`, `RUN_SUCCEEDED`, `RUN_FAILED`), `occurredAt`, `detail` |
@@ -435,6 +447,7 @@ interface RejectedAttachment {
 
 interface ProcessEmailOutput {
   submissionId: string;
+  matchDate: string; // YYYY-MM-DD from the email body (§4.4)
   screenshots: SourceScreenshot[];
   rejectedAttachments: RejectedAttachment[];
 }
@@ -609,7 +622,7 @@ It rejects ephemeral names in prod, names outside `^[a-z0-9][a-z0-9-]{0,19}$`, t
 | `CompareRuns` | none | `GetObject`, `PutObject` | encrypt, decrypt | none |
 | `MaterializeTrainingData` | none | `GetObject`, `PutObject` | encrypt, decrypt | none |
 
-Every role carries the workload permissions boundary named in §13.3. Ephemeral roles use the `/mcc-local/` path, the only path the local bootstrap lets CloudFormation create or pass. No function has `DeleteObject` or any bucket-configuration permission.
+`ProcessEmail` also has `ses:SendEmail` on `identity/*` in its own account and Region, only with the `From` address `noreply@<domain>`, for the reply in §4.4. In the SES sandbox, SES also checks the grant against the recipient's identity, so the grant cannot name only the domain's identity. The local workload boundary allows `ses:SendEmail` only from a `noreply@` address. Every role carries the workload permissions boundary named in §13.3. Ephemeral roles use the `/mcc-local/` path, the only path the local bootstrap lets CloudFormation create or pass. No function has `DeleteObject` or any bucket-configuration permission.
 
 ### 13.5 Bundling
 
