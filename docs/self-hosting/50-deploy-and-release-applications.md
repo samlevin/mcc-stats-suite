@@ -122,7 +122,7 @@ After saving the dev allowlist, wait one minute for cached values to expire, the
 
 ## Maintain the gamertag roster
 
-`match-to-csv` resolves player names against the gamertag roster in each environment's roster table ([spec 6](../../specs/6-gamertag-roster.md)). Administrators maintain it with `scripts/roster.mjs`, which writes the table directly with their own AWS credentials. Only administrators change the roster. The script needs DynamoDB, KMS, and SSM rights that the `mcc-<environment>-admin` profiles from [prerequisites](00-prerequisites.md#sso-profiles) already have, and no narrower operator policy exists. The roster table must be applied in that environment's foundation first. The script also needs the AWS CLI and a repository checkout with dependencies installed.
+Each environment's roster table holds the gamertag roster ([spec 6](../../specs/6-gamertag-roster.md)). No application reads it yet. Administrators maintain it with `scripts/roster.mjs`, which writes the table directly with their own AWS credentials. Only administrators change the roster. The script needs DynamoDB, KMS, and SSM rights that the `mcc-<environment>-admin` profiles from [prerequisites](00-prerequisites.md#sso-profiles) already have, and no narrower operator policy exists. The roster table must be applied in that environment's foundation first. The script also needs the AWS CLI and a repository checkout with dependencies installed.
 
 ```console
 export AWS_PROFILE=mcc-dev-admin
