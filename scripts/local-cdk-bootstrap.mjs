@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { parse, stringify } from 'yaml';
+import { parse } from 'yaml';
 import {
   APPLICATIONS as applications,
   LOCAL_CHANGE_SET_NAME,
@@ -12,7 +12,7 @@ import {
 // infrastructure/dev/local-cdk deploys this committed file as the CDKToolkitLocal stack.
 export const LOCAL_TEMPLATE_FILE = fileURLToPath(
   new URL(
-    '../infrastructure/dev/local-cdk/bootstrap-template.yaml',
+    '../infrastructure/dev/local-cdk/bootstrap-template.json',
     import.meta.url,
   ),
 );
@@ -556,8 +556,11 @@ export function pinnedBootstrapTemplate() {
   );
 }
 
+// Compact JSON: CloudFormation rejects the YAML anchors and aliases that a YAML
+// serializer emits for repeated objects, and expanded YAML leaves little room
+// under the inline template body limit.
 export function renderLocalBootstrap(upstream = pinnedBootstrapTemplate()) {
-  return stringify(localBootstrap(upstream));
+  return `${JSON.stringify(localBootstrap(upstream))}\n`;
 }
 
 // `npm run cdk:local-template` rewrites the committed template.

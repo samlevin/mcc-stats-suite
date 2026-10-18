@@ -806,7 +806,7 @@ test('classifier selects independent infrastructure and application gates', () =
   );
   // The local bootstrap freshness test is a full-gate script test.
   for (const path of [
-    'infrastructure/dev/local-cdk/bootstrap-template.yaml',
+    'infrastructure/dev/local-cdk/bootstrap-template.json',
     'infrastructure/dev/local-cdk/stack-policy.json',
     'scripts/local-cdk-bootstrap.mjs',
     'scripts/cdk-targets.mjs',

@@ -1,11 +1,11 @@
 # The restricted CDK bootstrap that ephemeral stacks deploy through. Regenerate
-# bootstrap-template.yaml with `npm run cdk:local-template`; never run
+# bootstrap-template.json with `npm run cdk:local-template`; never run
 # `cdk bootstrap` for the mcclocal1 qualifier. CloudFormation creates the
 # stack's IAM roles and policies with the caller's credentials, which the dev
 # bootstrap grants the Terrateam role for this stack only.
 resource "aws_cloudformation_stack" "local_cdk_toolkit" {
   name          = "CDKToolkitLocal"
-  template_body = file("${path.module}/bootstrap-template.yaml")
+  template_body = file("${path.module}/bootstrap-template.json")
   capabilities  = ["CAPABILITY_NAMED_IAM"]
 
   # Stops any update from deleting or replacing the local permission policies,

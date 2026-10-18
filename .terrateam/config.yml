@@ -124,7 +124,7 @@ dirs:
         - '${DIR}/*.tf'
         - '${DIR}/*.tfvars'
         - '${DIR}/*.hcl'
-        - '${DIR}/bootstrap-template.yaml'
+        - '${DIR}/bootstrap-template.json'
         - '${DIR}/stack-policy.json'
         - '.terrateam/config.yml'
 

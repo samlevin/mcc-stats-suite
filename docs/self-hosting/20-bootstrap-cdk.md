@@ -33,7 +33,7 @@ The `CDKToolkit` stack belongs to CDK. Do not import it into OpenTofu. The GitHu
 
 Keep the default `hnb659fds` bootstrap for GitHub Actions. Local developers use the separate `mcclocal1` bootstrap, the `CDKToolkitLocal` stack in dev. The OpenTofu root `infrastructure/dev/local-cdk` deploys it from two committed files in that directory:
 
-- `bootstrap-template.yaml`, which `scripts/local-cdk-bootstrap.mjs` generates from the CDK bootstrap template of the `aws-cdk` version pinned in `package-lock.json`; and
+- `bootstrap-template.json`, which `scripts/local-cdk-bootstrap.mjs` generates from the CDK bootstrap template of the `aws-cdk` version pinned in `package-lock.json`; and
 - the [stack policy](../../infrastructure/dev/local-cdk/stack-policy.json), `stack-policy.json`.
 
 Terrateam plans and applies the root like the dev foundation root, as in [Change the foundation with Terrateam](70-optional-terrateam.md#change-the-foundation-with-terrateam), except that the apply comment is `terrateam apply dev and local-cdk`. CloudFormation creates the stack's IAM roles and policies with the caller's credentials, so apply the dev bootstrap first: it grants the dev Terrateam role access to this stack and its IAM resources ([Bootstrap the Terrateam role](70-optional-terrateam.md#bootstrap-the-terrateam-role)). Without Terrateam, a dev administrator applies the root with OpenTofu, using its `.envrc` created from `.envrc.example`, as in [Apply dev](40-change-foundation.md#apply-dev). Nobody runs `cdk bootstrap` for `mcclocal1`.

@@ -999,7 +999,15 @@ test('the committed local bootstrap template matches a fresh generation', () => 
   assert.ok(
     readFileSync(LOCAL_TEMPLATE_FILE, 'utf8') ===
       renderLocalBootstrap(upstream),
-    `${LOCAL_ROOT}/bootstrap-template.yaml is stale; run npm run cdk:local-template and commit it`,
+    `${LOCAL_ROOT}/bootstrap-template.json is stale; run npm run cdk:local-template and commit it`,
+  );
+});
+
+test('the committed local bootstrap template is JSON, so it has no YAML anchors or aliases', () => {
+  // CloudFormation rejects YAML anchors and aliases in a template body.
+  assert.doesNotThrow(
+    () => JSON.parse(readFileSync(LOCAL_TEMPLATE_FILE, 'utf8')),
+    `${LOCAL_ROOT}/bootstrap-template.json must be JSON`,
   );
 });
 
@@ -1007,7 +1015,7 @@ test('the committed local bootstrap template fits an inline template body', () =
   const { size } = statSync(LOCAL_TEMPLATE_FILE);
   assert.ok(
     size <= INLINE_TEMPLATE_BODY_LIMIT,
-    `${LOCAL_ROOT}/bootstrap-template.yaml is ${size} bytes; CloudFormation accepts at most ${INLINE_TEMPLATE_BODY_LIMIT} bytes inline`,
+    `${LOCAL_ROOT}/bootstrap-template.json is ${size} bytes; CloudFormation accepts at most ${INLINE_TEMPLATE_BODY_LIMIT} bytes inline`,
   );
 });
 
@@ -1022,11 +1030,11 @@ test('the local-cdk root deploys the committed template as the local toolkit sta
   assert.equal(value('name'), `"${LOCAL_TOOLKIT_STACK_NAME}"`);
   assert.equal(
     value('template_body'),
-    'file("${path.module}/bootstrap-template.yaml")',
+    'file("${path.module}/bootstrap-template.json")',
   );
   assert.equal(
     LOCAL_TEMPLATE_FILE,
-    join(process.cwd(), LOCAL_ROOT, 'bootstrap-template.yaml'),
+    join(process.cwd(), LOCAL_ROOT, 'bootstrap-template.json'),
   );
   assert.equal(
     value('policy_body'),
@@ -1062,7 +1070,7 @@ test('Terrateam plans the local-cdk root, in dev only, when its template or stac
     'main.tf',
     'versions.tf',
     '.terraform.lock.hcl',
-    'bootstrap-template.yaml',
+    'bootstrap-template.json',
     'stack-policy.json',
   ]) {
     assert.ok(plans(`${LOCAL_ROOT}/${file}`), file);
