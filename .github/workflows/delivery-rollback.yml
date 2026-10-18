@@ -1,5 +1,7 @@
-# The CDK entry role trusts this exact name through the OIDC workflow claim.
-# Add a new name to bootstrap cdk_workflow_names and apply it before renaming.
+# The CDK entry role trusts _delivery-deploy-environment.yml by its path in the
+# OIDC job_workflow_ref claim, not by this workflow's name, so renaming this file
+# or changing its name: needs no bootstrap change. Moving or renaming the
+# reusable file needs bootstrap applied first.
 name: 'Delivery: roll back prod'
 run-name: Roll back ${{ inputs.application }} in prod to ${{ inputs.release-tag }}
 
