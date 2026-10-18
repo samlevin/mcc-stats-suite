@@ -111,7 +111,8 @@ test('run prints the name from the issue title', () => {
 
 test('run rejects non-numeric issues before calling GitHub', () => {
   const api = asApi(() => assert.fail('GitHub must not be called'));
-  for (const value of ['-w', 'abc', '0', '1x'])
+  assert.throws(() => run(['-w'], { api }), /Unknown option -w/);
+  for (const value of ['abc', '0', '1x'])
     assert.throws(() => run([value], { api }), /Issue must be a positive/);
 });
 

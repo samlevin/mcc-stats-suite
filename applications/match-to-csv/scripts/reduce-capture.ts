@@ -23,6 +23,7 @@
 // `knownIssue`, and `misreads` are kept: expected rows are transcribed from
 // the screenshot by hand, never generated.
 
+import { CliHelp, cliError, defineCli, parseCli } from './cli';
 import fs from 'node:fs';
 import type {
   AnalyzeDocumentCommandOutput,
@@ -326,22 +327,22 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const CLI = defineCli(
+  'Usage: reduce-capture.ts --capture <file> --mapping <file> --name <name> --output <file>',
+  ['capture', 'mapping', 'name', 'output'],
+);
+
 function parseArguments(argv: string[]): Record<string, string> {
-  const options: Record<string, string> = {};
-  for (let index = 0; index < argv.length; index += 2) {
-    const flag = argv[index];
-    const value = argv[index + 1];
-    if (!flag?.startsWith('--') || value === undefined) {
-      throw new Error(
-        'Usage: reduce-capture.ts --capture <file> --mapping <file> --name <name> --output <file>',
-      );
-    }
-    options[flag.slice(2)] = value;
-  }
+  const { options, positionals } = parseCli(argv, CLI);
+  if (positionals.length) throw cliError(CLI, 'Unexpected positional argument');
+  const result: Record<string, string> = {};
   for (const required of ['capture', 'mapping', 'name', 'output']) {
-    if (!options[required]) throw new Error(`Missing --${required}`);
+    const value = options[required];
+    if (typeof value !== 'string' || !value)
+      throw cliError(CLI, `Missing --${required}`);
+    result[required] = value;
   }
-  return options;
+  return result;
 }
 
 function main(argv: string[]): void {
@@ -380,9 +381,13 @@ if (require.main === module) {
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(
-      `${error instanceof Error ? error.message : String(error)}\n`,
-    );
-    process.exit(1);
+    if (error instanceof CliHelp) {
+      process.stdout.write(`${error.message}\n`);
+    } else {
+      process.stderr.write(
+        `${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      process.exit(1);
+    }
   }
 }

@@ -893,6 +893,10 @@ test('the publish-review command reports every failure as not posted', () => {
     script,
     readFileSync(new URL('./agent-policy.mjs', import.meta.url)),
   );
+  writeFileSync(
+    join(base, 'scripts/cli.cjs'),
+    readFileSync(new URL('./cli.cjs', import.meta.url)),
+  );
   const reportPath = join(base, 'review.md');
   writeFileSync(reportPath, report('APPROVE'));
   const publishCommand = (...args) =>

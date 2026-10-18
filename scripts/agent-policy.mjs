@@ -1,3 +1,4 @@
+import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
 // Repository agent workflows: policy resolution and definition generation.
 //
 // `resolve` turns a role (or capability) plus optional prompt overrides into
@@ -655,20 +656,37 @@ export function publishReview(
   };
 }
 
-function argument(args, name) {
-  const index = args.indexOf(`--${name}`);
-  return index === -1 ? undefined : args[index + 1];
-}
+const COMMAND_OPTIONS = {
+  resolve: ['tool', 'role', 'capability', 'model', 'effort'],
+  generate: [],
+  check: [],
+  'publish-review': ['pr', 'base', 'head', 'report'],
+};
+const USAGE =
+  'Usage: node scripts/agent-policy.mjs <resolve|generate|check|publish-review> [options]';
 
 function main(args) {
   const [command, ...rest] = args;
+  const cli = defineCli(USAGE, COMMAND_OPTIONS[command] ?? []);
+  if (command === '--help' || command === '-h')
+    throw new CliHelp(
+      defineCli(USAGE, Object.values(COMMAND_OPTIONS).flat()).help,
+    );
+  if (!Object.hasOwn(COMMAND_OPTIONS, command)) {
+    console.error(cli.help);
+    return 2;
+  }
+  const { options, positionals } = parseCli(rest, cli);
+  if (positionals.length) throw cliError(cli, 'Unexpected positional argument');
+  if (command === 'resolve' && options.role && options.capability)
+    throw cliError(cli, 'Use --role or --capability, not both');
   if (command === 'resolve') {
     const resolved = resolve(loadPolicy(), {
-      tool: argument(rest, 'tool'),
-      role: argument(rest, 'role'),
-      capability: argument(rest, 'capability'),
-      model: argument(rest, 'model'),
-      effort: argument(rest, 'effort'),
+      tool: options.tool,
+      role: options.role,
+      capability: options.capability,
+      model: options.model,
+      effort: options.effort,
     });
     console.log(JSON.stringify(resolved, null, 2));
     return 0;
@@ -678,7 +696,7 @@ function main(args) {
     return 0;
   }
   if (command === 'publish-review') {
-    const reportPath = argument(rest, 'report');
+    const reportPath = options.report;
     if (!reportPath) throw new ReviewNotPosted('--report <file> is required');
     let report;
     try {
@@ -695,9 +713,9 @@ function main(args) {
       );
     }
     const result = publishReview(policy, {
-      pr: argument(rest, 'pr'),
-      base: argument(rest, 'base'),
-      head: argument(rest, 'head'),
+      pr: options.pr,
+      base: options.base,
+      head: options.head,
       report,
     });
     console.log(JSON.stringify(result, null, 2));
@@ -711,20 +729,16 @@ function main(args) {
     );
     return 1;
   }
-  console.error(
-    'Usage: node scripts/agent-policy.mjs resolve --tool <claude|codex> (--role <role> | --capability <capability>) [--model <model>] [--effort <effort>]\n' +
-      '       node scripts/agent-policy.mjs generate\n' +
-      '       node scripts/agent-policy.mjs check\n' +
-      '       node scripts/agent-policy.mjs publish-review --pr <number> --base <sha> --head <sha> --report <file>',
-  );
-  return 2;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    console.error(error.message);
-    process.exitCode = 1;
+    if (error instanceof CliHelp) console.log(error.message);
+    else {
+      console.error(error.message);
+      process.exitCode = 1;
+    }
   }
 }

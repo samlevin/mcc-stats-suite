@@ -1,3 +1,4 @@
+import { CliHelp } from './cli.cjs';
 import { pathToFileURL } from 'node:url';
 import {
   configuration,
@@ -226,7 +227,10 @@ if (
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
     await reconcileContainers({ api: ghGraphql, ...config });
   } catch (error) {
-    console.error(failureMessage(error));
-    process.exitCode = 1;
+    if (error instanceof CliHelp) console.log(error.message);
+    else {
+      console.error(failureMessage(error));
+      process.exitCode = 1;
+    }
   }
 }
