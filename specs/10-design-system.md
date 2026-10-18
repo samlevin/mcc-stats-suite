@@ -28,14 +28,14 @@ HH.H is the visual identity of the MCC stats suite: dark, Halo 3 inspired, and b
 
 | Requirement | Decision | Reason |
 | --- | --- | --- |
-| Base UI as the component foundation, unless there is a better option | Base UI 1.x (`@base-ui/react`) supplies behavior and accessibility for interactive components: dialog, popover, menu, tooltip, tabs, select, combobox, checkbox, radio, switch, field, OTP field, toast, navigation menu. Static components (headings, buttons without state, cards, layout, tables) are plain React elements. | Base UI ships no styles, exposes state as `data-*` attributes that the CSS can target, and publishes each component as its own subpath. React Aria was the alternative; it is larger and its strengths (i18n, date pickers) are not needed here. Base UI has no table and no date picker; §7 covers both. |
+| Base UI as the component foundation, unless there is a better option | Base UI 1.x (`@base-ui/react`) supplies behavior and accessibility for interactive components: dialog, popover, menu, tooltip, tabs, select, combobox, checkbox, radio, switch, toggle, OTP field, toast, navigation menu. Every static-safe component, including `Field` and `Progress`, is built on native HTML and never imports Base UI (§3.1). Static components (headings, buttons without state, cards, layout, tables) are plain React elements. | Base UI ships no styles, exposes state as `data-*` attributes that the CSS can target, and publishes each component as its own subpath. React Aria was the alternative; it is larger and its strengths (i18n, date pickers) are not needed here. Base UI has no table and no date picker; §7 covers both. |
 | Works with a generic React app and an Astro app | One React implementation of every component. Astro renders React components to HTML at build time and ships no JavaScript for a component without a `client:*` directive. Each component is classified `static-safe` or `interactive` (§3.1). | Two implementations (React and `.astro`) would drift apart. The classification tells the player app which components cost zero JavaScript. |
 | No Tailwind; SCSS modules | SCSS is the source, but it compiles to plain CSS with fixed, prefixed class names instead of CSS modules. Each component has one SCSS file that Sass compiles to its own CSS file in `@hhh/css` (`@hhh/css/button.css`). Classes follow `hhh-<block>`, `hhh-<block>__<element>` and `hhh-<block>--<modifier>`; component state comes from Base UI `data-*` attributes. Global CSS is limited to the reset, token custom properties and font faces. All design system CSS sits in cascade layers named `hhh.reset`, `hhh.tokens`, `hhh.base` and `hhh.components`. | CSS modules hash class names, so only a bundler and the React components could use them. Fixed class names let Vue, Svelte, Astro or plain HTML users style their own markup with `@hhh/css`. A consumer's own unlayered CSS beats every layered rule, so overrides need no specificity tricks, and the `hhh.` prefix keeps the layer and class names from colliding with a consumer's. |
 | Extensible, with good defaults | Components work with no props beyond content. Each accepts `className`, exposes the CSS custom properties listed in its docs (such as `--hhh-button-bg`), and interactive components pass Base UI's `render` prop through for composition. | Defaults cover the common case. The three escape hatches cover restyling, theming one instance and changing the rendered element. |
 | No bloat; tree shaking so each app ships only what it uses | `@hhh/css` publishes one CSS file per component plus `tokens.css` and `base.css`. `@hhh/react` publishes one subpath export per component (`@hhh/react/button`) with no root barrel, and each component module imports its own CSS file. `@hhh/react` marks `**/*.css` as a side effect. Both packages ship compiled output, and the apps in this repository consume that same output through npm workspaces. Size checks fail CI when a single-component import exceeds its budget (§9.2). | Barrel files defeat tree shaking in some bundlers and slow development servers. Testing the apps against the published output means outside users get exactly what the apps use. |
 | Usable outside this project | `@hhh/css` and `@hhh/react` are MIT-licensed public packages on the npm registry, versioned with semantic versioning by release-please, and published by GitHub Actions through npm trusted publishing with provenance. The npm scope is `@hhh`, which a person reserves (§18). | GitHub Packages was considered and rejected: its npm registry requires an access token to install even public packages, so every outside user would have to create a token and edit `.npmrc`. npm trusted publishing needs no stored token. |
 | Separate admin and player apps | Kept. The admin app is a Vite React app behind Cognito with MFA; the player app is an Astro site of mostly static pages. Both consume the published design system packages. | The player bundle never contains admin code or routes, the two apps sign in differently, and most player pages need no JavaScript. The design system does not need a single app to be shared, because both apps install the same packages. |
-| Authoritative style guide | Design tokens in the Design Tokens Community Group format (`$value`, `$type`) under `packages/hhh-css/tokens/` are the source of truth. Style Dictionary builds them into CSS custom properties, an SCSS map and a TypeScript module. Storybook documentation pages render the built tokens, so the guide cannot disagree with the code. | A written guide that is separate from the code goes stale. |
+| Authoritative style guide | Design tokens in the Design Tokens Community Group format (`$value`, `$type`) under `packages/hhh-css/tokens/` are the source of truth. Style Dictionary builds them into CSS custom properties, an SCSS map, JSON and a TypeScript module (§11.1). Storybook documentation pages render the built tokens, so the guide cannot disagree with the code. | A written guide that is separate from the code goes stale. |
 | Show every proposed component, through a design service if possible | Storybook is the design surface, published to Chromatic. Mockups are coded page stories, not Figma frames. Reviewers open Chromatic links on an iPhone and approve or reject each story there. | Agents produce coded mockups as fast as frames, and the result shows real fonts, blur, motion and responsive behavior. A reviewer sees the real thing on the target device. Figma would add a second source of truth that no human designer maintains. |
 | Ideogram for images | Raster art comes from the Ideogram API through `scripts/ideogram.mjs`. Every committed image was approved by a person and has a manifest entry (§6.1). | Approval keeps the art bill and the repository size under control. The manifest makes each image reproducible and replaceable. |
 | Logo and vector creation by agents | The logo, icons, medals and emblems are SVG written by the art director agent. Ideogram concept sheets may come first; the committed artifact is always hand-written SVG. | Ideogram produces raster images only. SVG is sharp at every size, a few kilobytes, and themeable with tokens. |
@@ -78,7 +78,9 @@ packages/hhh-css/tokens/*.tokens.json (DTCG)
   |
   v  Style Dictionary (build)
 @hhh/css dist/
-  +-- tokens.css, tokens.scss, tokens.json   (layer `hhh.tokens`)
+  +-- tokens.css                             (custom properties, layer `hhh.tokens`)
+  +-- tokens.scss, tokens.json               (SCSS map, raw values)
+  +-- tokens.js, tokens.d.ts                 (TypeScript module, `@hhh/css/tokens`)
   +-- base.css                               (reset and font faces)
   +-- <component>.css                        (Sass build of src/<component>.scss; layer `hhh.components`)
   +-- icons/*.svg, medals/*.svg, emblems/*.svg
@@ -96,8 +98,9 @@ packages/storybook  <-- stories from packages/hhh-react, applications/admin, app
   +-- Vitest browser mode (interaction tests, axe)
   +-- Chromatic (hosted Storybook, visual baselines, human approval)
 
-Art (private): brief -> scripts/ideogram.mjs -> candidates on the PR branch -> person approves
-     -> packages/art/masters/*.webp + manifest.json -> build derivatives (AVIF, WebP) -> apps only
+Art (private): brief -> scripts/ideogram.mjs -> git-ignored candidates + local contact sheet
+     -> person approves IDs on the issue -> commit packages/art/masters/*.webp + manifest.json
+     -> build derivatives (AVIF, WebP) -> apps only
 ```
 
 **Ownership rules:** only `scripts/ideogram.mjs` calls the Ideogram API. Only `packages/art/scripts/build-art.mjs` writes image derivatives. Component SCSS reads semantic and component tokens only, never primitives or literal colors. `@hhh/react` components render `@hhh/css` class names and never define styles of their own. Neither public package imports from `@mcc/art`, `packages/storybook` or `applications/*`. Apps import only package subpath exports, never internals.
@@ -259,11 +262,11 @@ Both new roles use Playwright MCP for screenshots (P0.2). Playwriter attaches to
 
 1. The art director writes a brief per asset: purpose, placement, crops, palette, references by description, and likeness rules from §1.
 2. `scripts/ideogram.mjs` runs one batch: at most 8 images per brief and a per-batch cost cap (default 5 USD, `--max-usd` to change). It refuses to start when the estimated cost exceeds the cap, and refuses to run without `IDEOGRAM_API_KEY`.
-3. Candidates are converted to WebP (quality 85) and committed on the pull request branch under `packages/art/candidates/<brief-id>/`, with a generated contact sheet in the PR body.
-4. A person approves candidates by ID in a PR comment. Raising the cap for a batch needs the same approval.
-5. The art director moves approved images to `packages/art/masters/` (WebP, quality 90, longest side at most 2560 px), adds manifest entries, and deletes `candidates/` before the PR is marked ready. Squash merge keeps rejected candidates out of `main`.
+3. Candidates never enter Git. The script writes them to `packages/art/.candidates/<brief-id>/`, which `.gitignore` excludes, and names each one `<brief-id>-<n>-<sha12>.png`, where `<sha12>` is the first 12 hex characters of the file's SHA-256. It also writes a local contact sheet (`index.html`) that shows every candidate with its ID, crops and cost.
+4. The art director opens the contact sheet for the person on their machine and posts the candidate IDs, without images, as a comment on the slice's GitHub issue. The person approves by replying with the IDs they accept. Raising the cap for a batch needs the same kind of reply.
+5. Only after that reply, the art director re-encodes each approved candidate to `packages/art/masters/` (WebP, quality 90, longest side at most 2560 px) and commits it together with its manifest entry, which records the approval comment URL and the candidate's full SHA-256. Rejected candidates are deleted locally and never committed, so no branch history holds an unapproved image.
 6. The art build creates derivatives at widths 480, 768, 1080, 1440, 1920 and 2560 in AVIF (quality 50) and WebP (quality 70) plus a 16 px blurred placeholder, under the ignored `packages/art/dist/`.
-7. Original SVG medals, emblems and icons follow the same approval step but are committed to `packages/hhh-css/src/` with entries in that package's own manifest.
+7. Original SVG medals, emblems and icons follow the same steps: drafts stay in the ignored `packages/hhh-css/.candidates/`, and only approved files are committed to `packages/hhh-css/src/` with entries in that package's own manifest.
 
 ### 6.2 Mockup flow
 
@@ -287,12 +290,12 @@ Every component below has a CSS file in `@hhh/css` and a React component in `@hh
 | --- | --- | --- | --- |
 | Typography (P3.1) | `Heading`, `Text`, `Eyebrow`, `StatValue`, `Gamertag`, `VisuallyHidden` | static-safe | none |
 | Buttons (P3.2) | `Button` (primary, secondary, ghost, destructive), `IconButton`, `LinkButton`, `ToggleButton`, `SegmentedControl` | `Button`, `IconButton`, `LinkButton` static-safe; others interactive | Toggle, ToggleGroup |
-| Layout and navigation (P3.3) | `AppShell`, `TopBar`, `BottomTabBar`, `SideRail`, `Stack`, `Cluster`, `Grid`, `Container`, `Card`, `Breadcrumbs`, `SkipLink` | static-safe except the mobile menu | NavigationMenu, Menu |
-| Forms (P3.4, P3.9) | `Field`, `TextInput`, `PasswordInput`, `Select`, `Combobox`, `Checkbox`, `Radio`, `Switch`, `DateInput` (native), `OtpField`, `UploadField` | interactive except `Field`, `TextInput`, `DateInput` | Field, Select, Combobox, Checkbox, Radio, Switch, OTPField |
+| Layout and navigation (P3.3) | `AppShell`, `TopBar`, `BottomTabBar`, `SideRail`, `Stack`, `Cluster`, `Grid`, `Container`, `Card`, `Breadcrumbs`, `SkipLink` | static-safe except the mobile menu | NavigationMenu, Menu (mobile menu only) |
+| Forms (P3.4, P3.9) | `Field`, `TextInput`, `PasswordInput`, `Select`, `Combobox`, `Checkbox`, `Radio`, `Switch`, `DateInput` (native), `OtpField`, `UploadField` | `Field`, `TextInput` and `DateInput` static-safe on native elements; others interactive | Select, Combobox, Checkbox, Radio, Switch, OTPField (interactive components only) |
 | Sign-in (P3.5) | `AuthLayout`, `SsoButton` (Google, Microsoft, Apple) | static-safe | none |
 | Overlays (P3.6) | `Dialog`, `BottomSheet`, `Popover`, `Menu`, `Tooltip`, `Toast` | interactive | Dialog, Popover, Menu, Tooltip, Toast |
 | Data display (P3.7) | `DataTable`, `DataList`, `TeamGroup`, `RankRow`, `StatTile`, `Sparkline`, `BarMeter` | static-safe; sorting is an interactive add-on | none |
-| Feedback and status (P3.8) | `Badge`, `StatusBadge`, `Alert`, `Banner`, `Progress`, `Spinner`, `Skeleton`, `EmptyState`, `ErrorState` | static-safe | Progress |
+| Feedback and status (P3.8) | `Badge`, `StatusBadge`, `Alert`, `Banner`, `Progress`, `Spinner`, `Skeleton`, `EmptyState`, `ErrorState` | static-safe | none |
 | Icons and art (P1.2, P3.8) | `Icon`, medal and emblem SVGs, `ArtImage` (responsive `<picture>` that takes sources and a placeholder from the caller) | static-safe | none |
 
 The logo and the generated art are not components. The apps import them from `@mcc/art`.
@@ -301,6 +304,8 @@ Notes:
 
 - `DataTable` renders a semantic `<table>`. On phones it keeps the first column sticky and shows a scroll shadow when content overflows. `DataList` renders cards below the `md` container width and a table above it, from the same column definitions.
 - `TeamGroup` groups `DataTable` rows under a team header with the team color token and team label. Postgame scoreboards in both apps are built from it.
+- `Field` renders a native `<label>`, description and error message. It takes a required `controlId` and derives the ids `<controlId>`, `<controlId>-description` and `<controlId>-error` from it. Every form control accepts the same `controlId` and sets its own `id`, `aria-describedby` and `aria-invalid` from that derivation, so labels and messages connect without React context or Base UI Field, and the markup is complete with no JavaScript.
+- `Progress` renders a native `<progress>` element for a known value and a `role="progressbar"` element with a CSS-only animation for an unknown value. Its value comes from props, so it updates when its parent re-renders and needs no Base UI part.
 - `UploadField` handles picking several images from the iPhone photo library, per-file progress and retry. The admin app owns the match upload flow (spec 8).
 - `Sparkline` and `BarMeter` are hand-written SVG with no chart library.
 
@@ -418,15 +423,17 @@ interface ArtManifestEntry {
   };
   readonly approval: {
     readonly approver: string; // GitHub login
-    readonly reference: string; // PR comment URL
+    readonly reference: string; // URL of the approving issue comment
     readonly approvedAt: string;
+    readonly candidateId: string; // ID the person approved, `<brief-id>-<n>-<sha12>`
+    readonly candidateSha256: string; // full SHA-256 of the approved candidate file
   };
   readonly crops: readonly { readonly name: 'mobile' | 'desktop'; readonly x: number; readonly y: number; readonly width: number; readonly height: number }[];
   readonly placeholder: string; // data URI, at most 1 KB
 }
 ```
 
-Validation: the art check (§16.1) rejects a master without an entry, an entry without a file, a raster entry without `generation` and `approval`, a master whose longest side exceeds 2560 px, any file under `packages/art/candidates/` on `main`, and any `likeness: true` or raster entry in the `@hhh/css` manifest. Prompts never contain personal data.
+Validation: the art check (§16.1) rejects a master without an entry, an entry without a file, any entry without `approval`, a raster entry without `generation`, a master whose longest side exceeds 2560 px, any tracked file under a `.candidates/` directory, a `.gitignore` that does not exclude `.candidates/`, and any `likeness: true` or raster entry in the `@hhh/css` manifest. Prompts never contain personal data.
 
 ### 10.2 Relationships
 
@@ -447,7 +454,7 @@ Mockup story 1 -> 1 approved Chromatic baseline -> 1 real screen story
 | `src/base.scss` | `dist/base.css` | Reset, font faces, layer order |
 | `src/_mixins.scss` | `chamfer()`, `glow()`, `container()`, `bp()`, `focus-ring()`, `reduced-motion()` | Shared SCSS helpers; also published for SCSS users |
 | `src/icons/`, `src/medals/`, `src/emblems/` | `dist/icons/*.svg` and the same for medals and emblems | Original SVG art |
-| `scripts/build-tokens.mjs` | `dist/tokens.css`, `dist/tokens.scss`, `dist/tokens.json` | Style Dictionary build |
+| `scripts/build-tokens.mjs` | `dist/tokens.css`, `dist/tokens.scss`, `dist/tokens.json`, and `dist/tokens.js` with `dist/tokens.d.ts`, exported as `@hhh/css/tokens` | Style Dictionary build. The TypeScript module exports `tokens`, a readonly object of resolved values keyed by token path, and the `TokenPath` string union, for scripts, tests and charts that need values in JavaScript |
 | `scripts/check-contrast.mjs` | none | Token contrast check |
 
 ### 11.2 `packages/hhh-react` (`@hhh/react`, public)
@@ -549,7 +556,7 @@ None. The design system creates no AWS resources. Apps serve fonts and images fr
 
 | Layer | Covers |
 | --- | --- |
-| Token tests (`node --test`) | DTCG validity, naming, tier rules, contrast for every semantic text and background pair |
+| Token tests (`node --test`) | DTCG validity, naming, tier rules, contrast for every semantic text and background pair, and identical resolved values across the CSS, SCSS, JSON and TypeScript outputs |
 | Stylelint (SCSS) | No literal colors, sizes, spacing or `z-index` in component styles; `hhh-` class names; every rule in an `hhh.` layer |
 | ESLint | Import boundaries, no root barrel, no Base UI or hooks in `static-safe` components |
 | Vitest browser mode via the Storybook Vitest addon (Chromium and WebKit) | Every story renders; play functions test interaction, focus and keyboard; axe reports no WCAG 2.2 AA violation |
@@ -582,7 +589,7 @@ P0.4 adds the four new workspaces to `package-lock.json`, `.release-please-manif
 - [ ] Every story passes axe in Vitest browser mode on Chromium and WebKit and has approved Chromatic baselines at both viewports.
 - [ ] The token check fails when a semantic text and background pair falls below the §4.2 contrast rule.
 - [ ] Reference app pages meet every §9.1 budget in Lighthouse CI.
-- [ ] Every file under `packages/art/masters/` and every SVG in `@hhh/css` has a manifest entry with a person's approval, and `main` has no `packages/art/candidates/`.
+- [ ] Every file under `packages/art/masters/` and every SVG in `@hhh/css` has a manifest entry whose approval comment predates the commit that added the file, and no `.candidates/` file is tracked in Git.
 - [ ] The player sign-in components show only the Google, Microsoft and Apple buttons, follow each provider's branding, and show the Game Content Usage Rules notice.
 - [ ] The admin hosted login assets exist in `packages/art/cognito/`.
 - [ ] The `mcc-art-director` and `mcc-ux-designer` roles exist for Claude Code and Codex and pass `npm run agents:check`.
@@ -739,7 +746,7 @@ A change to a contract updates every consumer in the same PR.
   - A type specimen compares Saira, Michroma and the system body font, and a person picks the display face.
   - The admin hosted login assets exist in `packages/art/cognito/`.
   - The icon style page shows a starter set of original icons in `@hhh/css`.
-  - A person approved the kit in Chromatic.
+  - A person approved the logo variants and starter icons from the local contact sheet before they were committed (§6.1), and approved the palette, type and brand pages in Chromatic.
 
 #### P1.2 Medal and emblem set (M)
 
@@ -750,7 +757,7 @@ A change to a contract updates every consumer in the same PR.
   - Medals cover multi-kill, spree, objective and placement achievements in original shapes, with no one-to-one copies of game medals.
   - Emblems combine an original foreground and background shape with two colors.
   - Each SVG passes the SVG lint, reads at 24 px, and stays within 4 KB gzip.
-  - A person approved the set from a Storybook contact sheet.
+  - A person approved every medal and emblem from the local contact sheet before it was committed (§6.1).
 
 #### P1.3 Style guide and tokens (M)
 
@@ -760,6 +767,8 @@ A change to a contract updates every consumer in the same PR.
 - **Provides:** token names and tiers
 - **Acceptance:**
   - Tokens cover every §5.2 group in primitive, semantic and component tiers.
+  - The build writes `dist/tokens.css`, `dist/tokens.scss`, `dist/tokens.json`, `dist/tokens.js` and `dist/tokens.d.ts`, and `@hhh/css/tokens` resolves to the TypeScript module in the package `exports`.
+  - A test proves the formats agree: every CSS custom property has the same resolved value in `tokens.json`, the SCSS map and the `tokens` export, and a consumer file importing `tokens` type-checks under `strict`.
   - The contrast check fails when a semantic text and background pair breaks the §4.2 rule.
   - Stylelint rejects literal colors, sizes, spacing and `z-index` in component styles.
   - Display font files are Latin subsets with fallback metrics, within the §9.1 font budget.
@@ -837,6 +846,7 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - `Field`, `TextInput`, `PasswordInput`, `Select`, `Combobox`, `Checkbox`, `Radio`, `Switch` and `DateInput` exist.
   - Inputs use at least 16 px text, and validation messages are announced to screen readers.
+  - `Field`, `TextInput` and `DateInput` import no Base UI, and a `Field` with a `TextInput` rendered by Astro with no `client:*` directive has a working label, description and error association in axe.
 
 #### P3.5 Player sign-in components (M)
 
@@ -870,6 +880,7 @@ A change to a contract updates every consumer in the same PR.
 - **Spec:** §7.1, §9.3
 - **Acceptance:**
   - Status badges carry text, not color alone.
+  - `Progress` imports no Base UI and renders a native `<progress>` for known values and an accessible indeterminate state otherwise.
   - Skeletons match the layout of the content they replace, with no layout shift.
   - `Icon` renders any `@hhh/css` icon with an accessible name or as decorative, and `ArtImage` renders caller-supplied AVIF and WebP sources with a placeholder and no layout shift.
 
@@ -895,13 +906,56 @@ A change to a contract updates every consumer in the same PR.
 
 ### Phase 4: Backlog (not filed with v1)
 
-| ID | Slice | Size | Note |
-| --- | --- | --- | --- |
-| P4.1 | Chart components beyond sparkline and bar | M | Waits for a screen that needs them |
-| P4.2 | Search and filter chips | S | Waits for the player search screen |
-| P4.3 | Real-user Core Web Vitals reporting | S | Field data for §18.4 |
-| P4.4 | Light theme | M | Only if a use appears; semantic tokens make it a value swap |
-| P4.5 | Real-device test service for iOS | S | Replaces the manual iPhone check if it becomes a bottleneck |
+**Goal:** components and checks deferred until a screen or a measured need asks for them.
+**Exit criteria:** none for v1. Each slice is filed only when its trigger occurs.
+
+#### P4.1 Chart components (M)
+
+- **Trigger:** a mockup needs a chart that `Sparkline` and `BarMeter` cannot draw.
+- **Blocked by:** P3.7
+- **Spec:** §4.2, §7.1, §9.2, §9.3
+- **Acceptance:**
+  - `LineChart` and `StackedBarChart` render hand-written SVG from token colors and are static-safe.
+  - Each chart has a visually hidden data table with the same values for screen readers.
+  - Each chart stays within 6 KB gzip of JavaScript excluding React, and no third-party chart library is added.
+
+#### P4.2 Search and filter chips (S)
+
+- **Trigger:** a player or admin mockup adds search or filtering.
+- **Blocked by:** P3.2, P3.4
+- **Spec:** §7.1, §9.3
+- **Acceptance:**
+  - `SearchField` is a static-safe native `type="search"` input with a clear button that works without JavaScript through a form reset.
+  - `FilterChips` is an interactive Base UI ToggleGroup whose chips meet the 44 px target and announce their pressed state.
+
+#### P4.3 Real-user Core Web Vitals reporting (S)
+
+- **Trigger:** either app has real users, so §18.4 can be measured in the field.
+- **Blocked by:** P3.10
+- **Spec:** §9.1, §15, §18.4
+- **Acceptance:**
+  - `@hhh/react/vitals` exports `onWebVitals(callback)`, which reports LCP, INP and CLS with attribution through the `web-vitals` library and makes no network request of its own.
+  - The helper adds at most 3 KB gzip and loads only where an app imports it.
+
+#### P4.4 Light theme (M)
+
+- **Trigger:** a person decides a light theme is needed.
+- **Blocked by:** P1.3, P3.8
+- **Spec:** §1, §5.1, §16.1
+- **Acceptance:**
+  - A light set of semantic tokens applies under `[data-hhh-theme="light"]`, and no component SCSS changes to support it.
+  - The contrast check passes for every semantic text and background pair in both themes.
+  - Every story has Chromatic baselines in both themes.
+
+#### P4.5 Real-device iOS test service (S)
+
+- **Trigger:** the manual real-iPhone check in §20.3 delays a release or misses a defect.
+- **Blocked by:** P0.5
+- **Spec:** §9.4, §16.1, §18.9
+- **Acceptance:**
+  - A scheduled workflow on `main` runs the Playwright reference journeys on real iPhones with iOS 17 and the current iOS through a device cloud.
+  - The service credential is a CI secret added by a person, and the workflow does not run on pull requests from forks.
+  - §20.3 replaces the manual check with the scheduled run's latest result.
 
 ### 20.4 Dependency order and parallel lanes
 
