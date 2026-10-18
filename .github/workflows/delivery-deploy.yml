@@ -58,7 +58,7 @@ jobs:
       contents: read
       deployments: write
       issues: write
-      pull-requests: read
+      pull-requests: write
       id-token: write
     uses: ./.github/workflows/_delivery-promote-application.yml
     with:

@@ -42,7 +42,7 @@ jobs:
     permissions:
       actions: read
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: write
     steps:
       - name: Ask prod reviewers to approve
