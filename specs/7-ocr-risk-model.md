@@ -2,7 +2,7 @@
 
 **Status:** Draft; not implemented
 
-**Version:** 1.0-draft (first version)
+**Version:** 1.0-draft
 
 **Date:** October 15, 2026
 
@@ -18,11 +18,11 @@
 
 **External dependencies at runtime:** S3, EventBridge, EventBridge Scheduler, Step Functions, Lambda, KMS, DynamoDB, Amazon Bedrock Runtime, and spec 3's `LlmReviewWrite` function
 
-**Out of scope:** changing OCR text or any existing evidence, fine-tuning or replacing Textract, roster resolution (spec 6, #163), match creation and screenshot upload ([spec 8](8-match-uploads.md), #167), storing and resolving adjudications and the reviewer application ([spec 3](3-cell-labeling.md) as amended by #166), player identity and the stats lakehouse (#159), SageMaker (§8.9), any user interface
+**Out of scope:** changing OCR text or any existing evidence, fine-tuning or replacing Textract, roster resolution (spec 6, #163), match creation and screenshot upload ([spec 8](8-match-uploads.md), #167), storing and resolving adjudications and the reviewer application ([spec 3](3-cell-labeling.md)), player identity and the stats lakehouse (#159), SageMaker (§8.9), any user interface
 
 Match-to-csv reads every scoreboard cell with Textract, spec 2 scores and records features for every cell, and spec 3 stores a decision for every cell, row and table. This specification decides who makes those decisions and when a run needs a person. Deterministic scoreboard constraints check each table, a vision model on Bedrock reviews every run from the first screenshot and writes spec 3 adjudications, people answer only escalations and a blind audit sample, and a shallow gradient-boosted model trained on the resulting labels later lets well-read runs skip the LLM. The goal is that no run waits on a person, with a measured upper bound on the cell error rate of the accepted data. This is the risk model specification that spec 2 §9.6 hands stages 2 and 3 to.
 
-**Readiness:** this revision authorizes filing Phases 0 and 1 now, and Phases 2 to 4 once P0.4 records a go decision. Phase 5 is filed when spec 3 P5.2 is filed. §9.5 estimates the per-screenshot LLM review cost for a capture the size of the #91 captures, as issue #165 asks, and P0.4 measures the real cost on those captures and records it beside the estimate before Phase 2 is filed. Cost at that scale does not decide the model. Contracts in §5.3 and §10.1 freeze when P0.1 merges. Section references to spec 3 are to its 2.1-draft (#166, PR #171), spec 6 is the gamertag roster specification (#163, PR #170), and spec 8 is the match upload specification (#167, PR #173); all three are unmerged.
+**Readiness:** this specification authorizes filing Phases 0 and 1 now, and Phases 2 to 4 once P0.4 records a go decision. Phase 5 is filed when spec 3 P5.2 is filed. §9.5 estimates the per-screenshot LLM review cost for a capture the size of the #91 captures, as issue #165 asks, and P0.4 measures the real cost on those captures and records it beside the estimate before Phase 2 is filed. Cost at that scale does not decide the model. Contracts in §5.3 and §10.1 freeze when P0.1 merges. Section references to spec 3 are to its 2.1-draft. Spec 6 is the gamertag roster specification, and spec 8 is the match upload specification.
 
 ---
 
@@ -31,7 +31,7 @@ Match-to-csv reads every scoreboard cell with Textract, spec 2 scores and record
 | Requirement | Decision | Reason |
 | --- | --- | --- |
 | Where the risk model and LLM reviewer live | In `applications/ocr-quality`, beside spec 2's scoring. Constraint rules and model inference run in `ScoreRun`; the LLM review, training and report workflows are new resources in the same stack. | The constraints are spec 2 signals and the model fills spec 2's reserved `riskModel` fields. A separate application would duplicate the evidence readers and the feature contract. |
-| How runs become autonomous | Three layers in order: deterministic constraints (§4), an LLM reviewer for every run (§6, §7), and a learned model that later lets runs skip the LLM (§8). | The first real captures (#91) read every stat cell correctly. Their one serious failure was deterministic code, and Halo 3 team boards satisfy checkable sums. Most of the autonomy comes from checks and the LLM; the model only removes LLM calls. |
+| How runs become autonomous | Three layers in order: deterministic constraints (§4), an LLM reviewer for every run (§6, §7), and a learned model that later lets runs skip the LLM (§8). | Textract reads every stat cell of the #91 captures correctly, team and outcome come from deterministic code, and Halo 3 team boards satisfy checkable sums. Most of the autonomy comes from checks and the LLM; the model only removes LLM calls. |
 | Which tables the constraints apply to | Only tables matched to a validated layout and game type, a profile (§4.1). The first profile is Halo 3 Team Slayer. Every other table is `NOT_EVALUATED` with reason `NO_PROFILE`, so unknown layouts stay `UNKNOWN`. | A Slayer sum is false for Capture the Flag or Oddball scores. A rule applied to the wrong game type would escalate correct tables or, worse, pass wrong ones. |
 | Which screenshots the cross-run checks compare (`K006`, `K007`) | Only screenshots uploaded to the same spec 8 match (`intake.matchId`, §4.3) that the match's latest record lists as `ACTIVE`. Shared or equal rosters only sort a match's screenshots into pages of one board and separate captures of it. A screenshot without a match, including every emailed screenshot, is `NOT_EVALUATED` with `NO_MATCH_IDENTITY`. | Equal rosters within a few days are often a rematch, and two screenshots in one email can be two games. Comparing different games would fail hard constraints on correct tables. |
 | How much evidence a constraint needs | Each constraint is `PROVISIONAL` or `VALIDATED` per profile (§4.5). A provisional constraint can add review and escalation but never lets a value skip review. It becomes validated after holding on at least 30 verified captures from at least 5 sessions. | Two captures support the rules but cannot rule out exceptions. A wrong rule that only adds review costs a person's time; one that auto-accepts costs data quality. |
@@ -155,7 +155,7 @@ All checks use the parser's rows of the selected table (spec 1 §8), or the revi
 | `K002_KILLS_WITHIN_OPPONENT_DEATHS` | team pair, each direction | Team A's summed `KILLS` is at most team B's summed `DEATHS`. | `K_A <= D_B` | hard |
 | `K003_DEATH_GAP_EXPLAINED` | team pair, each direction | Team B's deaths beyond team A's kills are explained by B's own suicides and betrayals, which Slayer subtracts from score: `D_B - K_A <= sum over B of max(0, kills - score)`. | `killDeathSlack` 0 | soft |
 | `K004_SCORE_NOT_ABOVE_KILLS` | row | A player's `SCORE` is at most their `KILLS`. | `score <= kills` | hard |
-| `K005_TEAM_STRUCTURE` | table | Roster size: exactly 2 teams, each with 1 to 8 player rows, and at most 16 player rows in total. A Team Slayer table the parser read as free-for-all fails. | exact | hard |
+| `K005_TEAM_STRUCTURE` | table | Roster size: exactly 2 teams, each with 1 to 8 player rows, and at most 16 player rows in total. A Team Slayer table the parser did not read as two teams has zero rows with `noRowsReason.code: UNSUPPORTED_TEAM_LAYOUT` and fails this check. | exact | hard |
 | `K006_PAGE_AGREEMENT` | screenshot pair | Two screenshots of one match that are pages of one post-game summary (§4.3) agree on every field both carry for each shared player. | exact string match after trimming | hard |
 | `K007_SUBMISSION_AGREEMENT` | run pair | Two screenshots of one match that are captures of the same board (§4.3), each uploaded as its own submission, agree on every field for every player, and on the team partition and the winning team. | exact | hard |
 
@@ -193,7 +193,7 @@ The two Halo 3 two-team captures (fixtures `halo3-two-team-capture-1` and `-2`) 
 | `K005` teams | 2 teams of 4 | 2 teams of 4 |
 | `K006`, `K007` | `NO_MATCH_IDENTITY`: the captures were emailed, so neither has a match (§4.3). They are different games and share only 2 player keys. | `NO_MATCH_IDENTITY`, as capture 1 |
 
-Every evaluated check passes on both captures, and `K003` holds with equality in all four directions. The one serious failure on these captures before #162 was row colours sampled wrong, which turned both team games into free-for-all. With the game variant predicate in force, `K005` would have failed on both. Two captures are not enough to validate any constraint (§4.5), so all seven start `PROVISIONAL`.
+Every evaluated check passes on both captures, and `K003` holds with equality in all four directions. `K005` fails any Team Slayer table whose parser output has zero rows with `UNSUPPORTED_TEAM_LAYOUT`, such as one whose row colours are sampled wrong. Two captures are not enough to validate any constraint (§4.5), so all seven start `PROVISIONAL`.
 
 ### 4.5 Results and validation status
 
@@ -647,7 +647,7 @@ A run is **finalized without a person** when it has a validated version (spec 3 
 
 ### 9.5 Cost estimate and ceiling
 
-This is an estimate for a capture the size of the #91 captures. No Bedrock call was made for it, and the raw #91 captures were not used. In P0.4 the maintainer, who has the captures and AWS access, runs P0.3 on them and records the measured usage, cost, model and Region beside this table before Phase 2 starts. Cost at this scale is not a reason to reject a model: P0.4 chooses the model on in-Region availability and accuracy. The configured prices let every call be costed and the ceiling be enforced.
+This is an estimate for a capture the size of the #91 captures. It uses no Bedrock call and none of the raw #91 captures. In P0.4 the maintainer, who has the captures and AWS access, runs P0.3 on them and records the measured usage, cost, model and Region beside this table before Phase 2 starts. Cost at this scale is not a reason to reject a model: P0.4 chooses the model on in-Region availability and accuracy. The configured prices let every call be costed and the ceiling be enforced.
 
 **Image tokens.** Claude models with high-resolution vision accept up to 2,576 pixels on the long edge and use about `width * height / 750` tokens per image, up to about 4,784. In the #91 captures the table spans 0.90 of the image width and 0.42 of its height, and median word height is 0.0154 of the image height.
 
@@ -684,7 +684,7 @@ This spec edits no other spec. Each dependency below is recorded in the spec it 
 | `ScoreRun` reads spec 8 match records, the runs of its match's other screenshots, roster snapshots and `risk/models/` (spec 2 §6.2, §13.3, §13.4) | spec 2 | P1.4, P4.3 |
 | `UNREADABLE` is a positive label, and splits group by `gameKey` and by spec 8's `matchId`, the match identity spec 2 §8.5 rule 6 waits for (spec 2 §8.5 rules 1 and 6) | spec 2 | P4.1 |
 | Match membership (`intake.matchId` and `MatchRecord`, spec 8 §8.1) is the only identity for `K006` and `K007` pairs and a dataset grouping key (§4.3, §8.1). Rosters never give an emailed screenshot a match. | spec 8 P0.1 (contract), P3.1 (intake) and P4.3 (records) | P1.4, which is blocked by spec 8 P0.1, and P4.1. Spec 8 §8.3 records the change. |
-| Staged LLM write batches: `ADJUDICATE` payloads may carry a `batchId`. While a run has an open batch, spec 3's run evaluation (spec 3 §6.3) still updates counts, status and queues, but writes no validated version that holds part of the batch. A `COMMIT_BATCH` operation closes the batch and evaluates the run once, publishing only a complete run; a repeated commit is a no-op, and a newer batch for the run closes an abandoned one without publishing it. Spec 3 decides how a person's write to a run with an open batch publishes, within that rule. | spec 3 (not in its 2.1-draft) | Spec 3's next revision adds it to `LlmReviewWrite`. P2.7, which adds `REREVIEW`, is blocked by it (§6.4). |
+| Staged LLM write batches: `ADJUDICATE` payloads may carry a `batchId`. While a run has an open batch, spec 3's run evaluation (spec 3 §6.3) still updates counts, status and queues, but writes no validated version that holds part of the batch. A `COMMIT_BATCH` operation closes the batch and evaluates the run once, publishing only a complete run; a repeated commit is a no-op, and a newer batch for the run closes an abandoned one without publishing it. Spec 3 decides how a person's write to a run with an open batch publishes, within that rule. | spec 3 (not yet specified) | Spec 3's next revision adds it to `LlmReviewWrite`. P2.7, which adds `REREVIEW`, is blocked by it (§6.4). |
 | Spec 2 P5.5 is this specification; spec 2 P5.8 retires spec 1's materializer once P4.1 merges | spec 2 | P4.1 |
 | `ocr-quality` imports `@mcc/roster` (spec 2 §12 allows only `@mcc/contracts` and `@mcc/cdk-config`) | spec 2, spec 6 P0.2 | P1.4 |
 | The admin stack publishes `LlmReviewWrite`'s ARN as SSM parameter `/mcc/<env>/review/llm-review-write-function-arn` (ephemeral: `/mcc/dev/review/ephemeral/<name>/llm-review-write-function-arn`), so the `ocr-quality` stack can grant `lambda:InvokeFunction` on it | spec 3 P3.4 | P2.5 |
@@ -1012,7 +1012,7 @@ TypeScript tests use `tap` under `applications/ocr-quality/test/`, Python tests 
 
 | File | Covers |
 | --- | --- |
-| `constraints.test.ts` | every check in §4.2 passes on the two #91 fixtures, with a synthetic game variant `LINE` added because the reduced fixtures drop `LINE` blocks, with the numbers in §4.4; each fails on a seeded case with the right `miss` and involved items; `MISSING_VALUE` on a non-integer; `NO_PROFILE` on the FFA and `UNKNOWN` fixtures; `K005` fails on a Team Slayer table parsed as free-for-all |
+| `constraints.test.ts` | every check in §4.2 passes on the two #91 fixtures, with a synthetic game variant `LINE` added because the reduced fixtures drop `LINE` blocks, with the numbers in §4.4; each fails on a seeded case with the right `miss` and involved items; `MISSING_VALUE` on a non-integer; `NO_PROFILE` on the `UNKNOWN` fixtures; `K005` fails on a Team Slayer table with zero parser rows and `UNSUPPORTED_TEAM_LAYOUT` |
 | `profiles.test.ts` | capture 1 headers (`SCORE` with a trailing symbol, `ASSI`, empty deaths) and capture 2 headers match; three matching headers do not; the game variant predicate with and without a `LINE` above the table |
 | `peers.test.ts` | peers come only from the screenshot's `intake.matchId` and the `ACTIVE` screenshots of that match's highest record version; an emailed screenshot, two screenshots of one email, equal rosters without a match (a rematch), an uploaded screenshot that is `EXCLUDED`, `DUPLICATE` or not yet listed, and one whose match is `VOIDED` all record `NO_MATCH_IDENTITY`; within a match, an equal `gameKey` is a `K007` pair, 4 or more shared keys with a different `gameKey` a `K006` pair, fewer shared keys no pair, and an equal image hash no pair; results record `matchId`, `matchVersion` and `peerRunId`; `ScoreRun` compares parser rows only and never reads a validated table; `ApplyLlmReview` compares with a peer's validated version when one exists |
 | `reviewed-table.test.ts` | item classes in each mode (§4.7); a `HUMAN` head is retained in the reviewed table, and outside `REREVIEW` so is an earlier `LLM` head; a correction that passes on its own fails `K002` in the reviewed table beside a retained `HUMAN` row decision |
@@ -1473,7 +1473,7 @@ A change to a contract updates every consumer in the same PR.
 | --- | --- | --- | --- |
 | P6.1 | Escalate both runs on a `K007` disagreement | S | §18.10; needs a `NOT_CALLED` invocation record under the peer run's prefix. |
 | P6.2 | A second `ASSISTED` call with the failing constraints after a rejected correction, before escalating | S | Fewer escalations; only for `PRIORITY_SHOWN` runs. |
-| P6.3 | Profiles for Halo 3 free-for-all Slayer and other MCC titles | M | §18.9; each needs its own captures and P1.3 evidence. |
+| P6.3 | Profiles for other MCC titles | M | §18.9; each needs its own captures and P1.3 evidence. |
 | P6.4 | Bedrock batch inference for `BACKFILL` and `REREVIEW` | S | Half the price for work that can wait. |
 | P6.5 | Compare computed LLM cost with billed Bedrock cost in the report | S | §18.16. |
 | P6.6 | Prompt caching of the system prompt and tool schema | XS | Saves input cost when reviews cluster within the cache lifetime. |

@@ -292,7 +292,7 @@ test('every application allows ephemeral roles and compute and excludes shared n
   }
 });
 
-test('shared and legacy stacks are outside the ephemeral namespace', () => {
+test('shared stacks and names without the -e- prefix are outside the ephemeral namespace', () => {
   for (const name of [
     'admin-dev',
     'match-to-csv-dev-replay',
@@ -357,11 +357,11 @@ test('deployment and execution read only bootstrap and application parameters', 
 
 test('execution creates and changes only bounded roles under the local path', () => {
   const ephemeral = localRole('match-to-csv-e-alice-ServiceRole-hash');
-  // Roles from before the local bootstrap, or made by hand, sit at path /.
-  const legacy = role('match-to-csv-e-alice-ServiceRole-hash');
+  // Roles outside the local path, such as roles made by hand, sit at path /.
+  const rootPathRole = role('match-to-csv-e-alice-ServiceRole-hash');
   assert.equal(executes('iam:CreateRole', ephemeral), false);
   assert.equal(executes('iam:CreateRole', ephemeral, bounded), true);
-  assert.equal(executes('iam:CreateRole', legacy, bounded), false);
+  assert.equal(executes('iam:CreateRole', rootPathRole, bounded), false);
   for (const action of [
     'iam:PutRolePolicy',
     'iam:DeleteRolePolicy',
@@ -370,7 +370,11 @@ test('execution creates and changes only bounded roles under the local path', ()
   ]) {
     assert.equal(executes(action, ephemeral, bounded), true, action);
     assert.equal(executes(action, ephemeral), false, `${action} unbounded`);
-    assert.equal(executes(action, legacy, bounded), false, `${action} legacy`);
+    assert.equal(
+      executes(action, rootPathRole, bounded),
+      false,
+      `${action} root path`,
+    );
   }
   for (const action of [
     'iam:GetRole',
@@ -383,7 +387,7 @@ test('execution creates and changes only bounded roles under the local path', ()
     'iam:UpdateRoleDescription',
   ]) {
     assert.equal(executes(action, ephemeral), true, action);
-    assert.equal(executes(action, legacy), false, `${action} legacy`);
+    assert.equal(executes(action, rootPathRole), false, `${action} root path`);
     assert.equal(
       executes(action, localRole('match-to-csv-dev-ServiceRole-hash')),
       false,
@@ -392,7 +396,7 @@ test('execution creates and changes only bounded roles under the local path', ()
   }
   const toLambda = { 'iam:PassedToService': 'lambda.amazonaws.com' };
   assert.equal(executes('iam:PassRole', ephemeral, toLambda), true);
-  assert.equal(executes('iam:PassRole', legacy, toLambda), false);
+  assert.equal(executes('iam:PassRole', rootPathRole, toLambda), false);
   assert.equal(
     executes(
       'iam:PassRole',

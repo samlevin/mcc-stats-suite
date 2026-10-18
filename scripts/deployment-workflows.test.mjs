@@ -557,8 +557,8 @@ function runPrerequisites(stub) {
 test('match-to-csv prerequisites pass and mask the published domain', () => {
   const result = runPrerequisites({});
   assert.equal(result.status, 0, result.stderr + result.stdout);
-  // Masked before any other use. Revisions that still read MCC_EMAIL_DOMAIN
-  // declare the receipt rules the foundation owns, so nothing exports it.
+  // Masked before any other use. Nothing exports MCC_EMAIL_DOMAIN, because a
+  // release whose stack reads it declares receipt rules the foundation owns.
   assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
   assert.equal(result.githubEnv, '');
   assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
@@ -690,73 +690,82 @@ test('one deployment selector publishes the application selection after the requ
 const repositoryFile = (path) =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
-// GitHub's OIDC `workflow` claim carries the top-level workflow's `name:`,
-// never the name of a reusable workflow it calls.
-const deploymentCallerNames = () => {
+const triggers = ({ on }) =>
+  typeof on === 'string'
+    ? [on]
+    : Array.isArray(on)
+      ? on
+      : Object.keys(on ?? {});
+
+// Top-level workflows that reach `target` through local reusable workflow calls.
+const topLevelCallers = (target) => {
   const workflows = new Map(
     readdirSync(new URL('../.github/workflows/', import.meta.url))
       .filter((file) => file.endsWith('.yml'))
       .map((file) => [file, workflow(file.slice(0, -'.yml'.length))]),
   );
-  const reaches = (file, target, seen = new Set()) => {
+  const reaches = (file, seen = new Set()) => {
     if (seen.has(file)) return false;
     seen.add(file);
     return Object.values(workflows.get(file)?.jobs ?? {}).some((job) => {
       const called = job.uses?.match(/^\.\/\.github\/workflows\/(.+\.yml)$/);
-      return (
-        called && (called[1] === target || reaches(called[1], target, seen))
-      );
+      return called && (called[1] === target || reaches(called[1], seen));
     });
   };
-  const triggers = ({ on }) =>
-    typeof on === 'string'
-      ? [on]
-      : Array.isArray(on)
-        ? on
-        : Object.keys(on ?? {});
   return [...workflows]
     .filter(
       ([file, definition]) =>
-        !triggers(definition).includes('workflow_call') &&
-        reaches(file, '_delivery-deploy-environment.yml'),
+        !triggers(definition).includes('workflow_call') && reaches(file),
     )
-    .map(([, definition]) => definition.name)
+    .map(([file]) => file)
     .sort();
 };
 
-const trustedWorkflowNames = () => {
+const trustedDeployWorkflowPath = () => {
   const variables = repositoryFile(
     'infrastructure/modules/bootstrap/variables.tf',
   );
   const block = variables.match(
-    /variable "cdk_workflow_names" \{[\s\S]*?\n\}/,
+    /variable "cdk_deploy_workflow_path" \{[\s\S]*?\n\}/,
   )?.[0];
-  assert.ok(block, 'bootstrap must declare cdk_workflow_names');
-  const list = block.match(/^\s*default\s*=\s*\[([^\]]*)\]/m)?.[1];
-  assert.ok(list !== undefined, 'cdk_workflow_names needs a list default');
-  return [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort();
+  assert.ok(block, 'bootstrap must declare cdk_deploy_workflow_path');
+  const path = block.match(/^\s*default\s*=\s*"([^"]*)"/m)?.[1];
+  assert.ok(path, 'cdk_deploy_workflow_path needs a string default');
+  return path;
 };
 
-test('CDK entry role trusts the current callers and only the retired pre-rename names', () => {
-  const callers = deploymentCallerNames();
-  assert.deepEqual(callers, [
-    'Delivery: deploy to dev then prod',
-    'Delivery: roll back prod',
-  ]);
-  const trusted = trustedWorkflowNames();
-  // Bootstrap trusted the new names before issue #133 renamed both callers.
-  // It keeps the names from before the rename until a follow-up removes them.
-  assert.deepEqual(
-    trusted,
-    [...callers, 'deploy-applications', 'rollback-aws-application'].sort(),
+// GitHub sets the OIDC `job_workflow_ref` claim to the file that defines the
+// job requesting the token, so the CDK entry role must trust the reusable
+// workflow that assumes it, and every delivery workflow must reach that file.
+test('CDK entry role trusts the reusable workflow every delivery workflow calls', () => {
+  const path = trustedDeployWorkflowPath();
+  const file = path.match(/^\.github\/workflows\/([^/]+\.yml)$/)?.[1];
+  assert.ok(file, `${path} must be a workflow file in .github/workflows/`);
+  assert.ok(
+    existsSync(new URL(`../${path}`, import.meta.url)),
+    `${path} must exist`,
   );
-  assert.ok(!trusted.includes(deployment.name));
+  assert.ok(
+    triggers(workflow(file.slice(0, -'.yml'.length))).includes('workflow_call'),
+    `${path} must be a reusable workflow`,
+  );
+  assert.deepEqual(
+    workflowFiles()
+      .filter(({ text }) => text.includes('-github-cdk-deploy'))
+      .map(({ name }) => name),
+    [file],
+    'only the trusted workflow may assume the CDK entry role',
+  );
+  assert.deepEqual(topLevelCallers(file), [
+    'delivery-deploy.yml',
+    'delivery-rollback.yml',
+  ]);
   // The bootstrap roots must use the module default, which this test pins.
   for (const environment of ['dev', 'prod']) {
-    for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {
+    for (const name of ['main.tf', 'bootstrap.auto.tfvars.example']) {
       assert.doesNotMatch(
-        repositoryFile(`infrastructure/${environment}/bootstrap/${file}`),
-        /cdk_workflow_name/,
+        repositoryFile(`infrastructure/${environment}/bootstrap/${name}`),
+        /cdk_deploy_workflow_path/,
       );
     }
   }

@@ -67,10 +67,11 @@ resource "aws_ssm_parameter" "email_alias" {
 }
 
 // The plan redacts the alias, so a changed alias would otherwise show only as
-// a sensitive update to the shared rule. Compare it with the alias published
-// now, or with submit, the alias before it was configurable, and warn when an
-// apply would move the shared address: mail to the old address stops matching.
-// The lookup by path succeeds before the parameter exists.
+// a sensitive update to the shared rule. Compare it with the published alias,
+// or with submit when no alias parameter exists, because a foundation applied
+// without that parameter routes submit@. Warn when an apply would move the
+// shared address: mail to the current address stops matching. The lookup by
+// path succeeds before the parameter exists.
 data "aws_ssm_parameters_by_path" "match_to_csv" {
   path = "/mcc/${var.environment}/match-to-csv"
 }

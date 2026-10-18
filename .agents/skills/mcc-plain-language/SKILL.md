@@ -77,6 +77,10 @@ Use the most ordinary word that is still accurate. These come up most often:
 | testament to | shows |
 | underscore | show, stress |
 
+## Docs and code comments
+
+Docs, READMEs, guides, specs, agent instructions, wiki pages, and code comments describe the current state: what exists, and how to set it up, bootstrap, deploy, and run it. They are not a log of problems and fixes, and they are not ordered by when things happened. Write how it works, not how it came to work that way: "`ghRest` retries once on a 502", not "`ghRest` now retries, because a 502 used to fail the run". Change history goes in PR bodies, commit messages, and changelogs, where the example above belongs. A code comment may keep prior context only to explain an established regression the code must not reintroduce.
+
 ## Format
 
 Don't hard-wrap text. Write each paragraph as one line and let the display wrap it. Put code symbols in backticks: function and package names, parameters, file paths, commands, and literal syntax.

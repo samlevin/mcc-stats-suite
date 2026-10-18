@@ -5,7 +5,7 @@ Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/
 - an encrypted, versioned, deletion-protected S3 state bucket that requires TLS and retains noncurrent versions for 90 days; neither CI role operates the bootstrap state;
 - the GitHub Actions OIDC provider, unless the account already has one;
 - optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md), with an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role;
-- `mcc-stats-suite-<environment>-github-cdk-deploy`, with `PowerUserAccess`, trusted only by the deployment workflows on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
+- `mcc-stats-suite-<environment>-github-cdk-deploy`, with `PowerUserAccess`, trusted only by the reusable deployment workflow on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
 
 Bootstrap stays local so that CI identities cannot rewrite their own trust. Never let infrastructure CI/CD apply the bootstrap roots.
@@ -28,7 +28,7 @@ You edit the first section of each file. The second section reads the account ID
 
 The repository root has its own `.envrc`, created from the root `.envrc.example`. It sets only `AWS_PROFILE`, which `npm run app:*` reads. It defaults to `mcc-dev`, which works only after [local deploy access](20-bootstrap-cdk.md#grant-local-deploy-access) exists. Until then, use the administrator profiles the commands name.
 
-Recently created repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `TF_VAR_github_oidc_subject_repository` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise set it to `OWNER/REPOSITORY`. The foundation's optional Turbo cache role needs this value either way. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
+Some repositories use immutable OIDC subjects. To check, print the `sub` claim of an OIDC token requested by any workflow in the repository. If it contains `@`, set `TF_VAR_github_oidc_subject_repository` to `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID`, taking the IDs from `gh api repos/OWNER/REPOSITORY --jq '.owner.id, .id'`. Otherwise set it to `OWNER/REPOSITORY`. The foundation's optional Turbo cache role needs this value either way. A leftover placeholder becomes the trusted subject, and every GitHub role then rejects your workflows. A rename or transfer changes the subject and needs a bootstrap update.
 
 The `match-to-csv` email domain is a foundation input, not bootstrap configuration; [Apply the foundation](40-change-foundation.md#inputs) describes how to supply it.
 
@@ -85,13 +85,13 @@ tofu -chdir=infrastructure/dev/bootstrap test -test-directory=../../modules/boot
 
 Then run `tofu plan` in each bootstrap root and apply only the reviewed change.
 
-Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc` and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply.
+Once the change is on `main`, you can invoke `/mcc-apply-bootstrap` in Claude Code or `$mcc-apply-bootstrap` in Codex instead. An agent cannot start it for you. It plans and applies both roots at the current `origin/main` commit, dev and then prod, from a detached worktree. It reads the same local `.envrc` and `bootstrap.auto.tfvars` files, checks the account before every step, and waits for your approval before each plan and apply. It then offers the CDK bootstraps from [Bootstrap CDK and grant local deploy access](20-bootstrap-cdk.md), one approval per stack.
 
 ### Trusted deployment workflows
 
-The CDK entry role trusts a GitHub OIDC token only when its `workflow` claim matches an entry in `cdk_workflow_names` in `infrastructure/modules/bootstrap/variables.tf`. GitHub sets that claim to the `name:` of the top-level workflow that started the run, never to the name of a reusable workflow it calls. The list names the current callers of `.github/workflows/_delivery-deploy-environment.yml`: `Delivery: deploy to dev then prod` for continuous delivery and `Delivery: roll back prod` for prod rollback. It also keeps `deploy-applications` and `rollback-aws-application`, the names those workflows had before the rename in #133, until a follow-up removes them. `node --test scripts/deployment-workflows.test.mjs` checks the current callers and this exact list.
+The CDK entry role trusts a GitHub OIDC token only when its `job_workflow_ref` claim equals `<owner>/<repository>/.github/workflows/_delivery-deploy-environment.yml@refs/heads/main`. GitHub sets that claim to the path and ref of the file that defines the job requesting the token, so the role trusts the reusable workflow that runs the deploy steps, whichever top-level workflow calls it. `Delivery: deploy to dev then prod` calls it for continuous delivery, and `Delivery: roll back prod` for prod rollback. The token must also carry the `sub` of the matching GitHub Environment, the repository, and the `refs/heads/main` ref. The path comes from `cdk_deploy_workflow_path` and the branch from `github_deployment_branch`, both in `infrastructure/modules/bootstrap/variables.tf`. `node --test scripts/deployment-workflows.test.mjs` checks that the trusted file is the only workflow that assumes the role and that both delivery workflows reach it.
 
-Prepare a rename or a new caller in a separate bootstrap pull request first. Add the future workflow name and preserve every current name. Merge that prerequisite, then re-apply bootstrap from `main`, dev first and then prod, before merging the workflow change:
+Renaming a top-level delivery workflow, changing its `name:`, or adding another caller that calls the reusable workflow by its local path needs no bootstrap change. Moving or renaming `_delivery-deploy-environment.yml` needs bootstrap applied first. The role trusts one path, and `scripts/deployment-workflows.test.mjs` requires that path to exist, so move the file and set `cdk_deploy_workflow_path` to the new path in the same pull request. Before merging it, apply bootstrap from a checkout of that pull request's branch, dev first and then prod:
 
 ```console
 cd infrastructure/dev/bootstrap
@@ -102,7 +102,7 @@ tofu plan -out=bootstrap.tfplan
 tofu apply bootstrap.tfplan
 ```
 
-Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. Confirm both applies succeeded before merging the workflow rename or adding the caller. Otherwise it fails at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`. Keep the old names through the rename; remove them only in a follow-up bootstrap change after verifying delivery and rollback with the new names.
+Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the assume-role policy of `mcc-stats-suite-<environment>-github-cdk-deploy`. From each apply until the pull request merges, deployments from `main` fail at `aws-actions/configure-aws-credentials` with `Not authorized to perform sts:AssumeRoleWithWebIdentity`, so merge it right after both applies succeed.
 
 ## CI roles for the foundation
 

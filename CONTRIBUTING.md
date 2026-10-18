@@ -88,7 +88,7 @@ Workflow names show up in the Actions sidebar and in every pull request's check 
 
 Two kinds of rename need more than a code change:
 
-- The CDK entry role trusts the deployment workflows by their `name:`, which GitHub puts in the OIDC `workflow` claim. To rename `delivery-deploy.yml` or `delivery-rollback.yml`, or to add another caller of `_delivery-deploy-environment.yml`, add the new name to `cdk_workflow_names` and apply bootstrap in dev and then prod before the rename merges. [Trusted deployment workflows](docs/self-hosting/10-bootstrap-accounts.md#trusted-deployment-workflows) has the steps.
+- The CDK entry role trusts `_delivery-deploy-environment.yml` by its path, which GitHub puts in the OIDC `job_workflow_ref` claim, so renaming `delivery-deploy.yml` or `delivery-rollback.yml`, changing their `name:`, or adding another caller needs no bootstrap change. To move or rename `_delivery-deploy-environment.yml`, set `cdk_deploy_workflow_path` to the new path in the same pull request and apply bootstrap from that branch in dev and then prod before it merges. [Trusted deployment workflows](docs/self-hosting/10-bootstrap-accounts.md#trusted-deployment-workflows) has the steps.
 - The `main` ruleset requires three checks by job name: `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits`. Renaming one of those jobs needs a ruleset change when the pull request merges, or later pull requests wait on a check that no longer runs.
 
 ## Keep documentation with the code
@@ -102,5 +102,7 @@ Update the closest durable document:
 - future behavior and acceptance criteria belong in `specs/`;
 - repository-wide orientation belongs in this file or the root README;
 - instructions that only coding agents follow belong in `AGENTS.md` or `.agents/`.
+
+Documentation and code comments describe the current state: what exists and how to set it up, bootstrap, deploy, and run it. They are not a log of problems and fixes, and they are not ordered by when things happened. This applies to the self-hosting guides, READMEs, these guides, specs, agent instructions, code comments, and any future documentation such as wiki pages. Write how something works, not what it used to do or which change made it so. Change history belongs in pull request descriptions, commit messages, and changelogs. A code comment may keep prior context only to explain an established regression that the code must not reintroduce.
 
 Do not put personal account structure, domain names, email addresses, or maintainer-specific setup in public documentation.

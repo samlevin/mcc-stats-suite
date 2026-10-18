@@ -61,22 +61,14 @@ variable "terrateam_workflow_path" {
   default     = ".github/workflows/terrateam.yml"
 }
 
-variable "cdk_workflow_names" {
-  description = "Names of the top-level GitHub Actions workflows that call the reusable deployment workflow. GitHub puts the caller's name, not the reusable workflow's, in the OIDC workflow claim."
-  type        = list(string)
-  # The first two are the workflow names from before the #133 rename. Keep them
-  # until a follow-up removes them after delivery and rollback succeed with the
-  # new names.
-  default = [
-    "deploy-applications",
-    "rollback-aws-application",
-    "Delivery: deploy to dev then prod",
-    "Delivery: roll back prod",
-  ]
+variable "cdk_deploy_workflow_path" {
+  description = "Repository-relative path of the reusable workflow whose jobs may assume the CDK entry role. GitHub puts this path in the OIDC job_workflow_ref claim of every job that file defines, whichever workflow calls it."
+  type        = string
+  default     = ".github/workflows/_delivery-deploy-environment.yml"
 
   validation {
-    condition     = length(var.cdk_workflow_names) > 0 && alltrue([for name in var.cdk_workflow_names : length(trimspace(name)) > 0])
-    error_message = "cdk_workflow_names must list at least one non-empty workflow name."
+    condition     = can(regex("^\\.github/workflows/[^/[:space:]]+\\.ya?ml$", var.cdk_deploy_workflow_path))
+    error_message = "cdk_deploy_workflow_path must be a non-empty workflow file path directly under .github/workflows/."
   }
 }
 

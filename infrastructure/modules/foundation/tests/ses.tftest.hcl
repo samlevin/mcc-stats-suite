@@ -258,7 +258,8 @@ run "accept_longest_alias" {
   }
 }
 
-// Before the first apply publishes the alias, the shared address was submit@.
+// A foundation that has not published the alias routes submit@, so keeping
+// submit is not a change.
 run "keep_submit_before_first_publish" {
   command = plan
   plan_options { refresh = false }
