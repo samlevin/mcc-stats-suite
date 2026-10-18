@@ -179,8 +179,9 @@ export type ProcessEmailInput = S3ObjectReference;
 export interface ProcessEmailOutput {
   submissionId: string;
   /**
-   * The match date from the email body, as `YYYY-MM-DD`. A submission without
-   * a valid date is rejected with `MATCH_DATE_INVALID`, so it is always set.
+   * The first valid match date in the plain-text email body, as `YYYY-MM-DD`.
+   * A submission without a valid date is rejected with `MATCH_DATE_INVALID`,
+   * so it is always set.
    */
   matchDate: string;
   screenshots: SourceScreenshot[];
@@ -198,8 +199,8 @@ export type AttachmentRejectionCode =
  * Why a whole submission was rejected. Screening codes (SES verdicts, the
  * sender allowlist, and an ephemeral stack's recipient check) stop a message
  * before any attachment is stored. `MATCH_DATE_INVALID` is checked only after
- * screening passes, when the body is not one `M/D/YYYY` date, and also stops
- * the message before any attachment is stored.
+ * screening passes, when the plain-text body contains no valid `M/D/YYYY` date,
+ * and also stops the message before any attachment is stored.
  */
 export type SubmissionRejectionCode =
   | 'NO_PROCESSABLE_SCREENSHOTS'

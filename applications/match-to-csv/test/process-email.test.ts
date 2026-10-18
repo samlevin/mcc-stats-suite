@@ -861,7 +861,7 @@ test('processEmail records a failed completion when evidence storage fails', asy
   );
 });
 
-test('the match date is one M/D/YYYY calendar date, with or without leading zeros', () => {
+test('the match date is the first valid M/D/YYYY calendar date in reading order', () => {
   for (const [body, expected] of [
     ['5/2/2026', '2026-05-02'],
     ['05/02/2026', '2026-05-02'],
@@ -870,6 +870,12 @@ test('the match date is one M/D/YYYY calendar date, with or without leading zero
     [' \r\n\t10/17/2026 \r\n', '2026-10-17'],
     ['2/29/2024', '2024-02-29'],
     ['2/29/2000', '2000-02-29'],
+    ['Match date: (10/18/2026).\n--\nExample signature', '2026-10-18'],
+    ['1/1/2026 thanks', '2026-01-01'],
+    ['12/31/2026\n1/2/2026', '2026-12-31'],
+    ['13/1/2026, 2/30/2026, 2/29/1900, 2/29/2000', '2000-02-29'],
+    ['001/1/2026 1/001/2026 1/1/20266 then 5/2/2026', '2026-05-02'],
+    ['1/1/26 then 05/02/2026', '2026-05-02'],
   ] as const) {
     assert.equal(parseMatchDate(body), expected, body);
   }
@@ -889,10 +895,13 @@ test('the match date is one M/D/YYYY calendar date, with or without leading zero
     '1/1/26',
     '1/1/20266',
     '001/1/2026',
+    '1/001/2026',
+    '11/111/2026',
+    '1/1/2026/2',
+    '1/1/1/2026',
     '2026-01-01',
     '1-1-2026',
-    '1/1/2026 thanks',
-    '1/1/2026\n1/2/2026',
+    '13/1/2026 and 2/29/1900',
   ]) {
     assert.equal(parseMatchDate(body), undefined, JSON.stringify(body));
   }
@@ -914,6 +923,11 @@ for (const [label, text] of [
   ['month 13', '13/1/2026'],
   ['February 30', '2/30/2026'],
   ['a two-digit year', '1/1/26'],
+  [
+    'only invalid dates among text',
+    'Dates: 13/1/2026, 2/30/2026.\nExample signature',
+  ],
+  ['a longer numeric date token', 'Date: 001/1/2026'],
 ] as const) {
   test(`processEmail rejects ${label} as MATCH_DATE_INVALID before storing any screenshot and replies`, async () => {
     const run = await runScreening({ ...listedSender, text });
@@ -940,8 +954,11 @@ for (const [label, text] of [
     assert.match(reply.body, /not processed/);
     assert.match(
       reply.body,
-      /only the date of the match, written as M\/D\/YYYY/,
+      /no valid match date was found in its plain-text body/,
     );
+    assert.match(reply.body, /Include the date as M\/D\/YYYY/);
+    assert.match(reply.body, /first valid date in the body is used/);
+    assert.match(reply.body, /Surrounding text and signatures are allowed/);
     assert.match(reply.body, /send it again to the submission address/);
     assert.match(reply.body, /Replies to this no-reply address are not read/);
   });
@@ -986,6 +1003,43 @@ const plainPart = (body: string) => [
   '',
   body,
 ];
+
+for (const [label, body, expected] of [
+  [
+    'a signature after the date',
+    '10/18/2026\r\n--\r\nExample signature',
+    '2026-10-18',
+  ],
+  ['surrounding text', 'Screenshots for (05/02/2026). Thanks!', '2026-05-02'],
+  ['multiple valid dates', '12/31/2026\r\n1/2/2026', '2026-12-31'],
+  [
+    'invalid dates before a valid date',
+    '13/1/2026, 2/29/1900, then 2/29/2000',
+    '2000-02-29',
+  ],
+  [
+    'numeric tokens before a valid date',
+    '001/1/2026 1/1/20266 then 5/2/2026',
+    '2026-05-02',
+  ],
+] as const) {
+  test(`processEmail accepts ${label} parsed from MIME and records the first valid date`, async () => {
+    const run = await runScreening({
+      ...listedSender,
+      rawEmail: mimeWithScreenshot([plainPart(body)]),
+    });
+
+    assert.equal(run.error, undefined);
+    assert.equal(run.result?.matchDate, expected);
+    assert.equal(run.ingestion.matchDate, expected);
+    assert.equal(run.result?.screenshots.length, 1);
+    assert.equal(run.objectWrites.length, 1);
+    assert.equal(run.completion.status, 'SUCCEEDED');
+    assert.deepEqual(run.completion.rejectionCodes, []);
+    assert.equal(run.event.type, 'SUBMISSION_ACCEPTED');
+    assert.deepEqual(run.sends, []);
+  });
+}
 
 // By default MailParser converts HTML to text when the HTML is the whole
 // message or sits beside a text/plain part, so the first and last bodies would
@@ -1068,6 +1122,25 @@ for (const [label, options, codes] of [
     assert.equal(run.error?.name, 'SubmissionRejectedError');
     assert.deepEqual(run.completion.rejectionCodes, codes);
     assert.deepEqual(run.objectWrites, []);
+    assert.deepEqual(run.sends, []);
+  });
+
+  test(`processEmail preserves ${label} with a valid date among surrounding text`, async () => {
+    const run = await runScreening({
+      ...listedSender,
+      ...options,
+      text: 'Match date: 10/18/2026\n--\nExample signature',
+    });
+
+    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assert.equal(run.result, undefined);
+    assert.equal(run.ingestion.matchDate, '2026-10-18');
+    assert.equal(run.completion.status, 'REJECTED');
+    assert.deepEqual(run.completion.rejectionCodes, codes);
+    assert.equal(run.event.type, 'SUBMISSION_REJECTED');
+    assert.deepEqual(run.event.detail.rejectionCodes, codes);
+    assert.deepEqual(run.objectWrites, []);
+    assert.equal(run.inspections(), 0);
     assert.deepEqual(run.sends, []);
   });
 }
