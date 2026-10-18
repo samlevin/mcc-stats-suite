@@ -1,7 +1,7 @@
 # Generated from .agents/workflows/review-code.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`.
 interface:
   display_name: 'MCC: Review code'
-  short_description: Read-only review of an MCC pull request or branch
+  short_description: Independent review of an MCC pull request or branch, posted to the PR
   default_prompt: Use $mcc-review-code to review this MCC pull request or branch.
 policy:
   allow_implicit_invocation: true

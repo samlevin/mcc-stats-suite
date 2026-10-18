@@ -12,7 +12,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../.codex/agents/mcc-*.toml` | Generated Codex custom agents |
 | `../.claude/agents/mcc-*.md` | Generated Claude Code subagents |
 | `../.claude/skills/mcc-*/` | Generated Claude Code skills |
-| `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), and drift check (`check`) |
+| `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), drift check (`check`), and manual review publisher (`publish-review`) |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
 Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
@@ -99,6 +99,10 @@ Codex loads `.agents/skills/` from every directory between the working directory
 Every identifier here starts with `mcc-` so that it cannot collide with a contributor's own agents and skills in either tool.
 
 Trusting the folder is the only activation step in either tool. Nothing here installs, copies, symlinks, or registers anything outside the checkout, and a session in another repository does not see these definitions. Ordinary prerequisites stay yours: the tool itself, `gh` with authentication, the `gh stack` extension for stacked branches, and `npm ci` for the checks (the resolver itself runs without `node_modules`).
+
+## Manual review publication
+
+`mcc-review-code` posts the reviewer's report to a target pull request after `mcc-code-reviewer` returns. The reviewer itself stays read-only, and the skill posts through `node scripts/agent-policy.mjs publish-review`, so both tools follow one rule. That command reads the pull request again and posts nothing when its base or head differs from the reviewed pair. It compares the `gh api user` login with the PR creator's login and submits one review pinned to the reviewed head commit. The event is `REQUEST_CHANGES` only for a `REQUEST CHANGES` verdict from a different account, because GitHub rejects a change request or an approval from a pull request's own author. Every other case, including an identity it cannot establish, is a `COMMENT` review whose body says why when the event differs from the verdict. It never approves. Branch reviews and the implementer's pre-PR reviews post nothing. `scripts/agent-policy.test.mjs` covers each case against mocked `gh` responses.
 
 ## Infrastructure apply skills
 

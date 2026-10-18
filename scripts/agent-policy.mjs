@@ -5,13 +5,15 @@
 // and refuses unsupported values instead of letting a runtime substitute one.
 // `generate` writes the Claude Code and Codex definitions from the shared
 // sources under .agents/; `check` fails when a generated file is stale so
-// the two tools cannot drift apart.
+// the two tools cannot drift apart. `publish-review` posts a finished manual
+// code review to its pull request for the review-code skill.
 //
 // The sources name no repository. `policy.json` carries a `binding` (the
 // namespace prefix, repository, project, tracker documents, and feature
 // flags), and every `{{placeholder}}` and `{{#feature}}...{{/feature}}`
 // section in a source resolves against it, so another repository reuses the
 // same sources with its own policy file.
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -437,6 +439,223 @@ export function check(base = root) {
   return stale.sort();
 }
 
+// Manual review publication. The code-reviewer agent stays read-only. The
+// review-code skill passes its finished report here, and this posts exactly
+// one review to the pull request it reviewed, or posts nothing and says why.
+export const REVIEW_VERDICTS = ['APPROVE', 'REQUEST CHANGES', 'BLOCKED'];
+const FULL_SHA = /^[0-9a-f]{40}$/;
+const MAX_GITHUB_DETAIL = 300;
+
+export class ReviewNotPosted extends Error {
+  constructor(message) {
+    super(`Review not posted: ${message}`);
+    this.name = 'ReviewNotPosted';
+  }
+}
+
+// Reads the verdict and the reviewed SHAs from a code-reviewer report, which
+// has `Verdict: <verdict>` and `Base/Head: <sha>..<sha>` lines. Light
+// Markdown around either is tolerated. Two different verdicts are an error.
+export function parseReviewReport(text) {
+  const verdicts = new Set(
+    [
+      ...String(text).matchAll(
+        /^[\s>*_`-]*Verdict:[\s*_`]*(APPROVE|REQUEST CHANGES|BLOCKED)\b/gm,
+      ),
+    ].map((match) => match[1]),
+  );
+  if (verdicts.size !== 1)
+    throw new ReviewNotPosted(
+      verdicts.size
+        ? `the report has conflicting verdicts (${[...verdicts].join(', ')})`
+        : `the report has no Verdict: line with ${REVIEW_VERDICTS.join(', ')}`,
+    );
+  const pair =
+    /^[\s>*_`-]*Base\/Head:[\s*_`]*([0-9a-f]{7,40})`?\.\.`?([0-9a-f]{7,40})\b/m.exec(
+      String(text),
+    );
+  return {
+    verdict: [...verdicts][0],
+    base: pair?.[1] ?? null,
+    head: pair?.[2] ?? null,
+  };
+}
+
+// GitHub rejects REQUEST_CHANGES and APPROVE from a pull request's own
+// author, so a change request goes out only when the publishing account is
+// known and differs from the author. Logins compare case-insensitively, as
+// GitHub treats them. Agent names and models never enter the comparison.
+// Every other case is a COMMENT review, and nothing here ever approves.
+export function reviewEvent({ verdict, viewer, author, identityError }) {
+  if (!REVIEW_VERDICTS.includes(verdict))
+    throw new Error(`Unknown review verdict: ${verdict}`);
+  if (!viewer || !author)
+    return {
+      event: 'COMMENT',
+      note: `The publishing GitHub account could not be compared with the pull request author (${identityError ?? 'GitHub returned no login'}), so this review is posted as a comment and cannot request changes.`,
+    };
+  const same = viewer.toLowerCase() === author.toLowerCase();
+  if (verdict === 'REQUEST CHANGES')
+    return same
+      ? {
+          event: 'COMMENT',
+          note: `The verdict is REQUEST CHANGES, but it is posted as a comment rather than a change request because the reviewer and the pull request author share the GitHub account @${author}, and GitHub does not let an account request changes on its own pull request.`,
+        }
+      : { event: 'REQUEST_CHANGES', note: null };
+  if (verdict === 'APPROVE')
+    return {
+      event: 'COMMENT',
+      note: 'This workflow never submits a GitHub approval, so the APPROVE verdict is posted as a comment.',
+    };
+  return { event: 'COMMENT', note: null };
+}
+
+export function reviewBody(policy, { report, base, head, note }) {
+  const parts = [
+    `${binding(policy).label} code review of \`${base}..${head}\`, requested through \`${prefix(policy)}review-code\`.`,
+  ];
+  if (note) parts.push(`> ${note}`);
+  parts.push(String(report).trim());
+  return `${parts.join('\n\n')}\n`;
+}
+
+function githubDetail(cause) {
+  if (cause?.code === 'ENOENT') return 'gh is not installed or not on PATH';
+  let body;
+  try {
+    body = JSON.parse(String(cause?.stdout ?? ''));
+  } catch {
+    body = null;
+  }
+  const errors = Array.isArray(body?.errors)
+    ? body.errors
+        .map((error) => (typeof error === 'string' ? error : error?.message))
+        .filter((message) => typeof message === 'string' && message)
+    : [];
+  const status = /\(HTTP (\d{3})\)/.exec(String(cause?.stderr ?? ''))?.[1];
+  const detail = [
+    status && `HTTP ${status}`,
+    typeof body?.message === 'string' && body.message,
+    ...errors.slice(0, 3),
+  ]
+    .filter(Boolean)
+    .join(': ')
+    .replace(/\s+/g, ' ')
+    .slice(0, MAX_GITHUB_DETAIL);
+  return (
+    detail ||
+    `gh exited${cause?.status == null ? '' : ` with status ${cause.status}`} without a GitHub error message`
+  );
+}
+
+// When a request fails, `gh api` writes GitHub's JSON error body to stdout
+// and an `(HTTP nnn)` summary to stderr. Only those two are reported.
+function ghJson(path, run, { method, input } = {}) {
+  const args = ['api', path, ...(method ? ['--method', method] : [])];
+  if (input !== undefined) args.push('--input', '-');
+  let output;
+  try {
+    output = run('gh', args, {
+      encoding: 'utf8',
+      ...(input === undefined
+        ? { stdio: ['ignore', 'pipe', 'pipe'] }
+        : { input, stdio: ['pipe', 'pipe', 'pipe'] }),
+    });
+  } catch (cause) {
+    throw new Error(`gh api ${path} failed: ${githubDetail(cause)}`, {
+      cause,
+    });
+  }
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw new Error(`gh api ${path} returned a response that is not JSON`);
+  }
+}
+
+export function publishReview(
+  policy,
+  { pr, base, head, report },
+  run = execFileSync,
+) {
+  const repository = binding(policy).repository;
+  if (!/^[1-9][0-9]*$/.test(String(pr)))
+    throw new ReviewNotPosted('--pr must be a pull request number');
+  for (const [name, sha] of Object.entries({ base, head }))
+    if (!FULL_SHA.test(sha ?? ''))
+      throw new ReviewNotPosted(`--${name} must be a full 40-character SHA`);
+  if (!String(report ?? '').trim())
+    throw new ReviewNotPosted('the review report is empty');
+  const reviewed = parseReviewReport(report);
+  if (
+    (reviewed.base && !base.startsWith(reviewed.base)) ||
+    (reviewed.head && !head.startsWith(reviewed.head))
+  )
+    throw new ReviewNotPosted(
+      `the report reviewed ${reviewed.base ?? base}..${reviewed.head ?? head}, not ${base}..${head}. Run a fresh review.`,
+    );
+  let pull;
+  try {
+    pull = ghJson(`repos/${repository}/pulls/${pr}`, run);
+  } catch (error) {
+    throw new ReviewNotPosted(error.message);
+  }
+  if (pull?.base?.sha !== base || pull?.head?.sha !== head)
+    throw new ReviewNotPosted(
+      `pull request #${pr} is now at ${pull?.base?.sha}..${pull?.head?.sha}, not the reviewed ${base}..${head}. Run a fresh review for the new commits.`,
+    );
+  let viewer = null;
+  let identityError;
+  try {
+    viewer = ghJson('user', run)?.login || null;
+  } catch (error) {
+    identityError = error.message;
+  }
+  const author = pull.user?.login || null;
+  if (!identityError && !author)
+    identityError = 'GitHub returned no pull request author';
+  const { event, note } = reviewEvent({
+    verdict: reviewed.verdict,
+    viewer,
+    author,
+    identityError,
+  });
+  if (!['COMMENT', 'REQUEST_CHANGES'].includes(event))
+    throw new Error(`Refusing to submit a ${event} review`);
+  let posted;
+  try {
+    posted = ghJson(`repos/${repository}/pulls/${pr}/reviews`, run, {
+      method: 'POST',
+      // commit_id pins the review to the reviewed head, so GitHub shows it
+      // as outdated once the pull request moves.
+      input: JSON.stringify({
+        commit_id: head,
+        event,
+        body: reviewBody(policy, { report, base, head, note }),
+      }),
+    });
+  } catch (error) {
+    throw new ReviewNotPosted(
+      `${error.message.replace(/\.$/, '')}. Check the pull request before retrying.`,
+    );
+  }
+  if (!posted?.html_url)
+    throw new ReviewNotPosted(
+      'GitHub returned no review URL, so the review cannot be confirmed as posted. Check the pull request before retrying.',
+    );
+  return {
+    posted: true,
+    event,
+    verdict: reviewed.verdict,
+    note,
+    url: posted.html_url,
+    reviewer: viewer,
+    author,
+    base,
+    head,
+  };
+}
+
 function argument(args, name) {
   const index = args.indexOf(`--${name}`);
   return index === -1 ? undefined : args[index + 1];
@@ -459,6 +678,24 @@ function main(args) {
     for (const path of generate()) console.log(path);
     return 0;
   }
+  if (command === 'publish-review') {
+    const reportPath = argument(rest, 'report');
+    if (!reportPath) throw new ReviewNotPosted('--report <file> is required');
+    let report;
+    try {
+      report = readFileSync(reportPath, 'utf8');
+    } catch (error) {
+      throw new ReviewNotPosted(`cannot read ${reportPath}: ${error.message}`);
+    }
+    const result = publishReview(loadPolicy(), {
+      pr: argument(rest, 'pr'),
+      base: argument(rest, 'base'),
+      head: argument(rest, 'head'),
+      report,
+    });
+    console.log(JSON.stringify(result, null, 2));
+    return 0;
+  }
   if (command === 'check') {
     const stale = check();
     if (!stale.length) return 0;
@@ -470,7 +707,8 @@ function main(args) {
   console.error(
     'Usage: node scripts/agent-policy.mjs resolve --tool <claude|codex> (--role <role> | --capability <capability>) [--model <model>] [--effort <effort>]\n' +
       '       node scripts/agent-policy.mjs generate\n' +
-      '       node scripts/agent-policy.mjs check',
+      '       node scripts/agent-policy.mjs check\n' +
+      '       node scripts/agent-policy.mjs publish-review --pr <number> --base <sha> --head <sha> --report <file>',
   );
   return 2;
 }
