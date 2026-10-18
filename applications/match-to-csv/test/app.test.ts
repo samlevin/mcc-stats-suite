@@ -174,7 +174,7 @@ for (const [environment, ephemeral, retention] of [
       }
     >;
     const logGroups = template.findResources('AWS::Logs::LogGroup');
-    assert.equal(Object.keys(logGroups).length, 6);
+    assert.equal(Object.keys(logGroups).length, 7);
     for (const group of Object.values(logGroups)) {
       assert.equal(group.Properties.RetentionInDays, retention);
       assert.equal(
@@ -184,7 +184,7 @@ for (const [environment, ephemeral, retention] of [
       assert.equal(group.UpdateReplacePolicy, ephemeral ? 'Delete' : 'Retain');
     }
     const functions = template.findResources('AWS::Lambda::Function');
-    assert.equal(Object.keys(functions).length, 5);
+    assert.equal(Object.keys(functions).length, 6);
     const prefix = `match-to-csv-${ephemeral ? `e-${ephemeral}` : environment}-`;
     const functionNames = new Set<string>();
     for (const fn of Object.values(functions)) {
@@ -198,7 +198,7 @@ for (const [environment, ephemeral, retention] of [
         `/aws/lambda/${functionName}`,
       );
     }
-    assert.equal(functionNames.size, 5);
+    assert.equal(functionNames.size, 6);
     if (ephemeral) {
       for (const resource of Object.values(resources)) {
         assert.notEqual(resource.DeletionPolicy, 'Retain');
@@ -247,6 +247,7 @@ for (const environment of ['dev', 'prod'] as const) {
       ['ProcessEmailErrors', 'AWS/Lambda', 'Errors'],
       ['ExtractTextErrors', 'AWS/Lambda', 'Errors'],
       ['WriteExtractedCsvErrors', 'AWS/Lambda', 'Errors'],
+      ['WriteGamertagCsvsErrors', 'AWS/Lambda', 'Errors'],
       ['CompareRunsErrors', 'AWS/Lambda', 'Errors'],
       ['MaterializeTrainingDataErrors', 'AWS/Lambda', 'Errors'],
       ['ZeroRowExtractions', 'MCC/MatchToCsv', 'ZeroRowExtractions'],
@@ -488,6 +489,170 @@ test('write extracted CSV reads only run normalized observations from the eviden
       resource('s3:GetObject'),
       bucketArn(
         `/${namespace}submissions/*/runs/*/normalized/observations.json`,
+      ),
+      label,
+    );
+  }
+});
+
+type StateDefinition = {
+  StartAt: string;
+  States: Record<string, Record<string, unknown>>;
+};
+
+/** Parses a state machine definition, with each token as a placeholder. */
+function stateMachineDefinition(
+  template: ReturnType<typeof synthesize>,
+  stateMachineName: string,
+): StateDefinition {
+  const [stateMachine] = Object.values(
+    template.findResources('AWS::StepFunctions::StateMachine', {
+      Properties: { StateMachineName: stateMachineName },
+    }),
+  );
+  const parts = stateMachine.Properties.DefinitionString['Fn::Join'][1] as (
+    string | { 'Fn::GetAtt'?: [string, string] }
+  )[];
+  return JSON.parse(
+    parts
+      .map((part) =>
+        typeof part === 'string'
+          ? part
+          : `token:${part['Fn::GetAtt']?.[0] ?? 'other'}`,
+      )
+      .join(''),
+  ) as StateDefinition;
+}
+
+test('the main workflow writes gamertag CSVs only after the attachments Map', () => {
+  const template = synthesize({ environment: 'dev' });
+  const definition = stateMachineDefinition(template, 'match-to-csv-dev');
+  const map = definition.States['Process attachments'];
+  assert.equal(map.Type, 'Map');
+  // No Catch: a failed item fails the Map and the execution before the step.
+  assert.equal(map.Catch, undefined);
+  assert.equal(map.Next, 'Write gamertag CSVs');
+
+  const step = definition.States['Write gamertag CSVs'];
+  assert.equal(step.Type, 'Task');
+  assert.equal(step.End, true);
+  assert.equal(step.Catch, undefined);
+  assert.match(step.Resource as string, /^token:WriteGamertagCsvs/);
+  // Only the keys and the match date enter the step, never a row.
+  assert.deepEqual(step.Parameters, {
+    'submissionId.$': '$.submissionId',
+    'matchDate.$': '$.matchDate',
+    'exports.$': '$.results[*].summary',
+  });
+  assert.equal(step.ResultPath, '$.gamertagCsvs');
+  assert.deepEqual(
+    step.Retry,
+    definition.States['Process email and attachments'].Retry,
+  );
+  assert.deepEqual(step.Retry, [
+    {
+      ErrorEquals: [
+        'Lambda.ClientExecutionTimeoutException',
+        'Lambda.ServiceException',
+        'Lambda.AWSLambdaException',
+        'Lambda.SdkClientException',
+        'Lambda.TooManyRequestsException',
+        'Textract.InternalServerError',
+        'Textract.ProvisionedThroughputExceededException',
+        'Textract.ThrottlingException',
+        'InternalServerError',
+        'ProvisionedThroughputExceededException',
+        'ThrottlingException',
+      ],
+      IntervalSeconds: 2,
+      MaxAttempts: 3,
+      BackoffRate: 2,
+    },
+  ]);
+
+  // The replay workflow writes no per-gamertag files.
+  const replay = stateMachineDefinition(template, 'match-to-csv-dev-replay');
+  assert.deepEqual(Object.keys(replay.States).sort(), [
+    'Replay extract text',
+    'Replay write extracted CSV',
+  ]);
+  assert.ok(!JSON.stringify(replay).includes('WriteGamertagCsvs'));
+});
+
+test('write gamertag CSVs reads run tables and writes only submission gamertag exports', () => {
+  for (const [environment, ephemeral, namespace] of [
+    ['dev', undefined, ''],
+    ['prod', undefined, ''],
+    ['dev', 'test', 'ephemeral/test/'],
+  ] as const) {
+    const label = `${environment} ${ephemeral ?? 'stable'}`;
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const statements = Object.values(template.findResources('AWS::IAM::Policy'))
+      .filter((policy) =>
+        JSON.stringify(policy.Properties.Roles).includes('WriteGamertagCsvs'),
+      )
+      .flatMap(
+        (policy) =>
+          policy.Properties.PolicyDocument.Statement as Array<{
+            Action: string | string[];
+            Resource: unknown;
+          }>,
+      );
+    const s3Statements = statements.filter((statement) =>
+      [statement.Action].flat().some((action) => action.startsWith('s3:')),
+    );
+    assert.deepEqual(
+      s3Statements.map((statement) => statement.Action).sort(),
+      ['s3:GetObject', 's3:PutObject'],
+      label,
+    );
+    const suffix = (action: string) => {
+      const resource = s3Statements.find(
+        (statement) => statement.Action === action,
+      )?.Resource as { 'Fn::Join': [string, unknown[]] };
+      const parts = resource['Fn::Join'][1];
+      assert.deepEqual(parts.slice(0, 3), [
+        'arn:',
+        { Ref: 'AWS::Partition' },
+        ':s3:::',
+      ]);
+      // The bucket name resolves from the foundation's evidence parameter.
+      assert.deepEqual(
+        Object.keys(parts[3] as object),
+        ['Ref'],
+        `${label} ${action}`,
+      );
+      return parts.slice(4).join('');
+    };
+    assert.equal(
+      suffix('s3:GetObject'),
+      `/${namespace}submissions/*/runs/*/export/extracted-table.json`,
+      label,
+    );
+    assert.equal(
+      suffix('s3:PutObject'),
+      `/${namespace}submissions/*/export/gamertags/*`,
+      label,
+    );
+    // The data key encrypts the files and decrypts the run tables.
+    assert.ok(
+      statements.some(
+        (statement) =>
+          [statement.Action].flat().includes('kms:Decrypt') &&
+          [statement.Action].flat().includes('kms:GenerateDataKey*'),
+      ),
+      label,
+    );
+    assert.ok(
+      !statements.some((statement) =>
+        [statement.Action]
+          .flat()
+          .some((action) =>
+            /^(s3:Delete|s3:\*|dynamodb:|ses:|textract:)/.test(action),
+          ),
       ),
       label,
     );

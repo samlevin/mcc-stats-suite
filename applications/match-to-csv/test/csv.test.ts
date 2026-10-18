@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { CsvRow, PlayerResolution } from '@mcc/contracts';
-import { rowsToCsv } from '../src/lib/csv';
+import { exportDate, rowsToCsv, rowsToGamertagCsv } from '../src/lib/csv';
 
 const row: CsvRow = {
   team: 'Blue',
@@ -100,4 +100,33 @@ test('CSV output quotes commas, quotes, and numeric flags', () => {
   ]);
   assert.match(csv, /"Roster, ""One"""/);
   assert.match(csv, /"1","0","RESOLVED"\n$/);
+});
+
+test('gamertag CSV has no header and Date, Kills, Assists, Deaths, Win, Loss', () => {
+  const csv = rowsToGamertagCsv('2026-05-02', [
+    row,
+    { ...row, kills: '3', assists: '0', deaths: '7', win: 0, loss: 1 },
+  ]);
+  assert.deepEqual(lines(csv), ['5/2/2026,10,4,2,1,', '5/2/2026,3,0,7,,1']);
+  // No player, team or score column, and no resolution status.
+  assert.ok(!csv.includes('Blue'));
+  assert.ok(!csv.includes('Player'));
+  assert.ok(!csv.includes('19'));
+  assert.equal(rowsToGamertagCsv('2026-05-02', []), '');
+});
+
+test('gamertag CSV quotes only values that need it', () => {
+  const csv = rowsToGamertagCsv('2026-05-02', [
+    { ...row, kills: '1,0', assists: 'say "4"', deaths: '2\n' },
+  ]);
+  assert.equal(csv, '5/2/2026,"1,0","say ""4""","2\n",1,\n');
+});
+
+test('export dates have no leading zeros', () => {
+  assert.equal(exportDate('2026-01-09'), '1/9/2026');
+  assert.equal(exportDate('2026-10-10'), '10/10/2026');
+  assert.equal(exportDate('2026-12-31'), '12/31/2026');
+  for (const value of ['1/9/2026', '2026-1-9', '', '2026-01-09T00:00:00Z']) {
+    assert.throws(() => exportDate(value), /YYYY-MM-DD/, value);
+  }
 });

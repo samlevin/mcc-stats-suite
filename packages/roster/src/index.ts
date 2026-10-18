@@ -12,6 +12,7 @@ export {
 } from './resolve';
 export {
   EMPTY_ROSTER,
+  GAMERTAG_PATTERN,
   RosterIntegrityError,
   activeEntries,
   checkChange,

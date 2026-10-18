@@ -183,6 +183,12 @@ export class MatchToCsvStack extends Stack {
       lambdaEnvironment,
       1024,
     );
+    const writeGamertagCsvs = this.nodeFunction(
+      'WriteGamertagCsvs',
+      'write-gamertag-csvs.ts',
+      lambdaEnvironment,
+      1024,
+    );
     const compareRuns = this.nodeFunction(
       'CompareRuns',
       'compare-runs.ts',
@@ -248,11 +254,30 @@ export class MatchToCsvStack extends Stack {
         ],
       }),
     );
+    // The per-gamertag export reads each run's structured table and may only
+    // create files under its submission's export prefix.
+    writeGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject'],
+        resources: [
+          `${evidenceBucket.bucketArn}/${objectNamespace}submissions/*/runs/*/export/extracted-table.json`,
+        ],
+      }),
+    );
+    writeGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:PutObject'],
+        resources: [
+          `${evidenceBucket.bucketArn}/${objectNamespace}submissions/*/export/gamertags/*`,
+        ],
+      }),
+    );
     this.grantEvidenceAccess(evidenceBucket, compareRuns, true);
     this.grantEvidenceAccess(evidenceBucket, materializeTrainingData, true);
     dataKey.grantEncryptDecrypt(processEmail);
     dataKey.grantEncryptDecrypt(extractText);
     dataKey.grantEncryptDecrypt(writeExtractedCsv);
+    dataKey.grantEncryptDecrypt(writeGamertagCsvs);
     dataKey.grantEncryptDecrypt(compareRuns);
     dataKey.grantEncryptDecrypt(materializeTrainingData);
     extractText.addToRolePolicy(
@@ -303,6 +328,23 @@ export class MatchToCsvStack extends Stack {
       resultPath: '$.summary',
       retryOnServiceExceptions: false,
     });
+    // Runs only after every Map item succeeds. Its input holds the export keys
+    // and match date and never a row, so no roster gamertag enters the state.
+    const writeGamertagCsvsTask = new tasks.LambdaInvoke(
+      this,
+      'Write gamertag CSVs',
+      {
+        lambdaFunction: writeGamertagCsvs,
+        payloadResponseOnly: true,
+        payload: sfn.TaskInput.fromObject({
+          submissionId: sfn.JsonPath.stringAt('$.submissionId'),
+          matchDate: sfn.JsonPath.stringAt('$.matchDate'),
+          exports: sfn.JsonPath.listAt('$.results[*].summary'),
+        }),
+        resultPath: '$.gamertagCsvs',
+        retryOnServiceExceptions: false,
+      },
+    );
 
     const transientErrors = [
       'Lambda.ClientExecutionTimeoutException',
@@ -323,7 +365,12 @@ export class MatchToCsvStack extends Stack {
       maxAttempts: 3,
       backoffRate: 2,
     };
-    for (const task of [processEmailTask, extractTextTask, writeCsvTask]) {
+    for (const task of [
+      processEmailTask,
+      extractTextTask,
+      writeCsvTask,
+      writeGamertagCsvsTask,
+    ]) {
       task.addRetry(retry);
     }
 
@@ -345,7 +392,7 @@ export class MatchToCsvStack extends Stack {
       stateMachineName: deployment.resourcePrefix,
       stateMachineType: sfn.StateMachineType.STANDARD,
       definitionBody: sfn.DefinitionBody.fromChainable(
-        processEmailTask.next(processAttachments),
+        processEmailTask.next(processAttachments).next(writeGamertagCsvsTask),
       ),
       timeout: Duration.minutes(15),
       logs: {
@@ -420,6 +467,7 @@ export class MatchToCsvStack extends Stack {
           ProcessEmail: processEmail,
           ExtractText: extractText,
           WriteExtractedCsv: writeExtractedCsv,
+          WriteGamertagCsvs: writeGamertagCsvs,
           CompareRuns: compareRuns,
           MaterializeTrainingData: materializeTrainingData,
         },

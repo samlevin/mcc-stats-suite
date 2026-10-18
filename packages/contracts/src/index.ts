@@ -209,6 +209,32 @@ export interface WriteExtractedCsvOutput extends S3ObjectReference {
   rowCount: number;
 }
 
+/**
+ * Input of the main workflow's per-gamertag export step. `exports` holds each
+ * `Map` item's `WriteExtractedCsvOutput`, in `ProcessEmailOutput.screenshots`
+ * order.
+ */
+export interface WriteGamertagCsvsInput {
+  submissionId: string;
+  /** `ProcessEmailOutput.matchDate`, as `YYYY-MM-DD`. */
+  matchDate: string;
+  exports: WriteExtractedCsvOutput[];
+}
+
+/**
+ * Output of the per-gamertag export step. File keys name gamertags, so the
+ * output carries only the submission's export prefix and counts.
+ */
+export interface WriteGamertagCsvsOutput {
+  submissionId: string;
+  /** `[ephemeral/<name>/]submissions/{submissionId}/export/gamertags/` */
+  prefix: string;
+  /** Files for gamertags with at least one `EXACT` or `RESOLVED` row. */
+  fileCount: number;
+  /** Lines across those files, one per `EXACT` or `RESOLVED` row. */
+  rowCount: number;
+}
+
 export type DatasetSplit = 'TRAIN' | 'VALIDATION' | 'TEST';
 
 export interface MaterializeTrainingDataInput {
