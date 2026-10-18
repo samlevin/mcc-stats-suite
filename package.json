@@ -24,6 +24,7 @@
     "agents:generate": "node scripts/agent-policy.mjs generate",
     "release:metadata": "node scripts/release-metadata.mjs",
     "cdk:synth": "turbo run cdk:synth",
+    "cdk:local-template": "node scripts/local-cdk-bootstrap.mjs",
     "app:synth": "node scripts/cdk-app.mjs synth",
     "app:diff": "node scripts/cdk-app.mjs diff",
     "app:deploy": "node scripts/cdk-app.mjs deploy",

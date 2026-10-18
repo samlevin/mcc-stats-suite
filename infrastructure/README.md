@@ -7,6 +7,7 @@ This directory holds the OpenTofu side of the split that [How AWS is divided](..
 | `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
 | `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the SES receipt rule set, and SSM resource contracts |
 | `<environment>/data-platform` | OpenTofu, when activated | Shared analytics and lakehouse resources |
+| `dev/local-cdk` | OpenTofu, from Terrateam or by hand | The `CDKToolkitLocal` stack, the restricted CDK bootstrap for ephemeral stacks |
 
 ## Bootstrap
 
@@ -18,6 +19,10 @@ prod/bootstrap
 ```
 
 See [Bootstrap the dev and prod accounts](../docs/self-hosting/10-bootstrap-accounts.md) for the resource list and configuration. Apply bootstrap changes locally through an authorized IAM Identity Center session. CI/CD manages only stable operational roots.
+
+## Local CDK bootstrap
+
+`dev/local-cdk` has no prod counterpart. It deploys the `mcclocal1` CDK bootstrap as the `CDKToolkitLocal` CloudFormation stack from two committed files in the root: `bootstrap-template.yaml`, which `npm run cdk:local-template` regenerates through `scripts/local-cdk-bootstrap.mjs` from the pinned CDK, and `stack-policy.json`. A change to the local permissions or a CDK upgrade is a regenerated template in a pull request, planned and applied like any other dev root. See [Bootstrap local deployments separately](../docs/self-hosting/20-bootstrap-cdk.md#bootstrap-local-deployments-separately).
 
 ## Local inputs
 

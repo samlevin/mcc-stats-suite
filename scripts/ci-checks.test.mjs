@@ -804,6 +804,17 @@ test('classifier selects independent infrastructure and application gates', () =
     classify('infrastructure/dev/foundation/other.revision'),
     'full',
   );
+  // The local bootstrap freshness test is a full-gate script test.
+  for (const path of [
+    'infrastructure/dev/local-cdk/bootstrap-template.yaml',
+    'infrastructure/dev/local-cdk/stack-policy.json',
+    'scripts/local-cdk-bootstrap.mjs',
+    'scripts/cdk-targets.mjs',
+    'package-lock.json',
+  ]) {
+    assert.equal(classify(path), 'full', path);
+  }
+  assert.ok(buildTests().includes('scripts/local-cdk-bootstrap.test.mjs'));
   assert.equal(classify('.terrateam/config.yml'), 'full');
   assert.equal(classify('.terrateam/other.yml'), 'full');
   assert.equal(

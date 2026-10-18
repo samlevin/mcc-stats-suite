@@ -1,11 +1,23 @@
-import { readFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { parse, stringify } from 'yaml';
 import {
   APPLICATIONS as applications,
   LOCAL_CHANGE_SET_NAME,
   LOCAL_QUALIFIER,
   LOCAL_ROLE_PATH,
 } from './cdk-targets.mjs';
+
+// infrastructure/dev/local-cdk deploys this committed file as the CDKToolkitLocal stack.
+export const LOCAL_TEMPLATE_FILE = fileURLToPath(
+  new URL(
+    '../infrastructure/dev/local-cdk/bootstrap-template.yaml',
+    import.meta.url,
+  ),
+);
+// CloudFormation's limit, in bytes, for an inline template body, which the root passes.
+export const INLINE_TEMPLATE_BODY_LIMIT = 51_200;
 
 const sub = (value) => ({ 'Fn::Sub': value });
 const arn = (service, resource) =>
@@ -33,8 +45,9 @@ const managedPolicy = (ManagedPolicyName, Statement) => ({
   Properties: { ManagedPolicyName, PolicyDocument: document(Statement) },
 });
 
-// Logical IDs of the policies this transform adds. The operator's stack policy protects
-// them from deletion, so a default re-bootstrap cannot silently restore administrator roles.
+// Logical IDs of the policies this transform adds. The stack policy in
+// infrastructure/dev/local-cdk protects them from deletion, so a default
+// re-bootstrap cannot silently restore administrator roles.
 export const LOCAL_POLICY_RESOURCES = [
   'LocalWorkloadBoundary',
   'LocalExecutionBoundary',
@@ -525,12 +538,32 @@ export function localBootstrap(template) {
   return result;
 }
 
+// The bootstrap template of the aws-cdk version that package-lock.json pins. The CLI
+// renders it offline; telemetry and notices stay off.
+export function pinnedBootstrapTemplate() {
+  const cdk = fileURLToPath(
+    new URL('../node_modules/aws-cdk/bin/cdk', import.meta.url),
+  );
+  return parse(
+    execFileSync(
+      process.execPath,
+      [cdk, 'bootstrap', '--show-template', '--no-notices'],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, CDK_DISABLE_CLI_TELEMETRY: '1' },
+      },
+    ),
+  );
+}
+
+export function renderLocalBootstrap(upstream = pinnedBootstrapTemplate()) {
+  return stringify(localBootstrap(upstream));
+}
+
+// `npm run cdk:local-template` rewrites the committed template.
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
 ) {
-  const { parse, stringify } = await import('yaml');
-  process.stdout.write(
-    stringify(localBootstrap(parse(readFileSync(0, 'utf8')))),
-  );
+  writeFileSync(LOCAL_TEMPLATE_FILE, renderLocalBootstrap());
 }

@@ -1187,7 +1187,10 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
     ],
     foundation: ['AWS_PROFILE', 'TF_VAR_github_oidc_subject_repository'],
     'data-platform': ['AWS_PROFILE'],
+    'local-cdk': ['AWS_PROFILE'],
   };
+  // Only dev has local CDK deployments.
+  const devOnly = new Set(['local-cdk']);
   const exported = (text) => [
     ...new Set(
       [...text.matchAll(/^\s*export ([A-Za-z_][A-Za-z0-9_]*)=/gm)].map(
@@ -1219,6 +1222,7 @@ test('every OpenTofu root has a self-contained .envrc example and no backend fil
   );
   for (const environment of ['dev', 'prod']) {
     for (const [root, names] of Object.entries(editable)) {
+      if (environment !== 'dev' && devOnly.has(root)) continue;
       const directory = `infrastructure/${environment}/${root}`;
       const foundation = root === 'foundation';
       const text = repositoryFile(`${directory}/.envrc.example`);
