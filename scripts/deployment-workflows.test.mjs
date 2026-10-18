@@ -258,11 +258,14 @@ test('approval prompt uses the qualified application and SHA with comment permis
   assert.deepEqual(prompt.permissions, {
     actions: 'read',
     contents: 'read',
-    'pull-requests': 'read',
+    'pull-requests': 'write',
     issues: 'write',
   });
   assert.equal(orchestration.jobs.deliver.permissions.issues, 'write');
-  assert.equal(orchestration.jobs.deliver.permissions['pull-requests'], 'read');
+  assert.equal(
+    orchestration.jobs.deliver.permissions['pull-requests'],
+    'write',
+  );
   assert.deepEqual(prompt.steps[0].env, {
     APPLICATION: '${{ inputs.application }}',
     TARGET_SHA: '${{ inputs.sha }}',
