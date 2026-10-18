@@ -232,7 +232,7 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   const staticTasks = dryRun('static');
   const bundleTasks = dryRun('bundle');
   for (const [tasks, expected] of [
-    [staticTasks, 14],
+    [staticTasks, 16],
     [bundleTasks, 8],
   ]) {
     assert.equal(
