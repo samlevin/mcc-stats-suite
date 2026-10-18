@@ -506,7 +506,7 @@ applications/player/.../mockups/   # player mockup stories (removed when screens
 scripts/ideogram.mjs
 ```
 
-Import rules: `@hhh/css` imports nothing. `@hhh/react` imports only `@hhh/css`, `@base-ui/react` and React. Neither imports `@mcc/art`, `packages/storybook` or `applications/*`. Apps import only package subpath exports. ESLint enforces these rules, and the published-files check (§16.1) proves the tarballs contain nothing else.
+Import rules: `@hhh/css` imports nothing. `@hhh/react` imports only `@hhh/css`, `@base-ui/react` and React, with one exception: modules under `src/vitals/`, published as `@hhh/react/vitals` (P4.3), may also import `web-vitals`. `web-vitals` is a dependency of `@hhh/react`, and no other subpath imports it, so only apps that import `@hhh/react/vitals` bundle it. Neither imports `@mcc/art`, `packages/storybook` or `applications/*`. Apps import only package subpath exports. ESLint enforces these rules, and the published-files check (§16.1) proves the tarballs contain nothing else.
 
 ## 13. Configuration and infrastructure
 
@@ -936,6 +936,7 @@ A change to a contract updates every consumer in the same PR.
 - **Acceptance:**
   - `@hhh/react/vitals` exports `onWebVitals(callback)`, which reports LCP, INP and CLS with attribution through the `web-vitals` library and makes no network request of its own.
   - The helper adds at most 3 KB gzip and loads only where an app imports it.
+  - The ESLint import-boundary rule allows `web-vitals` only in `src/vitals/` and fails if any other `@hhh/react` module imports it, and a size check proves that importing `@hhh/react/button` bundles no `web-vitals` code.
 
 #### P4.4 Light theme (M)
 
