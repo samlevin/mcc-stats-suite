@@ -1,16 +1,30 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { awsCli } from './account-guard.mjs';
 
 // The script folds with the compiled @mcc/roster package.
 if (!existsSync('packages/roster/dist/index.js'))
   execFileSync('npm', ['run', 'build:shared', '--silent'], {
     stdio: 'inherit',
   });
-const { MAX_WRITE_ATTEMPTS, main, parseArguments } =
+const { CHANGE_PAGE_ITEMS, MAX_WRITE_ATTEMPTS, main, parseArguments } =
   await import('./roster.mjs');
+const { foldRoster, rosterSha256 } = createRequire(import.meta.url)(
+  '../packages/roster/dist/index.js',
+);
 
 const DEV = '111111111111';
 const PROD = '333333333333';
@@ -80,7 +94,7 @@ function fakeAws({ account = DEV, arn = ARN, table = TABLE } = {}) {
               item.sk.S <= values[':last'].S,
           )
           .sort((left, right) => (left.sk.S < right.sk.S ? -1 : 1));
-        return ok(JSON.stringify({ Items: found, Count: found.length }));
+        return ok(JSON.stringify(page(args, found)));
       }
       if (operation === 'transact-write-items') {
         fake.beforeTransaction.shift()?.();
@@ -138,6 +152,73 @@ function fakeAws({ account = DEV, arn = ARN, table = TABLE } = {}) {
         .sort((left, right) => (left.sk.S < right.sk.S ? -1 : 1)),
   };
   return fake;
+}
+
+// One AWS CLI query response with automatic pagination bounded by
+// --max-items: up to that many items after --starting-token, and a NextToken
+// when more remain. The token is opaque to the script.
+function page(args, found) {
+  const flag = (name) =>
+    args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
+  const maxItems = Number(flag('--max-items'));
+  assert.ok(
+    Number.isSafeInteger(maxItems) && maxItems > 0,
+    'change reads are paged',
+  );
+  assert.equal(flag('--page-size'), String(maxItems));
+  const start = flag('--starting-token')
+    ? Number(Buffer.from(flag('--starting-token'), 'base64').toString())
+    : 0;
+  const end = start + maxItems;
+  const Items = found.slice(start, end);
+  return {
+    Items,
+    Count: Items.length,
+    ...(end < found.length
+      ? { NextToken: Buffer.from(String(end)).toString('base64') }
+      : {}),
+  };
+}
+
+// A `count`-version change log for one entry in DynamoDB's typed JSON, as the
+// script writes it: an add, then deactivate and reactivate in turn, each with
+// a reason of the longest allowed length. Returns `{ head, changes }`.
+function changeLog(count) {
+  const changes = [];
+  let roster;
+  for (let version = 1; version <= count; version += 1) {
+    const change = {
+      rosterVersion: version,
+      action:
+        version === 1 ? 'ADD' : version % 2 === 0 ? 'DEACTIVATE' : 'REACTIVATE',
+      gamertagId: 'mbx001-entry',
+      gamertag: 'Player01',
+    };
+    roster = foldRoster([change], roster);
+    changes.push({
+      pk: { S: 'ROSTER#stable' },
+      sk: { S: `CHANGE#${String(version).padStart(10, '0')}` },
+      schemaVersion: { S: 'roster-change/v1' },
+      namespace: { S: 'stable' },
+      rosterVersion: { N: String(version) },
+      action: { S: change.action },
+      gamertagId: { S: change.gamertagId },
+      gamertag: { S: change.gamertag },
+      reason: { S: `${version} `.padEnd(256, 'r') },
+      actorArn: { S: ARN },
+      clientRequestId: { S: crypto.randomUUID() },
+      changedAt: { S: '2026-10-18T12:00:00.000Z' },
+      rosterSha256: { S: rosterSha256(roster.entries) },
+    });
+  }
+  const head = {
+    pk: { S: 'ROSTER#stable' },
+    sk: { S: 'HEAD' },
+    rosterVersion: { N: String(count) },
+    rosterSha256: changes.at(-1).rosterSha256,
+    updatedAt: { S: '2026-10-18T12:00:00.000Z' },
+  };
+  return { head, changes };
 }
 
 function ok(stdout) {
@@ -691,6 +772,137 @@ test('list and history print the folded roster and change log', async () => {
     ],
   );
   assert.equal(aws.transactions().length, 4);
+});
+
+test('a change log longer than one page is read page by page', async () => {
+  const aws = fakeAws();
+  const { head, changes } = changeLog(CHANGE_PAGE_ITEMS * 2 + 50);
+  for (const item of [head, ...changes]) {
+    aws.items.set(`${item.pk.S}|${item.sk.S}`, item);
+  }
+  const result = await roster(dev('history'), { aws });
+  assert.equal(result.status, 0, result.err);
+  const queries = aws.calls.filter((args) => args[1] === 'query');
+  assert.equal(queries.length, 3);
+  assert.deepEqual(
+    queries.map((args) => args.includes('--starting-token')),
+    [false, true, true],
+  );
+  const rows = result.out.trim().split('\n').slice(3);
+  assert.deepEqual(
+    rows.map((line) => Number(line.split('\t')[0])),
+    changes.map((_, index) => index + 1),
+  );
+});
+
+// The AWS CLI prints a whole response at once, and spawnSync keeps at most
+// 1 MiB of a child's output. This runs the script as a process against an
+// `aws` executable that answers as the CLI does: it prints 4-space indented
+// JSON and, without --max-items, every page of a query in one response.
+test('a change log over 1 MiB is read through the AWS CLI in pages', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcc-roster-'));
+  try {
+    const log = changeLog(1600);
+    const itemsFile = join(directory, 'items.json');
+    const callsFile = join(directory, 'calls.jsonl');
+    writeFileSync(itemsFile, JSON.stringify(log));
+    writeFileSync(callsFile, '');
+    writeFileSync(
+      join(directory, 'aws'),
+      `#!/usr/bin/env node
+const { appendFileSync, readFileSync } = require('node:fs');
+const args = process.argv.slice(2);
+appendFileSync(process.env.MCC_TEST_AWS_CALLS, JSON.stringify(args) + '\\n');
+const flag = (name) => args.includes(name) ? args[args.indexOf(name) + 1] : undefined;
+const { head, changes } = JSON.parse(readFileSync(process.env.MCC_TEST_ROSTER_ITEMS, 'utf8'));
+const print = (value) => process.stdout.write(JSON.stringify(value, null, 4) + '\\n');
+switch (args[0] + ' ' + args[1]) {
+  case 'sts get-caller-identity':
+    print({ Account: '${DEV}', Arn: '${ARN}' });
+    break;
+  case 'ssm get-parameter':
+    process.stdout.write('${TABLE}\\n');
+    break;
+  case 'dynamodb get-item':
+    print({ Item: head });
+    break;
+  case 'dynamodb query': {
+    const maxItems = Number(flag('--max-items') ?? changes.length);
+    const start = flag('--starting-token') ? Number(flag('--starting-token')) : 0;
+    const end = start + maxItems;
+    const Items = changes.slice(start, end);
+    print({ Items, Count: Items.length, ...(end < changes.length ? { NextToken: String(end) } : {}) });
+    break;
+  }
+  case 'dynamodb transact-write-items':
+    print({});
+    break;
+  default:
+    process.stderr.write('Unexpected AWS call ' + args.join(' ') + '\\n');
+    process.exit(255);
+}
+`,
+    );
+    chmodSync(join(directory, 'aws'), 0o755);
+    const env = {
+      ...process.env,
+      PATH: `${directory}${delimiter}${process.env.PATH}`,
+      AWS_PROFILE: 'mcc-dev-admin',
+      MCC_DEV_ACCOUNT_ID: DEV,
+      MCC_TEST_ROSTER_ITEMS: itemsFile,
+      MCC_TEST_AWS_CALLS: callsFile,
+    };
+    const calls = () =>
+      readFileSync(callsFile, 'utf8').trim().split('\n').map(JSON.parse);
+
+    // The whole log, as one CLI response, is more than spawnSync keeps.
+    const unpaged = awsCli('mcc-dev-admin', ['dynamodb', 'query'], env);
+    assert.equal(unpaged.error?.code, 'ENOBUFS');
+    writeFileSync(callsFile, '');
+
+    const script = (...argv) =>
+      spawnSync(
+        process.execPath,
+        ['scripts/roster.mjs', '--environment', 'dev', ...argv],
+        {
+          encoding: 'utf8',
+          env,
+          cwd: fileURLToPath(new URL('..', import.meta.url)),
+          maxBuffer: 64 * 1024 * 1024,
+        },
+      );
+
+    const history = script('history');
+    assert.equal(history.status, 0, history.stderr);
+    assert.match(
+      history.stdout,
+      /Roster version 1600: changes after version 0/,
+    );
+    assert.equal(history.stdout.trim().split('\n').length, 3 + 1600);
+    const queries = calls().filter((args) => args[1] === 'query');
+    assert.equal(queries.length, Math.ceil(1600 / CHANGE_PAGE_ITEMS));
+
+    const list = script('list', '--all');
+    assert.equal(list.status, 0, list.stderr);
+    assert.match(
+      list.stdout,
+      /\nPlayer01\tINACTIVE\tmbx001-entry\tp1ayer01\t1\t1600\n$/,
+    );
+
+    writeFileSync(callsFile, '');
+    const write = script('reactivate', 'Player01');
+    assert.equal(write.status, 0, write.stderr);
+    assert.match(
+      write.stdout,
+      /Reactivated Player01 \(mbx001-entry\) as roster version 1601\./,
+    );
+    assert.equal(
+      calls().filter((args) => args[1] === 'transact-write-items').length,
+      1,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('the script reads and writes no file', async () => {

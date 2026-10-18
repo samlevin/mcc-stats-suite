@@ -52,6 +52,11 @@ export const EXIT_ERROR = 2;
 // Spec 6 §6.1: a change whose transaction fails is tried again, 3 attempts in all.
 export const MAX_WRITE_ATTEMPTS = 3;
 
+// Change items per AWS CLI query call. The CLI buffers a whole response and
+// Node's spawnSync keeps at most 1 MiB of it, so the log is read in pages this
+// small: a change item holds at most a 256-character reason and one STS ARN.
+export const CHANGE_PAGE_ITEMS = 100;
+
 const VALUE_OPTIONS = new Set([
   '--environment',
   '--ephemeral',
@@ -284,26 +289,39 @@ export function rosterStore(aws, table, namespace) {
         rosterSha256: stringAttribute(Item, 'rosterSha256'),
       };
     },
+    // Reads change items 1 to `rosterVersion` in pages of CHANGE_PAGE_ITEMS,
+    // passing each page's NextToken to the next call.
     readChanges(rosterVersion) {
       if (rosterVersion === 0) return [];
-      const { Items = [] } = call([
-        'dynamodb',
-        'query',
-        '--table-name',
-        table,
-        '--key-condition-expression',
-        'pk = :pk AND sk BETWEEN :first AND :last',
-        '--expression-attribute-values',
-        JSON.stringify({
-          ':pk': { S: pk },
-          ':first': { S: changeKey(1) },
-          ':last': { S: changeKey(rosterVersion) },
-        }),
-        '--consistent-read',
-      ]);
-      return Items.map(changeFromItem).sort(
-        (left, right) => left.rosterVersion - right.rosterVersion,
-      );
+      const items = [];
+      let startingToken;
+      do {
+        const { Items = [], NextToken } = call([
+          'dynamodb',
+          'query',
+          '--table-name',
+          table,
+          '--key-condition-expression',
+          'pk = :pk AND sk BETWEEN :first AND :last',
+          '--expression-attribute-values',
+          JSON.stringify({
+            ':pk': { S: pk },
+            ':first': { S: changeKey(1) },
+            ':last': { S: changeKey(rosterVersion) },
+          }),
+          '--consistent-read',
+          '--page-size',
+          String(CHANGE_PAGE_ITEMS),
+          '--max-items',
+          String(CHANGE_PAGE_ITEMS),
+          ...(startingToken ? ['--starting-token', startingToken] : []),
+        ]);
+        items.push(...Items);
+        startingToken = NextToken;
+      } while (startingToken);
+      return items
+        .map(changeFromItem)
+        .sort((left, right) => left.rosterVersion - right.rosterVersion);
     },
     // Spec 6 §6.1 step 5. Returns 'WRITTEN', 'CONDITION_FAILED' when HEAD
     // moved, or the CLI's error output when the outcome is unknown.
