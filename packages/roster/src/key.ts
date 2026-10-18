@@ -1,5 +1,5 @@
 /**
- * The matching key and distance of spec 6 §7.1 and §7.2. Any change here
+ * The matching key and distance of spec 1.2 §7.1 and §7.2. Any change here
  * changes matching, so it needs a new `ROSTER_MATCHER_VERSION`.
  */
 
@@ -38,7 +38,7 @@ export function rosterKey(text: string): string {
 /**
  * The Levenshtein distance between two strings over Unicode code points.
  * Insertion, deletion and substitution each cost 1, so a transposition costs
- * 2. Spec 6 applies it to two keys (`keyDistance`) and to the name as read and
+ * 2. Spec 1.2 applies it to two keys (`keyDistance`) and to the name as read and
  * a gamertag (`textDistance`).
  */
 export function keyDistance(a: string, b: string): number {

@@ -1,6 +1,6 @@
 # Technical specification template
 
-Copy this file to `specs/<n>-<short-name>.md` and fill it in. It follows the structure of two specifications: [Match-to-CSV](1-mcc-analytics-engine.md) (an event-driven AWS pipeline) and the PR Review Agent specification (a GitHub Action with persisted state, kept outside this repository).
+Copy this file to `specs/<release>.<n>-<short-name>.md` and fill it in. `<release>` is the release the spec ships in (1 for the beta, 2 for v1), and `<n>` is its place in that release's delivery order. It follows the structure of two specifications: [Match-to-CSV](1.1-mcc-analytics-engine.md) (an event-driven AWS pipeline) and the PR Review Agent specification (a GitHub Action with persisted state, kept outside this repository).
 
 Lines starting with `> Guide:` explain what a section must contain. Delete them as you fill the section in. Text in `<angle brackets>` is a placeholder. Example rows come from the two source specifications; replace them.
 

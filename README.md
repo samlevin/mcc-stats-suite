@@ -50,17 +50,24 @@ The monorepo separates product areas so they can be tested, versioned, and deplo
 
 ## Specifications
 
-The plans under [`specs/`](specs/) describe product work. They are design inputs, not proof that a feature is deployed.
+The plans under [`specs/`](specs/) describe product work. They are design inputs, not proof that a feature is deployed. Release 1 is the beta and release 2 is v1, and the number after the dot is the spec's place in its release's delivery order.
 
-- [1. Match-to-CSV](specs/1-mcc-analytics-engine.md): specification for v1 delivery. It describes `match-to-csv`, the one application built so far.
-- [2. OCR Quality](specs/2-ocr-quality.md): draft, not implemented. It scores each OCR cell for how likely it is to be wrong.
-- [3. Cell Labeling](specs/3-cell-labeling.md): draft, not implemented. Reviewers confirm or correct every OCR cell in the `admin` application.
-- [5. Match-to-CSV observability](specs/5-match-to-csv-observability.md): draft, not implemented. It adds one structured log record per pipeline stage, plus metrics and alarms.
-- [6. Gamertag Roster](specs/6-gamertag-roster.md): draft, not implemented. It matches each player name OCR reads against a roster of known gamertags and writes the roster gamertag into the CSV.
-- [7. OCR Risk Model and Autonomous Review](specs/7-ocr-risk-model.md): draft, not implemented. Scoreboard rules, an LLM reviewer, and a trained risk model decide which runs need a person.
-- [8. Matches from Admin Uploads](specs/8-match-uploads.md): draft, not implemented. An admin creates a match by uploading its scoreboard screenshots in the `admin` application.
-- [9. Stats Lakehouse](specs/9-stats-lakehouse.md): draft, not implemented. It turns reviewed scoreboards into the statistics the `player` application shows.
-- [Template](specs/TEMPLATE.md): the structure a new specification follows.
+### 1. Beta
+
+- [1.1 Match-to-CSV](specs/1.1-mcc-analytics-engine.md): built and running. It describes `match-to-csv`, the one application built so far.
+- [1.2 Gamertag Roster](specs/1.2-gamertag-roster.md): partly built. It matches each player name OCR reads against a roster of known gamertags and writes the roster gamertag into the CSV. The roster contracts in `packages/contracts`, the matcher package `packages/roster`, and the roster table in the foundation are merged. Resolution in `match-to-csv` is filed as [#199](https://github.com/samlevin/mcc-stats-suite/issues/199) to [#201](https://github.com/samlevin/mcc-stats-suite/issues/201).
+- [1.3 Match-to-CSV observability](specs/1.3-match-to-csv-observability.md): draft, not implemented. It adds one structured log record per pipeline stage, plus metrics and alarms.
+
+### 2. v1
+
+- [2.1 OCR Quality](specs/2.1-ocr-quality.md): draft, not implemented. It scores each OCR cell for how likely it is to be wrong.
+- [2.2 HH.H Design System](specs/2.2-design-system.md): draft, not implemented. It defines the visual identity, tokens, CSS and React components that the `admin` and `player` applications share.
+- [2.3 Cell Labeling](specs/2.3-cell-labeling.md): draft, not implemented. Reviewers confirm or correct every OCR cell in the `admin` application.
+- [2.4 Matches from Admin Uploads](specs/2.4-match-uploads.md): draft, not implemented. An admin creates a match by uploading its scoreboard screenshots in the `admin` application.
+- [2.5 OCR Risk Model and Autonomous Review](specs/2.5-ocr-risk-model.md): draft, not implemented. Scoreboard rules, an LLM reviewer, and a trained risk model decide which runs need a person.
+- [2.6 Stats Lakehouse](specs/2.6-stats-lakehouse.md): draft, not implemented. It turns reviewed scoreboards into the statistics the `player` application shows.
+
+[Template](specs/TEMPLATE.md) gives the structure a new specification follows.
 
 ## Repository layout
 

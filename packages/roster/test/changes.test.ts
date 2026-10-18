@@ -51,7 +51,7 @@ function hashOf(json: string): string {
   return createHash('sha256').update(json, 'utf8').digest('hex');
 }
 
-describe('foldRoster (spec 6 §5.1)', () => {
+describe('foldRoster (spec 1.2 §5.1)', () => {
   test('an empty log is version 0 with no entries', () => {
     assert.deepEqual(foldRoster([]), { rosterVersion: 0, entries: [] });
     assert.deepEqual(foldRoster([]), EMPTY_ROSTER);
@@ -193,7 +193,7 @@ describe('activeEntries', () => {
   });
 });
 
-describe('rosterSha256 (spec 6 §5.1)', () => {
+describe('rosterSha256 (spec 1.2 §5.1)', () => {
   test('the empty roster hashes []', () => {
     assert.equal(
       rosterSha256([]),
@@ -251,7 +251,7 @@ describe('rosterSha256 (spec 6 §5.1)', () => {
   });
 });
 
-describe('checkChange (spec 6 §4.3)', () => {
+describe('checkChange (spec 1.2 §4.3)', () => {
   const add = (body: unknown): RosterChangeRequest => ({ action: 'ADD', body });
   const deactivate = (
     gamertagId: string,

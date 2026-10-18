@@ -39,7 +39,7 @@ export class RosterIntegrityError extends Error {
 }
 
 /**
- * Applies `changes` in order to `base` (spec 6 §5.1). The first change must
+ * Applies `changes` in order to `base` (spec 1.2 §5.1). The first change must
  * have version `base.rosterVersion + 1` and each later one the next version.
  * `base` defaults to the empty roster; pass a cached roster to fold only the
  * changes after it. `base` is never modified.
@@ -109,7 +109,7 @@ export function activeEntries(roster: Roster): RosterEntry[] {
 }
 
 /**
- * The roster hash (spec 6 §5.1): SHA-256, as lowercase hex, of the UTF-8 JSON
+ * The roster hash (spec 1.2 §5.1): SHA-256, as lowercase hex, of the UTF-8 JSON
  * array of active entries `{ "gamertag", "gamertagId" }` sorted by
  * `gamertagId` bytewise, with sorted keys and no whitespace. Entries with
  * `status: 'INACTIVE'` are left out; entries without a status count as
@@ -146,7 +146,7 @@ export type RosterRefusalCode =
   | 'ALREADY_INACTIVE'
   | 'ALREADY_ACTIVE';
 
-/** A request refused by spec 6 §4.3. Nothing may be written. */
+/** A request refused by spec 1.2 §4.3. Nothing may be written. */
 export interface RosterRefusal {
   accepted: false;
   status: 400 | 404 | 409;
@@ -157,7 +157,7 @@ export interface RosterRefusal {
   entries: readonly RosterEntryState[];
 }
 
-/** A request that passes every spec 6 §4.3 check against the roster. */
+/** A request that passes every spec 1.2 §4.3 check against the roster. */
 export interface AcceptedRosterChange {
   accepted: true;
   action: RosterChangeAction;
@@ -170,14 +170,14 @@ export interface AcceptedRosterChange {
   warnings: { nearKeyGamertags: string[] };
 }
 
-/** Spec 2's default `playerNamePattern` (spec 6 §4.3). */
+/** Spec 2.1's default `playerNamePattern` (spec 1.2 §4.3). */
 const GAMERTAG_PATTERN = /^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_REASON_LENGTH = 256;
 
 /**
- * Checks a roster write against `roster` (spec 6 §4.3) and returns either
+ * Checks a roster write against `roster` (spec 1.2 §4.3) and returns either
  * every value the change needs or the refusal. `body` is the parsed JSON
  * request body and is validated here, so it may hold anything. On an add or
  * reactivate, `warnings.nearKeyGamertags` lists active gamertags whose key is

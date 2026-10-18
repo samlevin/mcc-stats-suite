@@ -36,8 +36,8 @@ export interface RowReviewFlag {
 }
 
 /**
- * How an observed cell differs from what the screenshot shows (spec 3 §7.3).
- * Defined once here and shared by roster resolutions (spec 6 §7.5) and cell
+ * How an observed cell differs from what the screenshot shows (spec 2.3 §7.3).
+ * Defined once here and shared by roster resolutions (spec 1.2 §7.5) and cell
  * labeling. A list of these is sorted and has no duplicates.
  */
 export type CellErrorType =
@@ -51,7 +51,7 @@ export type CellErrorType =
 export type RosterChangeAction = 'ADD' | 'DEACTIVATE' | 'REACTIVATE';
 
 /**
- * One append-only change to a roster namespace (spec 6 §5.1). Stored as a
+ * One append-only change to a roster namespace (spec 1.2 §5.1). Stored as a
  * roster table change item and never updated or deleted.
  */
 export interface RosterChange {
@@ -63,7 +63,7 @@ export interface RosterChange {
   action: RosterChangeAction;
   /** Assigned by `ADD` with `evidenceId()`. */
   gamertagId: string;
-  /** The validated display text (spec 6 §4.3). */
+  /** The validated display text (spec 1.2 §4.3). */
   gamertag: string;
   /** At most 256 characters. */
   reason: string | null;
@@ -71,7 +71,7 @@ export interface RosterChange {
   actorArn: string;
   clientRequestId: string;
   changedAt: string;
-  /** The roster hash after this change (spec 6 §5.1). */
+  /** The roster hash after this change (spec 1.2 §5.1). */
   rosterSha256: string;
 }
 
@@ -103,7 +103,7 @@ export type PlayerMatchStatus = 'EXACT' | 'RESOLVED' | 'UNMATCHED';
 export type UnmatchedReason = 'NO_CANDIDATE' | 'AMBIGUOUS' | 'ENTRY_CLAIMED';
 
 /**
- * The roster match for one row's player name (spec 6 §7). It never changes
+ * The roster match for one row's player name (spec 1.2 §7). It never changes
  * the name as read.
  */
 export interface PlayerResolution {
@@ -141,7 +141,7 @@ export interface CsvRow {
   reviewFlags?: RowReviewFlag[];
   /**
    * The roster match for `player`, in normalized observations and the export
-   * from spec 6 P3.2 on. It never changes `player`.
+   * from spec 1.2 P3.2 on. It never changes `player`.
    */
   playerResolution?: PlayerResolution;
 }
@@ -200,7 +200,7 @@ export interface ExtractTextOutput {
   /** These rows never carry `playerResolution`. */
   rows: CsvRow[];
   normalizedArtifact: S3ObjectReference;
-  /** Present on runs from spec 6 P3.1 on. */
+  /** Present on runs from spec 1.2 P3.1 on. */
   roster?: RosterReference;
 }
 
@@ -226,7 +226,7 @@ export interface MaterializeTrainingDataOutput {
   counts: Record<Lowercase<DatasetSplit>, number>;
 }
 
-/** Body of `POST /v1/gamertags` on the roster API (spec 6 §4.1). */
+/** Body of `POST /v1/gamertags` on the roster API (spec 1.2 §4.1). */
 export interface AddGamertagRequest {
   gamertag: string;
   reason?: string;
