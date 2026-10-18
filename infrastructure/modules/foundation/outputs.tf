@@ -39,3 +39,8 @@ output "github_turbo_cache_role_arn" {
 output "receipt_rule_set_name" {
   value = aws_ses_receipt_rule_set.inbound.rule_set_name
 }
+
+output "local_cdk_policy_names" {
+  description = "Names of the local CDK permission policies this foundation creates; empty outside dev."
+  value       = sort([for policy in aws_iam_policy.local_cdk : policy.name])
+}
