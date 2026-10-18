@@ -930,7 +930,7 @@ const rosterRead = (keys, tag = 'alice') => ({
   'dynamodb:LeadingKeys': keys,
 });
 
-test('runtime boundary adds exactly the roster read and DynamoDB decrypt statements', () => {
+test('runtime boundary adds exactly the roster and recipient reads and the DynamoDB decrypt statement', () => {
   const bySid = (sid) => runtime.Statement.find((entry) => entry.Sid === sid);
   const read = bySid('ReadOwnRosterPartition');
   assert.deepEqual(
@@ -943,6 +943,27 @@ test('runtime boundary adds exactly the roster read and DynamoDB decrypt stateme
         'ForAllValues:StringEquals': {
           'dynamodb:LeadingKeys':
             'ROSTER#ephemeral/${aws:PrincipalTag/Ephemeral}',
+        },
+        Null: { 'dynamodb:LeadingKeys': 'false' },
+      },
+    ],
+  );
+  const recipients = bySid('ReadOwnRecipientsPartition');
+  assert.deepEqual(
+    [
+      recipients.Effect,
+      recipients.Action,
+      resolve(recipients.Resource),
+      recipients.Condition,
+    ],
+    [
+      'Allow',
+      ['dynamodb:GetItem', 'dynamodb:Query'],
+      table('*-dev-csv-recipients'),
+      {
+        'ForAllValues:StringEquals': {
+          'dynamodb:LeadingKeys':
+            'RECIPIENTS#ephemeral/${aws:PrincipalTag/Ephemeral}',
         },
         Null: { 'dynamodb:LeadingKeys': 'false' },
       },
@@ -963,7 +984,7 @@ test('runtime boundary adds exactly the roster read and DynamoDB decrypt stateme
     runtime.Statement.filter((entry) =>
       [entry.Action].flat().some((action) => action.startsWith('dynamodb:')),
     ).map((entry) => entry.Sid),
-    ['ReadOwnRosterPartition'],
+    ['ReadOwnRosterPartition', 'ReadOwnRecipientsPartition'],
   );
 });
 
@@ -1044,6 +1065,105 @@ test('runtime reads only its own roster partition', () => {
         action,
         devRoster,
         rosterRead(['ROSTER#ephemeral/alice']),
+      ),
+      false,
+      action,
+    );
+  }
+});
+
+const devRecipients = table('mcc-stats-suite-dev-csv-recipients');
+// A recipient request has the same shape as a roster request.
+const recipientsRead = rosterRead;
+
+test('runtime reads only its own recipient partition', () => {
+  for (const action of ['dynamodb:GetItem', 'dynamodb:Query']) {
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRecipients,
+        recipientsRead(['RECIPIENTS#ephemeral/alice']),
+      ),
+      true,
+      action,
+    );
+    for (const [keys, why] of [
+      [['RECIPIENTS#stable'], 'the stable recipient list'],
+      [['RECIPIENTS#ephemeral/bob'], "another developer's recipient list"],
+      [['RECIPIENTS#ephemeral/alice', 'RECIPIENTS#stable'], 'a mixed request'],
+      [['RECIPIENTS#ephemeral/alice/x'], 'a longer key'],
+      [['ROSTER#ephemeral/alice'], 'a roster key'],
+      [undefined, 'no leading key'],
+    ]) {
+      assert.equal(
+        allowed(runtime, action, devRecipients, recipientsRead(keys)),
+        false,
+        `${action} ${why}`,
+      );
+    }
+    // The stable recipient list stays refused for a stack named stable.
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRecipients,
+        recipientsRead(['RECIPIENTS#stable'], 'stable'),
+      ),
+      false,
+      `${action} the stable recipient list for a stack named stable`,
+    );
+    assert.equal(
+      allowed(runtime, action, devRecipients, {
+        'dynamodb:LeadingKeys': ['RECIPIENTS#ephemeral/alice'],
+      }),
+      false,
+      `${action} an untagged role`,
+    );
+    // Neither table's statement accepts the other table's keys.
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRoster,
+        recipientsRead(['RECIPIENTS#ephemeral/alice']),
+      ),
+      false,
+      `${action} a recipient key on the roster table`,
+    );
+    for (const resource of [
+      table('mcc-stats-suite-prod-csv-recipients'),
+      `${devRecipients}/index/by-address`,
+      table('mcc-stats-suite-dev-csv-recipients', '111111111111'),
+    ]) {
+      assert.equal(
+        allowed(
+          runtime,
+          action,
+          resource,
+          recipientsRead(['RECIPIENTS#ephemeral/alice']),
+        ),
+        false,
+        `${action} ${resource}`,
+      );
+    }
+  }
+  for (const action of [
+    'dynamodb:PutItem',
+    'dynamodb:UpdateItem',
+    'dynamodb:DeleteItem',
+    'dynamodb:BatchGetItem',
+    'dynamodb:BatchWriteItem',
+    'dynamodb:TransactWriteItems',
+    'dynamodb:Scan',
+    'dynamodb:DeleteTable',
+  ]) {
+    assert.equal(
+      allowed(
+        runtime,
+        action,
+        devRecipients,
+        recipientsRead(['RECIPIENTS#ephemeral/alice']),
       ),
       false,
       action,
@@ -1152,11 +1272,57 @@ test('local roles trust only this account and the template keeps upstream shape'
   );
 });
 
+// IAM limits a managed policy to 6,144 characters, not counting whitespace, in
+// the document CloudFormation sends after resolving intrinsic functions. Each
+// pseudo parameter becomes a placeholder longer than any AWS partition, Region
+// or account ID, and the staging bucket the longest name S3 allows, so the
+// limit holds wherever the template deploys.
+const LONGEST = {
+  'AWS::Partition': 'x'.repeat(12),
+  'AWS::Region': 'x'.repeat(16),
+  'AWS::AccountId': 'x'.repeat(12),
+};
+const longestStagingBucket = `arn:${LONGEST['AWS::Partition']}:s3:::${'x'.repeat(63)}`;
+function renderedForIam(value) {
+  if (Array.isArray(value)) return value.map(renderedForIam);
+  if (typeof value !== 'object' || value === null) return value;
+  if (value['Fn::Sub'] !== undefined)
+    return value['Fn::Sub'].replace(/\$\{(!?)([^}]+)\}/g, (_, literal, key) => {
+      if (literal) return `\${${key}}`;
+      if (key === 'StagingBucket.Arn') return longestStagingBucket;
+      if (!(key in LONGEST)) throw new Error(`Unknown Fn::Sub key ${key}`);
+      return LONGEST[key];
+    });
+  if (value['Fn::GetAtt']?.join('.') === 'StagingBucket.Arn')
+    return longestStagingBucket;
+  if (value['Fn::GetAtt']?.join('.') === 'CloudFormationExecutionRole.Arn')
+    return `arn:${LONGEST['AWS::Partition']}:iam::${LONGEST['AWS::AccountId']}:role/cdk-${LOCAL_QUALIFIER}-cfn-exec-role-${LONGEST['AWS::AccountId']}-${LONGEST['AWS::Region']}`;
+  if (value.Ref === 'LocalWorkloadBoundary')
+    return `arn:${LONGEST['AWS::Partition']}:iam::${LONGEST['AWS::AccountId']}:policy/${resources.LocalWorkloadBoundary.Properties.ManagedPolicyName}`;
+  if (Object.keys(value).some((key) => key.startsWith('Fn::') || key === 'Ref'))
+    throw new Error(`Unhandled intrinsic: ${JSON.stringify(value)}`);
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, renderedForIam(entry)]),
+  );
+}
+
 test('IAM managed policies remain below the 6144 character limit', () => {
   for (const name of LOCAL_POLICY_RESOURCES) {
-    const size = JSON.stringify(policyOf(name)).length;
+    const size = JSON.stringify(renderedForIam(policyOf(name))).replace(
+      /\s/g,
+      '',
+    ).length;
     assert.ok(size < 6144, `${name} is ${size} characters`);
   }
+  // The rendering resolves every intrinsic function.
+  assert.doesNotMatch(
+    JSON.stringify(renderedForIam(runtime)),
+    /Fn::|"Ref"|\$\{AWS::|\$\{!/,
+  );
+  assert.match(
+    JSON.stringify(renderedForIam(runtime)),
+    /RECIPIENTS#ephemeral\/\$\{aws:PrincipalTag\/Ephemeral\}/,
+  );
 });
 
 test('the local permission set assumes only the four local roles', () => {

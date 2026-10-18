@@ -102,6 +102,11 @@
       "description": "Directly affects the @mcc/player NPM package"
     },
     {
+      "name": "package: recipients",
+      "color": "5319e7",
+      "description": "Directly affects the @mcc/recipients NPM package"
+    },
+    {
       "name": "package: roster",
       "color": "5319e7",
       "description": "Directly affects the @mcc/roster NPM package"

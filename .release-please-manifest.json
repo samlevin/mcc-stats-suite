@@ -2,6 +2,7 @@
   "packages/cdk-config": "2.0.0",
   "packages/contracts": "1.1.0",
   "packages/roster": "1.1.0",
+  "packages/recipients": "1.0.0",
   "applications/match-to-csv": "3.0.0",
   "applications/ocr-quality": "1.1.0",
   "applications/admin": "1.1.0",

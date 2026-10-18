@@ -1,7 +1,8 @@
-// The AWS account check shared by the CDK wrapper (scripts/cdk-app.mjs) and the
-// roster script (scripts/roster.mjs). Both run it before any AWS call that reads
-// or changes a resource. Keep it free of dependencies: every deployment,
-// including GitHub Actions, loads it.
+// The AWS account check shared by the CDK wrapper (scripts/cdk-app.mjs), the
+// roster script (scripts/roster.mjs) and the recipient script
+// (scripts/recipients.mjs). Each runs it before any AWS call that reads or
+// changes a resource. Keep it free of dependencies: every deployment, including
+// GitHub Actions, loads it.
 import { spawnSync } from 'node:child_process';
 
 // A failed check. `detail` holds the AWS CLI's error output, when there is one.

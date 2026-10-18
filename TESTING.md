@@ -18,6 +18,7 @@ Current application guidance:
 - [`applications/match-to-csv/TESTING.md`](applications/match-to-csv/TESTING.md)
 - [`packages/cdk-config/TESTING.md`](packages/cdk-config/TESTING.md)
 - [`packages/roster/TESTING.md`](packages/roster/TESTING.md)
+- [`packages/recipients/TESTING.md`](packages/recipients/TESTING.md)
 
 Every application workspace participates in the root checks and can be targeted independently by the deployment workflow.
 

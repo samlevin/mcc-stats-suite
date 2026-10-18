@@ -23,6 +23,11 @@
       "release-type": "node",
       "package-name": "@mcc/roster"
     },
+    "packages/recipients": {
+      "component": "recipients",
+      "release-type": "node",
+      "package-name": "@mcc/recipients"
+    },
     "applications/match-to-csv": {
       "component": "match-to-csv",
       "release-type": "node",

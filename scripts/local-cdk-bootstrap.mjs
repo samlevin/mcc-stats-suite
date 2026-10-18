@@ -127,6 +127,9 @@ export function localBootstrap(template) {
   };
   // The foundation's dev roster table, <project>-dev-gamertag-roster (spec 1.2 §13.2).
   const rosterTable = arn('dynamodb', 'table/*-dev-gamertag-roster');
+  // The foundation's dev CSV recipient table, <project>-dev-csv-recipients
+  // (spec 1.1 §13.1).
+  const recipientsTable = arn('dynamodb', 'table/*-dev-csv-recipients');
   const localExecution = {
     'Fn::GetAtt': ['CloudFormationExecutionRole', 'Arn'],
   };
@@ -174,8 +177,8 @@ export function localBootstrap(template) {
         'ssm:GetParameter',
         applicationParameters,
       ),
-      // Apps use keys only for S3 server-side encryption and, below, roster reads
-      // through DynamoDB.
+      // Apps use keys only for S3 server-side encryption and, below, roster and
+      // recipient reads through DynamoDB.
       statement(
         'UseKeysThroughS3',
         [
@@ -232,7 +235,23 @@ export function localBootstrap(template) {
           },
         },
       ),
-      // DynamoDB decrypts roster items under the foundation data key.
+      // The recipient table has the same partition layout. A runtime reads only
+      // RECIPIENTS#ephemeral/<name> for its own tag, never RECIPIENTS#stable or
+      // another developer's (spec 1.1 §13.4).
+      statement(
+        'ReadOwnRecipientsPartition',
+        ['dynamodb:GetItem', 'dynamodb:Query'],
+        recipientsTable,
+        {
+          Condition: {
+            'ForAllValues:StringEquals': {
+              'dynamodb:LeadingKeys': `RECIPIENTS#ephemeral/${OWN_TAG}`,
+            },
+            Null: { 'dynamodb:LeadingKeys': 'false' },
+          },
+        },
+      ),
+      // DynamoDB decrypts roster and recipient items under the foundation data key.
       statement('DecryptThroughDynamoDB', 'kms:Decrypt', '*', {
         Condition: {
           StringEquals: {
