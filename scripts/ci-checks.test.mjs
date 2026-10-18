@@ -170,6 +170,7 @@ test('automation script tests run only in the repository scope', () => {
   for (const path of [
     '.github/workflows/ci-checks.yml',
     '.github/workflows/delivery-deploy.yml',
+    '.github/workflows/delivery-promote.yml',
     '.github/workflows/delivery-rollback.yml',
     '.github/workflows/_delivery-promote-application.yml',
     '.github/workflows/_delivery-deploy-environment.yml',
@@ -611,7 +612,16 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
   );
   assert.match(dev, /workflows: \['CI: checks'\]/);
   assert.match(dev, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(dev, /_delivery-promote-application/);
+  assert.match(dev, /_delivery-deploy-environment/);
+  assert.doesNotMatch(dev, /environment: prod|PROD_AWS_ACCOUNT_ID/);
+  const promotion = loadWorkflow('delivery-promote');
+  assert.deepEqual(promotion.on.workflow_run.workflows, [
+    'Delivery: deploy to dev',
+  ]);
+  assert.equal(
+    promotion.jobs.promote.uses,
+    './.github/workflows/_delivery-promote-application.yml',
+  );
   const prod = readFileSync(
     new URL(
       '../.github/workflows/_delivery-promote-application.yml',
@@ -619,8 +629,7 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
     ),
     'utf8',
   );
-  assert.match(prod, /needs: deploy-dev/);
-  assert.match(prod, /needs\.deploy-dev\.result == 'success'/);
+  assert.doesNotMatch(prod, /deploy-dev/);
   assert.match(prod, /environment: prod/);
   assert.ok(!workflow.includes('continue-on-error'));
   assert.ok(!workflow.includes('pull_request_target'));

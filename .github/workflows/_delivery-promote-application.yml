@@ -10,8 +10,6 @@ on:
         required: true
         type: string
     secrets:
-      DEV_AWS_ACCOUNT_ID:
-        required: false
       PROD_AWS_ACCOUNT_ID:
         required: false
 
@@ -22,22 +20,8 @@ permissions:
   id-token: write
 
 jobs:
-  deploy-dev:
-    name: Deploy to dev
-    uses: ./.github/workflows/_delivery-deploy-environment.yml
-    with:
-      application: ${{ inputs.application }}
-      environment: dev
-      sha: ${{ inputs.sha }}
-      operation: continuous-delivery
-      source: main
-    secrets:
-      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
-
   request-prod-approval:
     name: Request prod approval
-    needs: deploy-dev
-    if: needs.deploy-dev.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -66,7 +50,7 @@ jobs:
               const application = process.env.APPLICATION;
               const sha = process.env.TARGET_SHA;
               const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-              const body = `${mentions}, approve production for \`${application}\` at \`${sha.slice(0, 7)}\`.\n\n[Review deployments](${runUrl}) in this run after completing the dev smoke test. Once the production job is waiting, select it to approve or reject it.`;
+              const body = `${mentions}, approve production for \`${application}\` at \`${sha}\`.\n\n[Review deployments](${runUrl}) in this separate prod run after completing the dev smoke test. Once the production job is waiting, select it to approve or reject it.`;
               try {
                 await core.summary.addRaw(body).write();
               } catch (error) {
@@ -78,8 +62,6 @@ jobs:
 
   deploy-prod:
     name: Deploy to prod
-    needs: deploy-dev
-    if: needs.deploy-dev.result == 'success'
     uses: ./.github/workflows/_delivery-deploy-environment.yml
     with:
       application: ${{ inputs.application }}

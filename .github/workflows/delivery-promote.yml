@@ -1,0 +1,140 @@
+name: 'Delivery: promote to prod'
+run-name: Promote applications from dev run ${{ github.event.workflow_run.id }} to prod
+
+# CI -> dev -> prod uses two workflow_run handoffs, within GitHub's limit.
+on:
+  workflow_run:
+    workflows: ['Delivery: deploy to dev']
+    types: [completed]
+    branches: [main]
+
+permissions:
+  actions: read
+  contents: read
+  deployments: read
+
+jobs:
+  qualify-applications:
+    name: Qualify applications from dev
+    if: github.event.workflow_run.event == 'workflow_run' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled') && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      applications: ${{ steps.qualification.outputs.applications }}
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - name: Download dev source
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: dev-source-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: dev-source
+      - name: Validate dev and CI source runs
+        id: source
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('node:fs');
+            const source = JSON.parse(fs.readFileSync('dev-source/source.json', 'utf8'));
+            const expected = context.payload.workflow_run;
+            const repository = `${context.repo.owner}/${context.repo.repo}`;
+            const { data: dev } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: expected.id,
+            });
+            const trusted = (run, path, event) =>
+              run.path === path && run.event === event && run.head_branch === 'main' &&
+              run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
+              run.status === 'completed';
+            if (!trusted(dev, '.github/workflows/delivery-deploy.yml', 'workflow_run') ||
+                dev.workflow_id !== expected.workflow_id || dev.run_attempt !== expected.run_attempt ||
+                !['success', 'failure', 'cancelled'].includes(dev.conclusion)) {
+              throw new Error('Untrusted dev workflow run');
+            }
+            if (!Number.isSafeInteger(source.ciRunId) || source.ciRunId <= 0 ||
+                !Number.isSafeInteger(source.ciRunAttempt) || source.ciRunAttempt <= 0 ||
+                !/^[0-9a-f]{40}$/.test(source.sha)) {
+              throw new Error('Invalid dev source metadata');
+            }
+            const { data: ci } = await github.rest.actions.getWorkflowRun({
+              ...context.repo, run_id: source.ciRunId,
+            });
+            if (!trusted(ci, '.github/workflows/ci-checks.yml', 'push') ||
+                ci.conclusion !== 'success' || ci.run_attempt !== source.ciRunAttempt ||
+                ci.head_sha !== source.sha) {
+              throw new Error('Untrusted CI workflow run or commit');
+            }
+            core.setOutput('ci-run-id', source.ciRunId);
+            core.setOutput('sha', source.sha);
+      - name: Download original CI application selection
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: deploy-applications-${{ steps.source.outputs.ci-run-id }}
+          run-id: ${{ steps.source.outputs.ci-run-id }}
+          github-token: ${{ github.token }}
+          path: ci-selection
+      - name: Qualify each successful dev deployment
+        id: qualification
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          TARGET_SHA: ${{ steps.source.outputs.sha }}
+        with:
+          script: |
+            const applications = JSON.parse(require('node:fs').readFileSync('ci-selection/applications.json', 'utf8'));
+            const allowed = ['admin', 'data-pipeline', 'match-to-csv', 'ocr-quality', 'player'];
+            if (!Array.isArray(applications) || applications.some((app) => !allowed.includes(app)) ||
+                new Set(applications).size !== applications.length) {
+              throw new Error('Invalid affected application list');
+            }
+            const run = context.payload.workflow_run;
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt, {
+              ...context.repo, run_id: run.id, attempt_number: run.run_attempt, per_page: 100,
+            });
+            const succeeded = (name) => {
+              const matches = jobs.filter((job) => job.name === name);
+              return matches.length === 1 && matches[0].status === 'completed' && matches[0].conclusion === 'success';
+            };
+            if (!succeeded('Select applications from CI')) {
+              throw new Error('Dev selection did not succeed');
+            }
+            const sha = process.env.TARGET_SHA;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${run.id}`;
+            const qualified = [];
+            for (const application of applications.sort()) {
+              if (!succeeded(`Deploy ${application} to dev / Deploy ${application} to dev`)) continue;
+              const deployments = await github.paginate(github.rest.repos.listDeployments, {
+                ...context.repo, sha, environment: 'dev', task: `deploy:${application}`, per_page: 100,
+              });
+              const exact = deployments.filter((deployment) =>
+                deployment.sha === sha && deployment.environment === 'dev' && deployment.task === `deploy:${application}` &&
+                deployment.payload?.application === application && deployment.payload?.operation === 'continuous-delivery' &&
+                deployment.payload?.source === 'main' && deployment.payload?.workflowRun === runUrl,
+              ).sort((left, right) => right.id - left.id);
+              if (!exact.length) continue;
+              const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+                ...context.repo, deployment_id: exact[0].id, per_page: 100,
+              });
+              const latest = statuses.sort((left, right) => right.id - left.id)[0];
+              if (latest?.state === 'success' && latest.log_url === runUrl) qualified.push(application);
+            }
+            core.setOutput('applications', JSON.stringify(qualified));
+            await core.summary.addRaw(`Qualified for prod at \`${sha}\`: ${qualified.join(', ') || 'none'}.\n\n[Dev run](${runUrl})`).write();
+
+  promote:
+    name: Promote ${{ matrix.application }} to prod
+    needs: qualify-applications
+    if: needs.qualify-applications.outputs.applications != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        application: ${{ fromJSON(needs.qualify-applications.outputs.applications) }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/_delivery-promote-application.yml
+    with:
+      application: ${{ matrix.application }}
+      sha: ${{ needs.qualify-applications.outputs.sha }}
+    secrets:
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}
