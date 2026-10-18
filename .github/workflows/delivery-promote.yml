@@ -16,7 +16,7 @@ permissions:
 jobs:
   qualify-applications:
     name: Qualify applications from dev
-    if: github.event.workflow_run.event == 'workflow_run' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
+    if: github.event.workflow_run.event == 'workflow_run' && (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure' || github.event.workflow_run.conclusion == 'cancelled') && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     outputs:
       applications: ${{ steps.qualification.outputs.applications }}
@@ -47,7 +47,7 @@ jobs:
               run.status === 'completed';
             if (!trusted(dev, '.github/workflows/delivery-deploy.yml', 'workflow_run') ||
                 dev.workflow_id !== expected.workflow_id || dev.run_attempt !== expected.run_attempt ||
-                !['success', 'failure'].includes(dev.conclusion)) {
+                !['success', 'failure', 'cancelled'].includes(dev.conclusion)) {
               throw new Error('Untrusted dev workflow run');
             }
             if (!Number.isSafeInteger(source.ciRunId) || source.ciRunId <= 0 ||

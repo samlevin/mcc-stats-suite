@@ -4,6 +4,7 @@ import { runScript, workflow, evaluate } from './workflow-test-helpers.mjs';
 
 const dev = workflow('delivery-deploy');
 const prod = workflow('delivery-promote');
+const deploymentWorkflow = workflow('_delivery-deploy-environment');
 const qualify = prod.jobs['qualify-applications'];
 const sha = 'a'.repeat(40);
 const repo = { owner: 'owner', repo: 'repo' };
@@ -40,12 +41,18 @@ const validateSource = async ({
   metadata = source,
   dev = devRun,
   ci = ciRun,
+  readError,
 } = {}) => {
   const outputs = {};
   await runScript(
     qualify.steps.find((step) => step.id === 'source').with.script,
     {
-      require: () => ({ readFileSync: () => JSON.stringify(metadata) }),
+      require: () => ({
+        readFileSync: () => {
+          if (readError) throw readError;
+          return JSON.stringify(metadata);
+        },
+      }),
       context,
       github: {
         rest: {
@@ -109,7 +116,7 @@ test('handoff downloads artifacts only from the triggering dev attempt and valid
   assert.equal(prod.on.workflow_dispatch, undefined);
 });
 
-test('prod trigger allows partial matrix failure and rejects untrusted or cancelled runs', () => {
+test('prod trigger allows partial matrix failure or cancellation and rejects untrusted runs', () => {
   for (const event of ['workflow_run', 'push', 'pull_request'])
     for (const conclusion of [
       'success',
@@ -135,7 +142,7 @@ test('prod trigger allows partial matrix failure and rejects untrusted or cancel
               },
             }),
             event === 'workflow_run' &&
-              ['success', 'failure'].includes(conclusion) &&
+              ['success', 'failure', 'cancelled'].includes(conclusion) &&
               head_branch === 'main' &&
               repository === 'owner/repo',
           );
@@ -157,7 +164,6 @@ for (const [field, value] of [
   ['repository', { full_name: 'fork/repo' }],
   ['head_repository', { full_name: 'fork/repo' }],
   ['status', 'in_progress'],
-  ['conclusion', 'cancelled'],
   ['conclusion', 'skipped'],
   ['workflow_id', 999],
   ['run_attempt', 4],
@@ -210,8 +216,24 @@ const job = (name, conclusion = 'success') => ({
   status: 'completed',
   conclusion,
 });
+const renderJobName = (definition, values) =>
+  definition.name.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, expression) =>
+    evaluate(expression, {
+      format: (template, ...args) =>
+        template.replace(/\{(\d+)\}/g, (_, index) => args[index]),
+      ...values,
+    }),
+  );
 const devJob = (app, conclusion) =>
-  job(`Deploy ${app} to dev / Deploy ${app} to dev`, conclusion);
+  job(
+    [
+      renderJobName(dev.jobs.deliver, { matrix: { application: app } }),
+      renderJobName(deploymentWorkflow.jobs.deploy, {
+        inputs: { application: app, environment: 'dev' },
+      }),
+    ].join(' / '),
+    conclusion,
+  );
 const deployment = (app) => ({
   id: app === 'admin' ? 1 : 2,
   sha,
@@ -233,6 +255,7 @@ const qualifyApps = async ({
   ],
   deployments = [deployment('admin'), deployment('match-to-csv')],
   statuses = [{ id: 1, state: 'success', log_url: runUrl }],
+  run = devRun,
 } = {}) => {
   const outputs = {};
   const requests = [];
@@ -240,7 +263,7 @@ const qualifyApps = async ({
     qualify.steps.find((step) => step.id === 'qualification').with.script,
     {
       require: () => ({ readFileSync: () => JSON.stringify(applications) }),
-      context,
+      context: { ...context, payload: { workflow_run: run } },
       process: { env: { TARGET_SHA: sha } },
       github: {
         rest: {
@@ -329,6 +352,44 @@ test('each application qualifies only its own completed successful dev job', asy
       /Invalid affected application/,
     );
   }
+});
+
+test('a cancelled dev run preserves successful siblings and still requires source selection', async () => {
+  const run = { ...devRun, conclusion: 'cancelled' };
+  assert.deepEqual(await validateSource({ dev: run }), {
+    'ci-run-id': 10,
+    sha,
+  });
+  assert.deepEqual(
+    (
+      await qualifyApps({
+        run,
+        jobs: [
+          job('Select applications from CI'),
+          devJob('admin', 'cancelled'),
+          devJob('match-to-csv'),
+        ],
+      })
+    ).applications,
+    ['match-to-csv'],
+  );
+  for (const jobs of [
+    [],
+    [job('Select applications from CI', 'cancelled')],
+    [job('Select applications from CI', 'skipped')],
+  ]) {
+    await assert.rejects(
+      qualifyApps({ run, jobs }),
+      /Dev selection did not succeed/,
+    );
+  }
+  await assert.rejects(
+    validateSource({
+      dev: run,
+      readError: new Error('source artifact unavailable'),
+    }),
+    /source artifact unavailable/,
+  );
 });
 
 test('qualification requires the exact application, SHA, run, environment, and successful deployment status', async () => {
