@@ -12,6 +12,8 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../.codex/agents/mcc-*.toml` | Generated Codex custom agents |
 | `../.claude/agents/mcc-*.md` | Generated Claude Code subagents |
 | `../.claude/skills/mcc-*/` | Generated Claude Code skills |
+| `../.mcp.json` | Claude Code project MCP servers (maintained directly) |
+| `../.codex/config.toml` | Codex project MCP servers (maintained directly) |
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), drift check (`check`), and manual review publisher (`publish-review`) |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
@@ -46,6 +48,8 @@ Issue creation is the one capability without an agent. It needs to ask the perso
 | Foundation apply | the agent runs `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
 | Bootstrap apply | the agent runs `git`, `aws`, `tofu`, `direnv`, `jq`, `shasum`, `npm`, `npx`, and `node` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
 | Policy resolution | `node scripts/agent-policy.mjs resolve --tool claude ...` | `... --tool codex ...` | `scripts/agent-policy.test.mjs` |
+| Playwright MCP | `.mcp.json`, server `playwright` | `.codex/config.toml`, server `playwright` | fresh-session server discovery below |
+| Playwriter | `.mcp.json`, server `playwriter` | `.codex/config.toml`, server `playwriter` | fresh-session server discovery below |
 
 "Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role and workflow for both tools and compares shared lines.
 
@@ -98,7 +102,17 @@ Codex loads `.agents/skills/` from every directory between the working directory
 
 Every identifier here starts with `mcc-` so that it cannot collide with a contributor's own agents and skills in either tool.
 
-Trusting the folder is the only activation step in either tool. Nothing here installs, copies, symlinks, or registers anything outside the checkout, and a session in another repository does not see these definitions. Ordinary prerequisites stay yours: the tool itself, `gh` with authentication, the `gh stack` extension for stacked branches, and `npm ci` for the checks (the resolver itself runs without `node_modules`).
+Trusting the folder activates the agent definitions. Nothing here installs, copies, symlinks, or registers agent definitions outside the checkout, and a session in another repository does not see them. Ordinary prerequisites stay yours: the tool itself, `gh` with authentication, the `gh stack` extension for stacked branches, and `npm ci` for the checks (the resolver itself runs without `node_modules`). Browser MCP servers have the setup below.
+
+## Browser MCP servers
+
+Both tools start the same stdio servers through `npx -y`: [Playwright MCP](https://github.com/microsoft/playwright-mcp) (`@playwright/mcp@latest --headless`) and [Playwriter](https://github.com/remorses/playwriter) (`playwriter@latest`). Node.js and npm must be on `PATH`; the first start downloads the packages into npm's cache. The two configuration files are maintained directly, outside `agents:generate`.
+
+Agents use Playwright MCP for headless checks by default. Use Playwriter only for a person's connected Chrome session. Install its Chrome extension and click its icon on each tab to connect it. In this extension setup, Playwriter controls only the Chrome tabs a person connects through the extension. Disconnect a tab through the extension to stop control. Keep browser credentials and personal paths out of repository configuration.
+
+Claude Code asks for approval before using project MCP servers in an interactive session. Codex loads its project MCP configuration after the project is trusted. See the [Claude Code MCP documentation](https://code.claude.com/docs/en/mcp#project-scope) and [Codex MCP documentation](https://developers.openai.com/codex/mcp).
+
+To check discovery, open a fresh session in a new worktree and run `claude mcp list` and `codex mcp list`. Both lists must include `playwright` and `playwriter`. Claude Code may list them as pending approval until a person approves them. Use `/mcp` inside either tool to inspect the active server connections.
 
 ## Manual review publication
 
