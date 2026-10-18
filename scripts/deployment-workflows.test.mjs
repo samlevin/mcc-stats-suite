@@ -261,11 +261,14 @@ test('approval prompt uses the qualified application and SHA with comment permis
     'pull-requests': 'write',
     issues: 'write',
   });
-  assert.equal(orchestration.jobs.deliver.permissions.issues, 'write');
-  assert.equal(
-    orchestration.jobs.deliver.permissions['pull-requests'],
-    'write',
-  );
+  assert.deepEqual(orchestration.jobs.deliver.permissions, {
+    actions: 'read',
+    contents: 'read',
+    deployments: 'write',
+    issues: 'write',
+    'pull-requests': 'write',
+    'id-token': 'write',
+  });
   assert.deepEqual(prompt.steps[0].env, {
     APPLICATION: '${{ inputs.application }}',
     TARGET_SHA: '${{ inputs.sha }}',
@@ -273,6 +276,8 @@ test('approval prompt uses the qualified application and SHA with comment permis
   assert.equal(prompt.steps[0].with['github-token'], undefined);
   assert.equal(delivery.permissions.issues, undefined);
   assert.equal(delivery.permissions['pull-requests'], undefined);
+  assert.equal(delivery.jobs['deploy-dev'].permissions, undefined);
+  assert.equal(delivery.jobs['deploy-prod'].permissions, undefined);
 });
 
 test('delivery job names show the application, environment, and approval wait', () => {
@@ -307,7 +312,7 @@ test('delivery job names show the application, environment, and approval wait', 
   );
 });
 
-test('approval prompt notifies configured reviewers per run and tolerates API failures', async () => {
+test('approval prompt notifies configured reviewers per run and fails the job when posting fails', async () => {
   const script = delivery.jobs['request-prod-approval'].steps[0].with.script;
   const sha = 'a'.repeat(40);
   const marker = '<!-- production-approval:match-to-csv:run:123 -->';
@@ -329,6 +334,7 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
   ]) {
     const calls = [];
     const warnings = [];
+    const failures = [];
     let summary;
     const listPulls = Symbol('pulls');
     const listComments = Symbol('comments');
@@ -442,14 +448,23 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
         },
         info: () => {},
         warning: (message) => warnings.push(message),
+        setFailed: (message) => failures.push(message),
       },
       process: { env: { APPLICATION: 'match-to-csv', TARGET_SHA: sha } },
     });
-    if (
-      ['invalid-protection', 'bypass', 'environment-error'].includes(scenario)
-    ) {
+    const failed = /^Could not post production approval prompt: /;
+    if (['invalid-protection', 'bypass'].includes(scenario)) {
       assert.equal(summary, undefined);
       assert.equal(warnings.length, 1);
+      assert.deepEqual(failures, []);
+      assert.deepEqual(calls, []);
+      continue;
+    }
+    if (scenario === 'environment-error') {
+      assert.equal(summary, undefined);
+      assert.deepEqual(warnings, []);
+      assert.equal(failures.length, 1);
+      assert.match(failures[0], failed);
       assert.deepEqual(calls, []);
       continue;
     }
@@ -462,14 +477,18 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
     assert.match(summary, /Once the production job is waiting/);
     if (scenario === 'summary-error') {
       assert.equal(warnings.length, 1);
+      assert.deepEqual(failures, []);
       assert.equal(calls.length, 1);
       assert.equal(calls[0][0], 'create');
       assert.equal(calls[0][1].body, summary);
     } else if (scenario.endsWith('-error')) {
-      assert.equal(warnings.length, 1);
+      assert.deepEqual(warnings, []);
+      assert.equal(failures.length, 1);
+      assert.match(failures[0], failed);
       assert.deepEqual(calls, []);
     } else if (['create', 'update', 'new-run'].includes(scenario)) {
-      assert.equal(warnings.length, 0);
+      assert.deepEqual(warnings, []);
+      assert.deepEqual(failures, []);
       assert.equal(calls.length, 1);
       const operation = scenario === 'update' ? 'update' : 'create';
       assert.equal(calls[0][0], operation);
@@ -479,7 +498,8 @@ test('approval prompt notifies configured reviewers per run and tolerates API fa
         operation === 'create' ? 38 : 3,
       );
     } else {
-      assert.equal(warnings.length, 0);
+      assert.deepEqual(warnings, []);
+      assert.deepEqual(failures, []);
       assert.deepEqual(calls, []);
     }
   }

@@ -95,7 +95,7 @@ jobs:
                 await github.rest.issues.createComment({ ...context.repo, issue_number: pull.number, body });
               }
             } catch (error) {
-              core.warning(`Could not post production approval prompt: ${error.message}`);
+              core.setFailed(`Could not post production approval prompt: ${error.message}`);
             }
 
   deploy-prod:
