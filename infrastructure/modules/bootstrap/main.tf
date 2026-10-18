@@ -19,6 +19,7 @@ locals {
   terrateam_github_subject = "repo:${local.github_subject_repository}:*"
   cdk_github_subject       = "repo:${local.github_subject_repository}:environment:${local.github_environment_name}"
   terrateam_workflow_ref   = "${var.github_organization}/${var.github_repository}/${var.terrateam_workflow_path}@*"
+  cdk_deploy_workflow_ref  = "${var.github_organization}/${var.github_repository}/${var.cdk_deploy_workflow_path}@refs/heads/${var.github_deployment_branch}"
   terrateam_role_name      = coalesce(var.terrateam_role_name, "${var.project_name}-${var.environment}-terrateam")
   cdk_deploy_role_name     = coalesce(var.cdk_deploy_role_name, "${var.project_name}-${var.environment}-github-cdk-deploy")
 
@@ -265,10 +266,13 @@ data "aws_iam_policy_document" "cdk_deploy_assume_role" {
       values   = ["${var.github_organization}/${var.github_repository}"]
     }
 
+    # GitHub sets job_workflow_ref to the file that defines the job requesting
+    # the token, so the role trusts the reusable deploy workflow whichever
+    # top-level workflow calls it.
     condition {
       test     = "StringEquals"
-      variable = "token.actions.githubusercontent.com:workflow"
-      values   = var.cdk_workflow_names
+      variable = "token.actions.githubusercontent.com:job_workflow_ref"
+      values   = [local.cdk_deploy_workflow_ref]
     }
 
     condition {
