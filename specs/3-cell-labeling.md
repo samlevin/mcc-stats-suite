@@ -429,7 +429,7 @@ A correction can carry several types, sorted and without duplicates.
 
 ### 7.4 Row decisions
 
-The reviewer answers three questions for a table row: whether it is a player row (`isPlayerRow`), the player's team (`team`), and the outcome (`outcome`, `WIN` or `LOSS`). `team` is one of the MCC colour names in spec 1 §8.4, optionally followed by a space and a digit from 2 to 9 (`422 INVALID_DECISION` with `INVALID_TEAM` otherwise). `team` and `outcome` are required when `isPlayerRow` is true and must be `null` otherwise.
+The reviewer answers three questions for a table row: whether it is a player row (`isPlayerRow`), the player's team (`team`), and the outcome (`outcome`, `WIN` or `LOSS`). `team` is one of the MCC colour names in spec 1 §8.4, optionally followed by a space and `2` (`422 INVALID_DECISION` with `INVALID_TEAM` otherwise). `team` and `outcome` are required when `isPlayerRow` is true and must be `null` otherwise.
 
 The server copies the parser's output for the row (whether `parser.provenance.rowIndexes` lists it, and the team, win and loss of its exported row) and derives the error types:
 
