@@ -147,9 +147,38 @@ To try changes without touching the shared roster, add `--ephemeral <name>` in d
 
 Gamertags are typed as arguments and printed only to your terminal. The script reads no input file and writes no file. Keep roster output out of commits, issues, and pull requests, as with sender addresses.
 
+## Maintain the CSV recipient list
+
+Each environment's recipient table holds the addresses that receive each submission's per-gamertag CSVs ([spec 1.1 §4.5](../../specs/1.1-mcc-analytics-engine.md#45-csv-recipient-list)). No application reads it yet. Administrators maintain it with `scripts/recipients.mjs`, which writes the table directly with their own AWS credentials. Only administrators change the list. The script needs DynamoDB, KMS, and SSM rights that the `mcc-<environment>-admin` profiles from [prerequisites](00-prerequisites.md#sso-profiles) already have, and no narrower operator policy exists. The recipient table must be applied in that environment's foundation first. The script also needs the AWS CLI and a repository checkout with dependencies installed.
+
+```console
+export AWS_PROFILE=mcc-dev-admin
+aws sso login --profile "$AWS_PROFILE"
+npm run recipients -- --environment dev list
+npm run recipients -- --environment dev add 'player@example.test' 'teammate@example.test' --reason 'new season'
+npm run recipients -- --environment dev deactivate 'teammate@example.test' --reason 'left'
+npm run recipients -- --environment dev reactivate 'teammate@example.test'
+npm run recipients -- --environment dev list --all
+npm run recipients -- --environment dev history --after 10
+```
+
+`--environment` is required. Before any other AWS call, the script runs the same account check as `scripts/cdk-app.mjs` and `npm run roster`: it needs `AWS_PROFILE` or `--profile`, refuses a profile whose name implies the other environment, and refuses to continue unless the active account matches `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID`, or the profile's `sso_account_id` when the variable is unset. It then reads the table name from `/mcc/<environment>/recipients/table-name`.
+
+- `list` shows active entries, or inactive ones with `--inactive` and every entry with `--all`, with each entry's ID and the versions that added and last changed it, sorted by address ignoring case. `history` shows the change log after a version, including who made each change.
+- `add` takes one or more addresses and stops at the first refusal. `deactivate` and `reactivate` take one address, matched ignoring case. There is no delete. A changed address is a deactivation and an add.
+- An address is trimmed and must have no spaces or commas, exactly one `@` with text on both sides, and at most 254 characters. The script refuses an invalid address (`INVALID_ADDRESS`) and an address already on the list in any case, active or inactive (`DUPLICATE_ADDRESS`), and names the entry involved.
+- In `prod`, each write prints the change and asks you to type `yes`. Pass `--yes` to skip the prompt.
+- Exit status is 0 on success, 1 when a change is refused or declined, and 2 for a usage, account, AWS, or recipient list integrity error. When two administrators write at once, the script tries the write up to three times, then exits 1 with `CONCURRENT_CHANGE`. Run the command again.
+
+To try changes without touching the shared list, add `--ephemeral <name>` in dev. The script then reads and writes only that name's partition, which belongs to the ephemeral stacks of the same name. Production does not accept `--ephemeral`.
+
+To verify the script in dev, use an ephemeral name and test addresses at a domain you control, or reserved ones such as `example.test`. Run `add` with two addresses, `list`, `deactivate` one, `list --inactive`, `reactivate` it, and `history`. Check that each write prints the new version, that `list` shows the expected statuses, and that `history` shows every change with your role ARN.
+
+Addresses are typed as arguments and printed only to your terminal. The script reads no input file and writes no file. Keep recipient output out of commits, issues, and pull requests, as with sender addresses.
+
 ## Releases
 
-Release Please versions each application and the shared `@mcc/cdk-config`, `@mcc/contracts`, and `@mcc/roster` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
+Release Please versions each application and the shared `@mcc/cdk-config`, `@mcc/contracts`, `@mcc/roster`, and `@mcc/recipients` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
 
 A release does not gate deployment. The release commit deploys like any other merge. The tags exist so you can roll back to a known version.
 

@@ -47,3 +47,11 @@ output "roster_table_name" {
 output "roster_table_arn" {
   value = aws_dynamodb_table.roster.arn
 }
+
+output "recipients_table_name" {
+  value = aws_dynamodb_table.recipients.name
+}
+
+output "recipients_table_arn" {
+  value = aws_dynamodb_table.recipients.arn
+}

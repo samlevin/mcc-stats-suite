@@ -1,6 +1,6 @@
 # Apply and change the foundation
 
-The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/foundation`, hold KMS keys, durable storage, the gamertag roster table, the SES receipt rule set, the Turbo cache bucket and role, and the SSM parameters that applications read. They are ordinary OpenTofu roots. Apply them by hand from an administrator session, or from any infrastructure CI/CD system that can run OpenTofu with AWS credentials for the target account. The commands below are the manual path; a CI/CD system runs the same `init`, `plan`, and `apply` steps with the same inputs. The merged commit is the foundation version; there is no separate release ID.
+The foundation roots, `infrastructure/dev/foundation` and `infrastructure/prod/foundation`, hold KMS keys, durable storage, the gamertag roster and CSV recipient tables, the SES receipt rule set, the Turbo cache bucket and role, and the SSM parameters that applications read. They are ordinary OpenTofu roots. Apply them by hand from an administrator session, or from any infrastructure CI/CD system that can run OpenTofu with AWS credentials for the target account. The commands below are the manual path; a CI/CD system runs the same `init`, `plan`, and `apply` steps with the same inputs. The merged commit is the foundation version; there is no separate release ID.
 
 Whatever runs OpenTofu, keep these rules:
 

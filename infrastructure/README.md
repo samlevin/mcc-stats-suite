@@ -5,7 +5,7 @@ This directory holds the OpenTofu side of the split that [How AWS is divided](..
 | Root | Owner | Purpose |
 |---|---|---|
 | `<environment>/bootstrap` | Local administrator | State, GitHub OIDC, CI roles, and workload permissions boundary |
-| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the gamertag roster table, the SES receipt rule set, and SSM resource contracts |
+| `<environment>/foundation` | OpenTofu, by hand or from CI/CD | KMS, durable evidence storage, the gamertag roster and CSV recipient tables, the SES receipt rule set, and SSM resource contracts |
 | `<environment>/data-platform` | OpenTofu, when activated | Shared analytics and lakehouse resources |
 | `dev/local-cdk` | OpenTofu, from Terrateam or by hand | The `CDKToolkitLocal` stack, the restricted CDK bootstrap for ephemeral stacks |
 
@@ -54,6 +54,10 @@ Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, 
 ## Gamertag roster table
 
 Each foundation root owns the DynamoDB table `<project>-<environment>-gamertag-roster`, the roster change log described in [spec 1.2](../specs/1.2-gamertag-roster.md#51-roster-table). It uses on-demand billing, string keys `pk` and `sk`, and the foundation application data key, and it has point-in-time recovery, deletion protection, and `prevent_destroy` in both environments, whatever `force_destroy` says. The table name and ARN are published at `/mcc/<environment>/roster/table-name` and `/mcc/<environment>/roster/table-arn`. OpenTofu manages no roster items, so roster contents never appear in state or plan output. CDK stacks read the parameters to grant their Lambdas access.
+
+## CSV recipient table
+
+Each foundation root owns the DynamoDB table `<project>-<environment>-csv-recipients`, the change log of the addresses that receive each submission's per-gamertag CSVs, described in [spec 1.1](../specs/1.1-mcc-analytics-engine.md#45-csv-recipient-list). It is configured like the roster table: on-demand billing, string keys `pk` and `sk`, the foundation application data key, point-in-time recovery, deletion protection, and `prevent_destroy` in both environments, whatever `force_destroy` says. The table name and ARN are published at `/mcc/<environment>/recipients/table-name` and `/mcc/<environment>/recipients/table-arn`. OpenTofu manages no items, so addresses never appear in state or plan output. Administrators maintain the list with `npm run recipients` ([Maintain the CSV recipient list](../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-csv-recipient-list)).
 
 ## Turborepo cache storage contract
 

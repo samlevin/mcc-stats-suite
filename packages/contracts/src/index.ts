@@ -98,6 +98,34 @@ export interface RosterReference {
   snapshot: S3ObjectReference;
 }
 
+export type RecipientChangeAction = 'ADD' | 'DEACTIVATE' | 'REACTIVATE';
+
+/**
+ * One append-only change to a CSV recipient list namespace (spec 1.1 §4.5).
+ * Stored as a recipient table change item and never updated or deleted.
+ */
+export interface RecipientChange {
+  /** 1-based, with no gaps within a namespace. */
+  recipientsVersion: number;
+  action: RecipientChangeAction;
+  /** A UUID assigned by `ADD`. */
+  recipientId: string;
+  /** The validated, trimmed address, with its case as entered. */
+  address: string;
+  /** At most 256 characters. */
+  reason: string | null;
+  /** The IAM ARN of the caller who wrote the change, from STS. */
+  actorArn: string;
+  clientRequestId: string;
+  changedAt: string;
+}
+
+/** One active recipient of the per-gamertag CSVs. */
+export interface RecipientEntry {
+  recipientId: string;
+  address: string;
+}
+
 export type PlayerMatchStatus = 'EXACT' | 'RESOLVED' | 'UNMATCHED';
 
 export type UnmatchedReason = 'NO_CANDIDATE' | 'AMBIGUOUS' | 'ENTRY_CLAIMED';
