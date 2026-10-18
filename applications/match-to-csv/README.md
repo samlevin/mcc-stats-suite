@@ -1,98 +1,85 @@
 # Match-to-CSV
 
-`match-to-csv` receives MIME email through a configured SES receipt rule, preserves screenshot evidence, and runs Amazon Textract table extraction. One message can contain several attachments. Each accepted image becomes one `SCREENSHOT` source and one independent processing run.
+`match-to-csv` turns emailed Halo MCC scoreboard screenshots into Amazon Textract evidence, per-screenshot CSVs, and per-gamertag CSVs for legacy spreadsheets. It preserves the original inputs and OCR observations for review and replay.
 
-The package does not create matches, associate screenshots with matches, adjudicate OCR, or train models. It preserves the observations and metadata required by those later features.
+## Getting started
 
-## Pipeline
+Run commands from the repository root. Replace angle-bracket placeholders locally and keep real addresses, domains, account IDs, and test messages out of commits, issues, and pull requests.
 
-```text
-configured SES recipient
-  -> raw MIME email in S3
-  -> EventBridge and Step Functions
-  -> sender screening (SES verdicts and optional allowlist)
-  -> match date from the email body
-  -> attachment validation
-  -> one SourceScreenshot per accepted image
-  -> one ProcessingRun per screenshot
-  -> raw Textract response, normalized observations, and extracted CSV
-  -> once every screenshot succeeds, one legacy-spreadsheet CSV per roster gamertag
-```
+1. Install [Git and the pinned Node.js/npm](../../docs/getting-started.md#tier-1-run-the-checks-locally), then run `npm ci` to install dependencies. Deployment also needs AWS CLI v2, `direnv`, and Docker that can run Linux ARM64 images. Infrastructure setup needs the pinned OpenTofu version.
+2. Follow the [self-hosting guide](../../docs/self-hosting/README.md) if the AWS environment does not exist. Use a dev SSO profile and one workload Region that supports SES receiving. Complete [SES domain identity verification and inbound MX DNS](../../docs/self-hosting/00-prerequisites.md#inbound-email), [account bootstrap](../../docs/self-hosting/10-bootstrap-accounts.md#bootstrap-dev), and the [dev foundation apply](../../docs/self-hosting/40-change-foundation.md#apply-dev). The foundation supplies storage, roster and recipient tables, receipt rules, and SSM parameters.
+3. Have the [CDK bootstraps](../../docs/self-hosting/20-bootstrap-cdk.md) applied in that account and Region: `CDKToolkit` for GitHub Actions and `CDKToolkitLocal` (`mcclocal1`) for local dev. Obtain [local deploy access](../../docs/self-hosting/20-bootstrap-cdk.md#grant-local-deploy-access), then [configure your shell and sign in](../../docs/getting-started.md#set-up-your-shell) with `mcc-dev`. Confirm STS reports the dev account and your profile has the workload Region.
+4. [Choose an unused ephemeral name](../../docs/getting-started.md#pick-a-name), synthesize, inspect, and deploy your stack:
 
-The original image is never transformed or replaced. Rejected image attachments are preserved with rejection metadata. Non-image attachments remain available in the retained MIME message.
+   ```console
+   npm run app:synth -- match-to-csv --environment dev --ephemeral <name>
+   npm run verify:bundle --workspace @mcc/match-to-csv
+   npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
+   npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
+   ```
 
-V1 processing accepts PNG and JPEG images up to 10 MB (10,000,000 bytes, the Textract synchronous limit) with dimensions of at least 640 by 360 pixels. It rejects unreadable images, unsupported formats, oversized images, and small images. A message without a processable screenshot records a rejected submission and fails its workflow execution instead of succeeding without output.
+Local stacks are named `match-to-csv-e-<name>`. Stable `match-to-csv-dev` and `match-to-csv-prod` stacks deploy through [GitHub Actions on `main`](../../docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production). An ephemeral stack needs the applied dev foundation, but not the shared dev application stack.
 
-## Sender screening
+### Configure players and addresses
 
-The receipt rules enable SES scanning, so SES prepends `X-SES-Spam-Verdict`, `X-SES-Virus-Verdict`, `X-SES-SPF-Verdict`, and `X-SES-DKIM-Verdict` headers to each message. `process-email` reads the topmost copy of each header, so a copy the sender wrote lower in the message cannot override it. A `FAIL` spam or virus verdict rejects the submission before any attachment is stored or sent to Textract. The SPF and DKIM verdicts are recorded but not enforced.
+These are separate settings:
 
-For the optional sender allowlist, see [Manage the sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist). The self-hosting guide covers its behavior and how to create, update, or remove it through the AWS console or CLI.
+- The [gamertag roster](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-gamertag-roster) resolves OCR player names and determines which rows enter per-gamertag CSVs. Each run records the roster version it used. An empty roster permits processing but produces no per-gamertag files.
+- The [CSV recipient list](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-csv-recipient-list) stores intended export recipients. No application reads it yet. CSVs remain in S3 for manual retrieval. Automatic email delivery is tracked in [#207](https://github.com/samlevin/mcc-stats-suite/issues/207).
+- The optional [sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) controls who may submit email. It is an SSM parameter shared by all dev stacks, including ephemeral ones. Adding a CSV recipient does not allow that address to submit.
 
-A screened-out message keeps its raw MIME object. Its `completion.json` has status `REJECTED` and lists the `SubmissionRejectionCode` values from `@mcc/contracts`: `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, `RECIPIENT_NOT_ALLOWED`, or `MATCH_DATE_INVALID` (see [Match date](#match-date)). A message rejected because no attachment passed validation records `NO_PROCESSABLE_SCREENSHOTS`. `ingestion.json` and the `SUBMISSION_ACCEPTED` or `SUBMISSION_REJECTED` event record the verdicts as `sesVerdicts`, with `null` for an absent header, and the allowlist decision as `senderAllowlist` (`NOT_CONFIGURED`, `ALLOWED`, or `DENIED`, with the parameter name and the `From` addresses). They record the recipient check as `recipientCheck` (`NOT_CONFIGURED` for stable stacks, otherwise `ALLOWED` or `DENIED`, with the recipients SES recorded in its `Received` header).
-
-## Match date
-
-The plain-text body of each submission holds one string, the date of the match. Screenshots from one session can run past midnight, so the date cannot come from timestamps. After trimming whitespace, the body must be a calendar date written `M/D/YYYY`: month 1 to 12, a day that exists in that month, and a four-digit year. Leading zeros are accepted, so `5/2/2026` and `05/02/2026` are the same date. Only a text/plain part counts: HTML is never converted to text, so an HTML-only email has no match date.
-
-`process-email` checks the date only for a message that passed sender screening. A valid date is recorded as `matchDate` (`YYYY-MM-DD`) in `ingestion.json` and returned in `ProcessEmailOutput`. A missing or invalid date records `matchDate: null` and rejects the submission with `MATCH_DATE_INVALID` before any attachment is stored, so no screenshot reaches Textract.
-
-For `MATCH_DATE_INVALID` only, `process-email` replies to the `From` address from `noreply@<domain>`, where the domain is `/mcc/<environment>/match-to-csv/email-domain`, resolved when the stack deploys. The reply's subject is `Re: <original subject>`, its `In-Reply-To` and `References` headers name the original message ID, and its body says the email was not processed because the body must contain only the match date as `M/D/YYYY`. It asks the sender to send the email again to the submission address, because replies to the no-reply address are not read. Only an allowlisted sender gets a reply, so a message with no sender allowlist configured is rejected without one. No other rejection sends a reply. A failed send is logged with the SES error name only, and the recorded rejection stays as it is.
-
-`ProcessEmail` may call `ses:SendEmail` only with the `From` address `noreply@<domain>`, on SES identities in its own account and Region. The domain's identity exists outside OpenTofu. While an account is in the SES sandbox, SES delivers only to verified addresses and also checks the grant against the recipient's identity, so the grant names every identity instead of only the domain's. A reply to an unverified sender in a sandbox account fails and is logged. The local workload boundary that ephemeral stacks use allows the same send. A local bootstrap from before this boundary change denies it, so [upgrade the local bootstrap](../../docs/self-hosting/20-bootstrap-cdk.md#upgrade-the-local-bootstrap) before you expect an ephemeral stack to reply.
-
-## Deployment
-
-Apply the matching environment foundation before deploying the application. The foundation creates the raw-message bucket, immutable evidence bucket, KMS key, gamertag roster table, and required SSM parameters.
-
-GitHub Actions deploys stable environments. Its preflight checks verify the target account, CDK bootstrap parameter, foundation parameters including `/mcc/<environment>/roster/table-name`, SES identity status, and inbound MX target. The workflow builds native dependencies for Linux ARM64 and inspects both Sharp-using Lambda assets before deployment.
-
-Local developer stacks are explicit:
+Roster and recipient commands require administrator credentials such as `mcc-dev-admin`, with DynamoDB, KMS, and SSM permissions. The local `mcc-dev` deploy profile is insufficient, and no narrower roster/recipient operator policy exists. Sign in with the administrator profile, then list and add entries:
 
 ```console
-npm run app:deploy -- match-to-csv --environment dev --ephemeral <name>
+aws sso login --profile mcc-dev-admin
+npm run roster -- --environment dev --profile mcc-dev-admin --ephemeral <name> list
+npm run roster -- --environment dev --profile mcc-dev-admin --ephemeral <name> add 'Player01' 'Player 02'
+npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <name> list
+npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <name> add '<recipient-address>'
 ```
 
-Ephemeral deployments build their `<alias>+<name>@<domain>` rule from `/mcc/dev/match-to-csv/email-alias` and `/mcc/dev/match-to-csv/email-domain`, which the foundation publishes, so no local configuration holds either. The foundation owns the shared rule set and the `<alias>@<domain>` rule. The rule keeps the alias and domain from the stack's last deploy, so an ephemeral `process-email` reads both parameters for every message and rejects one whose SES recipients do not include the current `<alias>+<name>@<domain>` with `RECIPIENT_NOT_ALLOWED`, before storing any attachment. A warm Lambda reuses parameter values for up to a minute. Changing the alias or domain therefore needs no ephemeral redeploy to stop mail to the old address, only to receive mail at the new one. Never put the alias or domain in source files or documentation. Production and plain dev deployments are restricted to GitHub Actions on `main`.
+Use the same `<name>` as your stack to configure its `ephemeral/<name>` namespace. Omit `--ephemeral` for the environment's `stable` namespace. `--environment` is required. Production uses `prod` and its administrator profile, accepts no `--ephemeral`, and asks for confirmation before writes. Sender-allowlist operators need the separate SSM permissions in its guide. Keep list output local.
 
-## Alarms
+## Submit screenshots
 
-Stable stacks publish CloudWatch alarms to the `match-to-csv-<environment>-alarms` SNS topic. An alarm fires on any failed or timed-out execution of either state machine, any message in the `-events-dlq` queue, any Lambda error, and any screenshot whose extraction succeeds with no rows. `extract-text` reports the row count as the `ZeroRowExtractions` and `ExtractedRows` metrics in the `MCC/MatchToCsv` namespace, using the CloudWatch embedded metric format. Ephemeral stacks create no alarms or topic.
+Read `/mcc/<environment>/match-to-csv/email-alias` and `email-domain` in SSM with an administrator or operator profile that can read them. Send to `<alias>@<domain>` for a stable stack, or `<alias>+<name>@<domain>` for your ephemeral stack. The [test email instructions](../../docs/getting-started.md#send-a-test-email) show how to read and combine the parameters. After an alias or domain change, redeploy an ephemeral stack to receive at the new address.
 
-To receive alarm email, create a `String` parameter named `/mcc/<environment>/match-to-csv/alarm-email` that holds the address, then redeploy. The deploy workflow subscribes the address only when the parameter exists, and CloudFormation reads the value at deploy time, so the address stays out of the repository, the template, and the workflow logs. SNS sends a confirmation email, and the subscription delivers alarms only after someone confirms it.
+For example, send a message to your stack's address with this plain-text body and attach one or more PNG or JPEG scoreboard screenshots:
 
-## Roster
+```text
+10/18/2026
+```
 
-`extract-text` reads the gamertag roster before it calls Textract ([spec 1.2 §6.2](../../specs/1.2-gamertag-roster.md#62-roster-read-and-resolution-in-extract-text)). It reads the roster table's `HEAD` item and change log for its namespace, `stable` in stable stacks and `ephemeral/<name>` in ephemeral ones, and checks that the change log reproduces the hash in `HEAD`. It then writes that version's snapshot to `roster/versions/<version>.json` in the evidence bucket, create-only. A warm Lambda reads only the changes after the version it last read, and writes or checks each snapshot once.
+Images must be readable, at least 640 by 360 pixels, and no larger than 10 MB (10,000,000 bytes) each. Only Halo 3 two-team boards are supported. Free-for-all, three-team boards, and boards without two distinguishable team colors produce no rows. A message without a processable screenshot is rejected and its workflow fails. See [Evidence layout](#evidence-layout) for the full layout limits.
 
-Every run records the roster version it read as `roster` (`namespace`, `rosterVersion`, `rosterSha256`, and the snapshot's bucket and key) in its normalized observations, its successful completion, and `ExtractTextOutput`. A run records a version only after that version's snapshot exists. A namespace with no roster changes is version 0 with no entries, so runs succeed before an operator loads the roster.
+### Match date
 
-After parsing, `extract-text` resolves each player name against that roster version ([spec 1.2 §7](../../specs/1.2-gamertag-roster.md#7-matching)) and records the result as `playerResolution` beside the name in `parser.rows` of the normalized observations: `EXACT` when a roster gamertag equals the name as read, `RESOLVED` with the roster gamertag when the name is a near reading of exactly one gamertag, or `UNMATCHED` with a reason. The name as read, its `reviewFlags`, and every cell's `observedText` stay unchanged, and `ExtractTextOutput` rows carry no `playerResolution`. The successful completion records the `exact`, `resolved`, and `unmatched` counts as `metrics.playerMatchCounts`, the `Screenshot processed` log line carries the same counts, and the run manifest records `rosterMatcherVersion: roster-matcher-v1`. While the roster is empty, every row is `UNMATCHED` with `NO_CANDIDATE`.
+The trimmed plain-text body must contain only a valid calendar date in `M/D/YYYY` format. Leading zeros are accepted. HTML-only mail has no match date. Use the session's date even if play runs past midnight. A missing or invalid date rejects the submission with `MATCH_DATE_INVALID` before screenshots reach Textract.
 
-`write-extracted-csv` reads the rows with their `playerResolution` from the run's normalized observations. It fails with `NormalizedObservationsMismatchError`, before writing anything, when the observations name a different `runId` or roster reference than its input. `export/extracted-table.json` records the roster reference and each row's `playerResolution` beside the name as read. The CSV header is `Team,Player,Score,Kills,Assists,Deaths,Win,Loss,PlayerMatch`. `Player` holds the roster gamertag for `EXACT` and `RESOLVED` rows and the name as read for `UNMATCHED` rows, and `PlayerMatch` holds the status. A row without a resolution keeps the name as read and leaves `PlayerMatch` empty. The CSV and the [per-gamertag CSVs](#per-gamertag-csvs) are the only artifacts that name the roster gamertag in place of the name as read: normalized observations, `ExtractTextOutput`, and `extracted-table.json` keep the name as read. The run manifest records `pipelineVersion: 1.1.0`.
+Only allowlisted senders receive the invalid-date reply from `noreply@<domain>`. Replies to that address are not read. In the SES sandbox, verify the sender's address as an SES reply recipient before testing this reply. A failed reply does not change the recorded rejection. See the [date and reply contract](../../specs/1.1-mcc-analytics-engine.md#44-match-date-and-error-reply).
 
-A change log that does not reproduce `HEAD` fails the run with `RosterIntegrityError`, and a stored snapshot whose hash differs fails it with `RosterSnapshotMismatchError`. Neither is retried, and neither run calls Textract. DynamoDB throttling and server errors use the workflow's existing retries.
+### Sender screening
 
-`ExtractText` may only call `GetItem` and `Query` on the roster table, and only in its own `ROSTER#<namespace>` partition. `WriteExtractedCsv` may read only `normalized/observations.json` objects of runs in its own evidence namespace. Logs record the roster version and match counts, never a gamertag.
+SES spam or virus `FAIL` verdicts reject a message. SPF and DKIM verdicts are recorded but not enforced. When the sender allowlist exists, every `From` address must be listed. Without it, any sender can pass this check. Changes take effect within one minute. Ephemeral stacks also reject mail not addressed to their current plus-address.
 
-## Per-gamertag CSVs
+A rejected submission retains its raw MIME and records the reason in `completion.json`, including `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, `RECIPIENT_NOT_ALLOWED`, `MATCH_DATE_INVALID`, or `NO_PROCESSABLE_SCREENSHOTS`. See [intake details](../../specs/1.1-mcc-analytics-engine.md#4-email-intake-interface).
 
-Once every screenshot of a submission succeeds, the main workflow's `Write gamertag CSVs` step writes one CSV per roster gamertag to `submissions/{submissionId}/export/gamertags/`, in the submission's namespace. A person can paste each file into that player's legacy spreadsheet without editing it. A failed screenshot fails the execution before this step, so that submission gets no per-gamertag file. The replay workflow never writes these files.
+## Find results
 
-`write-gamertag-csvs` reads each run's `export/extracted-table.json` and keeps the rows whose `playerResolution` is `EXACT` or `RESOLVED`. A file exists for each gamertag with at least one such row, holding one line per row in the order of the email's screenshots. `UNMATCHED` rows and rows without a resolution appear in no file, and stay in each run's `extracted.csv`. A file has no header row, and each line has these columns:
+Use an administrator or operator profile with CloudFormation, Step Functions, SSM, and S3 read access. The local deploy profile cannot read the submission address or results. Use your CloudFormation stack's `StateMachineArn` output to find the workflow in Step Functions, then confirm your submission's execution is `SUCCEEDED`. The [result-check commands](../../docs/getting-started.md#check-the-result) find the workflow and list evidence in S3.
 
-| Column | Value |
-| --- | --- |
-| Date | The match date from the email body as `M/D/YYYY`, with no leading zeros |
-| Kills, Assists, Deaths | As observed |
-| Win | `1` for a win, otherwise empty |
-| Loss | `1` for a loss, otherwise empty |
+The bucket name is `/mcc/<environment>/match-to-csv/evidence-bucket-name` in SSM. Start at `submissions/{submissionId}/` for stable stacks or `ephemeral/<name>/submissions/{submissionId}/` for ephemeral ones:
 
-For example, a win with 12 kills, 3 assists and 4 deaths on March 7, 2026 is `3/7/2026,12,3,4,1,`. A value is quoted only when it holds a comma, a quote or a line break.
+- Each screenshot's `runs/{runId}/export/extracted.csv` holds its parsed rows, including unmatched players.
+- `export/gamertags/` holds one file per roster gamertag with an `EXACT` or `RESOLVED` row, after every screenshot succeeds. These files have no header and use `Date,Kills,Assists,Deaths,Win,Loss` order for pasting into a player's spreadsheet. Unmatched rows are excluded. Replay writes no per-gamertag files. See the [export format](../../specs/1.1-mcc-analytics-engine.md#861-per-gamertag-export).
 
-The file name is the gamertag with each space written as `_` and `#` written as `-`, so `Player 02#7` is `Player_02-7.csv`. Gamertags never hold `_` or `-`, so two gamertags never share a file name. Every file is written create-only, and a retried step treats a file that already exists as written.
+Download with `aws s3 cp` and compare CSV rows against the screenshot. A successful run can contain zero rows for an unsupported layout. Inspect `parser.noRowsReason` in `normalized/observations.json`. Raw MIME, original images, provider responses, and runs are immutable. Events are append-only, and replay creates a new run.
 
-The step's input holds the run export keys and the match date, and its output, stored at `$.gamertagCsvs`, holds the submission ID, the export prefix, and the file and line counts. Neither lists file names, because they name gamertags. Its log line and error messages carry run IDs, row positions and counts only. `WriteGamertagCsvs` may read only run `extracted-table.json` objects and write only under `submissions/*/export/gamertags/`, both in its own evidence namespace.
+## Operations
+
+- [Deployment, releases, and rollback](../../docs/self-hosting/50-deploy-and-release-applications.md), [troubleshooting](../../docs/self-hosting/60-recover-and-troubleshoot.md), and [ephemeral cleanup](../../docs/getting-started.md#remove-the-stack).
+- [Replay, run comparison, and training-data materialization](../../specs/1.1-mcc-analytics-engine.md#9-replay-comparison-and-training-data), including inputs and stack outputs.
+- Stable stacks alarm on workflow failures/timeouts, dead-letter messages, Lambda errors, and zero-row extractions. To receive alarm email, set `/mcc/<environment>/match-to-csv/alarm-email`, redeploy, and confirm the SNS subscription. Ephemeral stacks have no alarms. See [observability](../../specs/1.1-mcc-analytics-engine.md#15-observability).
 
 ## Evidence layout
 
@@ -131,56 +118,6 @@ The scoreboard parser supports Halo 3 only. Its Halo 3 two-team layout was valid
 
 Two-team boards are the only supported layout. The parser clusters the background colors of the player rows, ignoring the header and filtered rows, and names each cluster with its MCC team color. When the player rows form exactly two clusters, every player on the top row's team gets `Win` 1 and everyone else gets `Loss` 1. Free-for-all and three-team matches are not supported. A board whose player rows form one cluster, carry no row color, or form three or more clusters produces no rows. Its run still succeeds, so the other screenshots in the same email are unaffected, and on a stable stack the zero-row alarm fires. `parser.noRowsReason` in the normalized observations records why, for example `{ "code": "UNSUPPORTED_TEAM_LAYOUT", "colorClusterCount": 1 }`, where a count of 0 means no player row had a color.
 
-## Replay and comparison
-
-The main state machine handles new messages. The replay state machine accepts an existing `SourceScreenshot` and creates a new processing run without changing prior evidence:
-
-```json
-{
-  "source": {
-    "submissionId": "...",
-    "screenshotId": "...",
-    "bucket": "...",
-    "key": ".../source/original",
-    "attachmentName": "scoreboard.png",
-    "contentType": "image/png",
-    "sha256": "...",
-    "acquisitionType": "SCREENSHOT",
-    "widthPx": 1920,
-    "heightPx": 1080
-  }
-}
-```
-
-The `ReplayStateMachineArn` stack output identifies the replay workflow. The `RunComparisonFunctionName` output identifies the comparison Lambda. Comparison uses table index, row, and column. It reports added cells, removed cells, text changes, and confidence changes without altering either run.
-
-## Training-data materialization
-
-The `TrainingDataMaterializerFunctionName` stack output identifies the materializer Lambda. Invoke it with normalized artifact keys from completed runs:
-
-```json
-{
-  "bucket": "...",
-  "normalizedKeys": [
-    ".../normalized/observations.json"
-  ],
-  "splitSeed": "ocr-cells-v1"
-}
-```
-
-The materializer writes an immutable dataset under `datasets/{datasetId}/`:
-
-```text
-manifest.json
-train.jsonl
-validation.jsonl
-test.jsonl
-```
-
-Each JSONL record joins the cell observation, related tokens, validation result, processing versions, build metadata, source artifact, and normalized artifact reference. Records are marked `UNLABELED` until the separate labeling workflow produces ground truth.
-
-The split algorithm hashes the seed and `screenshotId`. Eighty percent of screenshots go to training, ten percent to validation, and ten percent to testing. All cells and all replayed runs for one screenshot always use the same split.
-
 ## Development and tests
 
 ```console
@@ -190,6 +127,4 @@ npm run app:synth -- match-to-csv --environment dev
 npm run verify:bundle --workspace @mcc/match-to-csv
 ```
 
-The test suite enforces minimum statement, branch, line, and function coverage. It covers MIME intake behavior, multiple attachments, rejections, submission events, processing success and failure records, parser behavior, semantic mapping, multiple tables, CSV escaping, comparison behavior, ephemeral paths, materialization joins, and deterministic dataset splits. Tests do not call AWS.
-
-CDK synthesis requires Docker because Sharp is packaged for the Lambda Linux ARM64 runtime. Run the bundle verification after synthesis; it checks the actual generated assets for the native binary.
+Tests enforce coverage thresholds and do not call AWS. Synthesis needs Docker for Linux ARM64 Sharp assets. Bundle verification checks the generated native binary. See [development setup and checks](../../docs/getting-started.md#tier-1-run-the-checks-locally) and [capture fixtures](test/fixtures/README.md).
