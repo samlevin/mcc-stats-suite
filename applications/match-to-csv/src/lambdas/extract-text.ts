@@ -41,7 +41,7 @@ const s3 = new S3Client({});
 const textract = new TextractClient({});
 
 const versions = {
-  pipelineVersion: '1.0.0',
+  pipelineVersion: '1.1.0',
   preprocessingVersion: 'none-v1',
   textractConfigurationVersion: 'textract-tables-v1',
   textractNormalizerVersion: 'textract-normalizer-v2',
