@@ -1,0 +1,27 @@
+{
+  "name": "@mcc/roster",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=60 test/*.test.ts",
+    "ci:test": "node --import tsx --test --experimental-test-coverage --test-coverage-include=\"src/**\" --test-coverage-lines=80 --test-coverage-branches=65 --test-coverage-functions=60 test/*.test.ts"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/samlevin/mcc-stats-suite.git",
+    "directory": "packages/roster"
+  },
+  "dependencies": {
+    "@mcc/contracts": "1.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

@@ -15,6 +15,7 @@ You do not need AWS access, secrets, or package registry credentials to contribu
 | `applications/player` | `@mcc/player` | Planned read-only statistics API and interface |
 | `packages/contracts` | `@mcc/contracts` | Types shared across application boundaries |
 | `packages/cdk-config` | `@mcc/cdk-config` | Account checks, environment rules, stack names, and resource prefixes |
+| `packages/roster` | `@mcc/roster` | Pure gamertag matcher, roster fold, and roster hash |
 | `infrastructure/modules` | n/a | Reusable OpenTofu bootstrap, foundation, and data-platform modules |
 | `infrastructure/dev` and `infrastructure/prod` | n/a | Environment roots |
 

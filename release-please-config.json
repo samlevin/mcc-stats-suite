@@ -18,6 +18,11 @@
       "release-type": "node",
       "package-name": "@mcc/contracts"
     },
+    "packages/roster": {
+      "component": "roster",
+      "release-type": "node",
+      "package-name": "@mcc/roster"
+    },
     "applications/match-to-csv": {
       "component": "match-to-csv",
       "release-type": "node",
