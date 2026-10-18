@@ -433,3 +433,63 @@ test('extract text reads only its own roster partition of the foundation roster 
     );
   }
 });
+
+test('write extracted CSV reads only run normalized observations from the evidence bucket', () => {
+  for (const [environment, ephemeral, namespace] of [
+    ['dev', undefined, ''],
+    ['prod', undefined, ''],
+    ['dev', 'test', 'ephemeral/test/'],
+  ] as const) {
+    const label = `${environment} ${ephemeral ?? 'stable'}`;
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const s3Statements = Object.values(
+      template.findResources('AWS::IAM::Policy'),
+    )
+      .filter((policy) =>
+        JSON.stringify(policy.Properties.Roles).includes('WriteExtractedCsv'),
+      )
+      .flatMap(
+        (policy) =>
+          policy.Properties.PolicyDocument.Statement as Array<{
+            Action: string | string[];
+            Resource: unknown;
+          }>,
+      )
+      .filter((statement) =>
+        [statement.Action].flat().some((action) => action.startsWith('s3:')),
+      );
+    assert.deepEqual(
+      s3Statements.map((statement) => statement.Action).sort(),
+      ['s3:GetObject', 's3:PutObject'],
+      label,
+    );
+    const resource = (action: string) =>
+      s3Statements.find((statement) => statement.Action === action)?.Resource;
+    // Both statements name the evidence bucket from the foundation parameter.
+    const bucketArn = (suffix: string) => ({
+      'Fn::Join': [
+        '',
+        [
+          'arn:',
+          { Ref: 'AWS::Partition' },
+          ':s3:::',
+          (resource('s3:PutObject') as { 'Fn::Join': [string, unknown[]] })[
+            'Fn::Join'
+          ][1][3],
+          suffix,
+        ],
+      ],
+    });
+    assert.deepEqual(resource('s3:PutObject'), bucketArn('/*'), label);
+    assert.deepEqual(
+      resource('s3:GetObject'),
+      bucketArn(
+        `/${namespace}submissions/*/runs/*/normalized/observations.json`,
+      ),
+      label,
+    );
+  }
+});

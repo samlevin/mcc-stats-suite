@@ -405,6 +405,7 @@ test('runExtraction reads the roster before Textract and records its reference',
     written('/manifest.json')?.versions?.rosterMatcherVersion,
     'roster-matcher-v1',
   );
+  assert.equal(written('/manifest.json')?.versions?.pipelineVersion, '1.1.0');
   const counts = { exact: 1, resolved: 0, unmatched: 1 };
   assert.deepEqual(
     written('/completion.json')?.metrics?.playerMatchCounts,

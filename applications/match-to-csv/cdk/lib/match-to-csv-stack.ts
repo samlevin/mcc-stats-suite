@@ -235,6 +235,19 @@ export class MatchToCsvStack extends Stack {
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
     this.grantEvidenceAccess(evidenceBucket, extractText, true);
     this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
+    // The export reads each row's player resolution from the run's normalized
+    // observations (spec 1.2 §6.2), and may read no other evidence object.
+    const objectNamespace = deployment.objectPrefix
+      ? `${deployment.objectPrefix}/`
+      : '';
+    writeExtractedCsv.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject'],
+        resources: [
+          `${evidenceBucket.bucketArn}/${objectNamespace}submissions/*/runs/*/normalized/observations.json`,
+        ],
+      }),
+    );
     this.grantEvidenceAccess(evidenceBucket, compareRuns, true);
     this.grantEvidenceAccess(evidenceBucket, materializeTrainingData, true);
     dataKey.grantEncryptDecrypt(processEmail);
