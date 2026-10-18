@@ -16,6 +16,7 @@ configured SES recipient
   -> one SourceScreenshot per accepted image
   -> one ProcessingRun per screenshot
   -> raw Textract response, normalized observations, and extracted CSV
+  -> once every screenshot succeeds, one legacy-spreadsheet CSV per roster gamertag
 ```
 
 The original image is never transformed or replaced. Rejected image attachments are preserved with rejection metadata. Non-image attachments remain available in the retained MIME message.
@@ -68,11 +69,30 @@ Every run records the roster version it read as `roster` (`namespace`, `rosterVe
 
 After parsing, `extract-text` resolves each player name against that roster version ([spec 1.2 §7](../../specs/1.2-gamertag-roster.md#7-matching)) and records the result as `playerResolution` beside the name in `parser.rows` of the normalized observations: `EXACT` when a roster gamertag equals the name as read, `RESOLVED` with the roster gamertag when the name is a near reading of exactly one gamertag, or `UNMATCHED` with a reason. The name as read, its `reviewFlags`, and every cell's `observedText` stay unchanged, and `ExtractTextOutput` rows carry no `playerResolution`. The successful completion records the `exact`, `resolved`, and `unmatched` counts as `metrics.playerMatchCounts`, the `Screenshot processed` log line carries the same counts, and the run manifest records `rosterMatcherVersion: roster-matcher-v1`. While the roster is empty, every row is `UNMATCHED` with `NO_CANDIDATE`.
 
-`write-extracted-csv` reads the rows with their `playerResolution` from the run's normalized observations. It fails with `NormalizedObservationsMismatchError`, before writing anything, when the observations name a different `runId` or roster reference than its input. `export/extracted-table.json` records the roster reference and each row's `playerResolution` beside the name as read. The CSV header is `Team,Player,Score,Kills,Assists,Deaths,Win,Loss,PlayerMatch`. `Player` holds the roster gamertag for `EXACT` and `RESOLVED` rows and the name as read for `UNMATCHED` rows, and `PlayerMatch` holds the status. A row without a resolution keeps the name as read and leaves `PlayerMatch` empty. The CSV is the only artifact that names the roster gamertag in place of the name as read: normalized observations, `ExtractTextOutput`, and `extracted-table.json` keep the name as read. The run manifest records `pipelineVersion: 1.1.0`.
+`write-extracted-csv` reads the rows with their `playerResolution` from the run's normalized observations. It fails with `NormalizedObservationsMismatchError`, before writing anything, when the observations name a different `runId` or roster reference than its input. `export/extracted-table.json` records the roster reference and each row's `playerResolution` beside the name as read. The CSV header is `Team,Player,Score,Kills,Assists,Deaths,Win,Loss,PlayerMatch`. `Player` holds the roster gamertag for `EXACT` and `RESOLVED` rows and the name as read for `UNMATCHED` rows, and `PlayerMatch` holds the status. A row without a resolution keeps the name as read and leaves `PlayerMatch` empty. The CSV and the [per-gamertag CSVs](#per-gamertag-csvs) are the only artifacts that name the roster gamertag in place of the name as read: normalized observations, `ExtractTextOutput`, and `extracted-table.json` keep the name as read. The run manifest records `pipelineVersion: 1.1.0`.
 
 A change log that does not reproduce `HEAD` fails the run with `RosterIntegrityError`, and a stored snapshot whose hash differs fails it with `RosterSnapshotMismatchError`. Neither is retried, and neither run calls Textract. DynamoDB throttling and server errors use the workflow's existing retries.
 
 `ExtractText` may only call `GetItem` and `Query` on the roster table, and only in its own `ROSTER#<namespace>` partition. `WriteExtractedCsv` may read only `normalized/observations.json` objects of runs in its own evidence namespace. Logs record the roster version and match counts, never a gamertag.
+
+## Per-gamertag CSVs
+
+Once every screenshot of a submission succeeds, the main workflow's `Write gamertag CSVs` step writes one CSV per roster gamertag to `submissions/{submissionId}/export/gamertags/`, in the submission's namespace. A person can paste each file into that player's legacy spreadsheet without editing it. A failed screenshot fails the execution before this step, so that submission gets no per-gamertag file. The replay workflow never writes these files.
+
+`write-gamertag-csvs` reads each run's `export/extracted-table.json` and keeps the rows whose `playerResolution` is `EXACT` or `RESOLVED`. A file exists for each gamertag with at least one such row, holding one line per row in the order of the email's screenshots. `UNMATCHED` rows and rows without a resolution appear in no file, and stay in each run's `extracted.csv`. A file has no header row, and each line has these columns:
+
+| Column | Value |
+| --- | --- |
+| Date | The match date from the email body as `M/D/YYYY`, with no leading zeros |
+| Kills, Assists, Deaths | As observed |
+| Win | `1` for a win, otherwise empty |
+| Loss | `1` for a loss, otherwise empty |
+
+For example, a win with 12 kills, 3 assists and 4 deaths on March 7, 2026 is `3/7/2026,12,3,4,1,`. A value is quoted only when it holds a comma, a quote or a line break.
+
+The file name is the gamertag with each space written as `_` and `#` written as `-`, so `Player 02#7` is `Player_02-7.csv`. Gamertags never hold `_` or `-`, so two gamertags never share a file name. Every file is written create-only, and a retried step treats a file that already exists as written.
+
+The step's input holds the run export keys and the match date, and its output, stored at `$.gamertagCsvs`, holds the submission ID, the export prefix, and the file and line counts. Neither lists file names, because they name gamertags. Its log line and error messages carry run IDs, row positions and counts only. `WriteGamertagCsvs` may read only run `extracted-table.json` objects and write only under `submissions/*/export/gamertags/`, both in its own evidence namespace.
 
 ## Evidence layout
 
@@ -84,6 +104,7 @@ submissions/{submissionId}/
   ingestion.json
   completion.json
   events/
+  export/gamertags/{gamertag file}.csv
   screenshots/{screenshotId}/
     source/original
     source/metadata.json

@@ -171,7 +171,7 @@ export interface AcceptedRosterChange {
 }
 
 /** Spec 2.1's default `playerNamePattern` (spec 1.2 §4.3). */
-const GAMERTAG_PATTERN = /^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$/;
+export const GAMERTAG_PATTERN = /^[A-Za-z0-9 ]{1,16}(#[0-9]{1,4})?$/;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_REASON_LENGTH = 256;
