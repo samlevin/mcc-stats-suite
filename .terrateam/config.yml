@@ -2,8 +2,11 @@ engine:
   name: tofu
   version: 1.12.1
 
+# Pull requests into main from the Release Please branch never change a root,
+# so Terrateam ignores them. Every other branch is evaluated.
 destination_branches:
-  - main
+  - branch: main
+    source_branches: ['*', '!release-please--branches--main']
 
 # Module dependencies are mapped by hand in each root's file_patterns. See AGENTS.md.
 indexer:

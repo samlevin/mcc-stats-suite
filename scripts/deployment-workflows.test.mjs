@@ -1411,3 +1411,18 @@ test('a foundation revision file triggers its root and drift reports daily witho
   assert.ok(!JSON.stringify(config.drift).includes('reconcile'));
   assert.deepEqual(config.hooks.plan.post, [{ type: 'drift_create_issue' }]);
 });
+
+test('Terrateam evaluates pull requests into main from every branch except the Release Please branch', () => {
+  const config = parse(repositoryFile('.terrateam/config.yml'));
+  // One combined release pull request uses release-please--branches--main.
+  const releasePlease = JSON.parse(
+    repositoryFile('release-please-config.json'),
+  );
+  assert.equal(releasePlease['separate-pull-requests'], false);
+  assert.deepEqual(config.destination_branches, [
+    {
+      branch: 'main',
+      source_branches: ['*', '!release-please--branches--main'],
+    },
+  ]);
+});
