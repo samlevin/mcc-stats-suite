@@ -455,7 +455,9 @@ export class ReviewNotPosted extends Error {
 
 // Reads the verdict and the reviewed SHAs from a code-reviewer report, which
 // has `Verdict: <verdict>` and `Base/Head: <sha>..<sha>` lines. Light
-// Markdown around either is tolerated. Two different verdicts are an error.
+// Markdown around either is tolerated. Two different verdicts are an error,
+// and so is a missing or unreadable pair: a review binds to the commits it
+// read, so a report that does not name them is never posted.
 export function parseReviewReport(text) {
   const verdicts = new Set(
     [
@@ -471,14 +473,14 @@ export function parseReviewReport(text) {
         : `the report has no Verdict: line with ${REVIEW_VERDICTS.join(', ')}`,
     );
   const pair =
-    /^[\s>*_`-]*Base\/Head:[\s*_`]*([0-9a-f]{7,40})`?\.\.`?([0-9a-f]{7,40})\b/m.exec(
+    /^[\s>*_`-]*Base\/Head:[\s*_`]*([0-9a-f]{7,40})`?\s*\.\.\s*`?([0-9a-f]{7,40})\b/m.exec(
       String(text),
     );
-  return {
-    verdict: [...verdicts][0],
-    base: pair?.[1] ?? null,
-    head: pair?.[2] ?? null,
-  };
+  if (!pair)
+    throw new ReviewNotPosted(
+      'the report has no Base/Head: <sha>..<sha> line naming the reviewed commits',
+    );
+  return { verdict: [...verdicts][0], base: pair[1], head: pair[2] };
 }
 
 // GitHub rejects REQUEST_CHANGES and APPROVE from a pull request's own
@@ -587,12 +589,9 @@ export function publishReview(
   if (!String(report ?? '').trim())
     throw new ReviewNotPosted('the review report is empty');
   const reviewed = parseReviewReport(report);
-  if (
-    (reviewed.base && !base.startsWith(reviewed.base)) ||
-    (reviewed.head && !head.startsWith(reviewed.head))
-  )
+  if (!base.startsWith(reviewed.base) || !head.startsWith(reviewed.head))
     throw new ReviewNotPosted(
-      `the report reviewed ${reviewed.base ?? base}..${reviewed.head ?? head}, not ${base}..${head}. Run a fresh review.`,
+      `the report reviewed ${reviewed.base}..${reviewed.head}, not ${base}..${head}. Run a fresh review.`,
     );
   let pull;
   try {
@@ -621,7 +620,7 @@ export function publishReview(
     identityError,
   });
   if (!['COMMENT', 'REQUEST_CHANGES'].includes(event))
-    throw new Error(`Refusing to submit a ${event} review`);
+    throw new ReviewNotPosted(`refusing to submit a ${event} review`);
   let posted;
   try {
     posted = ghJson(`repos/${repository}/pulls/${pr}/reviews`, run, {
@@ -687,7 +686,15 @@ function main(args) {
     } catch (error) {
       throw new ReviewNotPosted(`cannot read ${reportPath}: ${error.message}`);
     }
-    const result = publishReview(loadPolicy(), {
+    let policy;
+    try {
+      policy = loadPolicy();
+    } catch (error) {
+      throw new ReviewNotPosted(
+        `cannot load ${SOURCES.policy}: ${error.message}`,
+      );
+    }
+    const result = publishReview(policy, {
       pr: argument(rest, 'pr'),
       base: argument(rest, 'base'),
       head: argument(rest, 'head'),

@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -655,7 +662,19 @@ test('a review report yields its verdict and reviewed SHAs', () => {
     parseReviewReport('**Verdict:** APPROVE\n- Base/Head: `abc1234..def5678`'),
     { verdict: 'APPROVE', base: 'abc1234', head: 'def5678' },
   );
-  assert.equal(parseReviewReport('Verdict: BLOCKED').base, null);
+  assert.deepEqual(
+    parseReviewReport('Verdict: BLOCKED\nBase/Head: abc1234 .. def5678'),
+    { verdict: 'BLOCKED', base: 'abc1234', head: 'def5678' },
+  );
+  for (const text of [
+    'Verdict: BLOCKED',
+    'Verdict: BLOCKED\nBase/Head: unknown',
+    'Verdict: BLOCKED\nBase/Head: abc1234',
+  ])
+    assert.throws(
+      () => parseReviewReport(text),
+      /Review not posted: the report has no Base\/Head: <sha>\.\.<sha> line/,
+    );
   assert.throws(
     () => parseReviewReport('Findings: none'),
     /Review not posted: the report has no Verdict: line/,
@@ -831,6 +850,17 @@ test('moved or mismatched SHAs post nothing and ask for a fresh review', () => {
     /^ReviewNotPosted: Review not posted: the report reviewed .*Run a fresh review/,
   );
   assert.deepEqual(mismatch.calls, []);
+  // A report that names no commits is not posted on the strength of the
+  // arguments alone.
+  const unbound = mockGitHub();
+  assert.throws(
+    () =>
+      publish('APPROVE', unbound, {
+        report: 'Verdict: APPROVE\nFindings: none',
+      }),
+    /^ReviewNotPosted: Review not posted: the report has no Base\/Head: <sha>\.\.<sha> line/,
+  );
+  assert.deepEqual(unbound.calls, []);
   // Abbreviated SHAs in the report still bind to the dispatched pair.
   const short = mockGitHub();
   publish('BLOCKED', short, {
@@ -850,6 +880,47 @@ test('moved or mismatched SHAs post nothing and ask for a fresh review', () => {
     );
     assert.deepEqual(github.calls, []);
   }
+});
+
+test('the publish-review command reports every failure as not posted', () => {
+  // A copy of the script outside the repository has no policy file to load.
+  // realpathSync keeps the copy's module URL equal to its argv path, which
+  // the script compares before it runs as a command.
+  const base = realpathSync(mkdtempSync(join(tmpdir(), 'agent-policy-')));
+  mkdirSync(join(base, 'scripts'));
+  const script = join(base, 'scripts/agent-policy.mjs');
+  writeFileSync(
+    script,
+    readFileSync(new URL('./agent-policy.mjs', import.meta.url)),
+  );
+  const reportPath = join(base, 'review.md');
+  writeFileSync(reportPath, report('APPROVE'));
+  const publishCommand = (...args) =>
+    spawnSync(process.execPath, [script, 'publish-review', ...args], {
+      encoding: 'utf8',
+    });
+  const noPolicy = publishCommand(
+    '--pr',
+    '7',
+    '--base',
+    BASE,
+    '--head',
+    HEAD,
+    '--report',
+    reportPath,
+  );
+  assert.equal(noPolicy.status, 1);
+  assert.match(
+    noPolicy.stderr,
+    /^Review not posted: cannot load \.agents\/policy\.json: /,
+  );
+  assert.equal(noPolicy.stdout, '');
+  const noReport = publishCommand('--pr', '7');
+  assert.equal(noReport.status, 1);
+  assert.match(
+    noReport.stderr,
+    /^Review not posted: --report <file> is required/,
+  );
 });
 
 test('review publication runs only from a manual PR review', () => {
