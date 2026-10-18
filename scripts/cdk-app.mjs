@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
 import { spawnSync } from 'node:child_process';
 import {
   AccountGuardError,
@@ -18,17 +19,31 @@ import {
 const applications = new Set(APPLICATIONS);
 const actions = new Set(['synth', 'diff', 'deploy', 'destroy']);
 
-const [action, application, ...rawArguments] = process.argv.slice(2);
-if (!actions.has(action) || !applications.has(application)) {
-  fail(
-    'Usage: npm run app:<synth|diff|deploy> -- <application> ' +
-      '[--environment <dev|prod>] [--ephemeral <name>] [--profile <profile>]\n' +
-      '       npm run app:destroy -- <application> --environment dev ' +
-      '--ephemeral <name> [--profile <profile>]',
-  );
+const CLI = defineCli(
+  'Usage: npm run app:<synth|diff|deploy|destroy> -- <application> [options] [CDK arguments]',
+  ['environment', 'ephemeral', 'profile'],
+  { passthrough: true },
+);
+const [action, ...arguments_] = process.argv.slice(2);
+let parsed;
+try {
+  parsed = parseCli(arguments_, CLI);
+  if (action === '--help' || action === '-h') throw new CliHelp(CLI.help);
+  if (!actions.has(action)) throw cliError(CLI, 'Name a valid action');
+  // CDK has its own option grammar. Do not normalize its options or values.
+  if (!applications.has(parsed.passthrough[0]))
+    throw cliError(CLI, 'Name a valid application');
+} catch (error) {
+  if (error instanceof CliHelp) {
+    console.log(error.message);
+    process.exit(0);
+  }
+  fail(error.message);
 }
-
-const { options, passthrough } = parseArguments(rawArguments);
+const { options } = parsed;
+const [application, ...passthrough] = parsed.passthrough;
+if (passthrough.some((argument) => /^--context(?:=|$)|^-c/.test(argument)))
+  fail('Use --environment and --ephemeral instead of passing CDK context');
 const profile = options.profile ?? process.env.AWS_PROFILE;
 const environment = guard(() =>
   resolveEnvironment(options.environment, profile),
@@ -129,31 +144,6 @@ const command = spawnSync('npm', npmArguments, {
   env: childEnvironment,
 });
 process.exit(command.status ?? 1);
-
-function parseArguments(args) {
-  const options = {};
-  const passthrough = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const argument = args[index];
-    if (
-      argument === '--environment' ||
-      argument === '--ephemeral' ||
-      argument === '--profile'
-    ) {
-      const value = args[index + 1];
-      if (!value || value.startsWith('--')) {
-        fail(`${argument} requires a value`);
-      }
-      options[argument.slice(2)] = value;
-      index += 1;
-    } else if (argument === '-c' || argument === '--context') {
-      fail('Use --environment and --ephemeral instead of passing CDK context');
-    } else {
-      passthrough.push(argument);
-    }
-  }
-  return { options, passthrough };
-}
 
 // Runs one account check and exits on a refusal, after the AWS CLI's output.
 function guard(check) {

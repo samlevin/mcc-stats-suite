@@ -87,7 +87,8 @@ export function selectScopes(paths, event) {
       !scopes.length ||
       scopes.includes('full') ||
       scopes.includes('application'),
-    repository: scopes.includes('repository'),
+    repository:
+      scopes.includes('repository') || paths.includes('scripts/cli.cjs'),
     infrastructure:
       !scopes.length ||
       scopes.includes('infrastructure') ||

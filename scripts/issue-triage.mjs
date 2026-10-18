@@ -1,3 +1,4 @@
+import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
@@ -483,38 +484,39 @@ export async function reconcileEpicLabels({
   }
 }
 
+const CLI = defineCli(
+  'Usage: issue-triage.mjs / issue-containers.mjs [--dry-run | --apply] [--issue <number>]',
+  ['dry-run', 'apply', 'issue'],
+);
+
 export function configuration(env, args) {
+  const { options, positionals } = parseCli(args, CLI);
+  if (positionals.length)
+    throw cliError(
+      CLI,
+      'Use --dry-run or --apply with optional --issue <positive number>',
+    );
+  if (options['dry-run'] && options.apply)
+    throw cliError(CLI, 'Use --dry-run or --apply once');
+  let issueNumber;
+  if (options.issue !== undefined) {
+    if (
+      !/^[1-9]\d*$/.test(options.issue) ||
+      !Number.isSafeInteger(Number(options.issue))
+    )
+      throw cliError(CLI, '--issue requires one positive safe integer');
+    issueNumber = Number(options.issue);
+  }
   if (env.GITHUB_ACTIONS === 'true' && !env.MCC_PROJECT_TOKEN)
     throw new Error(
       'MCC_PROJECT_TOKEN is required for Projects access; GITHUB_TOKEN cannot access Projects.',
     );
-  let mode;
-  let issueNumber;
-  for (let index = 0; index < args.length; index++) {
-    const arg = args[index];
-    if (arg === '--dry-run' || arg === '--apply') {
-      if (mode) throw new Error('Use --dry-run or --apply once');
-      mode = arg;
-    } else if (arg === '--issue') {
-      const number = args[++index];
-      if (
-        issueNumber !== undefined ||
-        !/^[1-9]\d*$/.test(number ?? '') ||
-        !Number.isSafeInteger(Number(number))
-      )
-        throw new Error('--issue requires one positive safe integer');
-      issueNumber = Number(number);
-    } else {
-      throw new Error(
-        'Use --dry-run or --apply with optional --issue <positive number>',
-      );
-    }
-  }
   const setting = env.DRY_RUN ?? 'true';
   if (!['true', 'false'].includes(setting))
     throw new Error('DRY_RUN must be true or false');
   return {
-    dryRun: mode === '--dry-run' || (mode !== '--apply' && setting === 'true'),
+    dryRun:
+      options['dry-run'] === true || (!options.apply && setting === 'true'),
     ...(issueNumber === undefined ? {} : { issueNumber }),
   };
 }
@@ -530,7 +532,10 @@ if (
     await reconcileEpicLabels({ api: ghGraphql, ...config });
     await reconcile({ api: ghGraphql, ...config });
   } catch (error) {
-    console.error(failureMessage(error));
-    process.exitCode = 1;
+    if (error instanceof CliHelp) console.log(error.message);
+    else {
+      console.error(failureMessage(error));
+      process.exitCode = 1;
+    }
   }
 }

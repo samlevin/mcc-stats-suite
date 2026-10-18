@@ -12,6 +12,7 @@
 // captures hold real gamertags: keep them out of the repository and reduce
 // them with scripts/reduce-capture.ts.
 
+import { CliHelp, cliError, defineCli, parseCli } from './cli';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -29,12 +30,15 @@ import {
 } from '../src/lib/textract-analysis';
 import { assertOutsideRepository } from './fixture-paths';
 
+const CLI = defineCli(
+  'Usage: capture-textract.ts <output-dir> <image> [<image>...]',
+);
+
 async function main(argv: string[]): Promise<void> {
-  const [outputDirectory, ...images] = argv;
+  const { positionals } = parseCli(argv, CLI);
+  const [outputDirectory, ...images] = positionals;
   if (!outputDirectory || images.length === 0) {
-    throw new Error(
-      'Usage: capture-textract.ts <output-dir> <image> [<image>...]',
-    );
+    throw cliError(CLI, 'Name an output directory and at least one image');
   }
   assertOutsideRepository(outputDirectory);
   fs.mkdirSync(outputDirectory, { recursive: true });
@@ -99,6 +103,10 @@ async function main(argv: string[]): Promise<void> {
 }
 
 main(process.argv.slice(2)).catch((error: unknown) => {
+  if (error instanceof CliHelp) {
+    process.stdout.write(`${error.message}\n`);
+    return;
+  }
   process.stderr.write(
     `${error instanceof Error ? error.message : String(error)}\n`,
   );

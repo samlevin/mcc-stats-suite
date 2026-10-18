@@ -42,6 +42,8 @@ Name your branch `<login>/<issue>-<slug>`, with your GitHub login as the actor. 
 - `<slug>` is that issue's title in lowercase, with accents dropped and every run of other characters turned into `-`. "Part N" in the title becomes `partN`. The slug is cut to 40 characters at a word boundary, and is `issue` when the title has no ASCII letters or digits.
 - When one leaf is split into stacked layers, layers after the first end in `-part-<n>`; add `--layer <n>` to print them. A branch stacked on another issue's PR uses its own issue's number and title.
 
+Branch naming also accepts `-a` for `--actor` and `-l` for `--layer`. Run `node scripts/branch-name.mjs -h` for help. Repository commands follow the [shared CLI convention](scripts/README.md).
+
 For example, `octocat/48-generate-and-enforce-branch-names-from` is the first branch for #48, and `octocat/48-generate-and-enforce-branch-names-from-part-2` is its second stacked layer. Once a branch is pushed, keep its name, even if the issue title changes later. Nothing in CI checks branch names.
 
 ## Pull requests and review

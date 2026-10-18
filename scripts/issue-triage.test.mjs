@@ -944,7 +944,6 @@ test('parser rejects malformed, missing, unsafe, repeated, or conflicting argume
     ['--issue', 'Infinity'],
     ['--issue', '9007199254740992'],
     ['--issue', '1', '--issue', '2'],
-    ['--issue=1'],
     ['--unknown'],
     ['1'],
     ['--apply', '--apply'],
@@ -954,7 +953,7 @@ test('parser rejects malformed, missing, unsafe, repeated, or conflicting argume
   ])
     assert.throws(
       () => configuration({}, args),
-      /Use --dry-run or --apply|--issue requires/,
+      /Use --dry-run or --apply|--issue requires|Unknown option|given more than once/,
     );
 });
 

@@ -23,6 +23,8 @@ export const automationTests = [
 
 const automationLintTargets = [
   'scripts/ci-scope.mjs',
+  'scripts/cli.cjs',
+  'scripts/cli.test.mjs',
   'scripts/issue-triage.mjs',
   'scripts/issue-containers.mjs',
   'scripts/issue-pr-metadata.mjs',
@@ -83,7 +85,16 @@ export function checks({ full, repository, mode, job = 'static' }) {
   if (repository) {
     // Generated agent definitions must match their sources under .agents/.
     commands.push(['npm', ['run', 'agents:check']]);
-    commands.push(['node', ['--test', ...automationTests]]);
+    // CLI compatibility covers automation and build consumers. The full gate
+    // already runs it, so add it here only for repository-only changes.
+    commands.push([
+      'node',
+      [
+        '--test',
+        ...automationTests,
+        ...(!full ? ['scripts/cli.test.mjs'] : []),
+      ],
+    ]);
   }
   return commands;
 }
