@@ -2,8 +2,8 @@ engine:
   name: tofu
   version: 1.12.1
 
-# Pull requests into main from the Release Please branch never change a root,
-# so Terrateam ignores them. Every other branch is evaluated.
+# Terrateam ignores the Release Please branch. The infrastructure merge gate
+# independently checks changed paths, including changes on that branch.
 destination_branches:
   - branch: main
     source_branches: ['*', '!release-please--branches--main']
@@ -36,6 +36,21 @@ automerge:
   require_explicit_apply: true
   merge_strategy: squash
   retain_pr_title: true
+
+# The merge gate waits for applies, so it cannot also be an apply prerequisite.
+# Keep all other status checks and the merge-conflict requirement enabled.
+apply_requirements:
+  checks:
+    - tag_query: ''
+      approved:
+        enabled: false
+      merge_conflicts:
+        enabled: true
+      status_checks:
+        enabled: true
+        ignore_matching:
+          - '^Require applicable Terrateam applies$'
+          - '^Evaluate infrastructure merge requirements$'
 
 hooks:
   plan:
