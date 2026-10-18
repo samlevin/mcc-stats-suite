@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.1.0...contracts-v1.2.0) (2026-10-18)
+
+
+### Features
+
+* **recipients:** keep the CSV recipient list in DynamoDB with an operator script ([#276](https://github.com/samlevin/mcc-stats-suite/issues/276)) ([760ff41](https://github.com/samlevin/mcc-stats-suite/commit/760ff41aa4e588bb3c4d47b207213070aff1810b)), closes [#272](https://github.com/samlevin/mcc-stats-suite/issues/272)
+
 ## [1.1.0](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.0.0...contracts-v1.1.0) (2026-10-18)
 
 

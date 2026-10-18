@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.0.1](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.0.0...match-to-csv-v3.0.1) (2026-10-18)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @mcc/contracts bumped from 1.1.0 to 1.2.0
+    * @mcc/roster bumped from 1.1.0 to 1.1.1
+
 ## [3.0.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v2.0.0...match-to-csv-v3.0.0) (2026-10-18)
 
 
