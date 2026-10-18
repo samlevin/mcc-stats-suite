@@ -35,7 +35,7 @@ const UUID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 // An in-memory roster table behind the AWS CLI commands the script runs. It
-// evaluates the two conditions spec 6 §6.1 uses, so a test can move HEAD
+// evaluates the two conditions spec 1.2 §6.1 uses, so a test can move HEAD
 // between a read and a write, or lose a committed write's response.
 function fakeAws({ account = DEV, arn = ARN, table = TABLE } = {}) {
   const items = new Map();
@@ -256,7 +256,7 @@ async function roster(argv, { aws = fakeAws(), env, answers = [] } = {}) {
 
 const dev = (...args) => ['--environment', 'dev', ...args];
 
-test('arguments follow spec 6 §4.2', () => {
+test('arguments follow spec 1.2 §4.2', () => {
   assert.deepEqual(
     parseArguments([
       'add',

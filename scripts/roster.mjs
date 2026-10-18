@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Maintains the gamertag roster (spec 6 §4.2, §6.1) with the operator's own AWS
+// Maintains the gamertag roster (spec 1.2 §4.2, §6.1) with the operator's own AWS
 // credentials. It writes the roster table directly, one change item and the
 // HEAD item per change, under the same change-log rules every reader folds.
 //
@@ -49,7 +49,7 @@ export const EXIT_OK = 0;
 export const EXIT_REFUSED = 1;
 export const EXIT_ERROR = 2;
 
-// Spec 6 §6.1: a change whose transaction fails is tried again, 3 attempts in all.
+// Spec 1.2 §6.1: a change whose transaction fails is tried again, 3 attempts in all.
 export const MAX_WRITE_ATTEMPTS = 3;
 
 // Change items per AWS CLI query call. The CLI buffers a whole response and
@@ -94,7 +94,7 @@ class ExitError extends Error {
 }
 
 /**
- * Parses the command line. Throws ExitError(2) for anything spec 6 §4.2 does
+ * Parses the command line. Throws ExitError(2) for anything spec 1.2 §4.2 does
  * not list, so a mistyped command never reaches AWS.
  */
 export function parseArguments(argv) {
@@ -257,7 +257,7 @@ function readTableName(aws, environment) {
 
 /**
  * Roster table access for one namespace: the `ROSTER#<namespace>` partition and
- * nothing else (spec 6 §5.1). Items use DynamoDB's typed JSON, as the AWS CLI
+ * nothing else (spec 1.2 §5.1). Items use DynamoDB's typed JSON, as the AWS CLI
  * reads and writes it.
  */
 export function rosterStore(aws, table, namespace) {
@@ -323,7 +323,7 @@ export function rosterStore(aws, table, namespace) {
         .map(changeFromItem)
         .sort((left, right) => left.rosterVersion - right.rosterVersion);
     },
-    // Spec 6 §6.1 step 5. Returns 'WRITTEN', 'CONDITION_FAILED' when HEAD
+    // Spec 1.2 §6.1 step 5. Returns 'WRITTEN', 'CONDITION_FAILED' when HEAD
     // moved, or the CLI's error output when the outcome is unknown.
     appendChange(change, previousVersion) {
       const items = [
@@ -432,7 +432,7 @@ function integrityError(message) {
 }
 
 /**
- * Spec 6 §6.1 step 2: reads HEAD with a consistent read, folds the change log
+ * Spec 1.2 §6.1 step 2: reads HEAD with a consistent read, folds the change log
  * up to its version, and fails when the fold does not reproduce HEAD.
  */
 function readRoster(store) {
@@ -498,7 +498,7 @@ function history({ store, stdout, options }) {
 }
 
 /**
- * Spec 6 §6.1 for one gamertag: read and fold, replay by clientRequestId,
+ * Spec 1.2 §6.1 for one gamertag: read and fold, replay by clientRequestId,
  * check with `checkChange`, then one conditional transaction, tried at most
  * MAX_WRITE_ATTEMPTS times with the same clientRequestId.
  */
@@ -627,7 +627,7 @@ function compare(left, right) {
   return Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'));
 }
 
-// Spec 1 §5.1: base-36 milliseconds, a hyphen, and a random UUID.
+// Spec 1.1 §5.1: base-36 milliseconds, a hyphen, and a random UUID.
 function evidenceId() {
   return `${Date.now().toString(36)}-${randomUUID()}`;
 }

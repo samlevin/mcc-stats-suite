@@ -8,7 +8,7 @@ import type {
 import { editMatrix, keyDistance, rosterKey } from './key';
 
 /**
- * The matcher version a run records in its manifest (spec 6 §5.5). Any change
+ * The matcher version a run records in its manifest (spec 1.2 §5.5). Any change
  * to the key, distance, thresholds, claim rule or error types bumps it.
  */
 export const ROSTER_MATCHER_VERSION = 'roster-matcher-v1';
@@ -23,7 +23,7 @@ interface Candidate {
 
 /**
  * Resolves each row's `player` against the active entries of one roster
- * version (spec 6 §7.3 and §7.4). Returns one resolution per row, in row
+ * version (spec 1.2 §7.3 and §7.4). Returns one resolution per row, in row
  * order, and never changes a row.
  */
 export function resolvePlayers(
@@ -38,7 +38,7 @@ export function resolvePlayers(
 }
 
 /**
- * The spec 3 error types that turn `asRead` into `gamertag` (spec 6 §7.5),
+ * The spec 2.3 error types that turn `asRead` into `gamertag` (spec 1.2 §7.5),
  * sorted and unique. The alignment is traced back from the end, preferring a
  * match or substitution, then a deletion from `asRead`, then an insertion.
  */

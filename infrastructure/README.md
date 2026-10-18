@@ -53,7 +53,7 @@ Each foundation root owns the SES receipt rule set `mcc-inbound-<environment>`, 
 
 ## Gamertag roster table
 
-Each foundation root owns the DynamoDB table `<project>-<environment>-gamertag-roster`, the roster change log described in [spec 6](../specs/6-gamertag-roster.md#51-roster-table). It uses on-demand billing, string keys `pk` and `sk`, and the foundation application data key, and it has point-in-time recovery, deletion protection, and `prevent_destroy` in both environments, whatever `force_destroy` says. The table name and ARN are published at `/mcc/<environment>/roster/table-name` and `/mcc/<environment>/roster/table-arn`. OpenTofu manages no roster items, so roster contents never appear in state or plan output. CDK stacks read the parameters to grant their Lambdas access.
+Each foundation root owns the DynamoDB table `<project>-<environment>-gamertag-roster`, the roster change log described in [spec 1.2](../specs/1.2-gamertag-roster.md#51-roster-table). It uses on-demand billing, string keys `pk` and `sk`, and the foundation application data key, and it has point-in-time recovery, deletion protection, and `prevent_destroy` in both environments, whatever `force_destroy` says. The table name and ARN are published at `/mcc/<environment>/roster/table-name` and `/mcc/<environment>/roster/table-arn`. OpenTofu manages no roster items, so roster contents never appear in state or plan output. CDK stacks read the parameters to grant their Lambdas access.
 
 ## Turborepo cache storage contract
 

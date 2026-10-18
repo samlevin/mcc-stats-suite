@@ -1,4 +1,4 @@
-// The gamertag roster (spec 6 §5.1, §13.2). The table is an append-only change
+// The gamertag roster (spec 1.2 §5.1, §13.2). The table is an append-only change
 // log with one partition per namespace. It outlives every application stack, so
 // the foundation owns it like the evidence bucket, and CDK stacks only read its
 // name and ARN from SSM. The application data key encrypts it, including its

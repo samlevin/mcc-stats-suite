@@ -3,7 +3,7 @@ import { describe, test } from 'node:test';
 import { keyDistance, rosterKey } from '../src/index';
 
 describe('rosterKey', () => {
-  // Every row of the spec 6 §7.1 key table.
+  // Every row of the spec 1.2 §7.1 key table.
   for (const [texts, key] of [
     [['Player05', 'PIayer05', 'player05'], 'p1ayer05'],
     [['Player06', 'Player 06'], 'p1ayer06'],

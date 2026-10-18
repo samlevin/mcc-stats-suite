@@ -79,7 +79,7 @@ test('the matcher version is roster-matcher-v1', () => {
   assert.equal(ROSTER_MATCHER_VERSION, 'roster-matcher-v1');
 });
 
-describe('resolvePlayers per-row rule (spec 6 §7.3)', () => {
+describe('resolvePlayers per-row rule (spec 1.2 §7.3)', () => {
   test('an empty roster leaves every row NO_CANDIDATE with null distances', () => {
     assert.deepEqual(
       resolvePlayers([{ player: 'Mantequay' }, { player: '' }], []),
@@ -210,7 +210,7 @@ describe('resolvePlayers per-row rule (spec 6 §7.3)', () => {
   });
 });
 
-describe('resolvePlayers one entry per game (spec 6 §7.4)', () => {
+describe('resolvePlayers one entry per game (spec 1.2 §7.4)', () => {
   const entries = roster('Mantequay', 'Kayza');
   const runnerUp = keyDistance('mantequax', 'kayza');
 
@@ -297,7 +297,7 @@ describe('resolvePlayers one entry per game (spec 6 §7.4)', () => {
   });
 });
 
-describe('errorTypesFor (spec 6 §7.5)', () => {
+describe('errorTypesFor (spec 1.2 §7.5)', () => {
   for (const [asRead, gamertag, types] of [
     ['Kayzb', 'Kayza', ['GLYPH_SUBSTITUTION']],
     ['kayza', 'Kayza', ['GLYPH_SUBSTITUTION']],
@@ -322,7 +322,7 @@ describe('errorTypesFor (spec 6 §7.5)', () => {
   }
 });
 
-describe('the #91 fixtures (spec 6 §9.1)', () => {
+describe('the #91 fixtures (spec 1.2 §9.1)', () => {
   // The 14 placeholder gamertags of halo3-two-team-capture-1 and -2.
   const placeholders = roster(
     'Player01 A',

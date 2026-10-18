@@ -125,7 +125,7 @@ export function localBootstrap(template) {
   const viaS3 = {
     StringEquals: { 'kms:ViaService': sub('s3.${AWS::Region}.amazonaws.com') },
   };
-  // The foundation's dev roster table, <project>-dev-gamertag-roster (spec 6 §13.2).
+  // The foundation's dev roster table, <project>-dev-gamertag-roster (spec 1.2 §13.2).
   const rosterTable = arn('dynamodb', 'table/*-dev-gamertag-roster');
   const localExecution = {
     'Fn::GetAtt': ['CloudFormationExecutionRole', 'Arn'],
@@ -217,7 +217,7 @@ export function localBootstrap(template) {
       deny('ProtectSharedInboundEmail', 's3:*', objects('incoming/dev/*')),
       // One roster table holds every namespace's partition. A runtime reads only
       // ROSTER#ephemeral/<name> for its own tag, never ROSTER#stable or another
-      // developer's (spec 6 §13.4). Null refuses a request that names no leading key,
+      // developer's (spec 1.2 §13.4). Null refuses a request that names no leading key,
       // which ForAllValues would otherwise allow.
       statement(
         'ReadOwnRosterPartition',
