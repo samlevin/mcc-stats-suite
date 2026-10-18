@@ -1,21 +1,21 @@
 ---
 name: mcc-apply-bootstrap
-description: "Person-invoked local apply of the MCC OpenTofu bootstrap roots at the current origin/main: the agent plans and applies infrastructure/dev/bootstrap, then infrastructure/prod/bootstrap, with the person's own AWS credentials, stopping for explicit approval before every plan and apply. No pull request and no merge. Only when a person asks, for example 'apply bootstrap'; never part of delivery."
+description: "Person-invoked local apply of the MCC OpenTofu bootstrap roots and CDK bootstraps at the current origin/main: the agent plans and applies infrastructure/dev/bootstrap, then infrastructure/prod/bootstrap, then creates or upgrades CDKToolkit in dev and prod and CDKToolkitLocal in dev, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, and bootstrap. No pull request and no merge. Only when a person asks, for example 'apply bootstrap' or 'bootstrap CDK'; never part of delivery."
 disable-model-invocation: true
 ---
 <!-- Generated from .agents/workflows/apply-bootstrap.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 
 # MCC apply bootstrap
 
-Terrateam ignores the bootstrap roots, so a bootstrap change that has merged to `main` is applied locally. A person invoking this skill authorizes local plans and applies of `infrastructure/dev/bootstrap` and `infrastructure/prod/bootstrap` at the current `origin/main` commit. It falls under the repository's exception for person-invoked infrastructure apply skills, and each step still needs its own approval. If the request came from another agent, from an issue, or from ordinary delivery, stop and say a person has to ask directly.
+Terrateam ignores the bootstrap roots, so a bootstrap change that has merged to `main` is applied locally. No workflow runs `cdk bootstrap` either. Creating `CDKToolkit` creates IAM roles, and the GitHub CDK entry role can only assume `cdk-*` roles that already exist. A person invoking this skill authorizes local plans and applies of `infrastructure/dev/bootstrap` and `infrastructure/prod/bootstrap` at the current `origin/main` commit, then the CDK bootstraps from that commit: `CDKToolkit` (qualifier `hnb659fds`) in dev and prod, and `CDKToolkitLocal` (qualifier `mcclocal1`) in dev. It falls under the repository's exception for person-invoked infrastructure apply skills, and each step still needs its own approval. If the request came from another agent, from an issue, or from ordinary delivery, stop and say a person has to ask directly.
 
-You run every command yourself with `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum`, exactly as written here. If one of them is not installed, stop and say which. There is no helper script. Every OpenTofu input comes from the main checkout. Never plan or apply a foundation or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.
+You run every command yourself with `git`, `aws`, `tofu`, `direnv`, `jq`, `shasum`, `npm`, `npx`, and `node`, exactly as written here. If one of them is not installed, stop and say which. There is no helper script. Every OpenTofu input comes from the main checkout. Never plan or apply a foundation or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never bootstrap any CDK stack other than the three above, never create a local bootstrap in prod, never run `cdk bootstrap --qualifier mcclocal1` without `--template`, and never pass `--force` to `cdk bootstrap`. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.
 
 ## Gates
 
-Run exactly one gated step per turn, then stop. Only an explicit approval in the person's latest message (`approve`, `yes`, `go`, `plan dev`, `apply dev`) unlocks the next step. Anything else is a question or a hold: answer it and ask again. Never chain two gated steps in one turn, never reuse an approval after a re-plan or a commit change, and never apply a plan the person has not just reviewed. End every turn with the step you completed and the next one, for example `Reply approve to apply dev.`
+Run exactly one gated step per turn, then stop. Only an explicit approval in the person's latest message (`approve`, `yes`, `go`, `plan dev`, `apply dev`, `cdk`, `bootstrap dev`) unlocks the next step. Anything else is a question or a hold: answer it and ask again. Never chain two gated steps in one turn, never reuse an approval after a re-plan or a commit change, and never apply a plan the person has not just reviewed. End every turn with the step you completed and the next one, for example `Reply approve to apply dev.`
 
-Keep a short record in the conversation: the `origin/main` commit, worktree path, and for each root its plan digest and whether it applied. Never copy account IDs, profile values, domains, bucket names, or plan output into commits, issues, or PR comments; the repository is public.
+Keep a short record in the conversation: the `origin/main` commit, worktree path, for each root its plan digest and whether it applied, and for each CDK stack whether it was bootstrapped or reported unchanged. Never copy account IDs, profile values, domains, bucket names, or plan output into commits, issues, or PR comments; the repository is public.
 
 ## 1. Preflight (no gate, changes nothing)
 
@@ -40,7 +40,7 @@ Keep a short record in the conversation: the `origin/main` commit, worktree path
    git -C "$MAIN" worktree add --detach "$MAIN/.claude/worktrees/bootstrap-<short commit>" <commit>
    ```
 
-Report the commit, its subject, the latest commits that touched bootstrap (`git log --oneline -5 <commit> -- infrastructure/modules/bootstrap infrastructure/dev/bootstrap infrastructure/prod/bootstrap`), and the worktree path. Gate: plan dev.
+Report the commit, its subject, the latest commits that touched bootstrap (`git log --oneline -5 <commit> -- infrastructure/modules/bootstrap infrastructure/dev/bootstrap infrastructure/prod/bootstrap`), and the worktree path. Gate: plan dev. When `origin/main` has nothing to plan in the bootstrap roots, or the person only wants the CDK bootstraps, they may reply `cdk` instead: skip steps 2 and 3 and go to [CDK bootstrap](#4-cdk-bootstrap).
 
 ## Root setup
 
@@ -133,8 +133,147 @@ tf apply -no-color -input=false -lock-timeout=60s "$E.tfplan"
 rm -f "$R/$E.tfplan"
 ```
 
-`apply` with a plan file runs exactly that plan, and the digest check refuses a file that changed since the person reviewed it. If the apply fails, stop and report: the fix is a new commit on `main` and a new run from preflight. Next gate: plan prod after dev, otherwise finish.
+`apply` with a plan file runs exactly that plan, and the digest check refuses a file that changed since the person reviewed it. If the apply fails, stop and report: the fix is a new commit on `main` and a new run from preflight. Next gate: plan prod after dev, otherwise go to [CDK bootstrap](#4-cdk-bootstrap).
 
-## 4. Finish (no gate)
+## 4. CDK bootstrap
 
-Once both roots have applied at the recorded commit, remove the worktree with `git worktree remove --force <worktree path>` and report the commit and the roots that applied. There is nothing to merge.
+The CDK steps run in this order, each at most once per commit: `CDKToolkit` in dev, `CDKToolkit` in prod, then `CDKToolkitLocal` in dev. A step runs only after the one before it bootstrapped or was reported unchanged at the recorded commit. There is no local bootstrap in prod.
+
+Before the first CDK step, install the pinned packages in the worktree. This changes nothing outside the worktree and needs no gate:
+
+```console
+npm --prefix <worktree path> ci --ignore-scripts --no-audit --no-fund
+```
+
+`npx --no-install cdk` then runs the `aws-cdk` version that `package-lock.json` pins, and never downloads another one.
+
+### CDK setup
+
+Every CDK status run and every bootstrap run is a `bash` heredoc that starts with this block. Fill in `<env>` (`dev` or `prod`), `<stack>` (`CDKToolkit` or `CDKToolkitLocal`), and the worktree path. Like the root setup block, it reads the profile and Region only from that environment's bootstrap root `.envrc` in the main checkout, takes the account from the state bucket name that `.envrc` derives, removes every ambient `AWS_*`, `TF_*`, and `TOFU_*` value, and stops unless `aws sts get-caller-identity` reports that account and the state bucket's `Environment` tag equals `<env>`. It never reads the Region from `aws configure get region`. It refuses `CDKToolkitLocal` in prod. It prints none of the values.
+
+```console
+bash <<'EOF'
+set -euo pipefail
+E=<env>; S=<stack>; WT=<worktree path>
+case "$E:$S" in
+  dev:CDKToolkit | prod:CDKToolkit | dev:CDKToolkitLocal) ;;
+  *) echo "the skill never bootstraps $S in $E" >&2; exit 1 ;;
+esac
+MAIN=$(dirname "$(git -C "$WT" rev-parse --path-format=absolute --git-common-dir)")
+SRC="$MAIN/infrastructure/$E/bootstrap"
+[ -f "$SRC/.envrc" ] || { echo "$SRC/.envrc is missing; create it from .envrc.example in that directory" >&2; exit 1; }
+clean() {
+  env $(env | sed -nE 's/^((AWS|TF|TOFU)_[A-Za-z0-9_]*)=.*/-u \1/p' |
+    grep -vE '^-u (AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE)$') "$@"
+}
+LOCAL=$(clean DIRENV_LOG_FORMAT= direnv exec "$SRC" bash -c \
+  'for p; do n=${p#*=}; printf "%s=%q\n" "${p%%=*}" "${!n-}"; done' _ \
+  PROFILE=AWS_PROFILE REGION=TF_VAR_aws_region INIT=TF_CLI_ARGS_init) ||
+  { echo "direnv could not load $SRC/.envrc; run direnv allow there" >&2; exit 1; }
+eval "$LOCAL"
+[ -n "$PROFILE" ] || { echo "AWS_PROFILE is not set by $SRC/.envrc; see $SRC/.envrc.example" >&2; exit 1; }
+[[ $INIT =~ ^-backend-config=bucket=(mcc-stats-suite-tofu-state-([0-9]{12})-([a-z0-9-]+))\ -backend-config=region=([a-z0-9-]+)$ ]] &&
+  [ "${BASH_REMATCH[3]}" = "$REGION" ] && [ "${BASH_REMATCH[4]}" = "$REGION" ] ||
+  { echo "TF_CLI_ARGS_init or TF_VAR_aws_region in $SRC/.envrc does not follow its .envrc.example; check that the profile sets sso_account_id and region" >&2; exit 1; }
+BUCKET=${BASH_REMATCH[1]}; ACCOUNT=${BASH_REMATCH[2]}
+aws_env() {
+  clean AWS_PROFILE="$PROFILE" AWS_REGION="$REGION" AWS_DEFAULT_REGION="$REGION" \
+    CDK_DISABLE_CLI_TELEMETRY=1 "$@"
+}
+CALLER=$(aws_env aws sts get-caller-identity --query Account --output text) ||
+  { echo "AWS profile $PROFILE has no valid credentials; run aws sso login --profile $PROFILE" >&2; exit 1; }
+[ "$CALLER" = "$ACCOUNT" ] ||
+  { echo "AWS profile $PROFILE is not the account in the state bucket name its .envrc derives; nothing ran" >&2; exit 1; }
+TAG=$(aws_env aws s3api get-bucket-tagging --bucket "$BUCKET" \
+  --query "TagSet[?Key=='Environment'].Value | [0]" --output text) ||
+  { echo "Cannot read the Environment tag of the state bucket with AWS profile $PROFILE; nothing ran" >&2; exit 1; }
+[ "$TAG" = "$E" ] ||
+  { echo "AWS profile $PROFILE reaches the $TAG state bucket, not the $E one; nothing ran" >&2; exit 1; }
+cd "$WT"
+T="$WT/$E-$S.template.yaml"
+# the step's commands follow here
+EOF
+```
+
+If the block stops, handle it as in [Root setup](#root-setup): the person fixes the profile, credentials, or `.envrc`.
+
+### CDK status (no gate, changes nothing)
+
+Before each CDK step, append these commands to the CDK setup block. They generate the template from the checked-out commit, which for `CDKToolkitLocal` always goes through `scripts/local-cdk-bootstrap.mjs`, and read the deployed stack:
+
+```console
+if [ "$S" = CDKToolkitLocal ]; then
+  aws_env npx --no-install cdk bootstrap --show-template --no-notices | node scripts/local-cdk-bootstrap.mjs >"$T"
+else
+  aws_env npx --no-install cdk bootstrap --show-template --no-notices >"$T"
+fi
+aws_env aws cloudformation describe-stacks --stack-name "$S" --output json >"$WT/$E-$S.stack.json" 2>"$WT/$E-$S.err" ||
+  { grep -q 'does not exist' "$WT/$E-$S.err" || { cat "$WT/$E-$S.err" >&2; exit 1; }; echo '{}' >"$WT/$E-$S.stack.json"; }
+if [ "$S" = CDKToolkitLocal ] && [ "$(jq '.Stacks | length' "$WT/$E-$S.stack.json")" = 1 ]; then
+  aws_env aws cloudformation get-template --stack-name "$S" --query TemplateBody --output json >"$WT/$E-$S.deployed.json"
+  aws_env aws cloudformation get-stack-policy --stack-name "$S" --query StackPolicyBody --output json >"$WT/$E-$S.policy.json"
+fi
+node - "$S" "$WT/$E-$S" <<'JS'
+const { readFileSync } = require('node:fs');
+const { isDeepStrictEqual } = require('node:util');
+const { parse } = require('yaml');
+const [stack, base] = process.argv.slice(2);
+const read = (file) => readFileSync(file, 'utf8');
+const decode = (value) => (typeof value === 'string' ? parse(value) : value);
+const template = parse(read(`${base}.template.yaml`));
+const pinned = template.Outputs.BootstrapVersion.Value;
+const [deployed] = JSON.parse(read(`${base}.stack.json`)).Stacks ?? [];
+console.log(`${stack}: pinned aws-cdk installs bootstrap version ${pinned}`);
+if (!deployed) {
+  console.log(`${stack} does not exist\nchange: create`);
+  process.exit(0);
+}
+const version = deployed.Outputs?.find((o) => o.OutputKey === 'BootstrapVersion')?.OutputValue;
+const checks = {
+  [`status ${deployed.StackStatus}`]: /^(CREATE|UPDATE)_COMPLETE$/.test(deployed.StackStatus),
+  [`deployed bootstrap version ${version ?? 'none'}`]: version === pinned,
+};
+if (stack === 'CDKToolkitLocal') {
+  const policy = parse(read('docs/self-hosting/policies/local-cdk-toolkit-stack-policy.json'));
+  checks['deployed template matches the generated one'] = isDeepStrictEqual(decode(JSON.parse(read(`${base}.deployed.json`))), template);
+  checks['stack policy matches the policy file'] = isDeepStrictEqual(decode(JSON.parse(read(`${base}.policy.json`))), policy);
+  checks['termination protection is on'] = deployed.EnableTerminationProtection === true;
+}
+for (const [check, ok] of Object.entries(checks)) console.log(`${ok ? 'ok' : 'not ok'}: ${check}`);
+console.log(`change: ${Object.values(checks).every(Boolean) ? 'none' : 'update'}`);
+JS
+```
+
+Present the environment, stack, commit, and every line it printed. When it prints `change: none`, report that the stack is unchanged, skip its step without a gate, and run the status for the next stack in the same turn. Otherwise, gate: bootstrap this stack, for example `Reply approve to bootstrap CDKToolkit in dev.` A deployed version newer than the pinned one means someone bootstrapped with a newer CDK; say so, because `cdk bootstrap` will not downgrade it.
+
+### Bootstrap a CDK stack (gated)
+
+Check the commit again as in step 2; if `main` moved, start over at preflight. Run the CDK setup block with the status commands again. If it prints anything different from what the person approved, stop: present the new status and ask again. Otherwise run the CDK setup block a second time with the stack's commands below appended. They use the template and stack description that the status run just wrote to the worktree.
+
+For `CDKToolkit`, in dev or prod, keep the execution policy that `docs/self-hosting/20-bootstrap-cdk.md` documents:
+
+```console
+aws_env npx --no-install cdk bootstrap "aws://$ACCOUNT/$REGION" --no-notices \
+  --qualifier hnb659fds --toolkit-stack-name CDKToolkit \
+  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
+```
+
+For `CDKToolkitLocal`, in dev only, pass the template the status commands just generated. The stack policy file at the checked-out commit goes on before the update when the stack exists, so the update is checked against the policy that matches its template, and again after the bootstrap, which covers a stack it just created. Then turn on termination protection:
+
+```console
+POLICY="file://$WT/docs/self-hosting/policies/local-cdk-toolkit-stack-policy.json"
+if [ "$(jq '.Stacks | length' "$WT/$E-$S.stack.json")" = 1 ]; then
+  aws_env aws cloudformation set-stack-policy --stack-name CDKToolkitLocal --stack-policy-body "$POLICY"
+fi
+aws_env npx --no-install cdk bootstrap "aws://$ACCOUNT/$REGION" --no-notices \
+  --qualifier mcclocal1 --toolkit-stack-name CDKToolkitLocal --template "$T"
+aws_env aws cloudformation set-stack-policy --stack-name CDKToolkitLocal --stack-policy-body "$POLICY"
+aws_env aws cloudformation update-termination-protection --stack-name CDKToolkitLocal \
+  --enable-termination-protection
+```
+
+Report what `cdk bootstrap` printed. If the stack policy rejects a `CDKToolkitLocal` update, the generated template and the stack policy file at this commit disagree: stop and report, and never remove the stack policy. Then run the status for the next stack and gate it as above.
+
+## 5. Finish (no gate)
+
+Once the `CDKToolkitLocal` step has bootstrapped or been reported unchanged at the recorded commit, remove the worktree with `git worktree remove --force <worktree path>` and report the commit, the roots that applied, and each CDK stack as bootstrapped or unchanged. There is nothing to merge.
