@@ -9,6 +9,7 @@
 // Gamertags come only from arguments and are printed only to the terminal. The
 // script reads no input file and writes no file. Only the account check and the
 // roster calls below reach AWS, through the AWS CLI with the checked profile.
+import { CliError, CliHelp, defineCli, parseCli } from './cli.cjs';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createInterface } from 'node:readline/promises';
@@ -57,14 +58,16 @@ export const MAX_WRITE_ATTEMPTS = 3;
 // small: a change item holds at most a 256-character reason and one STS ARN.
 export const CHANGE_PAGE_ITEMS = 100;
 
-const VALUE_OPTIONS = new Set([
-  '--environment',
-  '--ephemeral',
-  '--profile',
-  '--reason',
-  '--after',
+const CLI = defineCli(USAGE, [
+  'environment',
+  'ephemeral',
+  'profile',
+  'reason',
+  'after',
+  'yes',
+  'inactive',
+  'all',
 ]);
-const FLAG_OPTIONS = new Set(['--yes', '--inactive', '--all']);
 const GLOBAL_OPTIONS = ['--environment', '--ephemeral', '--profile'];
 const WRITE_OPTIONS = ['--reason', '--yes'];
 const COMMANDS = {
@@ -98,29 +101,15 @@ class ExitError extends Error {
  * not list, so a mistyped command never reaches AWS.
  */
 export function parseArguments(argv) {
-  const options = {};
-  const positional = [];
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index];
-    if (!argument.startsWith('-')) {
-      positional.push(argument);
-      continue;
-    }
-    const name = argument.slice(2);
-    if (name in options) usage(`${argument} is given more than once`);
-    if (VALUE_OPTIONS.has(argument)) {
-      const value = argv[index + 1];
-      if (value === undefined || value.startsWith('--')) {
-        usage(`${argument} requires a value`);
-      }
-      options[name] = value;
-      index += 1;
-    } else if (FLAG_OPTIONS.has(argument)) {
-      options[name] = true;
-    } else {
-      usage(`Unknown option ${argument}`);
-    }
+  let parsed;
+  try {
+    parsed = parseCli(argv, CLI);
+  } catch (error) {
+    if (error instanceof CliError)
+      throw new ExitError(EXIT_ERROR, error.message);
+    throw error;
   }
+  const { options, positionals: positional } = parsed;
   const [command, ...operands] = positional;
   const rule = COMMANDS[command];
   if (!rule) usage(command ? `Unknown command ${command}` : 'Name a command');
@@ -156,7 +145,7 @@ export function parseArguments(argv) {
 }
 
 function usage(message) {
-  throw new ExitError(EXIT_ERROR, `${message}\n\n${USAGE}`);
+  throw new ExitError(EXIT_ERROR, `${message}\n\n${CLI.help}`);
 }
 
 /**
@@ -169,6 +158,10 @@ export async function main(argv, dependencies = defaultDependencies()) {
     await run(parseArguments(argv), dependencies);
     return EXIT_OK;
   } catch (error) {
+    if (error instanceof CliHelp) {
+      dependencies.stdout(`${error.message}\n`);
+      return EXIT_OK;
+    }
     if (error instanceof ExitError) {
       stderr(`${error.message}\n`);
       return error.status;

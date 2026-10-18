@@ -32,7 +32,7 @@ email with one or more screenshots
 
 Each screenshot has its own processing run. Replays create new runs and never replace earlier evidence. The package can also compare two runs and materialize screenshot-safe training, validation, and test datasets. It does not create matches, associate maps, adjudicate OCR, or train models yet.
 
-Read the [`match-to-csv` documentation](applications/match-to-csv/README.md) for its evidence layout, replay input, comparison behavior, and training-data output.
+Read the [`match-to-csv` documentation](applications/match-to-csv/README.md) for setup, submission, results, and its evidence layout.
 
 ## Components
 

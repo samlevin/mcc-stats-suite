@@ -12,6 +12,8 @@ Each application owns a CDK stack per environment:
 
 For a stable deploy, the wrapper confirms that the active AWS account matches `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID`, or the profile's `sso_account_id` when the variable is unset. It then builds `@mcc/cdk-config` and runs `cdk deploy` for the application, passing any other options through unchanged. The wrapper does not compare the release with the deployed template, so it will not stop a change that removes or replaces a stateful resource or a custom resource. The production job prints a CDK diff before it deploys, but nothing gates the deploy on that diff. If the deploy fails, see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure).
 
+The CDK wrapper, roster, and recipients accept `-env` for `--environment`, `-e` for `--ephemeral`, and `-p` for `--profile`. Both `-env dev` and `-env=dev` work. Use `-h` or `--help` for the command's options. The [shared CLI convention](../../scripts/README.md) lists the alias table, value syntax, and entry point coverage.
+
 ## Ephemeral stacks
 
 Test application changes in an ephemeral stack before opening a pull request. Use the `mcc-dev` profile and a name of 1 to 20 lowercase letters, numbers, or hyphens that starts with a letter or number. Names such as `devin` and `sam-devtest` are allowed. The exact names `dev` and `prod` are reserved for the shared environments, and `incoming` and `ephemeral` are reserved object prefixes:
@@ -19,7 +21,7 @@ Test application changes in an ephemeral stack before opening a pull request. Us
 ```console
 aws sso login --profile "$AWS_PROFILE"
 aws sts get-caller-identity
-npm run app:synth -- <application> --environment dev --ephemeral <name>
+npm run app:synth -- <application> -env dev -e <name>
 npm run app:diff -- <application> --environment dev --ephemeral <name>
 npm run app:deploy -- <application> --environment dev --ephemeral <name>
 ```
@@ -129,7 +131,7 @@ Each environment's roster table holds the gamertag roster ([spec 1.2](../../spec
 ```console
 export AWS_PROFILE=mcc-dev-admin
 aws sso login --profile "$AWS_PROFILE"
-npm run roster -- --environment dev list
+npm run roster -- -env dev list
 npm run roster -- --environment dev add 'Player01' 'Player 02' --reason 'new season'
 npm run roster -- --environment dev deactivate 'Player 02' --reason 'renamed'
 npm run roster -- --environment dev reactivate 'Player 02'
@@ -156,7 +158,7 @@ Each environment's recipient table holds the addresses that receive each submiss
 ```console
 export AWS_PROFILE=mcc-dev-admin
 aws sso login --profile "$AWS_PROFILE"
-npm run recipients -- --environment dev list
+npm run recipients -- -env dev list
 npm run recipients -- --environment dev add 'player@example.test' 'teammate@example.test' --reason 'new season'
 npm run recipients -- --environment dev deactivate 'teammate@example.test' --reason 'left'
 npm run recipients -- --environment dev reactivate 'teammate@example.test'

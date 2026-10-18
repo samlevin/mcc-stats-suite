@@ -1,6 +1,27 @@
 #!/usr/bin/env node
+import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+
+const CLI = defineCli(
+  'Usage: release-metadata.mjs --check | --application <name>',
+  ['check', 'application'],
+);
+let options;
+try {
+  const parsed = parseCli(process.argv.slice(2), CLI);
+  options = parsed.options;
+  if (parsed.positionals.length)
+    throw cliError(CLI, 'Unexpected positional argument');
+  if (!options.check && !options.application)
+    throw cliError(CLI, 'pass --check or --application <name>');
+} catch (error) {
+  if (error instanceof CliHelp) {
+    console.log(error.message);
+    process.exit(0);
+  }
+  fail(error.message);
+}
 
 const repositoryRoot = resolve(import.meta.dirname, '..');
 const releaseConfig = readJson('release-please-config.json');
@@ -18,12 +39,8 @@ if (errors.length > 0) {
   process.exit(1);
 }
 
-const applicationIndex = process.argv.indexOf('--application');
-if (applicationIndex !== -1) {
-  const requested = process.argv[applicationIndex + 1];
-  if (!requested || requested.startsWith('--')) {
-    fail('--application requires a workspace name');
-  }
+if (options.application !== undefined) {
+  const requested = options.application;
   const workspace = packagesByName.get(`@mcc/${requested}`);
   if (!workspace || !workspace.path.startsWith('applications/')) {
     fail(`unknown application: ${requested}`);
@@ -42,8 +59,6 @@ if (applicationIndex !== -1) {
       sharedPackages: internalDependencies,
     }),
   );
-} else if (!process.argv.includes('--check')) {
-  fail('pass --check or --application <name>');
 }
 
 function discoverWorkspaces() {
