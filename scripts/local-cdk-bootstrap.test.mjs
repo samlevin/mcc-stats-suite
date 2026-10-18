@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile, execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,25 +18,17 @@ import {
   localDeployArguments,
 } from './cdk-targets.mjs';
 import {
+  INLINE_TEMPLATE_BODY_LIMIT,
   LOCAL_POLICY_RESOURCES,
+  LOCAL_TEMPLATE_FILE,
   localBootstrap,
+  pinnedBootstrapTemplate,
+  renderLocalBootstrap,
 } from './local-cdk-bootstrap.mjs';
 
-// The CLI renders the pinned bootstrap template offline; telemetry and notices stay off.
-const quietCdk = { ...process.env, CDK_DISABLE_CLI_TELEMETRY: '1' };
-const upstream = parse(
-  execFileSync(
-    'node',
-    [
-      'node_modules/aws-cdk/bin/cdk',
-      'bootstrap',
-      '--show-template',
-      '--no-notices',
-    ],
-    { encoding: 'utf8', env: quietCdk },
-  ),
-);
+const upstream = pinnedBootstrapTemplate();
 const template = localBootstrap(upstream);
+const LOCAL_ROOT = 'infrastructure/dev/local-cdk';
 const resources = template.Resources;
 const policyOf = (name) => resources[name].Properties.PolicyDocument;
 const deployment =
@@ -980,10 +972,7 @@ test('the local permission set assumes only the four local roles', () => {
 
 test('the toolkit stack policy keeps the local policies from being deleted', () => {
   const stackPolicy = JSON.parse(
-    readFileSync(
-      'docs/self-hosting/policies/local-cdk-toolkit-stack-policy.json',
-      'utf8',
-    ),
+    readFileSync(`${LOCAL_ROOT}/stack-policy.json`, 'utf8'),
   );
   for (const name of LOCAL_POLICY_RESOURCES) {
     assert.ok(resources[name], `${name} exists in the template`);
@@ -1004,6 +993,90 @@ test('the toolkit stack policy keeps the local policies from being deleted', () 
       (entry) => entry.Effect === 'Allow' && entry.Resource === '*',
     ),
   );
+});
+
+test('the committed local bootstrap template matches a fresh generation', () => {
+  assert.ok(
+    readFileSync(LOCAL_TEMPLATE_FILE, 'utf8') ===
+      renderLocalBootstrap(upstream),
+    `${LOCAL_ROOT}/bootstrap-template.json is stale; run npm run cdk:local-template and commit it`,
+  );
+});
+
+test('the committed local bootstrap template is JSON, so it has no YAML anchors or aliases', () => {
+  // CloudFormation rejects YAML anchors and aliases in a template body.
+  assert.doesNotThrow(
+    () => JSON.parse(readFileSync(LOCAL_TEMPLATE_FILE, 'utf8')),
+    `${LOCAL_ROOT}/bootstrap-template.json must be JSON`,
+  );
+});
+
+test('the committed local bootstrap template fits an inline template body', () => {
+  const { size } = statSync(LOCAL_TEMPLATE_FILE);
+  assert.ok(
+    size <= INLINE_TEMPLATE_BODY_LIMIT,
+    `${LOCAL_ROOT}/bootstrap-template.json is ${size} bytes; CloudFormation accepts at most ${INLINE_TEMPLATE_BODY_LIMIT} bytes inline`,
+  );
+});
+
+test('the local-cdk root deploys the committed template as the local toolkit stack', () => {
+  const root = readFileSync(`${LOCAL_ROOT}/main.tf`, 'utf8');
+  const stacks = [...root.matchAll(/^resource "([^"]+)"/gm)].map(
+    ([, type]) => type,
+  );
+  assert.deepEqual(stacks, ['aws_cloudformation_stack']);
+  const value = (name) =>
+    root.match(new RegExp(`^\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'm'))?.[1];
+  assert.equal(value('name'), `"${LOCAL_TOOLKIT_STACK_NAME}"`);
+  assert.equal(
+    value('template_body'),
+    'file("${path.module}/bootstrap-template.json")',
+  );
+  assert.equal(
+    LOCAL_TEMPLATE_FILE,
+    join(process.cwd(), LOCAL_ROOT, 'bootstrap-template.json'),
+  );
+  assert.equal(
+    value('policy_body'),
+    'file("${path.module}/stack-policy.json")',
+  );
+  assert.equal(value('capabilities'), '["CAPABILITY_NAMED_IAM"]');
+  assert.equal(value('Qualifier'), `"${LOCAL_QUALIFIER}"`);
+  // `cdk bootstrap` passes this value; the template's empty default would
+  // create a customer-managed KMS key.
+  assert.equal(value('FileAssetsBucketKmsKeyId'), '"AWS_MANAGED_KEY"');
+  assert.equal(template.Parameters.FileAssetsBucketKmsKeyId.Default, '');
+  assert.equal(value('prevent_destroy'), 'true');
+  assert.ok(!existsSync('infrastructure/prod/local-cdk'), 'dev only');
+});
+
+test('Terrateam plans the local-cdk root, in dev only, when its template or stack policy changes', () => {
+  const config = parse(readFileSync('.terrateam/config.yml', 'utf8'));
+  const entry = config.dirs[LOCAL_ROOT];
+  assert.ok(entry, `${LOCAL_ROOT} has a Terrateam entry`);
+  assert.ok(entry.tags.includes('dev'));
+  assert.ok(!entry.tags.includes('prod'));
+  // Terrateam globs: * stays within one directory.
+  const plans = (file) =>
+    entry.when_modified.file_patterns.some((pattern) =>
+      new RegExp(
+        `^${pattern
+          .replace('${DIR}', LOCAL_ROOT)
+          .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+          .replaceAll('*', '[^/]*')}$`,
+      ).test(file),
+    );
+  for (const file of [
+    'main.tf',
+    'versions.tf',
+    '.terraform.lock.hcl',
+    'bootstrap-template.json',
+    'stack-policy.json',
+  ]) {
+    assert.ok(plans(`${LOCAL_ROOT}/${file}`), file);
+  }
+  assert.ok(plans('.terrateam/config.yml'));
+  assert.ok(!plans(`${LOCAL_ROOT}/.envrc.example`));
 });
 
 test('only the dev Terrateam role may manage the local toolkit stack and its IAM resources', () => {
