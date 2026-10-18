@@ -117,14 +117,14 @@ variable "create_cdk_deploy_role" {
   default     = true
 }
 
-variable "manage_local_cdk_policies" {
-  description = "Let the Terrateam role create, update, and delete the five local CDK permission policies and no other policy. Only dev has local CDK deployments."
+variable "manage_local_cdk_bootstrap" {
+  description = "Let the Terrateam role create, update, and delete the CDKToolkitLocal stack and the cdk-mcclocal1-* roles and mcc-stats-suite-local-* policies it creates. Only dev has local CDK deployments."
   type        = bool
   default     = false
 
   validation {
-    condition     = !var.manage_local_cdk_policies || var.environment == "dev"
-    error_message = "manage_local_cdk_policies is allowed only in dev."
+    condition     = !var.manage_local_cdk_bootstrap || var.environment == "dev"
+    error_message = "manage_local_cdk_bootstrap is allowed only in dev."
   }
 }
 

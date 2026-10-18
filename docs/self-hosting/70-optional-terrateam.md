@@ -35,7 +35,8 @@ The Terrateam indexer is disabled, so Terrateam plans a root only when a changed
 Set `create_terrateam_role = true` in each account's `bootstrap.auto.tfvars` and apply the bootstrap as in [Bootstrap the dev and prod accounts](10-bootstrap-accounts.md). The bootstrap then creates `mcc-stats-suite-<environment>-terrateam` with:
 
 - `PowerUserAccess`;
-- an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role, with the `mcc-stats-suite-workload-boundary` permissions boundary; and
+- an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role, with the `mcc-stats-suite-workload-boundary` permissions boundary;
+- in dev only, an inline grant to manage the `CDKToolkitLocal` stack and the IAM resources it creates, scoped by name to roles named `cdk-mcclocal1-*` and policies named `mcc-stats-suite-local-*`; and
 - a trust policy that accepts GitHub OIDC tokens only from this repository, the `terrateam_workflow_path` workflow (`.github/workflows/terrateam.yml` by default), and the `terrateam-action[bot]` actor.
 
 GitHub needs no role ARN: the committed configuration builds `arn:aws:iam::<account>:role/mcc-stats-suite-<environment>-terrateam` from the account ID, the same name `tofu output -raw terrateam_role_arn` reports. Apply bootstrap changes before any foundation change that depends on them; the Terrateam role cannot create the Turbo cache role until the bootstrap grants it.
