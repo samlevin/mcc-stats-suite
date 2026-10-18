@@ -6,10 +6,13 @@ import {
   type Block,
 } from '@aws-sdk/client-textract';
 import type {
+  CsvRow,
   ExtractTextOutput,
+  PlayerResolution,
   ProcessingRunInput,
   S3ObjectReference,
 } from '@mcc/contracts';
+import { ROSTER_MATCHER_VERSION, resolvePlayers } from '@mcc/roster';
 import sharp from 'sharp';
 import {
   analyzeDocumentInput,
@@ -45,6 +48,7 @@ const versions = {
   tableParserVersion: 'scoreboard-parser-v5',
   semanticMapperVersion: 'scoreboard-semantic-v2',
   validationRulesVersion: 'scoreboard-validation-v2',
+  rosterMatcherVersion: ROSTER_MATCHER_VERSION,
 };
 
 interface ImageMetadata {
@@ -173,7 +177,9 @@ export async function runExtraction(
     validateTextractImage(image, metadata, source.sha256);
     // The roster is read before Textract, so a roster failure never costs a
     // provider call.
-    const { reference: roster } = await dependencies.readRoster(source.bucket);
+    const { reference: roster, entries } = await dependencies.readRoster(
+      source.bucket,
+    );
     const invokedAt = dependencies.timestamp();
     request = await dependencies.writeJson(
       source.bucket,
@@ -203,6 +209,15 @@ export async function runExtraction(
       blocks,
     );
     const { rows, noRowsReason } = processScoreboardImage(blocks, rowColors);
+    // Resolutions sit beside the names as read in the normalized observations
+    // only. The returned rows carry none, so no roster gamertag enters Step
+    // Functions state (spec 1.2 §1).
+    const resolutions = resolvePlayers(rows, entries);
+    const resolvedRows: CsvRow[] = rows.map((row, index) => ({
+      ...row,
+      playerResolution: resolutions[index],
+    }));
+    const playerMatchCounts = countMatches(resolutions);
     const normalized = normalize(rawBlocks, source, runId);
     const normalizedArtifact = await dependencies.writeJson(
       source.bucket,
@@ -218,7 +233,7 @@ export async function runExtraction(
         tokens: normalized.tokens,
         parser: {
           version: versions.tableParserVersion,
-          rows,
+          rows: resolvedRows,
           rowColors,
           ...(noRowsReason ? { noRowsReason } : {}),
         },
@@ -249,6 +264,7 @@ export async function runExtraction(
           detectedCellCount: normalized.cells.length,
           detectedTokenCount: normalized.tokens.length,
           extractedRowCount: rows.length,
+          playerMatchCounts,
         },
       },
     );
@@ -265,6 +281,7 @@ export async function runExtraction(
       runId,
       rowCount: rows.length,
       rosterVersion: roster.rosterVersion,
+      ...playerMatchCounts,
       ...(noRowsReason ? { noRowsReason } : {}),
     });
     dependencies.publishExtractionMetrics(rows.length);
@@ -293,6 +310,21 @@ export async function runExtraction(
     });
     throw error;
   }
+}
+
+/** How many rows matched exactly, resolved from a near reading, or matched nothing. */
+function countMatches(resolutions: readonly PlayerResolution[]): {
+  exact: number;
+  resolved: number;
+  unmatched: number;
+} {
+  const count = (status: PlayerResolution['status']) =>
+    resolutions.filter((resolution) => resolution.status === status).length;
+  return {
+    exact: count('EXACT'),
+    resolved: count('RESOLVED'),
+    unmatched: count('UNMATCHED'),
+  };
 }
 
 function validateTextractImage(

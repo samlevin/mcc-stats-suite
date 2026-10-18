@@ -1,0 +1,61 @@
+{
+  "name": "placeholder roster for the halo3 two-team captures",
+  "entries": [
+    {
+      "gamertagId": "placeholder-01",
+      "gamertag": "Player01 A"
+    },
+    {
+      "gamertagId": "placeholder-02",
+      "gamertag": "Player02"
+    },
+    {
+      "gamertagId": "placeholder-03",
+      "gamertag": "Player03"
+    },
+    {
+      "gamertagId": "placeholder-04",
+      "gamertag": "Player04"
+    },
+    {
+      "gamertagId": "placeholder-05",
+      "gamertag": "Player05"
+    },
+    {
+      "gamertagId": "placeholder-06",
+      "gamertag": "Player06"
+    },
+    {
+      "gamertagId": "placeholder-07",
+      "gamertag": "Player07"
+    },
+    {
+      "gamertagId": "placeholder-08",
+      "gamertag": "Player08"
+    },
+    {
+      "gamertagId": "placeholder-09",
+      "gamertag": "Player09"
+    },
+    {
+      "gamertagId": "placeholder-10",
+      "gamertag": "Player10 B C"
+    },
+    {
+      "gamertagId": "placeholder-11",
+      "gamertag": "Player11"
+    },
+    {
+      "gamertagId": "placeholder-12",
+      "gamertag": "Player12"
+    },
+    {
+      "gamertagId": "placeholder-13",
+      "gamertag": "Player13"
+    },
+    {
+      "gamertagId": "placeholder-14",
+      "gamertag": "Player14"
+    }
+  ]
+}

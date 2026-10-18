@@ -43,6 +43,10 @@ When the parser keeps an OCR misread as read and flags its row for review, the f
 
 The suite checks that one expected row holds `expected` and carries a review flag on `field`, replaces the value with `read`, and then compares the parser output with every expected row. A parser flag that `expectedRows` does not list, or a listed flag the parser does not produce, fails the test.
 
+## Placeholder roster
+
+`roster.fixture.json` is not a scoreboard fixture, and the scoreboard suite skips it as one. It holds `name` and `entries`, the roster entries (`gamertagId`, `gamertag`) of the 14 placeholder gamertags in the `halo3-two-team-capture-*` fixtures. The suite runs every scoreboard fixture through `runExtraction` with this roster, checks that names, review flags, and cell text stay as read, and checks the resolutions of both captures against spec 1.2 §9.1.
+
 ## Capturing a real screenshot
 
 The `halo3-two-team-capture-*` fixtures come from real Textract responses. Screenshots and raw responses contain real gamertags, so they, and the file that maps real names to placeholders, stay outside the repository. Both scripts refuse paths inside a Git working tree.
