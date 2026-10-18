@@ -96,13 +96,17 @@ export function localBootstrap(template) {
     arn('states', `stateMachine:${app}-e-*`),
   );
   const queues = applications.map((app) => arn('sqs', `${app}-e-*`));
-  const computeResources = [
+  // What a runtime invokes, starts, or sends to.
+  const runnableResources = [
     ...functions,
     ...stateMachines,
     ...applications.map((app) => arn('states', `execution:${app}-e-*`)),
     ...queues,
-    ...applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
   ];
+  const logGroups = applications.map((app) =>
+    arn('logs', `log-group:/aws/*/${app}-e-*`),
+  );
+  const computeResources = [...runnableResources, ...logGroups];
   const rules = applications.map((app) => arn('events', `rule/${app}-e-*`));
   const bootstrapVersion = arn(
     'ssm',
@@ -121,6 +125,8 @@ export function localBootstrap(template) {
   const viaS3 = {
     StringEquals: { 'kms:ViaService': sub('s3.${AWS::Region}.amazonaws.com') },
   };
+  // The foundation's dev roster table, <project>-dev-gamertag-roster (spec 6 §13.2).
+  const rosterTable = arn('dynamodb', 'table/*-dev-gamertag-roster');
   const localExecution = {
     'Fn::GetAtt': ['CloudFormationExecutionRole', 'Arn'],
   };
@@ -157,7 +163,7 @@ export function localBootstrap(template) {
       statement(
         'WriteEphemeralLogs',
         ['logs:CreateLogGroup', 'logs:CreateLogStream', 'logs:PutLogEvents'],
-        applications.map((app) => arn('logs', `log-group:/aws/*/${app}-e-*`)),
+        logGroups,
       ),
       // Functions read single dev application parameters at runtime, such as
       // match-to-csv's sender allowlist and the submission address it checks.
@@ -168,7 +174,8 @@ export function localBootstrap(template) {
         'ssm:GetParameter',
         applicationParameters,
       ),
-      // The app uses keys only for S3 server-side encryption.
+      // Apps use keys only for S3 server-side encryption and, below, roster reads
+      // through DynamoDB.
       statement(
         'UseKeysThroughS3',
         [
@@ -208,6 +215,33 @@ export function localBootstrap(template) {
         },
       }),
       deny('ProtectSharedInboundEmail', 's3:*', objects('incoming/dev/*')),
+      // One roster table holds every namespace's partition. A runtime reads only
+      // ROSTER#ephemeral/<name> for its own tag, never ROSTER#stable or another
+      // developer's (spec 6 §13.4). Null refuses a request that names no leading key,
+      // which ForAllValues would otherwise allow.
+      statement(
+        'ReadOwnRosterPartition',
+        ['dynamodb:GetItem', 'dynamodb:Query'],
+        rosterTable,
+        {
+          Condition: {
+            'ForAllValues:StringEquals': {
+              'dynamodb:LeadingKeys': `ROSTER#ephemeral/${OWN_TAG}`,
+            },
+            Null: { 'dynamodb:LeadingKeys': 'false' },
+          },
+        },
+      ),
+      // DynamoDB decrypts roster items under the foundation data key.
+      statement('DecryptThroughDynamoDB', 'kms:Decrypt', '*', {
+        Condition: {
+          StringEquals: {
+            'kms:ViaService': sub('dynamodb.${AWS::Region}.amazonaws.com'),
+          },
+        },
+      }),
+      // None of these actions applies to a log group, so the statement names only
+      // runnable resources and the boundary stays under the managed policy size limit.
       statement(
         'UseEphemeralCompute',
         [
@@ -218,7 +252,7 @@ export function localBootstrap(template) {
           'states:GetExecutionHistory',
           'sqs:SendMessage',
         ],
-        computeResources,
+        runnableResources,
       ),
       deny(
         'NoDeploymentOrIdentityAdministration',
