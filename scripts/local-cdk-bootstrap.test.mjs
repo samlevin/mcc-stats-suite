@@ -12,6 +12,7 @@ import {
   LOCAL_CHANGE_SET_NAME,
   LOCAL_QUALIFIER,
   LOCAL_ROLE_PATH,
+  LOCAL_TOOLKIT_STACK_NAME,
   cdkArguments,
   ephemeralNameError,
   localDeployArguments,
@@ -1005,27 +1006,71 @@ test('the toolkit stack policy keeps the local policies from being deleted', () 
   );
 });
 
-test('only the dev Terrateam role may manage exactly the local policies', () => {
+test('only the dev Terrateam role may manage the local toolkit stack and its IAM resources', () => {
   const grant = readFileSync(
-    'infrastructure/modules/bootstrap/local-cdk-policy-management.tf',
+    'infrastructure/modules/bootstrap/local-cdk-bootstrap-management.tf',
     'utf8',
   );
-  const list = grant.match(/local_cdk_policy_names = \[([^\]]*)\]/)?.[1];
-  assert.ok(list, 'bootstrap must list local_cdk_policy_names');
-  assert.deepEqual(
-    [...list.matchAll(/"([^"]*)"/g)].map(([, name]) => name).sort(),
-    LOCAL_POLICY_RESOURCES.map(
-      (name) => resources[name].Properties.ManagedPolicyName,
-    ).sort(),
-  );
+  const local = (name) => {
+    const value = grant.match(
+      new RegExp(`^\\s*${name}\\s*=\\s*"([^"]*)"`, 'm'),
+    )?.[1];
+    assert.ok(value, `bootstrap must set ${name}`);
+    return value;
+  };
+  assert.equal(local('local_cdk_toolkit_stack_name'), LOCAL_TOOLKIT_STACK_NAME);
+  const prefix = (name) => {
+    const pattern = local(name);
+    assert.match(pattern, /^[a-z0-9-]+-\*$/, `${name} is a name prefix`);
+    return pattern.slice(0, -1);
+  };
+  const rolePrefix = prefix('local_cdk_role_name_pattern');
+  const policyPrefix = prefix('local_cdk_policy_name_pattern');
+
+  const ofType = (type) =>
+    Object.entries(resources).filter(([, resource]) => resource.Type === type);
+  const roles = ofType('AWS::IAM::Role');
+  assert.ok(roles.length >= 5, 'the template creates the bootstrap roles');
+  for (const [name, resource] of roles) {
+    const roleName = resource.Properties.RoleName['Fn::Sub'].replace(
+      '${Qualifier}',
+      LOCAL_QUALIFIER,
+    );
+    assert.ok(roleName.startsWith(rolePrefix), `${name} is ${roleName}`);
+    // The grant matches role ARNs without a path.
+    assert.equal(resource.Properties.Path, undefined, `${name} has no path`);
+  }
+  for (const [name, resource] of ofType('AWS::IAM::ManagedPolicy')) {
+    if (resource.Condition) {
+      // The example boundary exists only with --example-permissions-boundary,
+      // which the local bootstrap never passes.
+      assert.equal(name, 'CdkBoostrapPermissionsBoundaryPolicy');
+      assert.equal(
+        template.Parameters.UseExamplePermissionsBoundary.Default,
+        'false',
+      );
+      continue;
+    }
+    assert.ok(
+      resource.Properties.ManagedPolicyName.startsWith(policyPrefix),
+      `${name} is ${resource.Properties.ManagedPolicyName}`,
+    );
+  }
+  for (const name of LOCAL_POLICY_RESOURCES) {
+    assert.ok(
+      resources[name].Properties.ManagedPolicyName.startsWith(policyPrefix),
+      name,
+    );
+  }
+
   assert.match(
     readFileSync('infrastructure/dev/bootstrap/main.tf', 'utf8'),
-    /^\s*manage_local_cdk_policies\s*=\s*true\s*$/m,
+    /^\s*manage_local_cdk_bootstrap\s*=\s*true\s*$/m,
   );
   for (const file of ['main.tf', 'bootstrap.auto.tfvars.example']) {
     assert.doesNotMatch(
       readFileSync(`infrastructure/prod/bootstrap/${file}`, 'utf8'),
-      /manage_local_cdk_policies/,
+      /manage_local_cdk_bootstrap/,
     );
   }
 });
