@@ -67,7 +67,7 @@ export interface RosterChange {
   gamertag: string;
   /** At most 256 characters. */
   reason: string | null;
-  /** The IAM `userArn` of the function URL caller. */
+  /** The IAM ARN of the caller who wrote the change, from STS. */
   actorArn: string;
   clientRequestId: string;
   changedAt: string;
