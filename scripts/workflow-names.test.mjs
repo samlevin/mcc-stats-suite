@@ -33,6 +33,7 @@ test('workflow files and names match the convention table', () => {
       '_delivery-promote-application.yml':
         'Delivery: promote application (reusable)',
       'ci-checks.yml': 'CI: checks',
+      'ci-infrastructure-gate.yml': 'CI: infrastructure merge gate',
       'ci-pr-title.yml': 'CI: PR title',
       'ci-secret-scan.yml': 'CI: secret scan',
       'delivery-deploy.yml': 'Delivery: deploy to dev then prod',

@@ -1,0 +1,63 @@
+name: 'CI: infrastructure merge gate'
+run-name: 'CI: infrastructure merge gate for ${{ github.event.pull_request.number || inputs.pull-request || github.event.sha }}'
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  status:
+  workflow_dispatch:
+    inputs:
+      pull-request:
+        description: Pull request number to evaluate
+        required: true
+        type: string
+
+# Evaluate current API state once per event, without polling or running PR code.
+concurrency:
+  group: infrastructure-gate-${{ github.event.pull_request.head.sha || github.event.sha || inputs.pull-request }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  evaluate-infrastructure:
+    name: Evaluate infrastructure merge requirements
+    if: github.event_name != 'status' || startsWith(github.event.context, 'terrateam ')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mark merge requirements pending before setup
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            let sha = context.payload.pull_request?.head.sha || context.payload.sha;
+            if (context.eventName === 'workflow_dispatch') {
+              const number = Number(context.payload.inputs['pull-request']);
+              if (!Number.isSafeInteger(number) || number < 1) throw new Error('Invalid PR number');
+              const { data: pr } = await github.rest.pulls.get({ ...context.repo, pull_number: number });
+              sha = pr.head.sha;
+            }
+            await github.rest.repos.createCommitStatus({
+              ...context.repo, sha, context: 'Require applicable Terrateam applies',
+              state: 'pending', description: 'Checking infrastructure merge requirements',
+            });
+      - name: Check out trusted default branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22.16.0'
+      - name: Install trusted dependencies without scripts
+        run: npm ci --ignore-scripts
+      - name: Evaluate current pull request heads
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const { updateGate } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/infrastructure-merge-gate.mjs`);
+            await updateGate({ github, context, core });

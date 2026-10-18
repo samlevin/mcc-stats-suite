@@ -30,6 +30,8 @@ Only Terrateam reads the email domain secrets, as the table shows. A local found
 
 Protect `main`: require pull requests and the `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits` status checks, require branches to be up to date, and block force pushes and deletion. Enable auto-merge if you want pull requests to merge when their checks pass.
 
+When Terrateam manages infrastructure, also require `Require applicable Terrateam applies`, with GitHub Actions as the expected source. Do not require `terrateam apply` globally. The infrastructure merge gate reports its own success for non-infrastructure changes and waits for real Terrateam applies on managed changes. [Configure the infrastructure merge requirement](70-optional-terrateam.md#configure-the-infrastructure-merge-requirement) covers setup, migration, and verification.
+
 ## Release Please
 
 Release Please opens release pull requests as a GitHub App. Pull requests opened with the workflow's `GITHUB_TOKEN` do not start other workflows, so they would never get the required checks.

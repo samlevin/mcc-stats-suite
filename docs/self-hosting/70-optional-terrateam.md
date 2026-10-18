@@ -6,7 +6,7 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 
 [`.terrateam/config.yml`](../../.terrateam/config.yml) and the generated `.github/workflows/terrateam.yml` define the setup. With them, Terrateam:
 
-- ignores pull requests from the Release Please branch, `release-please--branches--main`, and never plans or applies them;
+- ignores pull requests from the Release Please branch, `release-please--branches--main`, without evaluation, plans, applies, or comments;
 - plans the foundation roots only when a `terrateam plan` comment on the pull request asks for it, never when the pull request opens or changes; a change to `infrastructure/modules/foundation` or `.terrateam/config.yml` affects dev and prod, and a change to one environment root affects only that root;
 - never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
 - locks each root from its first apply until the pull request merges, and takes no lock when a pull request merges without a Terrateam apply;
@@ -62,6 +62,32 @@ Terrateam reads the repository secrets and variables from [Configure GitHub](30-
 
 The OIDC subject step assumes immutable OIDC subjects. A repository with mutable subjects changes that step to print `${GITHUB_REPOSITORY}`. The Terrateam runner substitutes `$NAME` and `${NAME}` in every command before it runs and rejects shell syntax such as `$(...)`, so keep any other `$` out of commands in that file.
 
+## Configure the infrastructure merge requirement
+
+The `main` ruleset requires `Require applicable Terrateam applies` from GitHub Actions alongside `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits`. Do not require `terrateam apply` globally: Terrateam intentionally sends no status for the excluded Release Please branch. Keep the pull-request requirement, up-to-date requirement, force-push/deletion protection, and existing bypass policy.
+
+`CI: infrastructure merge gate` publishes the required commit status on each open pull request head targeting `main`. It runs on pull-request changes, Terrateam status events, and manual dispatch. It reads trusted default-branch code and dependencies, never executes pull-request code, and marks the status pending before setup. A dependency installation or API failure leaves the gate pending or failed. It makes no plan, apply, or comment and never writes a `terrateam apply` result.
+
+The gate matches changed paths, including both sides of renames, against the union of the base and proposed `.terrateam/config.yml` mappings. Narrowing or removing a mapping cannot exempt a root managed by the protected base. Unmapped infrastructure source files, incomplete file lists, unsupported mapping syntax, and unreadable configuration block the gate. Explicitly disabled roots remain manual. The matcher supports `*`, `**`, `?`, `${DIR}`, and negated file patterns, with the committed default workspace only. Extend its implementation and tests before using other pattern syntax or workspaces.
+
+| Pull request contents | Required gate result |
+| --- | --- |
+| Release manifests, changelogs, lockfile, package versions, docs, or application code with no managed root changes | Success without contacting Terrateam or requiring any apply status |
+| Managed root, mapped module, root input revision, or local CDK template/policy | Pending until the current head has successful aggregate `terrateam apply` and per-root `terrateam apply: <root> default` statuses from `terrateam-action[bot]` |
+| Managed infrastructure on the excluded Release Please branch | Blocked until moved to a normally evaluated branch and applied |
+
+A partial apply, absent apply, failed retry, forged status, or success on an older commit cannot satisfy the gate. Terrateam retains explicit comment approval, dev-before-prod dependencies, access control, and apply locks. Its apply prerequisites ignore only this gate and its evaluator job, so applies can finish while the merge gate waits. Other CI checks and merge-conflict checks remain apply prerequisites. See [Terrateam apply requirements](https://stategraph.com/docs/orchestration/configuration#apply-requirements) for the `status_checks.ignore_matching` setting.
+
+Repository settings need separate human approval. To replace an existing unconditional `terrateam apply` requirement:
+
+1. Merge the workflow, gate script, and configuration through the existing protections. This configuration affects every managed root, so an authorized operator reviews and approves its applicable applies before merge. The trusted gate starts running only after its workflow and script exist on `main`.
+2. Manually dispatch `CI: infrastructure merge gate` from `main` with each existing pull request number that needs evaluation. Confirm the new status appears on its current head. For a release-only pull request, it succeeds without Terrateam activity.
+3. After explicit approval for the repository-settings change, edit the active `main` ruleset in one update: replace only `terrateam apply` with `Require applicable Terrateam applies`, using GitHub Actions as its expected source. Preserve the other three required checks and all other protections. Do not add the evaluator job as a required check, add a bypass, or send a synthetic apply result.
+4. Read back the effective ruleset and check sources. For example, use `gh api repos/OWNER/REPOSITORY/rulesets/RULESET_ID` and `gh api repos/OWNER/REPOSITORY/rules/branches/main`. Confirm the four required contexts above and the unchanged protections.
+5. Inspect a release-only pull request such as upstream #277. Verify all four requirements pass on its current head and that Terrateam sent no evaluation, comment, plan, or apply. Inspect an authorized managed-infrastructure pull request before applying, after dev only, and after all applicable approved applies. The gate must remain pending until every applicable root succeeds, then report success. Use the normal dev-before-prod and lock checks in [Change the foundation with Terrateam](#change-the-foundation-with-terrateam). These live checks require separately authorized applies.
+
+Changing files or rerunning the evaluator does not approve an apply or change the ruleset. A manual OpenTofu apply produces no Terrateam status and cannot satisfy this requirement. An administrator must separately approve any temporary protection maintenance needed for an outage recovery or a manual apply workflow. Never fabricate apply evidence.
+
 ## Install Terrateam
 
 1. Install the Terrateam GitHub App for only this repository.
@@ -83,11 +109,11 @@ Verify the setup before relying on it:
 4. Validate dev. If the change needs fixing, push a new commit, comment `terrateam plan`, review the new plan, and apply dev again.
 5. After the dev apply succeeds, Terrateam plans prod. If no prod plan appears, comment `terrateam plan prod and foundation`. Compare the prod plan with the applied dev plan, then comment `terrateam apply prod and foundation`. Terrateam locks the prod root until the pull request merges. Only repository administrators can apply prod, and prod cannot plan or apply until dev has applied.
 
-When every planned root has applied without error, Terrateam squash-merges the pull request using its title. A change confined to `infrastructure/prod/foundation` has no dev step. If the merge is blocked, for example by a pending required check, merge the pull request yourself once the checks pass.
+When every planned root has applied without error, Terrateam squash-merges the pull request using its title. A change confined to `infrastructure/prod/foundation` has no dev step. If the merge is blocked by another required check, merge the pull request yourself once all required checks pass. `Require applicable Terrateam applies` also requires success for every affected root, even if only some roots have been planned.
 
 Terrateam takes a lock only when it applies a root, and the merge releases it. Merging a pull request that Terrateam never applied, such as one applied outside Terrateam, takes no lock and does not block later foundation pull requests. Never force-unlock a pull request that has applied part of a change.
 
-When Terrateam cannot run, a person can invoke `/mcc-apply-foundation` in Claude Code or `$mcc-apply-foundation` in Codex for one pull request. An agent cannot start it for you. It reads the inputs from each foundation root's ignored `.envrc` in your checkout, which you create from the `.envrc.example` in that root. It checks the account, plans and applies dev before prod, applies only the saved plans that person reviewed, and squash-merges with the pull request title, stopping for approval before every step. Because Terrateam never applied that pull request, the merge takes no Terrateam lock.
+Manual applies cannot satisfy the infrastructure merge requirement above. When Terrateam cannot run, a person can invoke `/mcc-apply-foundation` in Claude Code or `$mcc-apply-foundation` in Codex for one pull request. An agent cannot start it for you. It reads the inputs from each foundation root's ignored `.envrc` in your checkout, which you create from the `.envrc.example` in that root. It checks the account, plans and applies dev before prod, applies only the saved plans that person reviewed, and squash-merges with the pull request title, stopping for approval before every step. Because Terrateam never applied that pull request, the merge takes no Terrateam lock.
 
 Do not apply a [recovery](60-recover-and-troubleshoot.md#a-plan-wants-to-create-resources-that-already-exist) import pull request with Terrateam. Its import blocks must never merge, and Terrateam merges a pull request once its applies succeed and its checks pass. Apply it by hand as the recovery steps describe.
 
