@@ -6,6 +6,7 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 
 [`.terrateam/config.yml`](../../.terrateam/config.yml) and the generated `.github/workflows/terrateam.yml` define the setup. With them, Terrateam:
 
+- ignores pull requests from the Release Please branch, `release-please--branches--main`, and never plans or applies them;
 - plans the foundation roots only when a `terrateam plan` comment on the pull request asks for it, never when the pull request opens or changes; a change to `infrastructure/modules/foundation` or `.terrateam/config.yml` affects dev and prod, and a change to one environment root affects only that root;
 - never applies from `main`; dev and prod are applied from the pull request by comment, and prod only after dev;
 - locks each root from its first apply until the pull request merges, and takes no lock when a pull request merges without a Terrateam apply;
