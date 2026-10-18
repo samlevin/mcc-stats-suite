@@ -155,7 +155,7 @@ All checks use the parser's rows of the selected table (spec 1 §8), or the revi
 | `K002_KILLS_WITHIN_OPPONENT_DEATHS` | team pair, each direction | Team A's summed `KILLS` is at most team B's summed `DEATHS`. | `K_A <= D_B` | hard |
 | `K003_DEATH_GAP_EXPLAINED` | team pair, each direction | Team B's deaths beyond team A's kills are explained by B's own suicides and betrayals, which Slayer subtracts from score: `D_B - K_A <= sum over B of max(0, kills - score)`. | `killDeathSlack` 0 | soft |
 | `K004_SCORE_NOT_ABOVE_KILLS` | row | A player's `SCORE` is at most their `KILLS`. | `score <= kills` | hard |
-| `K005_TEAM_STRUCTURE` | table | Roster size: exactly 2 teams, each with 1 to 8 player rows, and at most 16 player rows in total. A Team Slayer table the parser read as free-for-all fails. | exact | hard |
+| `K005_TEAM_STRUCTURE` | table | Roster size: exactly 2 teams, each with 1 to 8 player rows, and at most 16 player rows in total. A Team Slayer table the parser did not read as two teams has zero rows with `noRowsReason.code: UNSUPPORTED_TEAM_LAYOUT` and fails this check. | exact | hard |
 | `K006_PAGE_AGREEMENT` | screenshot pair | Two screenshots of one match that are pages of one post-game summary (§4.3) agree on every field both carry for each shared player. | exact string match after trimming | hard |
 | `K007_SUBMISSION_AGREEMENT` | run pair | Two screenshots of one match that are captures of the same board (§4.3), each uploaded as its own submission, agree on every field for every player, and on the team partition and the winning team. | exact | hard |
 
@@ -193,7 +193,7 @@ The two Halo 3 two-team captures (fixtures `halo3-two-team-capture-1` and `-2`) 
 | `K005` teams | 2 teams of 4 | 2 teams of 4 |
 | `K006`, `K007` | `NO_MATCH_IDENTITY`: the captures were emailed, so neither has a match (§4.3). They are different games and share only 2 player keys. | `NO_MATCH_IDENTITY`, as capture 1 |
 
-Every evaluated check passes on both captures, and `K003` holds with equality in all four directions. `K005` fails any Team Slayer table that the parser reads as free-for-all, such as one whose row colours are sampled wrong. Two captures are not enough to validate any constraint (§4.5), so all seven start `PROVISIONAL`.
+Every evaluated check passes on both captures, and `K003` holds with equality in all four directions. `K005` fails any Team Slayer table whose parser output has zero rows with `UNSUPPORTED_TEAM_LAYOUT`, such as one whose row colours are sampled wrong. Two captures are not enough to validate any constraint (§4.5), so all seven start `PROVISIONAL`.
 
 ### 4.5 Results and validation status
 
@@ -1012,7 +1012,7 @@ TypeScript tests use `tap` under `applications/ocr-quality/test/`, Python tests 
 
 | File | Covers |
 | --- | --- |
-| `constraints.test.ts` | every check in §4.2 passes on the two #91 fixtures, with a synthetic game variant `LINE` added because the reduced fixtures drop `LINE` blocks, with the numbers in §4.4; each fails on a seeded case with the right `miss` and involved items; `MISSING_VALUE` on a non-integer; `NO_PROFILE` on the FFA and `UNKNOWN` fixtures; `K005` fails on a Team Slayer table parsed as free-for-all |
+| `constraints.test.ts` | every check in §4.2 passes on the two #91 fixtures, with a synthetic game variant `LINE` added because the reduced fixtures drop `LINE` blocks, with the numbers in §4.4; each fails on a seeded case with the right `miss` and involved items; `MISSING_VALUE` on a non-integer; `NO_PROFILE` on the `UNKNOWN` fixtures; `K005` fails on a Team Slayer table with zero parser rows and `UNSUPPORTED_TEAM_LAYOUT` |
 | `profiles.test.ts` | capture 1 headers (`SCORE` with a trailing symbol, `ASSI`, empty deaths) and capture 2 headers match; three matching headers do not; the game variant predicate with and without a `LINE` above the table |
 | `peers.test.ts` | peers come only from the screenshot's `intake.matchId` and the `ACTIVE` screenshots of that match's highest record version; an emailed screenshot, two screenshots of one email, equal rosters without a match (a rematch), an uploaded screenshot that is `EXCLUDED`, `DUPLICATE` or not yet listed, and one whose match is `VOIDED` all record `NO_MATCH_IDENTITY`; within a match, an equal `gameKey` is a `K007` pair, 4 or more shared keys with a different `gameKey` a `K006` pair, fewer shared keys no pair, and an equal image hash no pair; results record `matchId`, `matchVersion` and `peerRunId`; `ScoreRun` compares parser rows only and never reads a validated table; `ApplyLlmReview` compares with a peer's validated version when one exists |
 | `reviewed-table.test.ts` | item classes in each mode (§4.7); a `HUMAN` head is retained in the reviewed table, and outside `REREVIEW` so is an earlier `LLM` head; a correction that passes on its own fails `K002` in the reviewed table beside a retained `HUMAN` row decision |
@@ -1473,7 +1473,7 @@ A change to a contract updates every consumer in the same PR.
 | --- | --- | --- | --- |
 | P6.1 | Escalate both runs on a `K007` disagreement | S | §18.10; needs a `NOT_CALLED` invocation record under the peer run's prefix. |
 | P6.2 | A second `ASSISTED` call with the failing constraints after a rejected correction, before escalating | S | Fewer escalations; only for `PRIORITY_SHOWN` runs. |
-| P6.3 | Profiles for Halo 3 free-for-all Slayer and other MCC titles | M | §18.9; each needs its own captures and P1.3 evidence. |
+| P6.3 | Profiles for other MCC titles | M | §18.9; each needs its own captures and P1.3 evidence. |
 | P6.4 | Bedrock batch inference for `BACKFILL` and `REREVIEW` | S | Half the price for work that can wait. |
 | P6.5 | Compare computed LLM cost with billed Bedrock cost in the report | S | §18.16. |
 | P6.6 | Prompt caching of the system prompt and tool schema | XS | Saves input cost when reviews cluster within the cache lifetime. |
