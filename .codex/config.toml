@@ -1,0 +1,7 @@
+[mcp_servers.playwright]
+command = "npx"
+args = ["-y", "@playwright/mcp@latest", "--headless"]
+
+[mcp_servers.playwriter]
+command = "npx"
+args = ["-y", "playwriter@latest"]
