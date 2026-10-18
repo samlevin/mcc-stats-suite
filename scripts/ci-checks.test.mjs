@@ -199,6 +199,47 @@ test('automation script tests run only in the repository scope', () => {
   );
 });
 
+test('shared CLI changes select build and automation checks', () => {
+  for (const event of ['pull_request', 'push']) {
+    const scopes = selectScopes(['scripts/cli.cjs'], event);
+    assert.equal(scopes.full, true);
+    assert.equal(scopes.repository, true);
+    assert.equal(scopes.mode, 'all');
+    const commands = checks(scopes);
+    assert.ok(commands.some(([, args]) => args.includes('agents:check')));
+    const tests = commands
+      .filter(([command]) => command === 'node')
+      .flatMap(([, args]) => args.slice(1));
+    for (const path of [...automationTests, 'scripts/cli.test.mjs'])
+      assert.equal(tests.filter((test) => test === path).length, 1, path);
+  }
+});
+
+test('automation consumer changes run CLI compatibility without workspace tasks', () => {
+  for (const path of [
+    'scripts/branch-name.mjs',
+    'scripts/issue-triage.mjs',
+    'scripts/issue-containers.mjs',
+    'scripts/agent-policy.mjs',
+  ]) {
+    const scopes = selectScopes([path], 'pull_request');
+    assert.equal(scopes.full, false, path);
+    assert.equal(scopes.repository, true, path);
+    const commands = checks(scopes);
+    assert.ok(
+      commands.some(
+        ([command, args]) =>
+          command === 'node' && args.includes('scripts/cli.test.mjs'),
+      ),
+      path,
+    );
+    const lint = commands.find(([, args]) => args[0] === 'eslint')[1];
+    assert.ok(lint.includes('scripts/cli.cjs'), path);
+    assert.ok(lint.includes('scripts/cli.test.mjs'), path);
+    assert.ok(!JSON.stringify(commands).includes('turbo'), path);
+  }
+});
+
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {
   const started = [];
   const pending = [];
@@ -320,7 +361,7 @@ test('the bundle job is the only Docker job and runs only synthesis and verifica
   );
 });
 
-test('actual Turbo affected selection includes shared consumers and skips unrelated applications', () => {
+test('actual Turbo selects affected consumers and invalidates caches for shared CLI changes', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-selection-'));
   try {
     const git = (...args) =>
@@ -358,6 +399,9 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
         readFileSync(new URL(`${workspace}/package.json`, root)),
       );
     }
+    mkdirSync(join(directory, 'scripts'));
+    const cli = join(directory, 'scripts/cli.cjs');
+    writeFileSync(cli, '// CLI fixture\n');
     git('add', '.');
     git(
       '-c',
@@ -432,6 +476,33 @@ test('actual Turbo affected selection includes shared consumers and skips unrela
       );
       git('revert', '--no-edit', head);
     }
+    const cliConsumerHashes = () =>
+      JSON.parse(
+        execFileSync(
+          turbo,
+          [
+            'run',
+            'build',
+            'ci:test',
+            '--filter=@mcc/match-to-csv',
+            '--dry=json',
+          ],
+          { cwd: directory, encoding: 'utf8' },
+        ),
+      ).tasks.filter((task) => task.package === '@mcc/match-to-csv');
+    const before = cliConsumerHashes();
+    assert.deepEqual(before.map((task) => task.task).sort(), [
+      'build',
+      'ci:test',
+    ]);
+    writeFileSync(cli, '// Changed CLI fixture\n');
+    const after = cliConsumerHashes();
+    for (const task of before)
+      assert.notEqual(
+        task.hash,
+        after.find(({ taskId }) => taskId === task.taskId).hash,
+        task.taskId,
+      );
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

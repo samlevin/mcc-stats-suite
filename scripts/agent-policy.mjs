@@ -667,15 +667,19 @@ const USAGE =
 
 function main(args) {
   const [command, ...rest] = args;
-  const cli = defineCli(USAGE, COMMAND_OPTIONS[command] ?? []);
+  const commandHelp = defineCli(USAGE, Object.values(COMMAND_OPTIONS).flat());
   if (command === '--help' || command === '-h')
-    throw new CliHelp(
-      defineCli(USAGE, Object.values(COMMAND_OPTIONS).flat()).help,
-    );
+    throw new CliHelp(commandHelp.help);
   if (!Object.hasOwn(COMMAND_OPTIONS, command)) {
-    console.error(cli.help);
+    console.error(
+      cliError(
+        commandHelp,
+        command ? `Unknown command ${command}` : 'Name a command',
+      ).message,
+    );
     return 2;
   }
+  const cli = defineCli(USAGE, COMMAND_OPTIONS[command]);
   const { options, positionals } = parseCli(rest, cli);
   if (positionals.length) throw cliError(cli, 'Unexpected positional argument');
   if (command === 'resolve' && options.role && options.capability)

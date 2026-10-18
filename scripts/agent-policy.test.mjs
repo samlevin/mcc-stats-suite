@@ -46,6 +46,36 @@ const other = {
   },
 };
 
+test('missing and unknown commands show an actionable error and combined help', () => {
+  const run = (...args) =>
+    spawnSync(
+      process.execPath,
+      [new URL('./agent-policy.mjs', import.meta.url).pathname, ...args],
+      { encoding: 'utf8' },
+    );
+  const help = run('--help');
+  assert.equal(help.status, 0);
+  assert.equal(help.stderr, '');
+  for (const option of [
+    '--tool',
+    '--role',
+    '--pr',
+    '--base',
+    '--head',
+    '--report',
+  ])
+    assert.ok(help.stdout.includes(option), option);
+  for (const [args, message] of [
+    [[], 'Name a command'],
+    [['unknown'], 'Unknown command unknown'],
+  ]) {
+    const result = run(...args);
+    assert.equal(result.status, 2);
+    assert.equal(result.stdout, '');
+    assert.equal(result.stderr, `${message}\n\n${help.stdout}`);
+  }
+});
+
 test('the binding resolves every placeholder and feature section', () => {
   assert.equal(PREFIX, `${policy.binding.namespace}-`);
   assert.deepEqual(placeholders(other), {

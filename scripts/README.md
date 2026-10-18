@@ -27,7 +27,7 @@ Aliases are exact tokens. `-env` means environment; it is never `-e` plus `nv` o
 | `--model` | `-m` | Agent policy resolution |
 | `--output` | `-o` | Fixture reduction |
 
-Other options retain their long names. Each command's help lists the options it accepts. Aliases are scoped to a command, so `-a` has no collision between branch naming and release metadata. CDK's `-r` and `-m` remain passthrough options, with the existing ephemeral deployment restrictions.
+Other options retain their long names. Each command's help lists the options it accepts. Aliases are scoped to a command, so `-a` has no collision between branch naming and release metadata. CDK's `-r` and `-m` remain passthrough options, with the existing ephemeral deployment restrictions. The wrapper owns `-e`, `-p`, and `-h`, so use CDK's long forms `--exclusively` and `--plugin`. `-h` shows the wrapper's help.
 
 ```console
 npm run app:synth -- admin -env dev -e example
