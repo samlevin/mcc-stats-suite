@@ -113,6 +113,21 @@ dirs:
         - 'infrastructure/modules/foundation/*.tf'
         - '.terrateam/config.yml'
 
+  # Dev only. The stack's template and stack policy are files in the root, so a
+  # regenerated template affects it.
+  infrastructure/dev/local-cdk:
+    tags: [aws, dev, local-cdk]
+    when_modified:
+      autoplan: false
+      autoapply: false
+      file_patterns:
+        - '${DIR}/*.tf'
+        - '${DIR}/*.tfvars'
+        - '${DIR}/*.hcl'
+        - '${DIR}/bootstrap-template.json'
+        - '${DIR}/stack-policy.json'
+        - '.terrateam/config.yml'
+
   infrastructure/prod/foundation:
     tags: [aws, prod, foundation]
     when_modified:

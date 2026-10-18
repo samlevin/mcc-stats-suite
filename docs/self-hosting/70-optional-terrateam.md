@@ -13,6 +13,7 @@ The upstream repository applies its foundation with [Terrateam](https://terratea
 - squash-merges the pull request with its title once every planned root has applied without error, never after a failed apply;
 - lets repository writers apply dev and only administrators apply prod;
 - requires an administrator for changes to Terrateam's workflow or configuration;
+- plans and applies `infrastructure/dev/local-cdk`, the local CDK bootstrap, the same way as the dev foundation root, and treats a change to its template or stack policy as a change to that root;
 - never touches the bootstrap, module, or inactive data-platform directories;
 - treats a change to a foundation root's `external-inputs.revision` file as a change to that root, which is how a changed secret reaches AWS (see [Change an external input](40-change-foundation.md#change-an-external-input)); and
 - checks both foundation roots for drift daily and opens an issue instead of reconciling.
@@ -35,7 +36,8 @@ The Terrateam indexer is disabled, so Terrateam plans a root only when a changed
 Set `create_terrateam_role = true` in each account's `bootstrap.auto.tfvars` and apply the bootstrap as in [Bootstrap the dev and prod accounts](10-bootstrap-accounts.md). The bootstrap then creates `mcc-stats-suite-<environment>-terrateam` with:
 
 - `PowerUserAccess`;
-- an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role, with the `mcc-stats-suite-workload-boundary` permissions boundary; and
+- an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role, with the `mcc-stats-suite-workload-boundary` permissions boundary;
+- in dev only, an inline grant to manage the `CDKToolkitLocal` stack and the IAM resources it creates, scoped by name to roles named `cdk-mcclocal1-*` and policies named `mcc-stats-suite-local-*`; and
 - a trust policy that accepts GitHub OIDC tokens only from this repository, the `terrateam_workflow_path` workflow (`.github/workflows/terrateam.yml` by default), and the `terrateam-action[bot]` actor.
 
 GitHub needs no role ARN: the committed configuration builds `arn:aws:iam::<account>:role/mcc-stats-suite-<environment>-terrateam` from the account ID, the same name `tofu output -raw terrateam_role_arn` reports. Apply bootstrap changes before any foundation change that depends on them; the Terrateam role cannot create the Turbo cache role until the bootstrap grants it.

@@ -11,6 +11,6 @@ module "bootstrap" {
   state_bucket_name              = var.state_bucket_name
   create_terrateam_role          = var.create_terrateam_role
   create_cdk_deploy_role         = var.create_cdk_deploy_role
-  manage_local_cdk_policies      = true
+  manage_local_cdk_bootstrap     = true
   tags                           = var.tags
 }
