@@ -76,4 +76,4 @@ tofu -chdir=infrastructure/prod/foundation init -backend=false -lockfile=readonl
 tofu -chdir=infrastructure/prod/foundation validate
 ```
 
-These tests check dev/prod naming and SSM contracts, retention, encryption, IAM policy statements, and invalid service-role inputs. They do not inspect deployed resources. Review real environment plans before accepting infrastructure changes.
+These tests check dev/prod naming and SSM contracts, retention, encryption, IAM policy statements, and invalid service-role inputs. `dev-root.tftest.hcl` also plans the dev foundation root itself as on a fresh account, so a root-level `import` block, which needs its resource to exist, fails it. None of these tests inspect deployed resources. Review real environment plans before accepting infrastructure changes.
