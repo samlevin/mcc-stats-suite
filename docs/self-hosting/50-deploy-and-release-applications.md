@@ -120,6 +120,33 @@ The final read should return `ParameterNotFound`. Sender addresses in CLI histor
 
 After saving the dev allowlist, wait one minute for cached values to expire, then send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result. After an update or deletion, wait one minute and send a new message to verify the new behavior without redeploying.
 
+## Maintain the gamertag roster
+
+`match-to-csv` resolves player names against the gamertag roster in each environment's roster table ([spec 6](../../specs/6-gamertag-roster.md)). Administrators maintain it with `scripts/roster.mjs`, which writes the table directly with their own AWS credentials. Only administrators change the roster. The script needs DynamoDB, KMS, and SSM rights that the `mcc-<environment>-admin` profiles from [prerequisites](00-prerequisites.md#sso-profiles) already have, and no narrower operator policy exists. The roster table must be applied in that environment's foundation first. The script also needs the AWS CLI and a repository checkout with dependencies installed.
+
+```console
+export AWS_PROFILE=mcc-dev-admin
+aws sso login --profile "$AWS_PROFILE"
+npm run roster -- --environment dev list
+npm run roster -- --environment dev add 'Player01' 'Player 02' --reason 'new season'
+npm run roster -- --environment dev deactivate 'Player 02' --reason 'renamed'
+npm run roster -- --environment dev reactivate 'Player 02'
+npm run roster -- --environment dev list --all
+npm run roster -- --environment dev history --after 10
+```
+
+`--environment` is required. Before any other AWS call, the script runs the same account check as `scripts/cdk-app.mjs`: it needs `AWS_PROFILE` or `--profile`, refuses a profile whose name implies the other environment, and refuses to continue unless the active account matches `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID`, or the profile's `sso_account_id` when the variable is unset. It then reads the table name from `/mcc/<environment>/roster/table-name`.
+
+- `list` shows active entries, or inactive ones with `--inactive` and every entry with `--all`, with each entry's ID, matching key, and the versions that added and last changed it. `history` shows the change log after a version, including who made each change.
+- `add` takes one or more gamertags and stops at the first refusal. `deactivate` and `reactivate` take one gamertag, matched ignoring case. There is no delete. A renamed player is a deactivation and an add.
+- The script refuses an invalid gamertag, a gamertag already on the roster in any case, and a gamertag whose matching key equals an active entry's (`KEY_CONFLICT`), and names the entries involved. When an add or reactivate leaves an active gamertag one key edit away, it prints a warning, because readings between the two will not resolve.
+- In `prod`, each write prints the change and asks you to type `yes`. Pass `--yes` to skip the prompt.
+- Exit status is 0 on success, 1 when a change is refused or declined, and 2 for a usage, account, AWS, or roster integrity error. When two administrators write at once, the script tries the write up to three times, then exits 1 with `CONCURRENT_CHANGE`. Run the command again.
+
+To try changes without touching the shared roster, add `--ephemeral <name>` in dev. The script then reads and writes only that name's partition, which belongs to the ephemeral stacks of the same name. Production does not accept `--ephemeral`.
+
+Gamertags are typed as arguments and printed only to your terminal. The script reads no input file and writes no file. Keep roster output out of commits, issues, and pull requests, as with sender addresses.
+
 ## Releases
 
 Release Please versions each application and the shared `@mcc/cdk-config`, `@mcc/contracts`, and `@mcc/roster` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.

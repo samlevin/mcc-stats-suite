@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 import {
+  AccountGuardError,
+  awsCli,
+  profileSsoAccount,
+  resolveEnvironment,
+  resolveExpectedAccount,
+  verifyCallerAccount,
+} from './account-guard.mjs';
+import {
   APPLICATIONS,
   cdkArguments,
   ephemeralNameError,
@@ -22,22 +30,11 @@ if (!actions.has(action) || !applications.has(application)) {
 
 const { options, passthrough } = parseArguments(rawArguments);
 const profile = options.profile ?? process.env.AWS_PROFILE;
-const profileEnvironment = environmentFromProfile(profile);
-const environment = options.environment ?? profileEnvironment ?? 'dev';
+const environment = guard(() =>
+  resolveEnvironment(options.environment, profile),
+);
 const ephemeral = options.ephemeral;
 
-if (environment !== 'dev' && environment !== 'prod') {
-  fail('--environment must be dev or prod');
-}
-if (
-  options.environment &&
-  profileEnvironment &&
-  options.environment !== profileEnvironment
-) {
-  fail(
-    `AWS_PROFILE=${profile} looks like ${profileEnvironment}, not ${options.environment}`,
-  );
-}
 if (environment === 'prod' && ephemeral) {
   fail('Production does not support --ephemeral');
 }
@@ -73,28 +70,17 @@ if (ephemeral && action === 'deploy') {
   }
 }
 
-const accountVariable =
-  environment === 'dev' ? 'MCC_DEV_ACCOUNT_ID' : 'MCC_PROD_ACCOUNT_ID';
-let expectedAccount = process.env[accountVariable];
-let expectedAccountSource = accountVariable;
 const needsAws = action !== 'synth';
-
-if (needsAws && !profile && process.env.GITHUB_ACTIONS !== 'true') {
-  fail('Export AWS_PROFILE or pass --profile before using AWS');
-}
-if (needsAws && !expectedAccount && profile) {
-  expectedAccount = profileSsoAccount();
-  expectedAccountSource = `AWS_PROFILE=${profile} sso_account_id`;
-}
-if (needsAws && !expectedAccount) {
-  fail(
-    `AWS profile ${profile ?? '(ambient credentials)'} has no sso_account_id; ` +
-      `configure it or export ${accountVariable}`,
-  );
-}
-if (expectedAccount && !/^[0-9]{12}$/.test(expectedAccount)) {
-  fail(`${accountVariable} must contain a 12-digit AWS account ID`);
-}
+const { account: expectedAccount, source: expectedAccountSource } = guard(() =>
+  resolveExpectedAccount({
+    environment,
+    profile,
+    needsAws,
+    env: process.env,
+    readSsoAccount: () =>
+      profileSsoAccount((args) => awsCli(profile, args, process.env)),
+  }),
+);
 
 const childEnvironment = { ...process.env };
 const gitRevision = spawnSync('git', ['rev-parse', 'HEAD'], {
@@ -105,25 +91,14 @@ if (gitRevision.status === 0) {
   childEnvironment.GIT_SHA = gitRevision.stdout.trim();
 }
 if (needsAws) {
-  const identityArguments = [
-    'sts',
-    'get-caller-identity',
-    '--query',
-    'Account',
-    '--output',
-    'text',
-  ];
-  const identity = awsCli(identityArguments, childEnvironment);
-  if (identity.status !== 0) {
-    process.stderr.write(identity.stderr ?? '');
-    fail('Unable to resolve the active AWS account');
-  }
-  const actualAccount = identity.stdout.trim();
-  if (actualAccount !== expectedAccount) {
-    fail(
-      `Refusing ${action}: active account ${actualAccount} does not match ${expectedAccountSource} (${expectedAccount})`,
-    );
-  }
+  const { account: actualAccount } = guard(() =>
+    verifyCallerAccount({
+      run: (args) => awsCli(profile, args, childEnvironment),
+      expected: expectedAccount,
+      source: expectedAccountSource,
+      action,
+    }),
+  );
   childEnvironment.CDK_DEFAULT_ACCOUNT = actualAccount;
   process.stdout.write(
     `Using ${environment}${ephemeral ? ` ephemeral ${ephemeral}` : ''} in AWS account ${actualAccount}\n`,
@@ -180,29 +155,15 @@ function parseArguments(args) {
   return { options, passthrough };
 }
 
-function environmentFromProfile(profile) {
-  if (!profile) return undefined;
-  const normalized = profile.toLowerCase();
-  if (/(^|[-_])prod(uction)?($|[-_])/.test(normalized)) return 'prod';
-  if (/(^|[-_])dev(elopment)?($|[-_])/.test(normalized)) return 'dev';
-  return undefined;
-}
-
-// Every AWS CLI call goes through here so the profile is applied one way.
-function awsCli(commandArguments, environmentVariables = childEnvironment) {
-  const profileArguments = profile ? ['--profile', profile] : [];
-  return spawnSync('aws', [...commandArguments, ...profileArguments], {
-    encoding: 'utf8',
-    env: environmentVariables,
-  });
-}
-
-function profileSsoAccount() {
-  const configured = awsCli(
-    ['configure', 'get', 'sso_account_id'],
-    process.env,
-  );
-  return configured.status === 0 ? configured.stdout.trim() : undefined;
+// Runs one account check and exits on a refusal, after the AWS CLI's output.
+function guard(check) {
+  try {
+    return check();
+  } catch (error) {
+    if (!(error instanceof AccountGuardError)) throw error;
+    process.stderr.write(error.detail);
+    fail(error.message);
+  }
 }
 
 function fail(message) {
