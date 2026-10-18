@@ -1010,6 +1010,7 @@ test('catalog has unique names, supported severities, and all directly affected 
       'match-to-csv',
       'ocr-quality',
       'player',
+      'roster',
     ].map((name) => `package: ${name}`),
   );
   for (const label of catalog.labels) {
