@@ -79,7 +79,7 @@ Download with `aws s3 cp` and compare CSV rows against the screenshot. A success
 
 - [Deployment, releases, and rollback](../../docs/self-hosting/50-deploy-and-release-applications.md), [troubleshooting](../../docs/self-hosting/60-recover-and-troubleshoot.md), and [ephemeral cleanup](../../docs/getting-started.md#remove-the-stack).
 - [Replay, run comparison, and training-data materialization](../../specs/1.1-mcc-analytics-engine.md#9-replay-comparison-and-training-data), including inputs and stack outputs.
-- Stable stacks alarm on workflow failures/timeouts, dead-letter messages, Lambda errors, and zero-row extractions. To receive alarm email, set `/mcc/<environment>/match-to-csv/alarm-email`, redeploy, and confirm the SNS subscription. Ephemeral stacks have no alarms. See [observability](../../specs/1.1-mcc-analytics-engine.md#15-observability).
+- Stable stacks publish alarms to the `match-to-csv-<environment>-alarms` SNS topic for workflow failures/timeouts, dead-letter messages, Lambda errors, and zero-row extractions. `extract-text` publishes `ZeroRowExtractions` and `ExtractedRows` metrics in the `MCC/MatchToCsv` namespace. To receive alarm email, set `/mcc/<environment>/match-to-csv/alarm-email`, redeploy, and confirm the SNS subscription. Ephemeral stacks have no alarms.
 
 ## Evidence layout
 
