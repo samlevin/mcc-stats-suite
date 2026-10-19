@@ -1387,28 +1387,47 @@ test('each release has its own successful dev dependency before prod approval', 
     });
   }
   assert.equal(prod.needs, 'deploy-dev');
-  // Prod keys on the dev deploy job's output alone. The dev call's overall
-  // result also covers its Slack job, so a failed post never blocks prod.
+  // Prod keys on the dev call's `deployed` output, which requires the dev
+  // deploy job itself to succeed. The dev call's overall result also covers
+  // its Slack job, so prod never reads it and a failed post never blocks prod.
   assert.equal(
     prod.if,
     "always() && !cancelled() && needs.deploy-dev.outputs.deployed == 'true'",
   );
-  for (const result of ['success', 'failure', 'skipped', 'cancelled'])
-    for (const deployed of ['true', 'false', ''])
-      for (const cancelled of [false, true])
-        assert.equal(
-          evaluate(prod.if, {
-            always: () => true,
-            cancelled: () => cancelled,
-            needs: { 'deploy-dev': { result, outputs: { deployed } } },
-          }),
-          !cancelled && deployed === 'true',
-          `dev ${result}, deployed '${deployed}', run cancelled ${cancelled}`,
-        );
+  const output = deployment.on.workflow_call.outputs.deployed.value;
   assert.equal(
-    deployment.on.workflow_call.outputs.deployed.value,
-    '${{ jobs.deploy.outputs.deployed }}',
+    output,
+    "${{ jobs.deploy.result == 'success' && jobs.deploy.outputs.deployed == 'true' }}",
   );
+  const results = ['success', 'failure', 'skipped', 'cancelled'];
+  for (const deployResult of results)
+    for (const jobDeployed of ['true', 'false', ''])
+      for (const callResult of results)
+        for (const cancelled of [false, true]) {
+          // Actions writes a boolean expression result to an output as text.
+          const deployed = String(
+            evaluate(expression(output), {
+              jobs: {
+                deploy: {
+                  result: deployResult,
+                  outputs: { deployed: jobDeployed },
+                },
+              },
+            }),
+          );
+          assert.equal(
+            evaluate(prod.if, {
+              always: () => true,
+              cancelled: () => cancelled,
+              needs: {
+                'deploy-dev': { result: callResult, outputs: { deployed } },
+              },
+            }),
+            !cancelled && deployResult === 'success' && jobDeployed === 'true',
+            `dev deploy job ${deployResult} with deployed '${jobDeployed}', ` +
+              `dev call ${callResult}, run cancelled ${cancelled}`,
+          );
+        }
   assert.match(
     deployment.jobs.deploy.outputs.deployed,
     /steps.deploy.outcome == 'success' && steps.verify.outcome == 'success'/,
@@ -1847,12 +1866,15 @@ test('the result message names the application, release, environment, outcome, a
     ['dev', 'release', outcome('success', 'true', 'skipped'), 'succeeded'],
     ['dev', 'release', outcome('success', 'false', 'skipped'), notNewer],
     ['dev', 'release', outcome('failure', 'false', 'skipped'), 'failed'],
+    // A step after deploy and verify failed, such as Finish deployment record.
+    ['dev', 'release', outcome('failure', 'true', 'skipped'), 'failed'],
     ['dev', 'release', outcome('failure', '', 'skipped'), 'failed', rejected],
     ['dev', 'release', outcome('cancelled', '', 'skipped'), 'cancelled'],
     ['dev', 'release', outcome('skipped', '', 'skipped'), 'cancelled'],
     ['prod', 'release', outcome('success', 'true'), 'succeeded'],
     ['prod', 'rollback', outcome('success', 'true'), 'succeeded'],
     ['prod', 'release', outcome('failure', 'false'), 'failed', rejected],
+    ['prod', 'release', outcome('failure', 'true'), 'failed', rejected],
     ['prod', 'release', outcome('failure', ''), 'rejected', rejected],
     ['prod', 'rollback', outcome('failure', ''), 'rejected', rejected],
     ['prod', 'release', outcome('failure', ''), 'failed', approved],

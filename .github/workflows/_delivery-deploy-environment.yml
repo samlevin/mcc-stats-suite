@@ -24,9 +24,12 @@ on:
         required: true
         type: string
     outputs:
+      # The deploy job's own result and output only. A failed step after the
+      # deploy and verify steps still reads false here, and a notify job's
+      # result never affects it.
       deployed:
-        description: Whether this call deployed and verified the release
-        value: ${{ jobs.deploy.outputs.deployed }}
+        description: Whether this call deployed and verified the release and the deploy job succeeded
+        value: ${{ jobs.deploy.result == 'success' && jobs.deploy.outputs.deployed == 'true' }}
     # Repository secrets reach a called workflow only when the caller passes
     # them. Each caller passes the account of the environment it deploys, and
     # the Slack webhook, which turns on deploy messages only when it is set.
