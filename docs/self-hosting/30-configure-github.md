@@ -19,6 +19,7 @@ GitHub holds only the values nobody can derive: for each environment, the AWS ac
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `Release: release PR` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `Release: release PR` |
 | repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in `main` CI and deploys |
+| repository | `SLACK_DEPLOY_WEBHOOK_URL` | secret | Slack incoming webhook URL (optional; deploys post no Slack messages without it); see [Slack deploy messages](50-deploy-and-release-applications.md#slack-deploy-messages) | deploy and rollback messages |
 
 ### Turbo cache
 

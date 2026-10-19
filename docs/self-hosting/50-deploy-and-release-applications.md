@@ -45,11 +45,41 @@ Pull requests never deploy applications. `Delivery: deploy application releases`
 5. Finish the application's smoke test in dev; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv). Open the `Delivery: deploy application releases` run from the Actions page. Choose **Review deployments**, check the application, release tag and commit, and approve or reject with your GitHub account. The waiting job is named `Deploy <application> to prod (waits for approval)`. Pending or rejected approval leaves dev deployed. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.
 
-To get Slack messages only for deploys, subscribe a channel with the GitHub app for Slack to this one workflow: `/github subscribe <owner>/<repository> workflows:{name:"Delivery: deploy application releases"}`. Every run of it is a deploy, so the channel gets the dev result, the prod approval request, and the prod result, and nothing for merges that release no application.
-
 GitHub records every deployment with its release tag, commit, application version and shared-package versions on the repository's Deployments page. Release delivery and rollback call `_delivery-deploy-environment.yml`, which retains account checks, scoped secrets and the prod environment's required reviewers with administrator bypass disabled. Deploy jobs run on `refs/heads/main` through that reusable workflow, even while checking out an older release commit, so the CDK role's OIDC trust needs no change.
 
 Each application and environment has one concurrency group shared by forward deploys and rollback. It queues up to 100 pending jobs and never cancels a running deploy. Queue order follows when jobs start waiting, so the reusable workflow checks versions after approval and after acquiring the queue lock. A forward release skips successfully if its version is equal to or older than the latest successful deployment for that application and environment. The job summary names the requested and deployed versions. Failed deployments do not advance that baseline; legacy deployment records use their recorded application version. Missing version metadata on a successful record stops forward deployment for investigation. Rollback bypasses the version comparison, and its successful deployment becomes the baseline for later forward releases.
+
+### Slack deploy messages
+
+Slack deploy messages are optional and off by default. They turn on only when the repository secret `SLACK_DEPLOY_WEBHOOK_URL` is set, and that secret is the only setting. Without it, the Slack steps show as skipped in each run and write no warning or notice.
+
+With the secret set, `_delivery-deploy-environment.yml` posts plain-text messages to that Slack incoming webhook, one per application for each of these events:
+
+- **Dev result:** `match-to-csv match-to-csv-v3.2.1 -> dev: succeeded <run link>`. The result is `succeeded`, `failed`, `cancelled`, or `skipped` when the version is not newer than the latest successful deployment.
+- **Prod approval request:** `match-to-csv match-to-csv-v3.2.1 -> prod: waiting for approval <run link>`. `Verify prod reviewer protection` posts it after its check passes and before the deploy job waits. Open the link to approve or reject.
+- **Prod result:** `match-to-csv match-to-csv-v3.2.1 -> prod: succeeded <run link>`. The result is `succeeded`, `failed`, `rejected`, `cancelled`, or `skipped`.
+
+Rollbacks post the prod approval request and the prod result with `prod (rollback)` in place of `prod`. A merge that releases no application posts nothing.
+
+Each delivery workflow passes the secret explicitly to the reusable workflows. Only the two jobs that post to Slack receive it, and only their Slack steps send it. When Slack does not answer within 10 seconds or returns an error, the step logs a warning and the deploy continues. A Slack failure never fails or blocks a deploy.
+
+To turn the messages on:
+
+1. In Slack, create an app from scratch at <https://api.slack.com/apps> in your workspace. Under **Incoming Webhooks**, turn on **Activate Incoming Webhooks**, choose **Add New Webhook to Workspace**, pick the channel, and copy the webhook URL.
+2. Store the URL as a repository secret. `gh secret set` prompts for the value, so it stays out of your shell history:
+
+   ```console
+   gh secret set SLACK_DEPLOY_WEBHOOK_URL --repo <owner>/<repository>
+   ```
+
+3. If the channel subscribes to this repository with the GitHub app for Slack, remove the workflow and deployment subscriptions so each deploy is reported once. Run these in the channel:
+
+   ```console
+   /github unsubscribe <owner>/<repository> workflows
+   /github unsubscribe <owner>/<repository> deployments
+   ```
+
+To turn the messages off, delete the secret. To move them to another channel, add a webhook for that channel and replace the secret.
 
 ## Validate match-to-csv
 
