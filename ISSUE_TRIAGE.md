@@ -36,7 +36,7 @@ Clear requests need little planning. For broad requests, establish boundaries, a
 
 Three workflows keep the project in step with the work.
 
-The [project membership workflow](.github/workflows/tracker-project-membership.yml) adds every new issue to MCC delivery when it opens, however it was created. Pull requests are not added to the project. Adding an item that is already in the project changes nothing. It runs trusted default-branch code only and uses `MCC_PROJECT_TOKEN`.
+The [project membership workflow](.github/workflows/tracker-project-membership.yml) adds every new issue to MCC delivery when it opens, however it was created. GitHub sometimes starts no run for an issue's `opened` event, so every 15 minutes the same workflow also adds any open issue that is missing from the project. An issue archived in the project counts as present. The sweep runs five minutes before each issue states run, which then triages the issues it added. A sweep logs an issue it cannot add, continues with the rest, and fails at the end. Run it by hand from the Actions tab; a manual run is a dry run that lists the missing issues unless you clear `dry_run`. Pull requests are not added to the project. Adding an item that is already in the project changes nothing. It runs trusted default-branch code only and uses `MCC_PROJECT_TOKEN`.
 
 The [issue states workflow](.github/workflows/tracker-issue-states.yml) uses deterministic GitHub API calls, with no model usage. It moves an open issue from Inbox to Ready when Priority, exactly one supported severity, and Size are present. Other statuses are left alone by metadata triage. Ready means triaged; implementation still requires clear scope, acceptance criteria, validation, and satisfied dependencies.
 
