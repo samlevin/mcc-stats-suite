@@ -6,7 +6,7 @@ import { evaluate, workflow } from './workflow-test-helpers.mjs';
 // A mocked GitHub that keeps one project item per content node, as
 // addProjectV2ItemById does.
 function github({
-  contents = { issue: { 7: 'I_7' }, pullRequest: { 9: 'PR_9' } },
+  issues = { 7: 'I_7' },
   project = { id: 'P_1', closed: false },
   items = new Map(),
 } = {}) {
@@ -30,37 +30,36 @@ function github({
       number: variables.number,
     });
     assert.match(query, /user\(login: "samlevin"\) \{ projectV2\(number: 1\)/);
-    const field = query.includes('pullRequest(') ? 'pullRequest' : 'issue';
-    const id = contents[field][variables.number];
+    assert.match(query, /issue\(number: \$number\)/);
+    assert.doesNotMatch(query, /pullRequest/);
+    const id = issues[variables.number];
     return {
-      repository: { [field]: id ? { id } : null },
+      repository: { issue: id ? { id } : null },
       user: { projectV2: project },
     };
   };
   return { api, reads, writes, items, log: () => {} };
 }
 
-test('adds a new issue and a new pull request to the project', async () => {
+test('adds a new issue to the project', async () => {
   const f = github();
   assert.equal(
     await addToProject({ ...f, kind: 'issue', number: 7, dryRun: false }),
     'item-1',
   );
-  assert.equal(
-    await addToProject({
-      ...f,
-      kind: 'pull_request',
-      number: 9,
-      dryRun: false,
-    }),
-    'item-2',
-  );
-  assert.match(f.reads[0].query, /issue\(number: \$number\)/);
-  assert.match(f.reads[1].query, /pullRequest\(number: \$number\)/);
-  assert.deepEqual(f.writes, [
-    { project: 'P_1', content: 'I_7' },
-    { project: 'P_1', content: 'PR_9' },
-  ]);
+  assert.deepEqual(f.writes, [{ project: 'P_1', content: 'I_7' }]);
+});
+
+test('pull request input fails before any API call, including dry runs', async () => {
+  for (const dryRun of [true, false]) {
+    const f = github();
+    await assert.rejects(
+      addToProject({ ...f, kind: 'pull_request', number: 9, dryRun }),
+      /CONTENT_TYPE must be issue/,
+    );
+    assert.deepEqual(f.reads, []);
+    assert.deepEqual(f.writes, []);
+  }
 });
 
 test('an item already in the project is returned without a duplicate', async () => {
@@ -88,7 +87,6 @@ test('invalid input, missing content, and an unavailable project fail before wri
     [{ kind: 'issue', number: 0 }, /positive/],
     [{ kind: 'issue', number: Number.NaN }, /positive/],
     [{ kind: 'issue', number: 8 }, /Issue #8 not found/],
-    [{ kind: 'pull_request', number: 7 }, /Pull request #7 not found/],
   ];
   for (const [options, error] of cases) {
     const f = github();
@@ -120,17 +118,20 @@ test('a mutation without an item fails', async () => {
   );
 });
 
-test('the workflow adds every opened issue and PR with default-branch code', () => {
+test('the workflow adds only opened issues with default-branch code', () => {
   const definition = workflow('tracker-project-membership');
   assert.deepEqual(definition.on, {
     issues: { types: ['opened'] },
-    pull_request_target: { types: ['opened'] },
   });
+  assert.equal(definition.name, 'Tracker: add issues to the project');
+  assert.equal(
+    definition['run-name'],
+    'Add issue #${{ github.event.issue.number }} to MCC delivery',
+  );
   assert.deepEqual(definition.permissions, { contents: 'read' });
   const jobs = Object.values(definition.jobs);
   assert.equal(jobs.length, 1);
   const [job] = jobs;
-  // No draft or author filter: every PR, including a fork's, is added.
   assert.equal(job.if, "github.repository == 'samlevin/mcc-stats-suite'");
   const checkout = job.steps.find((step) =>
     step.uses?.startsWith('actions/checkout@'),
@@ -144,28 +145,11 @@ test('the workflow adds every opened issue and PR with default-branch code', () 
   assert.equal(run.run, 'node scripts/issue-project-membership.mjs');
   assert.equal(run.env.DRY_RUN, 'false');
   assert.equal(run.env.MCC_PROJECT_TOKEN, '${{ secrets.MCC_PROJECT_TOKEN }}');
-  // Actions reads a missing payload object as null; empty objects stand in.
-  const value = (expression, github) =>
-    evaluate(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), { github });
-  for (const [github, kind, number] of [
-    [
-      {
-        event_name: 'issues',
-        event: { issue: { number: 7 }, pull_request: {} },
-      },
-      'issue',
-      7,
-    ],
-    [
-      {
-        event_name: 'pull_request_target',
-        event: { issue: {}, pull_request: { number: 9 } },
-      },
-      'pull_request',
-      9,
-    ],
-  ]) {
-    assert.equal(value(run.env.CONTENT_TYPE, github), kind);
-    assert.equal(value(run.env.CONTENT_NUMBER, github), number);
-  }
+  assert.equal(run.env.CONTENT_TYPE, 'issue');
+  assert.equal(
+    evaluate(run.env.CONTENT_NUMBER.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), {
+      github: { event: { issue: { number: 7 } } },
+    }),
+    7,
+  );
 });
