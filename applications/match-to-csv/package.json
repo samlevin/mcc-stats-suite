@@ -1,7 +1,7 @@
 {
   "name": "@mcc/match-to-csv",
   "private": true,
-  "version": "3.0.1",
+  "version": "3.1.0",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -21,8 +21,8 @@
     "@aws-sdk/client-ssm": "^3.992.0",
     "@aws-sdk/client-textract": "^3.992.0",
     "@mcc/cdk-config": "2.0.0",
-    "@mcc/contracts": "1.2.0",
-    "@mcc/roster": "1.1.1",
+    "@mcc/contracts": "1.2.1",
+    "@mcc/roster": "1.1.2",
     "mailparser": "^3.9.3",
     "sharp": "^0.35.3"
   },
