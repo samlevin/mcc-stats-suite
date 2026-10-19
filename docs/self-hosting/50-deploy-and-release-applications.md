@@ -49,8 +49,6 @@ GitHub records every deployment with its release tag, commit, application versio
 
 Each application and environment has one concurrency group shared by forward deploys and rollback. It queues up to 100 pending jobs and never cancels a running deploy. Queue order follows when jobs start waiting, so the reusable workflow checks versions after approval and after acquiring the queue lock. A forward release skips successfully if its version is equal to or older than the latest successful deployment for that application and environment. The job summary names the requested and deployed versions. Failed deployments do not advance that baseline; legacy deployment records use their recorded application version. Missing version metadata on a successful record stops forward deployment for investigation. Rollback bypasses the version comparison, and its successful deployment becomes the baseline for later forward releases.
 
-After merging workflow changes, confirm an ordinary PR merge starts no deploy. Merge the next release PR and confirm each released application deploys to dev, then waits for prod approval.
-
 ## Validate match-to-csv
 
 After a `match-to-csv` change reaches dev, and before approving prod:

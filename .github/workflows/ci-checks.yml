@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
 
-# A unique push group never supersedes main validation or deployments.
+# A unique push group never supersedes main validation.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('push-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
