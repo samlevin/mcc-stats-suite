@@ -1732,19 +1732,24 @@ const releaseEnv = (environment, operation = 'release') => ({
   RELEASE_TAG: 'match-to-csv-v3.2.1',
 });
 
-test('the webhook secret reaches only the env of the two Slack steps', () => {
+const slackGate = "env.SLACK_DEPLOY_WEBHOOK_URL != ''";
+
+test('the webhook secret reaches only the env of the two jobs that post to Slack', () => {
   assert.deepEqual(
     pathsContaining(deployment, 'secrets.SLACK_DEPLOY_WEBHOOK_URL'),
     [
-      'jobs.verify-prod-protection.steps.1.env.SLACK_DEPLOY_WEBHOOK_URL',
-      'jobs.notify-result.steps.0.env.SLACK_DEPLOY_WEBHOOK_URL',
+      'jobs.verify-prod-protection.env.SLACK_DEPLOY_WEBHOOK_URL',
+      'jobs.notify-result.env.SLACK_DEPLOY_WEBHOOK_URL',
     ],
   );
   for (const step of [approvalStep, resultJob.steps[0]]) {
-    assert.equal(step.env.SLACK_DEPLOY_WEBHOOK_URL, slackWebhook);
     // Only the script's fetch reads the URL; nothing logs or outputs it.
     assert.doesNotMatch(step.with.script, /setOutput|exportVariable/);
-    assert.doesNotMatch(step.with.script, /core\.\w+\(webhook/);
+    assert.match(
+      step.with.script,
+      /fetch\(process\.env\.SLACK_DEPLOY_WEBHOOK_URL, \{/,
+    );
+    assert.doesNotMatch(step.with.script, /core\.\w+\([^)]*SLACK_DEPLOY/);
   }
   assert.deepEqual(
     pathsContaining(deployment.jobs.deploy, 'SLACK'),
@@ -1757,7 +1762,8 @@ test('the prod approval request posts after the protection check and before the 
   const guard = deployment.jobs['verify-prod-protection'];
   assert.equal(guard.steps.length, 2);
   assert.equal(guard.steps.indexOf(approvalStep), 1);
-  assert.equal(approvalStep.if, undefined, 'runs only when the check passed');
+  // Without an `always()` the step also runs only when the check passed.
+  assert.equal(approvalStep.if, slackGate);
   assert.equal(approvalStep['continue-on-error'], true);
   assert.equal(approvalStep['timeout-minutes'], 1);
   // The deploy job waits for approval only after this job finishes.
@@ -1787,12 +1793,13 @@ test('the result job runs after every deploy outcome and cannot fail the deploy'
   assert.deepEqual(resultJob.needs, ['verify-prod-protection', 'deploy']);
   assert.equal(resultJob.if, 'always()');
   assert.deepEqual(resultJob.permissions, { actions: 'read' });
+  assert.deepEqual(resultJob.env, { SLACK_DEPLOY_WEBHOOK_URL: slackWebhook });
   assert.equal(resultJob.steps.length, 1);
   const [step] = resultJob.steps;
+  assert.equal(step.if, slackGate);
   assert.equal(step['continue-on-error'], true);
   assert.equal(step['timeout-minutes'], 2);
   assert.deepEqual(step.env, {
-    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
     APPLICATION: '${{ inputs.application }}',
     DEPLOYMENT_ENVIRONMENT: '${{ inputs.environment }}',
     OPERATION: '${{ inputs.operation }}',
@@ -1885,7 +1892,43 @@ test('the result message names the application, release, environment, outcome, a
   );
 });
 
-test('Slack messages escape control characters, and a missing secret or failed post only warns', async () => {
+test('Slack messages are off unless the webhook secret is set', () => {
+  assert.deepEqual(deployment.jobs['verify-prod-protection'].env, {
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
+  });
+  // Every step that posts to Slack runs only when the secret is set, so an
+  // unset secret skips it and writes nothing about Slack.
+  const posting = Object.values(deployment.jobs).flatMap((job) =>
+    (job.steps ?? []).filter((step) => /fetch\(/.test(step.with?.script ?? '')),
+  );
+  assert.deepEqual(posting, [approvalStep, resultJob.steps[0]]);
+  for (const step of posting) {
+    assert.equal(step.if, slackGate, step.name);
+    assert.equal(step.env.SLACK_DEPLOY_WEBHOOK_URL, undefined, step.name);
+  }
+  // Actions reads an unset secret as an empty string.
+  for (const [value, runs] of [
+    ['', false],
+    [webhook, true],
+  ]) {
+    assert.equal(
+      evaluate(slackGate, { env: { SLACK_DEPLOY_WEBHOOK_URL: value } }),
+      runs,
+    );
+  }
+  assert.doesNotMatch(
+    readFileSync(
+      new URL(
+        '../.github/workflows/_delivery-deploy-environment.yml',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+    /is not set, so no Slack message/,
+  );
+});
+
+test('Slack messages escape control characters, and a failed post only warns', async () => {
   for (const step of [approvalStep, resultJob.steps[0]]) {
     const env = {
       ...releaseEnv('prod'),
@@ -1898,11 +1941,7 @@ test('Slack messages escape control characters, and a missing secret or failed p
       escaped.texts[0],
       /^match-to-csv a&lt;b&gt;&amp;c -&gt; prod: /,
     );
-    const unset = await notify(step, { ...env, SLACK_DEPLOY_WEBHOOK_URL: '' });
-    assert.deepEqual(unset.posts, []);
-    assert.deepEqual(unset.warnings, [
-      'SLACK_DEPLOY_WEBHOOK_URL is not set, so no Slack message was posted',
-    ]);
+    assert.deepEqual(escaped.warnings, []);
     // An error status or a thrown fetch warns and resolves.
     const refused = await notify(step, env, {
       respond: async () => ({ ok: false, status: 404 }),
@@ -1918,7 +1957,7 @@ test('Slack messages escape control characters, and a missing secret or failed p
     assert.deepEqual(thrown.warnings, [
       'Could not post the deploy message to Slack (TypeError)',
     ]);
-    for (const result of [escaped, unset, refused, thrown]) {
+    for (const result of [escaped, refused, thrown]) {
       for (const line of [...result.warnings, ...result.info]) {
         assert.ok(!line.includes(webhook), line);
       }

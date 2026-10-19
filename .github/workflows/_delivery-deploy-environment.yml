@@ -29,7 +29,7 @@ on:
         value: ${{ jobs.deploy.outputs.deployed }}
     # Repository secrets reach a called workflow only when the caller passes
     # them. Each caller passes the account of the environment it deploys, and
-    # the optional Slack webhook for deploy messages.
+    # the Slack webhook, which turns on deploy messages only when it is set.
     secrets:
       DEV_AWS_ACCOUNT_ID:
         required: false
@@ -51,6 +51,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read
+    # Step conditions cannot read secrets, so the Slack step tests this copy.
+    env:
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
     steps:
       - name: Require prod reviewers without administrator bypass
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -65,14 +68,15 @@ jobs:
               throw new Error('prod requires reviewers and disabled administrator bypass; configure the Environment with separate authorization');
             }
       # A job waiting for approval runs no steps, so this job posts the approval
-      # request before the deploy job starts waiting. A missing webhook or a
-      # failed post only warns and never blocks the deploy.
+      # request before the deploy job starts waiting. The step runs only when
+      # the webhook secret is set, and a failed post only warns and never
+      # blocks the deploy.
       - name: Post the prod approval request to Slack
+        if: env.SLACK_DEPLOY_WEBHOOK_URL != ''
         continue-on-error: true
         timeout-minutes: 1
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
           APPLICATION: ${{ inputs.application }}
           DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
           OPERATION: ${{ inputs.operation }}
@@ -84,13 +88,8 @@ jobs:
             const rollback = OPERATION === 'rollback' ? ' (rollback)' : '';
             const text = `${APPLICATION} ${RELEASE_TAG} -> ${DEPLOYMENT_ENVIRONMENT}${rollback}: waiting for approval ${runUrl}`;
             core.info(text);
-            const webhook = process.env.SLACK_DEPLOY_WEBHOOK_URL;
-            if (!webhook) {
-              core.warning('SLACK_DEPLOY_WEBHOOK_URL is not set, so no Slack message was posted');
-              return;
-            }
             try {
-              const response = await fetch(webhook, {
+              const response = await fetch(process.env.SLACK_DEPLOY_WEBHOOK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -501,7 +500,10 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
   # Runs after every deploy outcome, including a rejected approval, where the
-  # deploy job never starts. A missing webhook or a failed post only warns.
+  # deploy job never starts and sets no outputs. Job conditions cannot read
+  # secrets and no earlier job output covers every outcome, so this job always
+  # starts, and without the webhook secret its only step is skipped. A failed
+  # post only warns.
   notify-result:
     name: Post the ${{ inputs.application }} ${{ inputs.environment }} result to Slack
     needs:
@@ -512,13 +514,16 @@ jobs:
     timeout-minutes: 5
     permissions:
       actions: read
+    # Step conditions cannot read secrets, so the Slack step tests this copy.
+    env:
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
     steps:
       - name: Post the deploy result to Slack
+        if: env.SLACK_DEPLOY_WEBHOOK_URL != ''
         continue-on-error: true
         timeout-minutes: 2
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
           APPLICATION: ${{ inputs.application }}
           DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
           OPERATION: ${{ inputs.operation }}
@@ -564,13 +569,8 @@ jobs:
             const rollback = OPERATION === 'rollback' ? ' (rollback)' : '';
             const text = `${APPLICATION} ${RELEASE_TAG} -> ${DEPLOYMENT_ENVIRONMENT}${rollback}: ${await describe()} ${runUrl}`;
             core.info(text);
-            const webhook = process.env.SLACK_DEPLOY_WEBHOOK_URL;
-            if (!webhook) {
-              core.warning('SLACK_DEPLOY_WEBHOOK_URL is not set, so no Slack message was posted');
-              return;
-            }
             try {
-              const response = await fetch(webhook, {
+              const response = await fetch(process.env.SLACK_DEPLOY_WEBHOOK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({

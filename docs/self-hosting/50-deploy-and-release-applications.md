@@ -51,7 +51,9 @@ Each application and environment has one concurrency group shared by forward dep
 
 ### Slack deploy messages
 
-`_delivery-deploy-environment.yml` posts plain-text messages to a Slack incoming webhook, one per application for each of these events:
+Slack deploy messages are optional and off by default. They turn on only when the repository secret `SLACK_DEPLOY_WEBHOOK_URL` is set, and that secret is the only setting. Without it, the Slack steps show as skipped in each run and the logs say nothing about Slack.
+
+With the secret set, `_delivery-deploy-environment.yml` posts plain-text messages to that Slack incoming webhook, one per application for each of these events:
 
 - **Dev result:** `match-to-csv match-to-csv-v3.2.1 -> dev: succeeded <run link>`. The result is `succeeded`, `failed`, `cancelled`, or `skipped` when the version is not newer than the latest successful deployment.
 - **Prod approval request:** `match-to-csv match-to-csv-v3.2.1 -> prod: waiting for approval <run link>`. `Verify prod reviewer protection` posts it after its check passes and before the deploy job waits. Open the link to approve or reject.
@@ -59,9 +61,9 @@ Each application and environment has one concurrency group shared by forward dep
 
 Rollbacks post the prod approval request and the prod result with `prod (rollback)` in place of `prod`. A merge that releases no application posts nothing.
 
-The webhook URL is the repository secret `SLACK_DEPLOY_WEBHOOK_URL`. Each delivery workflow passes it explicitly to the reusable workflows, and only the two Slack steps read it. When the secret is not set, or Slack does not answer within 10 seconds or returns an error, the step logs a warning and the deploy continues.
+Each delivery workflow passes the secret explicitly to the reusable workflows. Only the two jobs that post to Slack receive it, and only their Slack steps send it. When Slack does not answer within 10 seconds or returns an error, the step logs a warning and the deploy continues. A Slack failure never fails or blocks a deploy.
 
-To set it up:
+To turn the messages on:
 
 1. In Slack, create an app from scratch at <https://api.slack.com/apps> in your workspace. Under **Incoming Webhooks**, turn on **Activate Incoming Webhooks**, choose **Add New Webhook to Workspace**, pick the channel, and copy the webhook URL.
 2. Store the URL as a repository secret. `gh secret set` prompts for the value, so it stays out of your shell history:
@@ -77,7 +79,7 @@ To set it up:
    /github unsubscribe <owner>/<repository> deployments
    ```
 
-To stop the messages, delete the secret. To move them to another channel, add a webhook for that channel and replace the secret.
+To turn the messages off, delete the secret. To move them to another channel, add a webhook for that channel and replace the secret.
 
 ## Validate match-to-csv
 
