@@ -11,6 +11,8 @@ Relationships use the numeric `id` of the other issue, from the create response 
 - Parent link: `gh api repos/samlevin/mcc-stats-suite/issues/PARENT/sub_issues -F sub_issue_id=CHILD_ID`, where PARENT is the parent's number.
 - Blocked-by edge: `gh api repos/samlevin/mcc-stats-suite/issues/BLOCKED/dependencies/blocked_by -F issue_id=BLOCKER_ID`, where BLOCKED is the number of the issue that waits. The blocker's `id` goes in the body; do not reverse the direction.
 
+Independence record: after the children exist, read the container's current body with `gh api repos/samlevin/mcc-stats-suite/issues/N --jq .body`, where N is the container's number. Write that whole body, with the section appended, to a scratch file, then update it with `gh api -X PATCH repos/samlevin/mcc-stats-suite/issues/N -F body=@/abs/body.md`.
+
 Project: select it by owner and number, never by title.
 `gh api users/samlevin/projectsV2/1/fields --paginate`
 Each single-select field lists its `options` with their `id` and `name`. A repository workflow adds each new issue to the project within about a minute. Never add an item yourself (no `POST` to the project's `items`). Find the item the workflow added:

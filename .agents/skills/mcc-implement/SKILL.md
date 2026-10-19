@@ -1,12 +1,12 @@
 ---
 name: mcc-implement
-description: "Deliver an MCC GitHub issue or rework an MCC PR with the repository's namespaced agents. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. Routes a container to mcc-orchestrator (serial, one leaf at a time) and a leaf or PR to mcc-implementer, applying the repository model/effort policy or an explicit prompt override."
+description: "Deliver an MCC GitHub issue or rework an MCC PR with the repository's namespaced agents. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. Routes a container to mcc-orchestrator (dependency order, concurrent only across recorded independence groups) and a leaf or PR to mcc-implementer, applying the repository model/effort policy or an explicit prompt override."
 ---
 <!-- Generated from .agents/workflows/implement.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 
 # MCC implement
 
-You are the dispatcher. You never implement, review, or fix code yourself in this flow; the namespaced agents do, and only one implementation runs at a time.
+You are the dispatcher. You never implement, review, or fix code yourself in this flow; the namespaced agents do. You dispatch one agent per request.
 
 ## Resolve the target
 
@@ -24,7 +24,7 @@ You are the dispatcher. You never implement, review, or fix code yourself in thi
 
 Run the resolver with `--model` or `--effort` only for an override that targets that role (`<tool>` is `claude` or `codex`). It prints JSON with the final `model`, `effort`, their `source`, and a `spawn` object. If it exits non-zero, stop and report its message verbatim; it refuses models and efforts the repository does not list, and nothing substitutes another value. Compose the `Policy:` line: `Policy: tool=<tool> role=<role> model=<model> effort=<effort> (model: <source>, effort: <source>); handoff overrides: <role-prefixed overrides or none>`.
 
-## Dispatch, one at a time
+## Dispatch one agent
 
 Send a compact packet: target URL, trunk `main` and the fresh `origin/main` SHA, accepted decisions from the request and issue comments, validation requirements, the project binding (project 1, owner `samlevin`), and the `Policy:` line. Reference repository docs by path; do not paste them. Pre-PR review happens inside the implementer; it needs no instruction from you.
 
