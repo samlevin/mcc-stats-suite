@@ -1,6 +1,6 @@
 {
   "name": "@mcc/roster",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "private": true,
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -19,7 +19,7 @@
     "directory": "packages/roster"
   },
   "dependencies": {
-    "@mcc/contracts": "1.2.0"
+    "@mcc/contracts": "1.2.1"
   },
   "devDependencies": {
     "tsx": "^4.23.15"

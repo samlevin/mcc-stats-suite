@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.2.0...contracts-v1.2.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **match-to-csv:** use the first valid email body date ([#286](https://github.com/samlevin/mcc-stats-suite/issues/286)) ([4b9efbd](https://github.com/samlevin/mcc-stats-suite/commit/4b9efbd3527751494ef0b73e1ba2aae3eb64b6c7))
+
 ## [1.2.0](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.1.0...contracts-v1.2.0) (2026-10-18)
 
 
