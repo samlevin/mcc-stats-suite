@@ -3,6 +3,7 @@ import type { DeploymentConfig } from '@mcc/cdk-config';
 import {
   Aspects,
   CfnOutput,
+  CfnResource,
   Duration,
   Fn,
   RemovalPolicy,
@@ -57,7 +58,41 @@ export class MatchToCsvStack extends Stack {
   private readonly deployment: DeploymentConfig;
 
   constructor(scope: Construct, id: string, props: MatchToCsvStackProps) {
-    super(scope, id, props);
+    super(scope, id, {
+      ...props,
+      description:
+        'Receive match screenshots by email, preserve OCR evidence, and export match and gamertag CSVs.',
+    });
+    Aspects.of(this).add({
+      visit(node: IConstruct) {
+        if (!(node instanceof CfnResource)) return;
+        const owner = [node, ...node.node.scopes.slice().reverse()].find(
+          (ancestor) =>
+            ancestor.node.metadata.some(
+              (entry) => entry.type === 'mcc:component',
+            ),
+        );
+        const component = owner?.node.metadata.find(
+          (entry) => entry.type === 'mcc:component',
+        )?.data as { group: string; purpose: string } | undefined;
+        node.addMetadata(
+          'mcc:nameOrigin',
+          node.cfnResourceType === 'AWS::IAM::Policy'
+            ? 'CDK-generated'
+            : 'explicitly configured',
+        );
+        node.addMetadata(
+          'mcc:component',
+          component ?? {
+            group: 'Operational support',
+            purpose: 'Support email-to-CSV processing and failure monitoring',
+          },
+        );
+        if (node instanceof iam.CfnRole) {
+          node.description = `Execution role for ${owner?.node.id ?? 'match-to-csv'}: ${component?.purpose ?? 'support processing'}`;
+        }
+      },
+    });
 
     const { deployment, gitSha, alarmEmailParameter } = props;
     this.deployment = deployment;
@@ -148,6 +183,8 @@ export class MatchToCsvStack extends Stack {
       : [senderAllowlistParameter];
     const processEmail = this.nodeFunction(
       'ProcessEmail',
+      'Email intake',
+      'Validate sender and match date, then preserve attachments',
       'process-email.ts',
       {
         EVIDENCE_BUCKET: evidenceBucket.bucketName,
@@ -167,6 +204,8 @@ export class MatchToCsvStack extends Stack {
     );
     const extractText = this.nodeFunction(
       'ExtractText',
+      'OCR',
+      'Extract screenshot tables with Textract and resolve roster players',
       'extract-text.ts',
       {
         ...lambdaEnvironment,
@@ -179,24 +218,32 @@ export class MatchToCsvStack extends Stack {
     );
     const writeExtractedCsv = this.nodeFunction(
       'WriteExtractedCsv',
+      'CSV export',
+      'Write extracted match tables and CSV evidence',
       'write-extracted-csv.ts',
       lambdaEnvironment,
       1024,
     );
     const writeGamertagCsvs = this.nodeFunction(
       'WriteGamertagCsvs',
+      'CSV export',
+      'Write per-gamertag CSV exports after every screenshot succeeds',
       'write-gamertag-csvs.ts',
       lambdaEnvironment,
       1024,
     );
     const compareRuns = this.nodeFunction(
       'CompareRuns',
+      'Replay/evidence tools',
+      'Compare immutable OCR runs for a submission',
       'compare-runs.ts',
       lambdaEnvironment,
       1024,
     );
     const materializeTrainingData = this.nodeFunction(
       'MaterializeTrainingData',
+      'Replay/evidence tools',
+      'Materialize selected evidence for OCR training',
       'materialize-training-data.ts',
       lambdaEnvironment,
       2048,
@@ -388,6 +435,11 @@ export class MatchToCsvStack extends Stack {
       'WorkflowLogs',
       `/aws/vendedlogs/states/${deployment.resourcePrefix}`,
     );
+    this.describe(
+      logGroup,
+      'Operational support',
+      'Record email workflow execution details',
+    );
     const workflow = new sfn.StateMachine(this, 'Workflow', {
       stateMachineName: deployment.resourcePrefix,
       stateMachineType: sfn.StateMachineType.STANDARD,
@@ -402,6 +454,11 @@ export class MatchToCsvStack extends Stack {
       },
       tracingEnabled: true,
     });
+    this.describe(
+      workflow,
+      'Email intake',
+      'Process stored email, OCR attachments, and export CSVs',
+    );
     const replayExtract = new tasks.LambdaInvoke(this, 'Replay extract text', {
       lambdaFunction: extractText,
       payloadResponseOnly: true,
@@ -428,6 +485,12 @@ export class MatchToCsvStack extends Stack {
       tracingEnabled: true,
     });
 
+    this.describe(
+      replayWorkflow,
+      'Replay/evidence tools',
+      'Create a new OCR run and CSV export from preserved evidence',
+    );
+
     const inboundRoute = deployment.ephemeral ?? deployment.environment;
     const inboundPrefix = `incoming/${inboundRoute}/`;
     const workflowDlq = new sqs.Queue(this, 'WorkflowDlq', {
@@ -435,7 +498,14 @@ export class MatchToCsvStack extends Stack {
       retentionPeriod: Duration.days(14),
       encryption: sqs.QueueEncryption.SQS_MANAGED,
     });
+    this.describe(
+      workflowDlq,
+      'Operational support',
+      'Preserve events that could not start the email workflow',
+    );
     const rawEmailCreated = new events.Rule(this, 'RawEmailCreated', {
+      description:
+        'Start email processing when S3 stores a message under this stack inbound prefix.',
       eventPattern: {
         source: ['aws.s3'],
         detailType: ['Object Created'],
@@ -455,6 +525,12 @@ export class MatchToCsvStack extends Stack {
           key: events.EventField.fromPath('$.detail.object.key'),
         }),
       }),
+    );
+
+    this.describe(
+      rawEmailCreated,
+      'Email intake',
+      'Start the workflow for stored-message events under the stack inbound prefix',
     );
 
     // Ephemeral stacks run under the local workload boundary, which grants no
@@ -495,7 +571,7 @@ export class MatchToCsvStack extends Stack {
         this,
         emailAliasParameter,
       );
-      new ses.CfnReceiptRule(this, 'StoreRawEmail', {
+      const receiptRule = new ses.CfnReceiptRule(this, 'StoreRawEmail', {
         ruleSetName: ssm.StringParameter.valueForStringParameter(
           this,
           `${prefix}/receipt-rule-set-name`,
@@ -519,6 +595,11 @@ export class MatchToCsvStack extends Stack {
           ],
         },
       });
+      this.describe(
+        receiptRule,
+        'Email intake',
+        'Store plus-addressed ephemeral email in the shared raw-message bucket',
+      );
     }
 
     new CfnOutput(this, 'StateMachineArn', {
@@ -553,6 +634,11 @@ export class MatchToCsvStack extends Stack {
     const topic = new sns.Topic(this, 'AlarmTopic', {
       topicName: `${prefix}-alarms`,
     });
+    this.describe(
+      topic,
+      'Operational support',
+      'Publish pipeline failure alarms to operators',
+    );
     if (sources.alarmEmailParameter) {
       topic.addSubscription(
         new subscriptions.EmailSubscription(
@@ -569,7 +655,7 @@ export class MatchToCsvStack extends Stack {
       metric: cloudwatch.IMetric,
       description: string,
     ): void => {
-      new cloudwatch.Alarm(this, `${id}Alarm`, {
+      const resource = new cloudwatch.Alarm(this, `${id}Alarm`, {
         alarmName: `${prefix}-${id}`,
         alarmDescription: description,
         metric,
@@ -578,7 +664,9 @@ export class MatchToCsvStack extends Stack {
         comparisonOperator:
           cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-      }).addAlarmAction(action);
+      });
+      resource.addAlarmAction(action);
+      this.describe(resource, 'Operational support', description);
     };
 
     for (const [id, stateMachine] of Object.entries(sources.stateMachines)) {
@@ -627,6 +715,8 @@ export class MatchToCsvStack extends Stack {
 
   private nodeFunction(
     id: string,
+    group: string,
+    purpose: string,
     fileName: string,
     environment: Record<string, string>,
     memorySize: number,
@@ -635,14 +725,17 @@ export class MatchToCsvStack extends Stack {
   ): lambdaNode.NodejsFunction {
     const repositoryRoot = path.join(__dirname, '..', '..', '..', '..');
     const functionName = `${this.deployment.resourcePrefix}-${id}`;
-    return new lambdaNode.NodejsFunction(this, id, {
+    const logGroup = this.logGroup(`${id}Logs`, `/aws/lambda/${functionName}`);
+    this.describe(logGroup, group, `Logs for ${id}: ${purpose}`);
+    const fn = new lambdaNode.NodejsFunction(this, id, {
       functionName,
+      description: purpose,
       entry: path.join(__dirname, '..', '..', 'src', 'lambdas', fileName),
       handler: 'handler',
       runtime: bundlingRuntime,
       architecture: lambda.Architecture.ARM_64,
       memorySize,
-      logGroup: this.logGroup(`${id}Logs`, `/aws/lambda/${functionName}`),
+      logGroup,
       timeout,
       tracing: lambda.Tracing.ACTIVE,
       environment,
@@ -650,6 +743,16 @@ export class MatchToCsvStack extends Stack {
       depsLockFilePath: path.join(repositoryRoot, 'package-lock.json'),
       bundling: bundlingOptions(includeSharp, this.bundlingRequired),
     });
+    this.describe(fn, group, purpose);
+    return fn;
+  }
+
+  private describe(
+    construct: IConstruct,
+    group: string,
+    purpose: string,
+  ): void {
+    construct.node.addMetadata('mcc:component', { group, purpose });
   }
 
   private grantEvidenceAccess(
