@@ -22,7 +22,7 @@ Current application guidance:
 
 Every application workspace participates in the root checks and can be targeted independently by the deployment workflow.
 
-`npm test` is AWS-free. CDK synth verifies infrastructure structure. After a merge, the deployment verifies each affected application's dev stack, as [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes. Run the full email integration test before promoting a material ingestion or processing change.
+`npm test` is AWS-free. CDK synth verifies infrastructure structure. After a release PR merges, delivery verifies each released application's dev stack, as [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes. Run the full email integration test before promoting a material ingestion or processing change.
 
 ## Issue automation tests
 
@@ -57,7 +57,7 @@ The ARM64 `check-workspaces` job installs dependencies once, prepares shared dec
 
 The parallel ARM64 `check-bundles` job runs only for full-scope changes. It starts pulling the digest-pinned bundling image before `npm ci`, then runs `ci:synth` and `verify:bundle`. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. The bundling image pin lives in `applications/match-to-csv/cdk/lib/bundling.ts`, which explains how to update it.
 
-For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, CI selection, root dependencies, unknown paths, and every full-scope push to `main` check all workspaces, so `main` validates every workspace before deployment.
+For a PR confined to known workspaces, Turbo `--affected` checks changed workspaces and downstream consumers. A `contracts` change checks `match-to-csv`; a `cdk-config` change checks all five applications. Root configuration, CI selection, root dependencies, unknown paths, and every full-scope push to `main` check all workspaces, so `main` validates every workspace. Release pull requests pass the required checks before merging.
 
 ### Infrastructure gate
 
@@ -73,7 +73,7 @@ npm run tofu:check
 
 ### Deployment selection
 
-After the required gate succeeds on a push to `main`, a single selector job publishes the deployment artifact that names the affected applications. Pull requests never deploy. [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes the deployment that follows.
+The release workflow reads Release Please's per-path release outputs and selects only applications. Ordinary merges and shared-package-only releases deploy nothing. Each selected application's release commit deploys to dev and then waits for prod approval. Pull requests never deploy. [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes the deployment that follows.
 
 ## Caches
 
@@ -93,6 +93,6 @@ Run the selection, concurrency, failure propagation, cache policy, and deploymen
 node --test scripts/ci-checks.test.mjs
 ```
 
-Application delivery regression checks run with `node --test scripts/deployment-workflows.test.mjs`. They use workflow definitions and mocked GitHub responses to verify trusted CI qualification, exact-SHA handoff, independent dev-success gating, and required production approval protection without AWS calls.
+Application delivery regression checks run with `node --test scripts/deployment-workflows.test.mjs`. They use workflow definitions and mocked GitHub responses to verify release selection, exact release commits, required production approval protection, and account checks without AWS calls. The same suite checks per-application dev-success gating, shared deployment queues, stale-version skips and the rollback exception with prior prod qualification.
 
 `node --test scripts/workflow-names.test.mjs` checks workflow, job, and step names against the convention in [CONTRIBUTING.md](CONTRIBUTING.md#name-github-actions-workflows), including the three check names the `main` ruleset requires.

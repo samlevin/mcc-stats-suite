@@ -29,8 +29,8 @@ on:
         required: true
         type: string
       reason:
-        description: Required for rollback; optional for promotion
-        required: false
+        description: Reason for restoring this production release
+        required: true
         type: string
 
 permissions:
@@ -87,7 +87,7 @@ jobs:
           fi
           git merge-base --is-ancestor "${TARGET_SHA}" origin/main
           RELEASE_VERSION="${RELEASE_TAG#"${APPLICATION}-v"}"
-          PACKAGE_VERSION="$(node -p "require('./applications/${APPLICATION}/package.json').version")"
+          PACKAGE_VERSION="$(git show "${TARGET_SHA}:applications/${APPLICATION}/package.json" | node -e 'let input = ""; process.stdin.on("data", (data) => input += data); process.stdin.on("end", () => console.log(JSON.parse(input).version));')"
           if [ "${RELEASE_VERSION}" != "${PACKAGE_VERSION}" ]; then
             echo "::error::Release tag version ${RELEASE_VERSION} does not match ${APPLICATION} package version ${PACKAGE_VERSION}"
             exit 1

@@ -51,7 +51,7 @@ Use `feat` for a minor version, `fix` for a patch, and a documented breaking cha
 
 ## What happens after merge
 
-A merge to `main` deploys every affected application to `dev` and then, after a required reviewer approves, to `prod`. You can follow it in the repository's Deployments page, but you do not run it. [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes each step.
+Merging a release pull request deploys each released application to `dev` at its release commit and then, after a required reviewer approves, to `prod`. Ordinary merges and shared-package-only releases deploy nothing. You can follow releases in the Actions run and the repository's Deployments page. [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes each step.
 
 Foundation changes under `infrastructure/` are applied before they merge. Someone with Terrateam apply access applies them to dev and then prod from your pull request, as [Change the foundation with Terrateam](docs/self-hosting/70-optional-terrateam.md#change-the-foundation-with-terrateam) describes.
 
@@ -90,7 +90,7 @@ Workflow names show up in the Actions sidebar and in every pull request's check 
 
 Two kinds of rename need more than a code change:
 
-- The CDK entry role trusts `_delivery-deploy-environment.yml` by its path, which GitHub puts in the OIDC `job_workflow_ref` claim, so renaming `delivery-deploy.yml` or `delivery-rollback.yml`, changing their `name:`, or adding another caller needs no bootstrap change. To move or rename `_delivery-deploy-environment.yml`, set `cdk_deploy_workflow_path` to the new path in the same pull request and apply bootstrap from that branch in dev and then prod before it merges. [Trusted deployment workflows](docs/self-hosting/10-bootstrap-accounts.md#trusted-deployment-workflows) has the steps.
+- The CDK entry role trusts `_delivery-deploy-environment.yml` by its path, which GitHub puts in the OIDC `job_workflow_ref` claim, so renaming `release-pr.yml` or `delivery-rollback.yml`, changing their `name:`, or adding another caller needs no bootstrap change. To move or rename `_delivery-deploy-environment.yml`, set `cdk_deploy_workflow_path` to the new path in the same pull request and apply bootstrap from that branch in dev and then prod before it merges. [Trusted deployment workflows](docs/self-hosting/10-bootstrap-accounts.md#trusted-deployment-workflows) has the steps.
 - The `main` ruleset requires three checks by job name: `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits`. The Terrateam setup also requires the `Require applicable Terrateam applies` commit status from GitHub Actions, which the infrastructure merge gate publishes independently of its evaluator job name. Renaming a required job or status needs a ruleset change when the pull request merges, or later pull requests wait on a check that no longer runs.
 
 ## Keep documentation with the code

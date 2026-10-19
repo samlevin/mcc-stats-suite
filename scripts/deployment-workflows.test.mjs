@@ -14,134 +14,9 @@ import { test } from 'node:test';
 import { parse } from 'yaml';
 import { evaluate, runScript, workflow } from './workflow-test-helpers.mjs';
 const ci = workflow('ci-checks');
-const orchestration = workflow('delivery-deploy');
-const delivery = workflow('_delivery-promote-application');
-const promotion = workflow('delivery-promote');
+const release = workflow('release-pr');
+const delivery = workflow('_delivery-release-application');
 const deployment = workflow('_delivery-deploy-environment');
-const selection = orchestration.jobs['select-applications'];
-
-test('only successful trusted main push CI qualifies stable delivery', () => {
-  assert.deepEqual(orchestration.on.workflow_run, {
-    workflows: [ci.name],
-    types: ['completed'],
-    branches: ['main'],
-  });
-  assert.equal(ci.name, 'CI: checks');
-  for (const event of ['push', 'pull_request', 'workflow_dispatch']) {
-    for (const conclusion of ['success', 'failure', 'cancelled', 'skipped']) {
-      for (const head_branch of ['main', 'other']) {
-        for (const repository of ['owner/repo', 'fork/repo']) {
-          const allowed = evaluate(selection.if, {
-            github: {
-              repository: 'owner/repo',
-              event: {
-                workflow_run: {
-                  event,
-                  conclusion,
-                  head_branch,
-                  head_repository: { full_name: repository },
-                },
-              },
-            },
-          });
-          assert.equal(
-            allowed,
-            event === 'push' &&
-              conclusion === 'success' &&
-              head_branch === 'main' &&
-              repository === 'owner/repo',
-          );
-        }
-      }
-    }
-  }
-  assert.ok(
-    !Object.values(ci.jobs).some((job) => job.uses?.includes('deploy')),
-  );
-  assert.ok(!orchestration.on.pull_request);
-});
-
-test('artifact belongs to qualifying CI run and deployment uses that CI SHA', () => {
-  const download = selection.steps.find((step) =>
-    step.uses?.startsWith('actions/download-artifact'),
-  );
-  assert.equal(download.with['run-id'], '${{ github.event.workflow_run.id }}');
-  assert.equal(
-    download.with.name,
-    'deploy-applications-${{ github.event.workflow_run.id }}',
-  );
-  assert.equal(
-    selection.outputs.sha,
-    '${{ github.event.workflow_run.head_sha }}',
-  );
-  assert.equal(
-    orchestration.jobs.deliver.with.sha,
-    '${{ needs.select-applications.outputs.sha }}',
-  );
-  for (const job of [delivery.jobs['deploy-prod']]) {
-    assert.equal(job.with.sha, '${{ inputs.sha }}');
-    assert.equal(job.with.application, '${{ inputs.application }}');
-  }
-  const checkout = deployment.jobs.deploy.steps.find(
-    (step) => step.uses?.split('@')[0] === 'actions/checkout',
-  );
-  assert.ok(checkout, 'deployment must check out the qualifying CI revision');
-  assert.match(checkout.uses, /^actions\/checkout@[a-f0-9]{40}$/);
-  assert.equal(checkout.with.ref, '${{ inputs.sha }}');
-});
-
-test('dev and prod runs share deployment steps and independent application matrices', () => {
-  assert.equal(orchestration.jobs.deliver.strategy['fail-fast'], false);
-  assert.equal(promotion.jobs.promote.strategy['fail-fast'], false);
-  assert.equal(
-    orchestration.jobs.deliver.uses,
-    './.github/workflows/_delivery-deploy-environment.yml',
-  );
-  assert.equal(orchestration.jobs.deliver.with.environment, 'dev');
-  assert.equal(
-    promotion.jobs.promote.uses,
-    './.github/workflows/_delivery-promote-application.yml',
-  );
-  assert.equal(
-    delivery.jobs['deploy-prod'].uses,
-    './.github/workflows/_delivery-deploy-environment.yml',
-  );
-  assert.equal(delivery.jobs['deploy-prod'].with.environment, 'prod');
-  assert.equal(delivery.jobs['deploy-prod'].needs, undefined);
-  assert.equal(delivery.jobs['deploy-dev'], undefined);
-  assert.equal(
-    promotion.jobs.promote.with.sha,
-    '${{ needs.qualify-applications.outputs.sha }}',
-  );
-  assert.equal(
-    promotion.jobs['qualify-applications'].outputs.sha,
-    '${{ steps.source.outputs.sha }}',
-  );
-  for (const [job, dependency] of [
-    [orchestration.jobs.deliver, 'select-applications'],
-    [promotion.jobs.promote, 'qualify-applications'],
-  ]) {
-    for (const applications of ['[]', '["admin"]']) {
-      assert.equal(
-        evaluate(job.if, {
-          needs: { [dependency]: { outputs: { applications } } },
-        }),
-        applications !== '[]',
-      );
-    }
-  }
-  const finish = deployment.jobs.deploy.steps.find(
-    (step) => step.name === 'Finish deployment record',
-  );
-  assert.match(
-    finish.env.DEPLOYMENT_STATE,
-    /steps.deploy.outcome == 'success' && steps.verify.outcome == 'success'/,
-  );
-  assert.deepEqual(deployment.concurrency, {
-    group: 'deploy-${{ inputs.application }}-${{ inputs.environment }}',
-    'cancel-in-progress': "${{ inputs.environment == 'dev' }}",
-  });
-});
 
 test('production requires reviewers and disabled bypass before protected job', async () => {
   const guard = deployment.jobs['verify-prod-protection'];
@@ -214,37 +89,6 @@ test('production requires reviewers and disabled bypass before protected job', a
   }
 });
 
-test('selection rejects shared packages and unknown applications and accepts no affected apps', () => {
-  const script = selection.steps.find((step) => step.id === 'selection').run;
-  const body = script.match(/node -e '([\s\S]*)'/)[1];
-  const run = new Function('require', 'process', body);
-  for (const [applications, allowed] of [
-    [[], true],
-    [['admin'], true],
-    [['admin', 'admin'], false],
-    [['contracts'], false],
-    [['unknown'], false],
-    [{}, false],
-  ]) {
-    let output;
-    const invocation = () =>
-      run(
-        () => ({
-          readFileSync: () => JSON.stringify(applications),
-          writeFileSync: () => {},
-          appendFileSync: (_path, value) => {
-            output = value;
-          },
-        }),
-        { env: { GITHUB_OUTPUT: 'output', TARGET_SHA: 'a'.repeat(40) } },
-      );
-    if (allowed) {
-      invocation();
-      assert.equal(output, `applications=${JSON.stringify(applications)}\n`);
-    } else assert.throws(invocation, /Invalid affected application list/);
-  }
-});
-
 test('workspaces install locally without a package registry or token', () => {
   const root = new URL('../', import.meta.url);
   assert.equal(existsSync(new URL('.npmrc', root)), false);
@@ -269,189 +113,6 @@ test('workspaces install locally without a package registry or token', () => {
   }
 });
 
-test('approval summary uses the qualified application and SHA without comment permissions', () => {
-  const prompt = delivery.jobs['request-prod-approval'];
-  assert.equal(prompt.needs, undefined);
-  assert.equal(prompt.if, undefined);
-  assert.equal(prompt.environment, undefined);
-  assert.deepEqual(prompt.permissions, {
-    actions: 'read',
-    contents: 'read',
-  });
-  assert.deepEqual(orchestration.jobs.deliver.permissions, {
-    actions: 'read',
-    contents: 'read',
-    deployments: 'write',
-    'id-token': 'write',
-  });
-  assert.deepEqual(prompt.steps[0].env, {
-    APPLICATION: '${{ inputs.application }}',
-    TARGET_SHA: '${{ inputs.sha }}',
-  });
-  assert.equal(prompt.steps[0].with['github-token'], undefined);
-  assert.equal(delivery.permissions.issues, undefined);
-  assert.equal(delivery.permissions['pull-requests'], undefined);
-});
-
-test('delivery job names show the application, environment, and approval wait', () => {
-  const format = (template, ...args) =>
-    template.replace(/\{(\d+)\}/g, (_, index) => args[index]);
-  const name = (job, values) =>
-    job.name.replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, inner) =>
-      evaluate(inner, { format, ...values }),
-    );
-  assert.equal(
-    name(orchestration.jobs.deliver, { matrix: { application: 'admin' } }),
-    'Deploy admin to dev',
-  );
-  assert.equal(delivery.jobs['deploy-prod'].name, 'Deploy to prod');
-  for (const [environment, expected] of [
-    ['dev', 'Deploy match-to-csv to dev'],
-    ['prod', 'Deploy match-to-csv to prod (waits for approval)'],
-  ]) {
-    assert.equal(
-      name(deployment.jobs.deploy, {
-        inputs: { application: 'match-to-csv', environment },
-      }),
-      expected,
-    );
-  }
-  assert.equal(
-    name(workflow('delivery-rollback').jobs['rollback-prod'], {
-      inputs: { application: 'player' },
-    }),
-    'Roll back player in prod',
-  );
-});
-
-test('approval summary lists reviewers without calling pull request or comment APIs', async () => {
-  const script = delivery.jobs['request-prod-approval'].steps[0].with.script;
-  const sha = 'a'.repeat(40);
-  for (const scenario of [
-    'valid',
-    'invalid-protection',
-    'bypass',
-    'environment-error',
-    'summary-error',
-  ]) {
-    const calls = [];
-    const warnings = [];
-    let summary;
-    await runScript(script, {
-      github: new Proxy(
-        {
-          rest: {
-            repos: new Proxy(
-              {
-                getEnvironment: async (request) => {
-                  calls.push(request);
-                  if (scenario === 'environment-error')
-                    throw new Error('environment unavailable');
-                  return {
-                    data: {
-                      can_admins_bypass: scenario === 'bypass',
-                      protection_rules: [
-                        {
-                          type: 'required_reviewers',
-                          reviewers:
-                            scenario === 'invalid-protection'
-                              ? []
-                              : [
-                                  {
-                                    type: 'User',
-                                    reviewer: { login: 'approver' },
-                                  },
-                                  {
-                                    type: 'Team',
-                                    reviewer: { slug: 'release-team' },
-                                  },
-                                ],
-                        },
-                      ],
-                    },
-                  };
-                },
-              },
-              {
-                get(target, key) {
-                  assert.equal(
-                    key,
-                    'getEnvironment',
-                    'only environment lookup is allowed',
-                  );
-                  return target[key];
-                },
-              },
-            ),
-          },
-        },
-        {
-          get(target, key) {
-            assert.equal(key, 'rest', 'pagination is not allowed');
-            return new Proxy(target.rest, {
-              get(rest, resource) {
-                assert.equal(resource, 'repos', 'comment APIs are not allowed');
-                return rest[resource];
-              },
-            });
-          },
-        },
-      ),
-      context: {
-        repo: { owner: 'owner', repo: 'repo' },
-        serverUrl: 'https://github.com',
-        runId: 123,
-      },
-      core: {
-        summary: {
-          addRaw: (body) => {
-            summary = body;
-            return {
-              write: async () => {
-                if (scenario === 'summary-error')
-                  throw new Error('summary unavailable');
-              },
-            };
-          },
-        },
-        warning: (message) => warnings.push(message),
-      },
-      process: { env: { APPLICATION: 'match-to-csv', TARGET_SHA: sha } },
-    });
-    assert.deepEqual(calls, [
-      { owner: 'owner', repo: 'repo', environment_name: 'prod' },
-    ]);
-    if (
-      ['invalid-protection', 'bypass', 'environment-error'].includes(scenario)
-    ) {
-      assert.equal(summary, undefined);
-      assert.equal(warnings.length, 1);
-      assert.match(
-        warnings[0],
-        scenario === 'environment-error'
-          ? /Could not prepare production approval summary: environment unavailable/
-          : /Production protection is invalid/,
-      );
-      continue;
-    }
-    assert.match(summary, /@approver @owner\/release-team/);
-    assert.ok(summary.includes('`match-to-csv` at `' + sha + '`'));
-    assert.match(summary, /separate prod run/);
-    assert.match(
-      summary,
-      /https:\/\/github.com\/owner\/repo\/actions\/runs\/123/,
-    );
-    assert.match(summary, /Once the production job is waiting/);
-    assert.doesNotMatch(summary, /production-approval|<!--/);
-    assert.deepEqual(
-      warnings,
-      scenario === 'summary-error'
-        ? ['Could not write production approval summary: summary unavailable']
-        : [],
-    );
-  }
-});
-
 // Runs the real step body under GitHub's default `bash -e` with stub `aws` and
 // `dig` commands, so the parameter, rule set, identity, and MX gates are
 // exercised rather than matched as text.
@@ -459,7 +120,10 @@ function runPrerequisites(stub) {
   const step = deployment.jobs.deploy.steps.find(
     (candidate) => candidate.name === 'Verify match-to-csv prerequisites',
   );
-  assert.equal(step.if, "inputs.application == 'match-to-csv'");
+  assert.equal(
+    step.if,
+    "steps.version-guard.outputs.deploy == 'true' && (inputs.application == 'match-to-csv')",
+  );
   assert.equal(step.env.DEPLOYMENT_ENVIRONMENT, '${{ inputs.environment }}');
   assert.ok(!step.run.includes('${{'), 'the step reads inputs only from env');
   const directory = mkdtempSync(join(tmpdir(), 'prerequisites-'));
@@ -603,67 +267,6 @@ for (const [name, stub, message] of [
   });
 }
 
-test('one deployment selector publishes the application selection after the required gate', () => {
-  const select = ci.jobs['select-applications'];
-  const gate = ci.jobs['require-scoped-checks'];
-  const save = select.steps.find(
-    (step) => step.name === 'Save application selection',
-  );
-  const uploads = Object.values(ci.jobs).flatMap((job) =>
-    job.steps.filter((step) =>
-      step.uses?.startsWith('actions/upload-artifact'),
-    ),
-  );
-  assert.equal(uploads.length, 1);
-  assert.equal(select.needs, 'require-scoped-checks');
-  // A skipped gate upstream of require-scoped-checks must not suppress the
-  // selection.
-  const selectIf = select.if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
-  assert.match(
-    selectIf,
-    /^!cancelled\(\) && needs\.require-scoped-checks\.result == 'success'/,
-  );
-  assert.match(
-    save.env.APPLICATIONS,
-    /needs\.require-scoped-checks\.outputs\.applications \|\| '\[\]'/,
-  );
-  assert.equal(
-    gate.outputs.applications,
-    '${{ needs.check-workspaces.outputs.applications }}',
-  );
-  assert.match(gate.steps[0].run, /INFRASTRUCTURE_RESULT/);
-  assert.match(gate.steps[0].run, /APPLICATIONS_RESULT/);
-  for (const event_name of ['push', 'pull_request']) {
-    for (const result of ['success', 'failure', 'skipped']) {
-      const values = {
-        cancelled: () => false,
-        github: { event_name, ref: 'refs/heads/main' },
-        needs: { 'require-scoped-checks': { result } },
-      };
-      assert.equal(
-        evaluate(selectIf, values),
-        event_name === 'push' && result === 'success',
-      );
-    }
-  }
-  assert.match(save.run, /printf '%s\\n'/);
-  assert.match(save.run, /deploy-selection\/applications\.json/);
-  assert.equal(
-    uploads[0].with.name,
-    'deploy-applications-${{ github.run_id }}',
-  );
-  assert.equal(
-    uploads[0].with.path,
-    '${{ runner.temp }}/deploy-selection/applications.json',
-  );
-  assert.equal(
-    evaluate(orchestration.jobs.deliver.if, {
-      needs: { 'select-applications': { outputs: { applications: '[]' } } },
-    }),
-    false,
-  );
-});
-
 const repositoryFile = (path) =>
   readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
 
@@ -734,9 +337,8 @@ test('CDK entry role trusts the reusable workflow every delivery workflow calls'
     'only the trusted workflow may assume the CDK entry role',
   );
   assert.deepEqual(topLevelCallers(file), [
-    'delivery-deploy.yml',
-    'delivery-promote.yml',
     'delivery-rollback.yml',
+    'release-pr.yml',
   ]);
   // The bootstrap roots must use the module default, which this test pins.
   for (const environment of ['dev', 'prod']) {
@@ -914,13 +516,14 @@ test('deployment selects the account and Region by environment and builds the ro
 });
 
 test('each deployment caller passes only the account secrets it deploys to', () => {
-  assert.deepEqual(orchestration.jobs.deliver.secrets, {
+  assert.deepEqual(release.jobs['deliver-applications'].secrets, {
+    DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
+    PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+  });
+  assert.deepEqual(delivery.jobs['deploy-dev'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
   });
   assert.deepEqual(delivery.jobs['deploy-prod'].secrets, {
-    PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
-  });
-  assert.deepEqual(promotion.jobs.promote.secrets, {
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
   });
   assert.deepEqual(
@@ -982,6 +585,8 @@ test('deployment rejects a missing account secret before any work', () => {
         TARGET_SHA: 'a'.repeat(40),
         MCC_DEV_ACCOUNT_ID: '',
         MCC_PROD_ACCOUNT_ID: '',
+        OPERATION: 'release',
+        GITHUB_REF: 'refs/heads/main',
         ...env,
       },
     });
@@ -1395,4 +1000,438 @@ test('Terrateam evaluates pull requests into main from every branch except the R
       source_branches: ['*', '!release-please--branches--main'],
     },
   ]);
+});
+
+const sha = 'a'.repeat(40);
+const repo = { owner: 'owner', repo: 'repo' };
+
+test('rollback keeps prior prod qualification and the protected shared deployment path', async () => {
+  const rollback = workflow('delivery-rollback');
+  assert.equal(rollback.on.workflow_run, undefined);
+  assert.ok(rollback.on.workflow_dispatch);
+  const deploy = rollback.jobs['rollback-prod'];
+  assert.equal(deploy.needs, 'qualify-release');
+  assert.equal(
+    deploy.uses,
+    './.github/workflows/_delivery-deploy-environment.yml',
+  );
+  assert.equal(deploy.with.environment, 'prod');
+  assert.equal(deploy.with.sha, '${{ needs.qualify-release.outputs.sha }}');
+  const steps = rollback.jobs['qualify-release'].steps;
+  assert.ok(steps.some((step) => step.name === 'Require rollback reason'));
+  const script = steps.find(
+    (step) => step.name === 'Verify prior qualification',
+  ).with.script;
+  for (const state of ['success', 'failure', 'in_progress', undefined]) {
+    const failures = [];
+    await runScript(script, {
+      context: { repo },
+      process: {
+        env: {
+          APPLICATION: 'match-to-csv',
+          OPERATION: 'rollback',
+          TARGET_SHA: sha,
+        },
+      },
+      github: {
+        rest: {
+          repos: {
+            listDeployments: 'deployments',
+            listDeploymentStatuses: 'statuses',
+          },
+        },
+        paginate: async (method, request) => {
+          if (method === 'deployments') {
+            assert.equal(request.environment, 'prod');
+            assert.equal(request.sha, sha);
+            assert.equal(request.task, 'deploy:match-to-csv');
+            return [
+              { id: 1, sha, task: request.task, created_at: '2026-01-01' },
+            ];
+          }
+          return state ? [{ state, created_at: '2026-01-01' }] : [];
+        },
+      },
+      core: { setFailed: (message) => failures.push(message) },
+    });
+    assert.equal(failures.length, state === 'success' ? 0 : 1);
+  }
+});
+
+const selection = release.jobs['update-release-pr'].steps.find(
+  (step) => step.id === 'selection',
+);
+const select = async (outputs) => {
+  let applications;
+  await runScript(selection.with.script, {
+    process: { env: { RELEASE_OUTPUTS: JSON.stringify(outputs) } },
+    core: {
+      setOutput: (name, value) => {
+        assert.equal(name, 'applications');
+        applications = JSON.parse(value);
+      },
+    },
+  });
+  return applications;
+};
+const released = (app, version = '1.2.3', commit = sha) => ({
+  [`applications/${app}--tag_name`]: `${app}-v${version}`,
+  [`applications/${app}--sha`]: commit,
+});
+
+test('only application releases from Release Please outputs deploy at their release commits', async () => {
+  assert.deepEqual(release.on.push.branches, ['main']);
+  assert.equal(release.on.release, undefined);
+  assert.equal(release.on.workflow_run, undefined);
+  assert.deepEqual(await select({}), []);
+  assert.deepEqual(await select({ paths_released: '[]' }), []);
+  assert.deepEqual(
+    await select({
+      paths_released: '["packages/contracts","packages/cdk-config"]',
+    }),
+    [],
+  );
+  const outputs = {
+    paths_released:
+      '["applications/admin","packages/contracts","applications/match-to-csv"]',
+    ...released('admin'),
+    ...released('match-to-csv', '3.10.0', 'b'.repeat(40)),
+  };
+  assert.deepEqual(await select(outputs), [
+    { application: 'admin', tag: 'admin-v1.2.3', sha },
+    {
+      application: 'match-to-csv',
+      tag: 'match-to-csv-v3.10.0',
+      sha: 'b'.repeat(40),
+    },
+  ]);
+  for (const invalid of [
+    { ...outputs, paths_released: '{}' },
+    {
+      ...outputs,
+      paths_released: '["applications/admin","applications/admin"]',
+    },
+    { ...outputs, paths_released: '["applications/unknown"]' },
+    { ...outputs, 'applications/admin--tag_name': 'player-v1.2.3' },
+    { ...outputs, 'applications/admin--tag_name': 'admin-v1.2.3-rc.1' },
+    { ...outputs, 'applications/admin--sha': 'main' },
+  ])
+    await assert.rejects(select(invalid), /Invalid/);
+  const job = release.jobs['deliver-applications'];
+  assert.equal(job.strategy['fail-fast'], false);
+  assert.equal(
+    job.uses,
+    './.github/workflows/_delivery-release-application.yml',
+  );
+  assert.equal(job.with.sha, '${{ matrix.release.sha }}');
+  assert.equal(job.with['release-tag'], '${{ matrix.release.tag }}');
+  assert.equal(job.with.application, '${{ matrix.release.application }}');
+  for (const ref of ['refs/heads/main', 'refs/tags/admin-v1.2.3']) {
+    for (const applications of ['[]', '[{"application":"admin"}]']) {
+      assert.equal(
+        evaluate(job.if, {
+          github: { ref },
+          needs: { 'update-release-pr': { outputs: { applications } } },
+        }),
+        ref === 'refs/heads/main' && applications !== '[]',
+      );
+    }
+  }
+});
+
+test('each release has its own successful dev dependency before prod approval', () => {
+  const dev = delivery.jobs['deploy-dev'];
+  const prod = delivery.jobs['deploy-prod'];
+  for (const [job, environment] of [
+    [dev, 'dev'],
+    [prod, 'prod'],
+  ]) {
+    assert.equal(
+      job.uses,
+      './.github/workflows/_delivery-deploy-environment.yml',
+    );
+    assert.deepEqual(job.with, {
+      application: '${{ inputs.application }}',
+      environment,
+      sha: '${{ inputs.sha }}',
+      operation: 'release',
+      source: '${{ inputs.release-tag }}',
+    });
+  }
+  assert.equal(prod.needs, 'deploy-dev');
+  for (const deployed of ['true', 'false', '']) {
+    assert.equal(
+      evaluate(prod.if, { needs: { 'deploy-dev': { outputs: { deployed } } } }),
+      deployed === 'true',
+    );
+  }
+  assert.equal(
+    deployment.on.workflow_call.outputs.deployed.value,
+    '${{ jobs.deploy.outputs.deployed }}',
+  );
+  assert.match(
+    deployment.jobs.deploy.outputs.deployed,
+    /steps.deploy.outcome == 'success' && steps.verify.outcome == 'success'/,
+  );
+  assert.equal(
+    deployment.jobs.deploy.environment.name,
+    '${{ inputs.environment }}',
+  );
+  assert.match(deployment.jobs.deploy.name, /waits for approval/);
+});
+
+test('forward and rollback operations hold one application/environment queue through verification', () => {
+  assert.equal(deployment.concurrency, undefined);
+  assert.deepEqual(deployment.jobs.deploy.concurrency, {
+    group: 'deploy-${{ inputs.application }}-${{ inputs.environment }}',
+    queue: 'max',
+  });
+  assert.equal(
+    workflow('delivery-rollback').jobs['rollback-prod'].with.operation,
+    '${{ inputs.operation }}',
+  );
+  const steps = deployment.jobs.deploy.steps;
+  const guard = steps.findIndex((step) => step.id === 'version-guard');
+  assert.ok(
+    guard > steps.findIndex((step) => step.name === 'Read release metadata'),
+  );
+  for (const step of steps.slice(
+    guard + 1,
+    steps.findIndex((step) => step.name === 'Finish deployment record'),
+  )) {
+    assert.match(
+      step.if,
+      /steps.version-guard.outputs.deploy == 'true'/,
+      step.name,
+    );
+  }
+  const finish = steps.find((step) => step.name === 'Finish deployment record');
+  assert.match(finish.if, /always\(\).*steps.deployment.outputs.result != ''/);
+});
+
+const guard = deployment.jobs.deploy.steps.find(
+  (step) => step.id === 'version-guard',
+);
+const record = (id, version, extra = {}) => ({
+  id,
+  environment: 'prod',
+  task: 'deploy:admin',
+  payload: {
+    application: 'admin',
+    release: { application: { version } },
+  },
+  ...extra,
+});
+const checkVersion = async ({
+  candidate = '2.0.0',
+  operation = 'release',
+  records = [],
+  states = {},
+  environment = 'prod',
+  tag = `admin-v${candidate}`,
+} = {}) => {
+  const outputs = {};
+  let summary;
+  const calls = [];
+  await runScript(guard.with.script, {
+    process: {
+      env: {
+        APPLICATION: 'admin',
+        DEPLOYMENT_ENVIRONMENT: environment,
+        OPERATION: operation,
+        RELEASE_TAG: tag,
+        RELEASE_METADATA: JSON.stringify({
+          application: { name: '@mcc/admin', version: candidate },
+        }),
+      },
+    },
+    context: { repo },
+    github: {
+      rest: {
+        repos: {
+          listDeployments: 'deployments',
+          listDeploymentStatuses: 'statuses',
+        },
+      },
+      paginate: async (method, request) => {
+        calls.push([method, request]);
+        if (method === 'deployments') {
+          assert.equal(request.environment, environment);
+          assert.equal(request.task, 'deploy:admin');
+          assert.equal(request.sha, undefined);
+          assert.equal(request.per_page, 100);
+          return records;
+        }
+        return states[request.deployment_id] ?? [{ id: 1, state: 'success' }];
+      },
+    },
+    core: {
+      setOutput: (name, value) => {
+        outputs[name] = value;
+      },
+      summary: {
+        addRaw: (value) => {
+          summary = value;
+          return { write: async () => {} };
+        },
+      },
+    },
+  });
+  return { outputs, summary, calls };
+};
+
+test('forward versions bootstrap, compare numerically, and skip equal or older releases with a summary', async () => {
+  for (const [candidate, previous, expected] of [
+    ['2.0.0', '1.9.9', 'true'],
+    ['1.10.0', '1.9.0', 'true'],
+    ['1.2.10', '1.2.9', 'true'],
+    ['2.0.0', '2.0.0', 'false'],
+    ['1.9.0', '1.10.0', 'false'],
+    ['1.9.9', '2.0.0', 'false'],
+  ]) {
+    const result = await checkVersion({
+      candidate,
+      records: [record(1, previous)],
+    });
+    assert.equal(result.outputs.deploy, expected);
+    if (expected === 'false')
+      assert.match(
+        result.summary,
+        /Skipped admin-v.*not newer than the latest successful deployment/,
+      );
+  }
+  assert.equal((await checkVersion()).outputs.deploy, 'true');
+});
+
+test('guard uses the latest successful exact application and environment deployment, including rollbacks and legacy records', async () => {
+  const records = [
+    record(1, '9.0.0'),
+    record(5, '1.0.0'),
+    record(3, '3.0.0'),
+    record(7, '8.0.0', { environment: 'dev' }),
+    record(8, '8.0.0', { task: 'deploy:player' }),
+    record(9, '8.0.0', { payload: { application: 'player' } }),
+  ];
+  const states = {
+    5: [
+      { id: 1, state: 'success' },
+      { id: 2, state: 'failure' },
+    ],
+  };
+  assert.equal(
+    (await checkVersion({ records, states })).outputs.deploy,
+    'false',
+  );
+  // The latest success is a deliberate rollback to 1.0.0; forward 2.0.0 may deploy again.
+  assert.equal(
+    (await checkVersion({ records: [record(1, '9.0.0'), record(2, '1.0.0')] }))
+      .outputs.deploy,
+    'true',
+  );
+  assert.equal(
+    (await checkVersion({ records: [record(1, '9.0.0')], states: { 1: [] } }))
+      .outputs.deploy,
+    'true',
+  );
+  const dev = record(1, '3.0.0', { environment: 'dev' });
+  assert.equal(
+    (await checkVersion({ records: [dev], environment: 'dev' })).outputs.deploy,
+    'false',
+  );
+  await assert.rejects(
+    checkVersion({ records: [record(1, undefined)] }),
+    /Invalid stable release version/,
+  );
+  await assert.rejects(
+    checkVersion({ tag: 'player-v2.0.0' }),
+    /does not match/,
+  );
+  const rollback = await checkVersion({
+    operation: 'rollback',
+    records: [record(1, '9.0.0')],
+  });
+  assert.equal(rollback.outputs.deploy, 'true');
+  assert.deepEqual(rollback.calls, []);
+});
+
+test('deployment records carry release tags and exact commit metadata', async () => {
+  const step = deployment.jobs.deploy.steps.find(
+    (step) => step.id === 'deployment',
+  );
+  let created;
+  await runScript(step.with.script, {
+    process: {
+      env: {
+        APPLICATION: 'admin',
+        DEPLOYMENT_ENVIRONMENT: 'dev',
+        DEPLOYMENT_OPERATION: 'release',
+        DEPLOYMENT_SOURCE: 'admin-v2.0.0',
+        RELEASE_METADATA: JSON.stringify({ application: { version: '2.0.0' } }),
+        TARGET_SHA: sha,
+      },
+    },
+    context: { repo, serverUrl: 'https://github.com', runId: 123 },
+    github: {
+      rest: {
+        repos: {
+          createDeployment: async (request) => {
+            created = request;
+            return { data: { id: 1 } };
+          },
+          createDeploymentStatus: async () => {},
+        },
+      },
+    },
+  });
+  assert.equal(created.ref, sha);
+  assert.equal(created.payload.releaseTag, 'admin-v2.0.0');
+  assert.equal(created.payload.release.application.version, '2.0.0');
+});
+
+test('rollback resolves the selected release package version after main advances and requires a reason', () => {
+  const rollback = workflow('delivery-rollback');
+  assert.equal(rollback.on.workflow_dispatch.inputs.reason.required, true);
+  const steps = rollback.jobs['qualify-release'].steps;
+  const target = steps.find((step) => step.id === 'target');
+  const directory = mkdtempSync(join(tmpdir(), 'mcc-rollback-release-'));
+  writeFileSync(
+    join(directory, 'git'),
+    `#!/usr/bin/env bash
+case "$1" in
+  rev-list) echo ${sha} ;;
+  merge-base) exit 0 ;;
+  show) test "$2" = '${sha}:applications/admin/package.json' || exit 1; echo '{"version":"1.0.0"}' ;;
+  *) exit 1 ;;
+esac
+`,
+    { mode: 0o755 },
+  );
+  writeFileSync(join(directory, 'npm'), '#!/usr/bin/env bash\nexit 0\n', {
+    mode: 0o755,
+  });
+  const output = join(directory, 'output');
+  const result = spawnSync('bash', ['-eo', 'pipefail', '-c', target.run], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: {
+      PATH: `${directory}:${process.env.PATH}`,
+      APPLICATION: 'admin',
+      RELEASE_TAG: 'admin-v1.0.0',
+      GITHUB_OUTPUT: output,
+    },
+  });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(readFileSync(output, 'utf8'), `sha=${sha}\n`);
+  const reason = steps.find((step) => step.name === 'Require rollback reason');
+  for (const [value, expected] of [
+    ['', 1],
+    ['   ', 1],
+    ['restore healthy release', 0],
+  ]) {
+    assert.equal(
+      spawnSync('bash', ['-e', '-c', reason.run], { env: { REASON: value } })
+        .status,
+      expected,
+    );
+  }
 });

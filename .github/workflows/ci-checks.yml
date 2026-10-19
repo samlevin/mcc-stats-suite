@@ -127,8 +127,6 @@ jobs:
       id-token: write
     env:
       MCC_BUILD_ENVIRONMENT: dev
-    outputs:
-      applications: ${{ steps.affected.outputs.applications }}
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -158,25 +156,6 @@ jobs:
           CI_MODE: ${{ needs.detect-changes.outputs.mode }}
           CI_JOB: static
         run: node scripts/ci-checks.mjs
-      - name: Find affected deployable applications
-        id: affected
-        if: github.event_name == 'push' && needs.detect-changes.outputs.full == 'true'
-        env:
-          TURBO_SCM_BASE: ${{ github.event.before }}
-          TURBO_SCM_HEAD: ${{ github.sha }}
-        run: |
-          if [[ "${TURBO_SCM_BASE}" =~ ^0+$ ]]; then
-            TURBO_SCM_BASE="${TURBO_SCM_HEAD}^"
-            export TURBO_SCM_BASE
-          fi
-          APPLICATIONS="$(npx turbo run cdk:deploy --affected --dry=json | jq -c '
-            [.tasks[]
-              | select(.task == "cdk:deploy" and .command != "<NONEXISTENT>")
-              | .package
-              | select(startswith("@mcc/"))
-              | sub("^@mcc/"; "")]
-            | unique')"
-          echo "applications=${APPLICATIONS}" >> "${GITHUB_OUTPUT}"
 
   check-bundles:
     name: Synthesize CDK stacks and verify Lambda bundles
@@ -234,8 +213,6 @@ jobs:
       [detect-changes, check-infrastructure, check-workspaces, check-bundles]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
-    outputs:
-      applications: ${{ needs.check-workspaces.outputs.applications }}
     steps:
       - name: Fail unless every selected check passed
         env:
@@ -257,24 +234,3 @@ jobs:
               test "$BUNDLES_RESULT" = success
             fi
           fi
-
-  select-applications:
-    name: Select applications to deliver
-    needs: require-scoped-checks
-    # The implicit success() fails when either gate was skipped upstream of
-    # require-scoped-checks, so require that job's own result instead.
-    if: ${{ !cancelled() && needs.require-scoped-checks.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: Save application selection
-        env:
-          APPLICATIONS: ${{ needs.require-scoped-checks.outputs.applications || '[]' }}
-        run: |
-          mkdir -p "${RUNNER_TEMP}/deploy-selection"
-          printf '%s\n' "${APPLICATIONS}" > "${RUNNER_TEMP}/deploy-selection/applications.json"
-      - name: Upload application selection
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: deploy-applications-${{ github.run_id }}
-          path: ${{ runner.temp }}/deploy-selection/applications.json
-          retention-days: 1
