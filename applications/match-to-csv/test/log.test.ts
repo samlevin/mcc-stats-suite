@@ -2,7 +2,24 @@ import assert from 'node:assert/strict';
 import { test, type TestContext } from 'node:test';
 import { log, type LogLevel } from '../src/lib/log';
 
-const LEVELS: LogLevel[] = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR'];
+// Keyed by LogLevel so the compiler fails here when a level is added.
+const LEVELS = Object.keys({
+  TRACE: true,
+  DEBUG: true,
+  INFO: true,
+  WARN: true,
+  ERROR: true,
+} satisfies Record<LogLevel, true>) as LogLevel[];
+
+// Every value Lambda sets in AWS_LAMBDA_LOG_LEVEL, with the levels it keeps.
+const LAMBDA_LEVELS: Array<[string, LogLevel[]]> = [
+  ['TRACE', ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR']],
+  ['DEBUG', ['DEBUG', 'INFO', 'WARN', 'ERROR']],
+  ['INFO', ['INFO', 'WARN', 'ERROR']],
+  ['WARN', ['WARN', 'ERROR']],
+  ['ERROR', ['ERROR']],
+  ['FATAL', []],
+];
 
 function written(
   t: TestContext,
@@ -29,33 +46,54 @@ test('log writes one JSON line per record with its details', (t) => {
   ]);
 });
 
-test('INFO is the default threshold', (t) => {
-  for (const environment of [
-    {},
-    { AWS_LAMBDA_LOG_LEVEL: '' },
-    { AWS_LAMBDA_LOG_LEVEL: 'VERBOSE' },
-  ]) {
-    assert.deepEqual(
-      written(t, environment).map(({ level }) => level),
-      ['INFO', 'WARN', 'ERROR'],
-    );
-  }
-});
-
-test('records below AWS_LAMBDA_LOG_LEVEL are dropped', (t) => {
-  const cases: Array<[string, LogLevel[]]> = [
-    ['TRACE', ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR']],
-    ['DEBUG', ['DEBUG', 'INFO', 'WARN', 'ERROR']],
-    ['INFO', ['INFO', 'WARN', 'ERROR']],
-    ['WARN', ['WARN', 'ERROR']],
-    ['error', ['ERROR']],
-    ['FATAL', []],
-  ];
-  for (const [threshold, expected] of cases) {
+test('records below each Lambda log level are dropped', (t) => {
+  for (const [threshold, expected] of LAMBDA_LEVELS) {
     assert.deepEqual(
       written(t, { AWS_LAMBDA_LOG_LEVEL: threshold }).map(({ level }) => level),
       expected,
       threshold,
+    );
+  }
+});
+
+test('FATAL drops every log level', (t) => {
+  assert.deepEqual(written(t, { AWS_LAMBDA_LOG_LEVEL: 'FATAL' }), []);
+});
+
+test('AWS_LAMBDA_LOG_LEVEL is read case-insensitively', (t) => {
+  for (const [threshold, expected] of LAMBDA_LEVELS) {
+    const mixed = threshold.charAt(0) + threshold.slice(1).toLowerCase();
+    for (const value of [threshold.toLowerCase(), mixed]) {
+      assert.deepEqual(
+        written(t, { AWS_LAMBDA_LOG_LEVEL: value }).map(({ level }) => level),
+        expected,
+        value,
+      );
+    }
+  }
+});
+
+test('an unset, empty, or unknown AWS_LAMBDA_LOG_LEVEL means INFO', (t) => {
+  const environments: NodeJS.ProcessEnv[] = [
+    {},
+    { AWS_LAMBDA_LOG_LEVEL: undefined },
+    { AWS_LAMBDA_LOG_LEVEL: '' },
+    { AWS_LAMBDA_LOG_LEVEL: '   ' },
+    { AWS_LAMBDA_LOG_LEVEL: 'VERBOSE' },
+    { AWS_LAMBDA_LOG_LEVEL: 'WARNING' },
+    { AWS_LAMBDA_LOG_LEVEL: 'OFF' },
+    { AWS_LAMBDA_LOG_LEVEL: '3' },
+    // Names that exist on Object.prototype are still unknown levels.
+    { AWS_LAMBDA_LOG_LEVEL: 'constructor' },
+    { AWS_LAMBDA_LOG_LEVEL: '__proto__' },
+    { AWS_LAMBDA_LOG_LEVEL: 'toString' },
+    { AWS_LAMBDA_LOG_LEVEL: 'hasOwnProperty' },
+  ];
+  for (const environment of environments) {
+    assert.deepEqual(
+      written(t, environment).map(({ level }) => level),
+      ['INFO', 'WARN', 'ERROR'],
+      JSON.stringify(environment),
     );
   }
 });
