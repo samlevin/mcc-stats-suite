@@ -6,6 +6,8 @@ description: "Maintain the MCC repository agent workflows: change a role's model
 
 # MCC maintain agents
 
+Read and follow `.agents/worktree-isolation.md` before using a worktree.
+
 The Claude Code and Codex definitions are generated. Never edit a generated file; every one carries a `Generated from ...` header and `npm run agents:check` rejects hand edits. Work in the branch and worktree you already have; this skill does not create issues, branches, or PRs.
 
 ## Pick the source
