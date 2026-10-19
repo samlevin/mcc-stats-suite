@@ -8,7 +8,7 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import type {
   AttachmentRejectionCode,
   ProcessEmailInput,
-  ProcessEmailOutput,
+  ProcessEmailResult,
   RejectedAttachment,
   S3ObjectReference,
   SourceScreenshot,
@@ -266,14 +266,20 @@ const readParameter = createParameterReader(async (parameterName) => {
 
 export async function handler(
   event: ProcessEmailInput,
-): Promise<ProcessEmailOutput> {
+): Promise<ProcessEmailResult> {
   return processEmail(event, defaultDependencies);
 }
 
+/**
+ * Stores and screens one raw email. A submission rejected as a whole is a
+ * result, not an error: its evidence is recorded and a `REJECTED` result is
+ * returned, so the workflow ends as succeeded. It throws only when it cannot
+ * finish its work.
+ */
 export async function processEmail(
   event: ProcessEmailInput,
   dependencies: ProcessEmailDependencies,
-): Promise<ProcessEmailOutput> {
+): Promise<ProcessEmailResult> {
   const evidenceBucket = requiredEnvironment('EVIDENCE_BUCKET');
   const receivedAt = readReceivedAt(event.receivedAt);
   log('INFO', 'Processing raw email', {
@@ -312,6 +318,7 @@ export async function processEmail(
   const submissionPrefix = namespacedObjectKey(`submissions/${submissionId}`);
   const screenshots: SourceScreenshot[] = [];
   const rejectedAttachments: RejectedAttachment[] = [];
+  let rejectionCodes: SubmissionRejectionCode[];
 
   await dependencies.writeJson(
     evidenceBucket,
@@ -422,7 +429,7 @@ export async function processEmail(
       }
     }
 
-    const rejectionCodes: SubmissionRejectionCode[] =
+    rejectionCodes =
       submissionRejectionCodes.length > 0
         ? submissionRejectionCodes
         : screenshots.length === 0
@@ -459,53 +466,51 @@ export async function processEmail(
       },
     );
 
-    if (submissionRejectionCodes.length > 0) {
-      if (submissionRejectionCodes.includes('MATCH_DATE_INVALID')) {
-        await replyMatchDateInvalid(
-          dependencies,
-          parsed,
-          screening.senderAllowlist,
-          submissionId,
-        );
-      }
-      throw new SubmissionRejectedError(submissionRejectionCodes);
+    if (rejectionCodes.includes('MATCH_DATE_INVALID')) {
+      await replyMatchDateInvalid(
+        dependencies,
+        parsed,
+        screening.senderAllowlist,
+        submissionId,
+      );
     }
-    if (!accepted) throw new NoProcessableScreenshotsError();
   } catch (error) {
-    if (!(error instanceof SubmissionRejectedError)) {
-      const failure = errorSummary(error);
-      await Promise.all([
-        dependencies.writeJson(
-          evidenceBucket,
-          `${submissionPrefix}/completion.json`,
-          {
-            schemaVersion: 'email-submission-completion/v1',
-            submissionId,
-            status: 'FAILED',
-            completedAt: dependencies.timestamp(),
-            acceptedScreenshotCount: screenshots.length,
-            rejectedAttachments,
-            error: failure,
-          },
-        ),
-        submissionEvent(
-          dependencies,
-          evidenceBucket,
-          submissionPrefix,
+    const failure = errorSummary(error);
+    await Promise.all([
+      dependencies.writeJson(
+        evidenceBucket,
+        `${submissionPrefix}/completion.json`,
+        {
+          schemaVersion: 'email-submission-completion/v1',
           submissionId,
-          'SUBMISSION_FAILED',
-          { error: failure },
-        ),
-      ]).catch((recordError) => {
-        log('ERROR', 'Unable to record submission failure', {
-          submissionId,
-          error: errorSummary(recordError),
-        });
+          status: 'FAILED',
+          completedAt: dependencies.timestamp(),
+          acceptedScreenshotCount: screenshots.length,
+          rejectedAttachments,
+          error: failure,
+        },
+      ),
+      submissionEvent(
+        dependencies,
+        evidenceBucket,
+        submissionPrefix,
+        submissionId,
+        'SUBMISSION_FAILED',
+        { error: failure },
+      ),
+    ]).catch((recordError) => {
+      log('ERROR', 'Unable to record submission failure', {
+        submissionId,
+        error: errorSummary(recordError),
       });
-    }
+    });
     throw error;
   }
 
+  if (rejectionCodes.length > 0) {
+    log('INFO', 'Submission rejected', { submissionId, rejectionCodes });
+    return { status: 'REJECTED', submissionId, rejectionCodes };
+  }
   log('INFO', 'Raw email processed', {
     submissionId,
     screenshotCount: screenshots.length,
@@ -851,22 +856,6 @@ function errorSummary(error: unknown): { name: string; message: string } {
     return { name: error.name, message: error.message };
   }
   return { name: 'UnknownError', message: String(error) };
-}
-
-/** A recorded rejection: the workflow fails, but not as a FAILED submission. */
-class SubmissionRejectedError extends Error {
-  constructor(rejectionCodes: SubmissionRejectionCode[]) {
-    super(`Submission rejected: ${rejectionCodes.join(', ')}`);
-    this.name = 'SubmissionRejectedError';
-  }
-}
-
-class NoProcessableScreenshotsError extends SubmissionRejectedError {
-  constructor() {
-    super(['NO_PROCESSABLE_SCREENSHOTS']);
-    this.message = 'Email contains no processable screenshot attachments';
-    this.name = 'NoProcessableScreenshotsError';
-  }
 }
 
 function requiredEnvironment(name: string): string {

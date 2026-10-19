@@ -691,8 +691,9 @@ test('a main workflow start without receivedAt runs steps that never read it', (
       /^token:ProcessEmail/,
       name,
     );
-    assert.equal(definition.States[name].Next, 'Process attachments', name);
+    assert.equal(definition.States[name].Next, 'Rejected?', name);
   }
+  assert.equal(definition.States['Rejected?'].Default, 'Process attachments');
   // process-email omits receivedAt from its output when the input had none
   // or a malformed one, so the gamertag step checks again.
   assert.equal(
@@ -789,6 +790,43 @@ test('the main workflow writes gamertag CSVs only after the attachments Map', ()
     'Replay write extracted CSV',
   ]);
   assert.ok(!JSON.stringify(replay).includes('WriteGamertagCsvs'));
+});
+
+test('the main workflow ends a rejected submission as succeeded and sends an accepted one to the Map', () => {
+  for (const ephemeral of [undefined, 'test']) {
+    const template = synthesize({
+      environment: 'dev',
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const definition = stateMachineDefinition(
+      template,
+      ephemeral ? `match-to-csv-e-${ephemeral}` : 'match-to-csv-dev',
+    );
+    assert.equal(definition.StartAt, 'Input has receivedAt');
+    for (const name of [
+      'Process email and attachments',
+      'Process email and attachments without receivedAt',
+    ]) {
+      const processEmail = definition.States[name];
+      assert.equal(processEmail.Next, 'Rejected?', name);
+      // No Catch: an error that is not a rejection still fails the execution.
+      assert.equal(processEmail.Catch, undefined, name);
+    }
+    assert.deepEqual(definition.States['Rejected?'], {
+      Type: 'Choice',
+      Choices: [
+        {
+          Variable: '$.status',
+          StringEquals: 'REJECTED',
+          Next: 'Submission rejected',
+        },
+      ],
+      Default: 'Process attachments',
+    });
+    assert.deepEqual(definition.States['Submission rejected'], {
+      Type: 'Succeed',
+    });
+  }
 });
 
 test('write gamertag CSVs reads run tables and writes only submission gamertag exports', () => {
