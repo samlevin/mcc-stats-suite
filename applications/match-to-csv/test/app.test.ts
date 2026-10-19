@@ -524,6 +524,128 @@ function stateMachineDefinition(
   ) as StateDefinition;
 }
 
+/** The `trace` payload member every Lambda task of the workflow sets. */
+function trace(workflow: 'INGEST' | 'REPLAY') {
+  return {
+    'executionId.$': '$$.Execution.Id',
+    'retryCount.$': '$$.State.RetryCount',
+    workflow,
+  };
+}
+
+const writeExtractedCsvParameters = (workflow: 'INGEST' | 'REPLAY') => ({
+  'runId.$': '$.runId',
+  'source.$': '$.source',
+  'rows.$': '$.rows',
+  'normalizedArtifact.$': '$.normalizedArtifact',
+  'roster.$': '$.roster',
+  trace: trace(workflow),
+});
+
+test('every main workflow task payload carries INGEST trace context', () => {
+  const definition = stateMachineDefinition(
+    synthesize({ environment: 'dev' }),
+    'match-to-csv-dev',
+  );
+  const processEmail = definition.States['Process email and attachments'];
+  assert.deepEqual(processEmail.Parameters, {
+    'bucket.$': '$.bucket',
+    'key.$': '$.key',
+    'receivedAt.$': '$.receivedAt',
+    trace: trace('INGEST'),
+  });
+  assert.equal(processEmail.ResultPath, undefined);
+
+  const map = definition.States['Process attachments'];
+  assert.deepEqual(map.ItemSelector, { 'source.$': '$$.Map.Item.Value' });
+  const item = (map.ItemProcessor as StateDefinition).States;
+  assert.deepEqual(Object.keys(item).sort(), [
+    'Extract text',
+    'Write extracted CSV',
+  ]);
+  assert.deepEqual(item['Extract text'].Parameters, {
+    'source.$': '$.source',
+    trace: trace('INGEST'),
+  });
+  assert.equal(item['Extract text'].ResultPath, undefined);
+  assert.deepEqual(
+    item['Write extracted CSV'].Parameters,
+    writeExtractedCsvParameters('INGEST'),
+  );
+  assert.equal(item['Write extracted CSV'].ResultPath, '$.summary');
+
+  // Every Lambda task in the workflow sets its own trace context.
+  const tasks = [
+    ...Object.values(definition.States),
+    ...Object.values(item),
+  ].filter((state) => state.Type === 'Task');
+  assert.equal(tasks.length, 4);
+  for (const task of tasks) {
+    assert.deepEqual(
+      (task.Parameters as { trace: unknown }).trace,
+      trace('INGEST'),
+    );
+  }
+});
+
+test('every replay workflow task payload carries REPLAY trace context', () => {
+  const replay = stateMachineDefinition(
+    synthesize({ environment: 'dev' }),
+    'match-to-csv-dev-replay',
+  );
+  assert.equal(replay.StartAt, 'Replay extract text');
+  const extract = replay.States['Replay extract text'];
+  assert.deepEqual(extract.Parameters, {
+    'source.$': '$.source',
+    trace: trace('REPLAY'),
+  });
+  assert.equal(extract.ResultPath, undefined);
+  assert.equal(extract.Next, 'Replay write extracted CSV');
+  const write = replay.States['Replay write extracted CSV'];
+  assert.deepEqual(write.Parameters, writeExtractedCsvParameters('REPLAY'));
+  assert.equal(write.ResultPath, undefined);
+  assert.equal(write.End, true);
+});
+
+test('the stored-email rule starts the workflow with the object and its receive time', () => {
+  const template = synthesize({ environment: 'dev' });
+  const [rule] = Object.values(template.findResources('AWS::Events::Rule'));
+  const targets = rule.Properties.Targets as {
+    InputTransformer: {
+      InputPathsMap: Record<string, string>;
+      InputTemplate: string;
+    };
+  }[];
+  assert.equal(targets.length, 1);
+  const { InputPathsMap, InputTemplate } = targets[0].InputTransformer;
+  // Rebuild the input from a sample event the way EventBridge does, by
+  // replacing each <name> with the JSON value at its path.
+  const event = {
+    time: '2026-10-19T12:34:56Z',
+    detail: {
+      bucket: { name: 'raw-email-bucket' },
+      object: { key: 'incoming/dev/message-id' },
+    },
+  };
+  const input = InputTemplate.replace(/<([^>]+)>/g, (_, name: string) => {
+    const pathExpression = InputPathsMap[name];
+    assert.ok(pathExpression, name);
+    const value = pathExpression
+      .replace(/^\$\./, '')
+      .split('.')
+      .reduce<unknown>(
+        (node, key) => (node as Record<string, unknown>)[key],
+        event,
+      );
+    return JSON.stringify(value);
+  });
+  assert.deepEqual(JSON.parse(input), {
+    bucket: 'raw-email-bucket',
+    key: 'incoming/dev/message-id',
+    receivedAt: '2026-10-19T12:34:56Z',
+  });
+});
+
 test('the main workflow writes gamertag CSVs only after the attachments Map', () => {
   const template = synthesize({ environment: 'dev' });
   const definition = stateMachineDefinition(template, 'match-to-csv-dev');
@@ -538,11 +660,14 @@ test('the main workflow writes gamertag CSVs only after the attachments Map', ()
   assert.equal(step.End, true);
   assert.equal(step.Catch, undefined);
   assert.match(step.Resource as string, /^token:WriteGamertagCsvs/);
-  // Only the keys and the match date enter the step, never a row.
+  // Only the keys, the match date, receivedAt and trace context enter the
+  // step, never a row.
   assert.deepEqual(step.Parameters, {
     'submissionId.$': '$.submissionId',
     'matchDate.$': '$.matchDate',
     'exports.$': '$.results[*].summary',
+    'receivedAt.$': '$.receivedAt',
+    trace: trace('INGEST'),
   });
   assert.equal(step.ResultPath, '$.gamertagCsvs');
   assert.deepEqual(

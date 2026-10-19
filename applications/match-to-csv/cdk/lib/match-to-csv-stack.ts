@@ -1,5 +1,13 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@mcc/cdk-config';
+import type {
+  ExtractTextOutput,
+  ProcessEmailInput,
+  ProcessingRunInput,
+  TraceContext,
+  WorkflowKind,
+  WriteGamertagCsvsInput,
+} from '@mcc/contracts';
 import {
   Aspects,
   CfnOutput,
@@ -41,6 +49,42 @@ import {
   ZERO_ROW_EXTRACTIONS_METRIC,
 } from '../../src/lib/metrics';
 import { REPLY_LOCAL_PART } from '../../src/lib/reply-address';
+
+/**
+ * The Step Functions context each Lambda task payload carries (spec 1.3
+ * §4.1). It is read when the task starts, so a retried attempt reports its
+ * own retry count.
+ */
+function traceContext(workflow: WorkflowKind): TraceContext {
+  return {
+    executionId: sfn.JsonPath.executionId,
+    retryCount: sfn.JsonPath.numberAt('$$.State.RetryCount'),
+    workflow,
+  };
+}
+
+/** The `extract-text` task payload in both workflows. */
+function extractTextPayload(workflow: WorkflowKind): sfn.TaskInput {
+  return sfn.TaskInput.fromObject({
+    source: sfn.JsonPath.objectAt('$.source'),
+    trace: traceContext(workflow),
+  } satisfies Record<keyof ProcessingRunInput, unknown>);
+}
+
+/**
+ * The `write-extracted-csv` task payload in both workflows: every field of
+ * the `extract-text` output, with this task's own trace context.
+ */
+function writeExtractedCsvPayload(workflow: WorkflowKind): sfn.TaskInput {
+  return sfn.TaskInput.fromObject({
+    runId: sfn.JsonPath.stringAt('$.runId'),
+    source: sfn.JsonPath.objectAt('$.source'),
+    rows: sfn.JsonPath.listAt('$.rows'),
+    normalizedArtifact: sfn.JsonPath.objectAt('$.normalizedArtifact'),
+    roster: sfn.JsonPath.objectAt('$.roster'),
+    trace: traceContext(workflow),
+  } satisfies Record<keyof ExtractTextOutput, unknown>);
+}
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -369,22 +413,31 @@ export class MatchToCsvStack extends Stack {
       {
         lambdaFunction: processEmail,
         payloadResponseOnly: true,
+        payload: sfn.TaskInput.fromObject({
+          bucket: sfn.JsonPath.stringAt('$.bucket'),
+          key: sfn.JsonPath.stringAt('$.key'),
+          receivedAt: sfn.JsonPath.stringAt('$.receivedAt'),
+          trace: traceContext('INGEST'),
+        } satisfies Record<keyof ProcessEmailInput, unknown>),
         retryOnServiceExceptions: false,
       },
     );
     const extractTextTask = new tasks.LambdaInvoke(this, 'Extract text', {
       lambdaFunction: extractText,
       payloadResponseOnly: true,
+      payload: extractTextPayload('INGEST'),
       retryOnServiceExceptions: false,
     });
     const writeCsvTask = new tasks.LambdaInvoke(this, 'Write extracted CSV', {
       lambdaFunction: writeExtractedCsv,
       payloadResponseOnly: true,
+      payload: writeExtractedCsvPayload('INGEST'),
       resultPath: '$.summary',
       retryOnServiceExceptions: false,
     });
-    // Runs only after every Map item succeeds. Its input holds the export keys
-    // and match date and never a row, so no roster gamertag enters the state.
+    // Runs only after every Map item succeeds. Its input holds the export
+    // keys, the match date, receivedAt and trace context, and never a row, so
+    // no roster gamertag enters the state.
     const writeGamertagCsvsTask = new tasks.LambdaInvoke(
       this,
       'Write gamertag CSVs',
@@ -395,7 +448,9 @@ export class MatchToCsvStack extends Stack {
           submissionId: sfn.JsonPath.stringAt('$.submissionId'),
           matchDate: sfn.JsonPath.stringAt('$.matchDate'),
           exports: sfn.JsonPath.listAt('$.results[*].summary'),
-        }),
+          receivedAt: sfn.JsonPath.stringAt('$.receivedAt'),
+          trace: traceContext('INGEST'),
+        } satisfies Record<keyof WriteGamertagCsvsInput, unknown>),
         resultPath: '$.gamertagCsvs',
         retryOnServiceExceptions: false,
       },
@@ -470,6 +525,7 @@ export class MatchToCsvStack extends Stack {
     const replayExtract = new tasks.LambdaInvoke(this, 'Replay extract text', {
       lambdaFunction: extractText,
       payloadResponseOnly: true,
+      payload: extractTextPayload('REPLAY'),
       retryOnServiceExceptions: false,
     });
     const replayWrite = new tasks.LambdaInvoke(
@@ -478,6 +534,7 @@ export class MatchToCsvStack extends Stack {
       {
         lambdaFunction: writeExtractedCsv,
         payloadResponseOnly: true,
+        payload: writeExtractedCsvPayload('REPLAY'),
         retryOnServiceExceptions: false,
       },
     );
@@ -531,7 +588,8 @@ export class MatchToCsvStack extends Stack {
         input: events.RuleTargetInput.fromObject({
           bucket: events.EventField.fromPath('$.detail.bucket.name'),
           key: events.EventField.fromPath('$.detail.object.key'),
-        }),
+          receivedAt: events.EventField.time,
+        } satisfies Record<keyof Omit<ProcessEmailInput, 'trace'>, unknown>),
       }),
     );
 
