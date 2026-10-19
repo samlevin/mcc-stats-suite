@@ -26,7 +26,7 @@ These are separate settings:
 
 - The [gamertag roster](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-gamertag-roster) resolves OCR player names and determines which rows enter per-gamertag CSVs. Each run records the roster version it used. An empty roster permits processing but produces no per-gamertag files.
 - The [CSV recipient list](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-csv-recipient-list) stores intended export recipients. No application reads it yet. CSVs remain in S3 for manual retrieval. Automatic email delivery is tracked in [#207](https://github.com/samlevin/mcc-stats-suite/issues/207).
-- The optional [sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) controls who may submit email. It is an SSM parameter shared by all dev stacks, including ephemeral ones. Adding a CSV recipient does not allow that address to submit.
+- The required [sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) controls who may submit email. It is an SSM parameter shared by all dev stacks, including ephemeral ones, and administrators change it with `npm run sender-allowlist`. Adding a CSV recipient does not allow that address to submit.
 
 Roster and recipient commands require administrator credentials such as `mcc-dev-admin`, with DynamoDB, KMS, and SSM permissions. The local `mcc-dev` deploy profile is insufficient, and no narrower roster/recipient operator policy exists. Sign in with the administrator profile, then list and add entries:
 
@@ -38,7 +38,7 @@ npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <nam
 npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <name> add '<recipient-address>'
 ```
 
-Use the same `<name>` as your stack to configure its `ephemeral/<name>` namespace. Omit `--ephemeral` for the environment's `stable` namespace. `--environment` is required. Production uses `prod` and its administrator profile, accepts no `--ephemeral`, and asks for confirmation before writes. Sender-allowlist operators need the separate SSM permissions in its guide. Keep list output local.
+Use the same `<name>` as your stack to configure its `ephemeral/<name>` namespace. Omit `--ephemeral` for the environment's `stable` namespace. `--environment` is required. Production uses `prod` and its administrator profile, accepts no `--ephemeral`, and asks for confirmation before writes. Sender allowlist operators need the SSM permissions in its guide. Keep list output local.
 
 ## Scripts reference
 
@@ -78,7 +78,7 @@ Only allowlisted senders receive the invalid-date reply from `noreply@<domain>`.
 
 ### Sender screening
 
-SES spam or virus `FAIL` verdicts reject a message. SPF and DKIM verdicts are recorded but not enforced. When the sender allowlist exists, every `From` address must be listed. Without it, any sender can pass this check. Changes take effect within one minute. Ephemeral stacks also reject mail not addressed to their current plus-address.
+SES spam or virus `FAIL` verdicts reject a message. SPF and DKIM verdicts are recorded but not enforced. Every `From` address must be on the sender allowlist. When the allowlist parameter is missing or lists no address, every message is rejected with `SENDER_NOT_ALLOWED`. Changes take effect within one minute. Ephemeral stacks also reject mail not addressed to their current plus-address.
 
 A rejected submission retains its raw MIME and records the reason in `completion.json`, including `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, `RECIPIENT_NOT_ALLOWED`, `MATCH_DATE_INVALID`, or `NO_PROCESSABLE_SCREENSHOTS`. See [intake details](../../specs/1.1-mcc-analytics-engine.md#4-email-intake-interface).
 
