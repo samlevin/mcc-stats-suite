@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.1](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.2.0...match-to-csv-v3.2.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **cdk:** pin unset CDK feature flags to their current defaults ([#316](https://github.com/samlevin/mcc-stats-suite/issues/316)) ([6ec0dba](https://github.com/samlevin/mcc-stats-suite/commit/6ec0dba05b8bd93205c2563c0bab86fb904042e2)), closes [#281](https://github.com/samlevin/mcc-stats-suite/issues/281)
+
 ## [3.2.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.1.0...match-to-csv-v3.2.0) (2026-10-19)
 
 
