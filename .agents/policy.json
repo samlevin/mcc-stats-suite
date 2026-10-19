@@ -43,7 +43,7 @@
       }
     },
     "orchestration": {
-      "summary": "Serial dispatch of a container's executable leaves",
+      "summary": "Dependency-ordered dispatch of a container's executable leaves",
       "claude": {
         "model": "sonnet",
         "effort": "medium"
