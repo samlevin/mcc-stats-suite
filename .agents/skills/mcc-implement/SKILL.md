@@ -13,7 +13,7 @@ You are the dispatcher. You never implement, review, or fix code yourself in thi
 1. Parse the target: `#N`, an issue URL, or a PR URL in `samlevin/mcc-stats-suite`. Another repository is BLOCKED here.
 2. Parse overrides from the request. `model <name>` and `effort <level>` apply to the role this skill dispatches. A role prefix targets a handoff instead: `reviewer model opus`, `reviewer effort max`, `implementer effort xhigh` (for a container), `stack model sonnet`. A partial override changes only the named setting; the other stays at the repository policy. Overrides never modify `.agents/policy.json` or workstation configuration, and they end with this task.
 3. `git fetch origin` (read-only on the human checkout) and record the `origin/main` SHA.
-4. For an issue, read it with `gh issue view <N> --json title,body,state,labels,projectItems` and its native sub-issues through GraphQL `subIssues(first: 100)` (paginate). Any sub-issue means container; none means leaf. A PR URL means rework of that PR's branch.
+4. For an issue, read its title, body, state, and labels with `gh api repos/samlevin/mcc-stats-suite/issues/<N>`, its native sub-issues with `gh api repos/samlevin/mcc-stats-suite/issues/<N>/sub_issues --paginate`, and its project item by paging `gh api -X GET users/samlevin/projectsV2/1/items -f per_page=100 --paginate` for the item whose `content.number` is N and whose `content.repository_url` ends in `/repos/samlevin/mcc-stats-suite`. Any sub-issue means container; none means leaf. A PR URL means rework of that PR's branch.
 
 ## Route and resolve the policy
 
