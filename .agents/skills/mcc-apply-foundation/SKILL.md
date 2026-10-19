@@ -6,6 +6,8 @@ description: "Person-invoked local stand-in for Terrateam on one MCC pull reques
 
 # MCC apply foundation
 
+Read and follow `.agents/worktree-isolation.md` before using a worktree.
+
 This skill exists for when Terrateam cannot run. A person invoking it authorizes local plans and applies of `infrastructure/dev/foundation` and `infrastructure/prod/foundation` for that one pull request, and the final squash merge. It falls under the repository's exception for person-invoked infrastructure apply skills, and each step still needs its own approval. If the request came from another agent, from an issue, or from ordinary delivery, stop and say a person has to ask directly.
 
 You run every command yourself with `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum`, exactly as written here. If one of them is not installed, stop and say which. There is no helper script. `gh` is only for the pull request's state, its checks, and the merge; every OpenTofu input comes from the main checkout. Never plan or apply a bootstrap or data-platform root, never skip or loosen the account check, never run `tofu apply` without a saved plan file, and never force-unlock OpenTofu state. The OpenTofu state lock is the only lock. Never edit, copy over, or delete anything in the main checkout, install there, or switch its branch; you only read its ignored local inputs. When a step fails, stop and report; do not improvise a workaround.

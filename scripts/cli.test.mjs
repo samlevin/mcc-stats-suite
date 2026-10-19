@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -13,11 +14,23 @@ import test from 'node:test';
 import { CliHelp, defineCli, parseCli } from './cli.cjs';
 import { run as branch } from './branch-name.mjs';
 import { configuration } from './issue-triage.mjs';
-import { parseArguments as roster, main as rosterMain } from './roster.mjs';
-import {
-  parseArguments as recipients,
-  main as recipientsMain,
-} from './recipients.mjs';
+// Operator CLI modules load the compiled shared packages when imported.
+if (
+  ['roster', 'recipients'].some(
+    (name) =>
+      !existsSync(
+        new URL(`../packages/${name}/dist/index.js`, import.meta.url),
+      ),
+  )
+)
+  execFileSync('npm', ['run', 'build:shared', '--silent'], {
+    cwd: new URL('..', import.meta.url),
+    stdio: 'pipe',
+  });
+const { parseArguments: roster, main: rosterMain } =
+  await import('./roster.mjs');
+const { parseArguments: recipients, main: recipientsMain } =
+  await import('./recipients.mjs');
 
 const cli = defineCli('Usage: example [options]', [
   'environment',
