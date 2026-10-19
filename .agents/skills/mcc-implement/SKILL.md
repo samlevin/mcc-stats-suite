@@ -1,37 +1,48 @@
 ---
 name: mcc-implement
-description: "Deliver an MCC GitHub issue or rework an MCC PR with the repository's namespaced agents. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. Routes a container to mcc-orchestrator (dependency order, concurrent only across recorded independence groups) and a leaf or PR to mcc-implementer, applying the repository model/effort policy or an explicit prompt override."
+description: "Deliver an MCC GitHub issue or rework an MCC PR in the current thread. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. The thread that invokes it owns the work: it creates the worktree, claims the issue, implements, runs the checks, gets the independent pre-PR review, runs stack operations through mcc-stack, and opens the ready-for-review PR. A container runs as a sequential dependency queue in the same thread. One isolated mcc-implementer is an explicit exception, never the default."
 ---
 <!-- Generated from .agents/workflows/implement.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 
 # MCC implement
 
-You are the dispatcher. You never implement, review, or fix code yourself in this flow; the namespaced agents do. You dispatch one agent per request.
+You are the delivery owner. You run the delivery in this thread: you create and own the worktree, claim the issue, implement, validate, get the independent pre-PR review, run stack operations, and open the PR. You spawn only the agents named below, and only for the reasons given.
 
 ## Resolve the target
 
 1. Parse the target: `#N`, an issue URL, or a PR URL in `samlevin/mcc-stats-suite`. Another repository is BLOCKED here.
-2. Parse overrides from the request. `model <name>` and `effort <level>` apply to the role this skill dispatches. A role prefix targets a handoff instead: `reviewer model opus`, `reviewer effort max`, `implementer effort xhigh` (for a container), `stack model sonnet`. A partial override changes only the named setting; the other stays at the repository policy. Overrides never modify `.agents/policy.json` or workstation configuration, and they end with this task.
-3. `git fetch origin` (read-only on the human checkout) and record the `origin/main` SHA.
-4. For an issue, read its title, body, state, and labels with `gh api repos/samlevin/mcc-stats-suite/issues/<N>`, its native sub-issues with `gh api repos/samlevin/mcc-stats-suite/issues/<N>/sub_issues --paginate`, and its project item by paging `gh api -X GET users/samlevin/projectsV2/1/items -f per_page=100 --paginate` for the item whose `content.number` is N and whose `content.repository_url` ends in `/repos/samlevin/mcc-stats-suite`. Any sub-issue means container; none means leaf. A PR URL means rework of that PR's branch.
+2. Parse the request for `isolated`, `parallel`, and overrides. `reviewer model <name>` and `reviewer effort <level>` apply to mcc-code-reviewer. An unprefixed `model <name>` or `effort <level>`, or an `implementer` prefix, applies to an isolated mcc-implementer when you spawn one. A partial override changes only the named setting. Overrides never modify `.agents/policy.json` or workstation configuration, and they end with this task.
+3. Run `git fetch origin` (read-only on the human checkout) and record the `origin/main` SHA.
+4. For an issue, read its title, body, state, and labels with `gh api repos/samlevin/mcc-stats-suite/issues/<N>`, and its native sub-issues with `gh api repos/samlevin/mcc-stats-suite/issues/<N>/sub_issues --paginate`. Any sub-issue means container; none means leaf. A PR URL means rework of that PR's branch.
 
-## Route and resolve the policy
+## Pick the mode
 
-| Target | Role | Resolver |
+| Target | Default mode | Procedure |
 | --- | --- | --- |
-| Container or epic | `mcc-orchestrator` | `node scripts/agent-policy.mjs resolve --tool <tool> --role orchestrator` |
-| Leaf issue or PR rework | `mcc-implementer` | `node scripts/agent-policy.mjs resolve --tool <tool> --role implementer` |
+| Leaf issue | inline in this thread | [references/delivery.md](references/delivery.md) |
+| PR rework | inline in this thread | [references/delivery.md](references/delivery.md), including its Rework section |
+| Container or epic | sequential dependency queue in this thread | [references/queue.md](references/queue.md) |
 
-Run the resolver with `--model` or `--effort` only for an override that targets that role (`<tool>` is `claude` or `codex`). It prints JSON with the final `model`, `effort`, their `source`, and a `spawn` object. If it exits non-zero, stop and report its message verbatim; it refuses models and efforts the repository does not list, and nothing substitutes another value. Compose the `Policy:` line: `Policy: tool=<tool> role=<role> model=<model> effort=<effort> (model: <source>, effort: <source>); handoff overrides: <role-prefixed overrides or none>`.
+Read the procedure for the mode and follow it. It owns every gate, safety rule, and result field.
 
-## Dispatch one agent
+## Settings
 
-Send a compact packet: target URL, trunk `main` and the fresh `origin/main` SHA, accepted decisions from the request and issue comments, validation requirements, the project binding (project 1, owner `samlevin`), and the `Policy:` line. Reference repository docs by path; do not paste them. Pre-PR review happens inside the implementer; it needs no instruction from you.
+This skill runs at the session model and effort in both tools; it cannot change them, and it spawns no agent to enforce a model choice. Resolve the advisory policy with `node scripts/agent-policy.mjs resolve --tool <tool> --capability implementation` (`<tool>` is `claude` or `codex`) and state it in your first message and your result as `Advisory policy: tool=<tool> capability=implementation model=<model> effort=<effort> (session settings apply)`. An unprefixed `model` or `effort` override for inline work cannot be applied by this skill: say so, and name the tool's own control for the session.
 
-Use `spawn_agent` with `agent_type`, `model`, and `reasoning_effort` copied from the resolver's `spawn` object and `fork_turns: "none"`. Always pass `model` and `reasoning_effort`: the repository agent files deliberately omit them, so an omitted value would silently fall back to the contributor's `[agents]` defaults or the session model, and the built-in guidance to leave `model` unset does not apply here. If `spawn_agent` reports an unknown `agent_type`, the project is not trusted in Codex yet; say so and stop (see `.agents/README.md`). Wait with the agent tools, never with shell loops. Send one concrete correction to the same agent rather than spawning another.
+In Codex, start the session with `codex -m <model> -c model_reasoning_effort=<effort>`.
 
-Never: merge, enable auto-merge, deploy, apply infrastructure, change settings, invoke mcc-security-reviewer, mark issues Done, or wait for or poll remote CI.
+Delegated roles keep their own policy: resolve each one with `node scripts/agent-policy.mjs resolve --tool <tool> --role <role>`, adding `--model` or `--effort` only for an override that targets it. If the resolver exits non-zero, stop and report its message verbatim; nothing substitutes another value.
+
+## Isolated implementer exception
+
+By default you deliver the work yourself. You may hand one leaf or one rework to one isolated mcc-implementer when the request says `isolated`, or when the leaf is large enough that its exploration would crowd this conversation, and say which reason applies. The queue's parallel exception in [references/queue.md](references/queue.md) is the only case where more than one runs at a time. An isolated implementer never spawns another implementer, adds no dispatcher or orchestrator, and returns a compact result.
+
+Resolve its settings with `--role implementer`, then send a bounded assignment: target URL, trunk `main` and the fresh `origin/main` SHA, the base to build on, acceptance criteria, accepted decisions, verified prerequisites and their SHAs, validation requirements, the project binding (project 1, owner `samlevin`), the expected result fields from [references/delivery.md](references/delivery.md#result), and the `Policy:` line `Policy: tool=<tool> role=implementer model=<model> effort=<effort> (model: <source>, effort: <source>); handoff overrides: <reviewer overrides or none>`. Reference repository docs by path; do not paste them or this conversation.
+
+Use `spawn_agent` with `agent_type`, `model`, and `reasoning_effort` copied from the resolver's `spawn` object and `fork_turns: "none"`, so the child gets only the assignment and none of this conversation. Always pass `model` and `reasoning_effort`: the repository agent files deliberately omit them, so an omitted value would silently fall back to the contributor's `[agents]` defaults or the session model, and the built-in guidance to leave `model` unset does not apply here. If `spawn_agent` reports an unknown `agent_type`, the project is not trusted in Codex yet; say so and stop (see `.agents/README.md`). Send one concrete correction to the same agent rather than spawning another.
+
+Wait as `.agents/evidence.md` describes. Relay the implementer's READY FOR REVIEW or BLOCKED result verbatim, including every `Requested settings:` line, and record it before any dependent work.
 
 ## Report
 
-Relay the agent's READY FOR REVIEW or BLOCKED result verbatim, including every `Requested settings:` line. Then list what still depends on merge, deploy, or human verification.
+Return the result that the procedure defines, with your `Advisory policy:` line and every `Requested settings:` line verbatim. Then list what still depends on merge, deploy, or human verification.
