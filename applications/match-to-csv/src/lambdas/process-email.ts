@@ -516,26 +516,29 @@ export async function processEmail(
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 
 /**
- * Reads the match date from a plain-text body. After trimming whitespace, the
- * body must be one calendar date written `M/D/YYYY`: month 1-12, a day that
- * exists in that month, and a four-digit year, with optional leading zeros.
- * Returns the date as `YYYY-MM-DD`, or undefined for a missing or invalid body.
+ * Reads the first valid `M/D/YYYY` calendar date in a plain-text body, with
+ * optional leading zeros. Candidates touching a digit or slash are ignored.
+ * Returns `YYYY-MM-DD`, or undefined when no valid date is found.
  */
 export function parseMatchDate(text: string | undefined): string | undefined {
-  const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text?.trim() ?? '');
-  if (!match) return undefined;
-  const [month, day, year] = match.slice(1).map(Number);
-  const leapYear = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-  const lastDay =
-    month === 2 && leapYear ? 29 : (DAYS_IN_MONTH[month - 1] ?? 0);
-  if (day < 1 || day > lastDay) return undefined;
-  return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const candidates = (text ?? '').matchAll(
+    /(?<![\d/])(\d{1,2})\/(\d{1,2})\/(\d{4})(?![\d/])/g,
+  );
+  for (const match of candidates) {
+    const [month, day, year] = match.slice(1).map(Number);
+    const leapYear = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+    const lastDay =
+      month === 2 && leapYear ? 29 : (DAYS_IN_MONTH[month - 1] ?? 0);
+    if (day < 1 || day > lastDay) continue;
+    return `${match[3]}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  return undefined;
 }
 
 const MATCH_DATE_REPLY_BODY = [
-  'Your email was not processed because its body must contain only the date of the match, written as M/D/YYYY, such as 10/17/2026.',
+  'Your email was not processed because no valid match date was found in its plain-text body. Include the date as M/D/YYYY, such as 10/17/2026. The first valid date in the body is used. Surrounding text and signatures are allowed.',
   '',
-  'Please send it again to the submission address with only the date in the body. Replies to this no-reply address are not read.',
+  'Please send it again to the submission address with a valid match date in the body. Replies to this no-reply address are not read.',
   '',
 ].join('\n');
 
