@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { addToProject } from './issue-project-membership.mjs';
+import { addToProject, sweep } from './issue-project-membership.mjs';
 import { evaluate, workflow } from './workflow-test-helpers.mjs';
 
 // A mocked GitHub that keeps one project item per content node, as
@@ -118,38 +118,306 @@ test('a mutation without an item fails', async () => {
   );
 });
 
-test('the workflow adds only opened issues with default-branch code', () => {
+// A mocked GitHub for sweeps: `open` lists open issues as [number, projects],
+// served `pageSize` per page, and `failing` holds issue numbers whose add
+// fails.
+function repository({
+  open = [],
+  project = { id: 'P_1', closed: false },
+  pageSize = 2,
+  failing = new Set(),
+} = {}) {
+  const calls = [];
+  const writes = [];
+  const logs = [];
+  const errors = [];
+  const api = async (query, variables) => {
+    if (query.startsWith('mutation')) {
+      const number = Number(variables.content.slice(2));
+      if (failing.has(number))
+        throw new Error(`Issue #${number} could not be added`);
+      writes.push(number);
+      return { addProjectV2ItemById: { item: { id: `item-${number}` } } };
+    }
+    if (query.includes('issue(number: $number)')) {
+      calls.push(['read', variables.number]);
+      return {
+        repository: { issue: { id: `I_${variables.number}` } },
+        user: { projectV2: project },
+      };
+    }
+    if (query.includes('issues(first: 100')) {
+      assert.match(query, /states: \[OPEN\]/);
+      assert.doesNotMatch(query, /pullRequest/);
+      assert.equal(variables.owner, 'samlevin');
+      assert.equal(variables.name, 'mcc-stats-suite');
+      const start = variables.cursor ? Number(variables.cursor) : 0;
+      calls.push(['list', start]);
+      const end = start + pageSize;
+      return {
+        repository: {
+          issues: {
+            nodes: open.slice(start, end).map(([number, projects]) => ({
+              number,
+              projectItems: {
+                nodes: projects.map((id) => ({ project: { id } })),
+              },
+            })),
+            pageInfo: {
+              hasNextPage: end < open.length,
+              endCursor: String(end),
+            },
+          },
+        },
+      };
+    }
+    assert.match(query, /user\(login: "samlevin"\) \{ projectV2\(number: 1\)/);
+    calls.push(['project']);
+    return { user: { projectV2: project } };
+  };
+  return {
+    api,
+    calls,
+    writes,
+    logs,
+    errors,
+    log: (line) => logs.push(line),
+    logError: (line) => errors.push(line),
+  };
+}
+
+test('a sweep adds only the open issues missing from the project', async () => {
+  const f = repository({
+    open: [
+      [4, ['P_1']],
+      [9, []],
+      [5, ['P_other']],
+      [6, ['P_other', 'P_1']],
+      [3, []],
+    ],
+  });
+  assert.deepEqual(await sweep({ ...f, dryRun: false }), {
+    missing: [3, 5, 9],
+    failed: [],
+  });
+  assert.deepEqual(f.writes, [3, 5, 9]);
+  assert.deepEqual(
+    f.calls.filter(([kind]) => kind === 'list'),
+    [
+      ['list', 0],
+      ['list', 2],
+      ['list', 4],
+    ],
+  );
+  assert.deepEqual(f.errors, []);
+});
+
+test('a sweep with nothing missing makes no write and no per-issue read', async () => {
+  const f = repository({
+    open: [
+      [1, ['P_1']],
+      [2, ['P_1']],
+      [3, ['P_1']],
+    ],
+  });
+  assert.deepEqual(await sweep({ ...f, dryRun: false }), {
+    missing: [],
+    failed: [],
+  });
+  assert.deepEqual(f.writes, []);
+  assert.deepEqual(
+    f.calls.filter(([kind]) => kind === 'read'),
+    [],
+  );
+  assert.deepEqual(f.logs, ['All 3 open issues are in MCC delivery.']);
+});
+
+test('a dry-run sweep reports missing issues without writing', async () => {
+  for (const options of [{}, { dryRun: true }]) {
+    const f = repository({
+      open: [
+        [8, []],
+        [2, ['P_1']],
+      ],
+    });
+    assert.deepEqual(await sweep({ ...f, ...options }), {
+      missing: [8],
+      failed: [],
+    });
+    assert.deepEqual(f.writes, []);
+    assert.deepEqual(f.logs, [
+      'Open issues missing from MCC delivery: #8.',
+      'Issue #8: would add to MCC delivery (dry run).',
+    ]);
+  }
+});
+
+test('a failing issue is logged, the rest are added, and the sweep fails', async () => {
+  const f = repository({
+    open: [
+      [1, []],
+      [2, []],
+      [3, []],
+    ],
+    failing: new Set([2]),
+  });
+  await assert.rejects(
+    sweep({ ...f, dryRun: false }),
+    /Could not add 1 of 3 missing issues: #2$/,
+  );
+  assert.deepEqual(f.writes, [1, 3]);
+  assert.deepEqual(f.errors, ['Issue #2: Issue #2 could not be added']);
+});
+
+test('a sweep against an unavailable project fails before listing issues', async () => {
+  for (const project of [null, { id: 'P_1', closed: true }]) {
+    const f = repository({ open: [[1, []]], project });
+    await assert.rejects(
+      sweep({ ...f, dryRun: false }),
+      /project is unavailable/,
+    );
+    assert.deepEqual(f.calls, [['project']]);
+    assert.deepEqual(f.writes, []);
+  }
+});
+
+// Evaluate a workflow expression such as `${{ a && format('x{0}', b) }}`.
+const expression = (value, context) =>
+  evaluate(value.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), {
+    format: (text, ...args) =>
+      text.replace(/\{(\d+)\}/g, (_, index) => args[index]),
+    ...context,
+  });
+const DEFAULT_BRANCH = { repository: { default_branch: 'main' } };
+
+test('the workflow adds opened issues and sweeps on a schedule or by hand', () => {
   const definition = workflow('tracker-project-membership');
-  assert.deepEqual(definition.on, {
-    issues: { types: ['opened'] },
-  });
+  const { issues, schedule, workflow_dispatch: dispatch } = definition.on;
+  assert.deepEqual(Object.keys(definition.on).sort(), [
+    'issues',
+    'schedule',
+    'workflow_dispatch',
+  ]);
+  assert.deepEqual(issues, { types: ['opened'] });
+  assert.deepEqual(schedule, [{ cron: '2,17,32,47 * * * *' }]);
+  const minutes = (cron) => cron.split(' ')[0].split(',').map(Number);
+  const states = workflow('tracker-issue-states').on.schedule[0].cron;
+  for (const minute of minutes(schedule[0].cron))
+    assert.ok(!minutes(states).includes(minute), `minute ${minute} collides`);
+  assert.equal(dispatch.inputs.dry_run.type, 'boolean');
+  assert.equal(dispatch.inputs.dry_run.default, true);
   assert.equal(definition.name, 'Tracker: add issues to the project');
-  assert.equal(
-    definition['run-name'],
-    'Add issue #${{ github.event.issue.number }} to MCC delivery',
-  );
   assert.deepEqual(definition.permissions, { contents: 'read' });
-  const jobs = Object.values(definition.jobs);
-  assert.equal(jobs.length, 1);
-  const [job] = jobs;
-  assert.equal(job.if, "github.repository == 'samlevin/mcc-stats-suite'");
-  const checkout = job.steps.find((step) =>
-    step.uses?.startsWith('actions/checkout@'),
+  const opened = {
+    event_name: 'issues',
+    event: { issue: { number: 7 }, ...DEFAULT_BRANCH },
+  };
+  assert.equal(
+    expression(definition['run-name'], { github: opened }),
+    'Add issue #7 to MCC delivery',
   );
-  assert.deepEqual(checkout.with, {
-    ref: '${{ github.event.repository.default_branch }}',
-    'persist-credentials': false,
-    'sparse-checkout': 'scripts',
-  });
+  assert.equal(
+    expression(definition.concurrency.group, { github: opened }),
+    'project-membership-issue-7',
+  );
+  for (const event_name of ['schedule', 'workflow_dispatch']) {
+    const github = { event_name, event: DEFAULT_BRANCH };
+    assert.equal(
+      expression(definition['run-name'], { github }),
+      `Add missing issues to MCC delivery (${event_name})`,
+    );
+    assert.equal(
+      expression(definition.concurrency.group, { github }),
+      'project-membership-sweep',
+    );
+  }
+  assert.equal(definition.concurrency['cancel-in-progress'], false);
+  assert.deepEqual(Object.keys(definition.jobs), [
+    'add-to-project',
+    'add-missing-issues',
+  ]);
+  for (const job of Object.values(definition.jobs)) {
+    const checkout = job.steps.find((step) =>
+      step.uses?.startsWith('actions/checkout@'),
+    );
+    assert.deepEqual(checkout.with, {
+      ref: '${{ github.event.repository.default_branch }}',
+      'persist-credentials': false,
+      'sparse-checkout': 'scripts',
+    });
+    const runs = job.steps.filter((step) => step.run);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].run, 'node scripts/issue-project-membership.mjs');
+    assert.equal(
+      runs[0].env.MCC_PROJECT_TOKEN,
+      '${{ secrets.MCC_PROJECT_TOKEN }}',
+    );
+  }
+});
+
+test('opened issues run the single-issue job unchanged', () => {
+  const job = workflow('tracker-project-membership').jobs['add-to-project'];
+  assert.equal(job.name, 'Add the new issue to MCC delivery');
   const run = job.steps.find((step) => step.run);
-  assert.equal(run.run, 'node scripts/issue-project-membership.mjs');
+  assert.deepEqual(Object.keys(run.env).sort(), [
+    'CONTENT_NUMBER',
+    'CONTENT_TYPE',
+    'DRY_RUN',
+    'MCC_PROJECT_TOKEN',
+  ]);
   assert.equal(run.env.DRY_RUN, 'false');
-  assert.equal(run.env.MCC_PROJECT_TOKEN, '${{ secrets.MCC_PROJECT_TOKEN }}');
   assert.equal(run.env.CONTENT_TYPE, 'issue');
   assert.equal(
-    evaluate(run.env.CONTENT_NUMBER.replace(/^\$\{\{\s*|\s*\}\}$/g, ''), {
+    expression(run.env.CONTENT_NUMBER, {
       github: { event: { issue: { number: 7 } } },
     }),
     7,
   );
+});
+
+test('each event runs one job, and the sweep runs only from the default branch', () => {
+  const { jobs } = workflow('tracker-project-membership');
+  const runs = (github) =>
+    Object.entries(jobs)
+      .filter(([, job]) => expression(job.if, { github }))
+      .map(([id]) => id);
+  const github = (event_name, overrides = {}) => ({
+    event_name,
+    repository: 'samlevin/mcc-stats-suite',
+    ref: 'refs/heads/main',
+    event: { issue: { number: 7 }, ...DEFAULT_BRANCH },
+    ...overrides,
+  });
+  assert.deepEqual(runs(github('issues')), ['add-to-project']);
+  assert.deepEqual(runs(github('issues', { ref: 'refs/heads/feature' })), [
+    'add-to-project',
+  ]);
+  assert.deepEqual(runs(github('schedule')), ['add-missing-issues']);
+  assert.deepEqual(runs(github('workflow_dispatch')), ['add-missing-issues']);
+  assert.deepEqual(
+    runs(github('workflow_dispatch', { ref: 'refs/heads/feature' })),
+    [],
+  );
+  for (const event_name of ['issues', 'schedule', 'workflow_dispatch'])
+    assert.deepEqual(
+      runs(github(event_name, { repository: 'someone/fork' })),
+      [],
+    );
+});
+
+test('the sweep writes on a schedule and a manual run follows its dry_run input', () => {
+  const job = workflow('tracker-project-membership').jobs['add-missing-issues'];
+  assert.equal(job.name, 'Add missing open issues to MCC delivery');
+  const run = job.steps.find((step) => step.run);
+  assert.deepEqual(Object.keys(run.env).sort(), [
+    'DRY_RUN',
+    'MCC_PROJECT_TOKEN',
+    'SWEEP',
+  ]);
+  assert.equal(run.env.SWEEP, 'true');
+  const dryRun = (event_name, inputs = {}) =>
+    expression(run.env.DRY_RUN, { github: { event_name }, inputs });
+  assert.equal(dryRun('schedule'), 'false');
+  assert.equal(dryRun('workflow_dispatch', { dry_run: true }), 'true');
+  assert.equal(dryRun('workflow_dispatch', { dry_run: false }), 'false');
 });

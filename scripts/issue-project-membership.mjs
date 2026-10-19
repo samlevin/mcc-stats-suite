@@ -1,5 +1,10 @@
 import { pathToFileURL } from 'node:url';
-import { failureMessage, ghGraphql, REPOSITORY } from './issue-triage.mjs';
+import {
+  failureMessage,
+  ghGraphql,
+  paginate,
+  REPOSITORY,
+} from './issue-triage.mjs';
 
 export async function addToProject({
   api,
@@ -42,6 +47,76 @@ export async function addToProject({
   return item;
 }
 
+// Adds every open issue that is not in MCC delivery. Archived project items
+// count as present. An issue in more than 100 projects may be listed as
+// missing; addToProject then returns its existing item.
+export async function sweep({
+  api,
+  dryRun = true,
+  log = console.log,
+  logError = console.error,
+}) {
+  const [owner, name] = REPOSITORY.split('/');
+  const data = await api(
+    `query { user(login: "samlevin") { projectV2(number: 1) { id closed } } }`,
+    {},
+  );
+  const project = data.user?.projectV2;
+  if (!project?.id || project.closed)
+    throw new Error('MCC delivery project is unavailable');
+  const issues = await paginate(async (cursor) => {
+    const page = await api(
+      `query($owner: String!, $name: String!, $cursor: String) {
+        repository(owner: $owner, name: $name) {
+          issues(first: 100, after: $cursor, states: [OPEN]) {
+            nodes { number projectItems(first: 100) { nodes { project { id } } } }
+            pageInfo { hasNextPage endCursor }
+          }
+        }
+      }`,
+      { owner, name, cursor },
+    );
+    return page.repository?.issues;
+  });
+  const missing = issues
+    .filter(
+      (issue) =>
+        !issue.projectItems?.nodes.some(
+          (item) => item?.project?.id === project.id,
+        ),
+    )
+    .map((issue) => issue.number)
+    .sort((a, b) => a - b);
+  if (!missing.length) {
+    log(`All ${issues.length} open issues are in MCC delivery.`);
+    return { missing, failed: [] };
+  }
+  log(
+    `Open issues missing from MCC delivery: ${missing.map((number) => `#${number}`).join(', ')}.`,
+  );
+  const failed = [];
+  for (const number of missing) {
+    try {
+      await addToProject({ api, kind: 'issue', number, dryRun, log });
+    } catch (error) {
+      failed.push(number);
+      logError(`Issue #${number}: ${failureMessage(error)}`);
+    }
+  }
+  if (failed.length)
+    throw new Error(
+      `Could not add ${failed.length} of ${missing.length} missing issues: ${failed.map((number) => `#${number}`).join(', ')}`,
+    );
+  return { missing, failed };
+}
+
+function flag(env, name, fallback) {
+  const value = env[name] ?? fallback;
+  if (!['true', 'false'].includes(value))
+    throw new Error(`${name} must be true or false`);
+  return value === 'true';
+}
+
 if (
   process.argv[1] &&
   import.meta.url === pathToFileURL(process.argv[1]).href
@@ -54,15 +129,16 @@ if (
         throw new Error('Unexpected repository');
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
     }
-    const mode = process.env.DRY_RUN ?? 'true';
-    if (!['true', 'false'].includes(mode))
-      throw new Error('DRY_RUN must be true or false');
-    await addToProject({
-      api: ghGraphql,
-      kind: process.env.CONTENT_TYPE,
-      number: Number(process.env.CONTENT_NUMBER),
-      dryRun: mode === 'true',
-    });
+    const dryRun = flag(process.env, 'DRY_RUN', 'true');
+    if (flag(process.env, 'SWEEP', 'false'))
+      await sweep({ api: ghGraphql, dryRun });
+    else
+      await addToProject({
+        api: ghGraphql,
+        kind: process.env.CONTENT_TYPE,
+        number: Number(process.env.CONTENT_NUMBER),
+        dryRun,
+      });
   } catch (error) {
     console.error(failureMessage(error));
     process.exitCode = 1;
