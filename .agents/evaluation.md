@@ -11,8 +11,8 @@ It separates context occupancy from total token processing and reports task qual
 
 | Tool | Status |
 | --- | --- |
-| Claude Code | Unverified. No run has been recorded. |
-| Codex | Unverified. No run has been recorded. |
+| Claude Code | Unverified. No run has been recorded. The client is installed, but the procedure needs 18 fresh top-level sessions (three scenarios, two topologies, three runs) against prepared fixtures, and none has been run. |
+| Codex | Unverified. No run has been recorded, for the same reason. |
 
 Record each run in the [results table](#record-the-results) and change a tool's status only from recorded runs. Static checks, such as `npm run agents:check` and the routing tests in `scripts/agent-policy.test.mjs`, show what the generated definitions say. They are not runtime evidence.
 

@@ -12,7 +12,7 @@ The main thread running mcc-implement follows this file for a container issue or
    - `done`: closed, or its closing PR merged.
    - `in review`: an open PR already closes it. Record the PR and skip the leaf.
    - `owned elsewhere`: another agent or person claimed it and its claim was not released. Record the claim and skip the leaf.
-   - `resume`: an agent claimed it in an earlier run of this delivery, and no PR exists yet. The request says so, or the claim names a worktree that you created or that no longer exists. Reuse its pushed branch and keep that branch's name; create a new worktree only when the old one is gone. Any other unreleased claim is `owned elsewhere`.
+   - `resume`: an earlier run of this delivery claimed it, and no PR exists yet. Only two cases qualify: the request says to resume that leaf, or the claim names a worktree that `git worktree list` shows in this checkout and that this delivery created. Reuse its pushed branch and keep that branch's name; create a new worktree only when the request says to resume and the old one is gone. Any other unreleased claim is `owned elsewhere`, including one whose worktree is missing here, because it may live on another machine or in the other tool. Ask the person before taking such a leaf over.
    - `waiting`: a blocker is unmet. A blocker counts as met when it is closed, or when its PR qualifies for stacking under the [Gate](delivery.md#gate) rules.
    - `ready`: no unmet blocker. It still has to pass the gate in [delivery.md](delivery.md) before you claim it.
 
@@ -33,6 +33,8 @@ Leaves run at the same time only when all of these hold:
 - The leaves' implementation notes name no overlapping files or shared contracts.
 
 Then each concurrent leaf goes to its own isolated mcc-implementer, in its own worktree and branch, based on trunk or its own prerequisite and never on a leaf from another group. At most one leaf per group runs at a time, and you deliver no other leaf yourself while they run. A leaf that no group names, including every leaf under a container without a valid record, runs alone. An implementer that finds it must change a file or shared contract that another running leaf owns returns BLOCKED, and you deliver that leaf after the other leaf's PR opens. When any condition fails, deliver sequentially and say why.
+
+An Agent call blocks until it returns, so start the concurrent leaves by sending their Agent calls together in one message, then wait for all of them before you start another leaf in any of their groups.
 
 ## Report
 

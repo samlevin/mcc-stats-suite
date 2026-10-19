@@ -804,7 +804,25 @@ test('a container runs as a dependency queue in the owning thread', () => {
     assert.match(parallel, /no overlapping files or shared contracts/);
     assert.match(parallel, /At most one leaf per group runs at a time/);
     assert.match(parallel, /Never infer, form, extend, or merge groups/);
+    // A claim whose worktree is missing here is never taken over silently.
+    assert.ok(
+      lineWith(content, '`resume`', '`git worktree list`'),
+      `${path} must tie resume to a worktree in this checkout`,
+    );
+    assert.ok(
+      lineWith(content, 'whose worktree is missing here', 'Ask the person'),
+      `${path} must treat a missing worktree as owned elsewhere`,
+    );
   }
+  // Concurrent leaves really run at the same time in each tool.
+  assert.match(
+    section(files.get(QUEUE[0]), 'Parallel exception'),
+    /sending their Agent calls together in one message/,
+  );
+  assert.match(
+    section(files.get(QUEUE[1]), 'Parallel exception'),
+    /`spawn_agent` returns at once/,
+  );
   const creation = readFileSync(
     new URL('../.agents/issue-creation.md', import.meta.url),
     'utf8',
