@@ -1387,12 +1387,24 @@ test('each release has its own successful dev dependency before prod approval', 
     });
   }
   assert.equal(prod.needs, 'deploy-dev');
-  for (const deployed of ['true', 'false', '']) {
-    assert.equal(
-      evaluate(prod.if, { needs: { 'deploy-dev': { outputs: { deployed } } } }),
-      deployed === 'true',
-    );
-  }
+  // Prod keys on the dev deploy job's output alone. The dev call's overall
+  // result also covers its Slack job, so a failed post never blocks prod.
+  assert.equal(
+    prod.if,
+    "always() && !cancelled() && needs.deploy-dev.outputs.deployed == 'true'",
+  );
+  for (const result of ['success', 'failure', 'skipped', 'cancelled'])
+    for (const deployed of ['true', 'false', ''])
+      for (const cancelled of [false, true])
+        assert.equal(
+          evaluate(prod.if, {
+            always: () => true,
+            cancelled: () => cancelled,
+            needs: { 'deploy-dev': { result, outputs: { deployed } } },
+          }),
+          !cancelled && deployed === 'true',
+          `dev ${result}, deployed '${deployed}', run cancelled ${cancelled}`,
+        );
   assert.equal(
     deployment.on.workflow_call.outputs.deployed.value,
     '${{ jobs.deploy.outputs.deployed }}',
@@ -1808,8 +1820,9 @@ test('the result job runs after every deploy outcome and cannot fail the deploy'
     DEPLOY_RESULT: '${{ needs.deploy.result }}',
     DEPLOYED: '${{ needs.deploy.outputs.deployed }}',
   });
-  // Nothing reads a notify job: the workflow output, and with it the dev gate
-  // before prod, comes from the deploy job alone.
+  // The workflow output comes from the deploy job alone and never from a
+  // notify job. A caller that reads only that output, as the prod gate does,
+  // does not depend on the notify job's result.
   assert.deepEqual(Object.keys(deployment.on.workflow_call.outputs), [
     'deployed',
   ]);

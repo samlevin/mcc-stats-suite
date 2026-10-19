@@ -43,7 +43,9 @@ jobs:
   deploy-prod:
     name: Deploy ${{ inputs.application }} to prod
     needs: deploy-dev
-    if: needs.deploy-dev.outputs.deployed == 'true'
+    # Prod depends only on the dev deploy job's output, never on the dev call's
+    # overall result, so a failed Slack job in that call cannot block prod.
+    if: always() && !cancelled() && needs.deploy-dev.outputs.deployed == 'true'
     uses: ./.github/workflows/_delivery-deploy-environment.yml
     with:
       application: ${{ inputs.application }}
