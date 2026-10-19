@@ -9,8 +9,17 @@ export const SEVERITIES = ['critical', 'high', 'medium', 'low', 'none'].map(
 const PRIORITIES = ['P0', 'P1', 'P2', 'P3'];
 const SIZES = ['XS', 'S', 'M', 'L'];
 const PAGE = 'pageInfo { hasNextPage endCursor }';
-const CONTENT = `id type project { id } content {
-  __typename ... on Issue { id number state repository { nameWithOwner } }
+const EMPTY = { nodes: [], pageInfo: { hasNextPage: false } };
+const VALUES = `nodes {
+  ... on ProjectV2ItemFieldSingleSelectValue { optionId field {
+    ... on ProjectV2SingleSelectField { id }
+  } }
+} ${PAGE}`;
+// One project item with the first page of its field values and issue labels,
+// so reading an item costs one request unless a connection overflows.
+const ITEM = `id type project { id } fieldValues(first: 50) { ${VALUES} } content {
+  __typename ... on Issue { id number state repository { nameWithOwner }
+    labels(first: 50) { nodes { name } ${PAGE} } }
 }`;
 
 export function eligible(item) {
@@ -28,12 +37,14 @@ export function eligible(item) {
   );
 }
 
-export async function paginate(fetchPage) {
+// `first` is a first page that arrived nested in another query; fetchPage then
+// runs only for the pages after it.
+export async function paginate(fetchPage, first) {
   const nodes = [];
   let cursor = null;
   const seen = new Set();
+  let connection = first ?? (await fetchPage(cursor));
   while (true) {
-    const connection = await fetchPage(cursor);
     if (!connection) throw new Error('Missing GraphQL connection');
     nodes.push(...connection.nodes.filter(Boolean));
     if (!connection.pageInfo.hasNextPage) return nodes;
@@ -41,6 +52,7 @@ export async function paginate(fetchPage) {
     if (!cursor || seen.has(cursor))
       throw new Error('Pagination cursor did not advance');
     seen.add(cursor);
+    connection = await fetchPage(cursor);
   }
 }
 
@@ -300,11 +312,12 @@ export async function discover(
   return { projectId, fields: selected };
 }
 
+// Every project item, each with the first page of its field values and labels.
 export async function listItems(api, projectId) {
   return paginate(async (cursor) => {
     const data = await api(
       `query($id: ID!, $cursor: String) { node(id: $id) { ... on ProjectV2 {
-        items(first: 100, after: $cursor) { nodes { ${CONTENT} } ${PAGE} }
+        items(first: 100, after: $cursor) { nodes { ${ITEM} } ${PAGE} }
       } } }`,
       { id: projectId, cursor },
     );
@@ -312,48 +325,66 @@ export async function listItems(api, projectId) {
   });
 }
 
-export async function readItem(api, id, context) {
-  let item;
+// The unarchived project items of one issue, in the same shape as listItems.
+export async function issueItems(api, number) {
+  const [owner, name] = REPOSITORY.split('/');
+  return paginate(async (cursor) => {
+    const data = await api(
+      `query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+        repository(owner: $owner, name: $name) { issue(number: $number) {
+          projectItems(first: 20, after: $cursor, includeArchived: false) {
+            nodes { ${ITEM} } ${PAGE}
+          }
+        } }
+      }`,
+      { owner, name, number, cursor },
+    );
+    return data.repository?.issue?.projectItems ?? EMPTY;
+  });
+}
+
+// Turns an item node from listItems, issueItems, or readItem into an item
+// with named field values and label names, reading any remaining pages.
+export async function completeItem(api, node, context) {
+  if (!node?.id || node.project?.id !== context.projectId) return null;
   const values = await paginate(async (cursor) => {
     const data = await api(
       `query($id: ID!, $cursor: String) { node(id: $id) { ... on ProjectV2Item {
-        ${CONTENT} fieldValues(first: 100, after: $cursor) { nodes {
-          ... on ProjectV2ItemFieldSingleSelectValue { optionId field {
-            ... on ProjectV2SingleSelectField { id }
-          } }
-        } ${PAGE} }
+        fieldValues(first: 100, after: $cursor) { ${VALUES} }
       } } }`,
-      { id, cursor },
+      { id: node.id, cursor },
     );
-    item = data.node;
-    return item?.fieldValues ?? { nodes: [], pageInfo: { hasNextPage: false } };
-  });
-  if (!item?.id || item.project?.id !== context.projectId) return null;
-  item.fields = {};
+    return data.node?.fieldValues ?? EMPTY;
+  }, node.fieldValues);
+  const fields = {};
   for (const [name, field] of Object.entries(context.fields)) {
     const value = values.find((value) => value.field?.id === field.id);
-    item.fields[name] = field.options.find(
+    fields[name] = field.options.find(
       (option) => option.id === value?.optionId,
     )?.name;
   }
-  item.labels = [];
-  if (item.type !== 'ISSUE' || item.content?.__typename !== 'Issue')
-    return item;
-  let issue;
-  item.labels = await paginate(async (cursor) => {
+  const item = { id: node.id, type: node.type, project: node.project, fields };
+  if (node.type !== 'ISSUE' || node.content?.__typename !== 'Issue')
+    return { ...item, content: node.content, labels: [] };
+  const { labels: first, ...content } = node.content;
+  const labels = await paginate(async (cursor) => {
     const data = await api(
       `query($id: ID!, $cursor: String) { node(id: $id) { ... on Issue {
-        id number state __typename repository { nameWithOwner }
         labels(first: 100, after: $cursor) { nodes { name } ${PAGE} }
       } } }`,
-      { id: item.content.id, cursor },
+      { id: content.id, cursor },
     );
-    issue = data.node;
-    return issue?.labels ?? { nodes: [], pageInfo: { hasNextPage: false } };
-  });
-  item.labels = item.labels.map((label) => label.name);
-  item.content = issue;
-  return item;
+    return data.node?.labels ?? EMPTY;
+  }, first);
+  return { ...item, content, labels: labels.map((label) => label.name) };
+}
+
+export async function readItem(api, id, context) {
+  const data = await api(
+    `query($id: ID!) { node(id: $id) { ... on ProjectV2Item { ${ITEM} } } }`,
+    { id },
+  );
+  return completeItem(api, data.node, context);
 }
 
 export async function updateProjectStatus(api, context, itemId, status) {
@@ -387,26 +418,29 @@ export async function reconcile({
   )
     throw new Error('--issue requires a positive safe integer');
   const context = await discover(api);
-  const items = await listItems(api, context.projectId);
+  // One issue reads only its own project items; a sweep lists the project.
+  const items =
+    issueNumber === undefined
+      ? await listItems(api, context.projectId)
+      : await issueItems(api, issueNumber);
   let candidates = 0;
   let updated = 0;
   for (const listed of items) {
     if (
       listed.type !== 'ISSUE' ||
-      listed.content?.repository.nameWithOwner !== REPOSITORY ||
+      listed.content?.repository?.nameWithOwner !== REPOSITORY ||
       (issueNumber !== undefined && listed.content.number !== issueNumber)
     )
       continue;
-    const item = await readItem(api, listed.id, context);
+    const item = await completeItem(api, listed, context);
     if (
       !item ||
       !eligible(item) ||
       (issueNumber !== undefined && item.content.number !== issueNumber)
     )
       continue;
-    // Resolve current options and re-read both issue and project metadata at the write boundary.
-    const freshContext = await discover(api);
-    const fresh = await readItem(api, listed.id, freshContext);
+    // Re-read the item's project fields and issue metadata at the write boundary.
+    const fresh = await readItem(api, listed.id, context);
     if (
       !fresh ||
       !eligible(fresh) ||
@@ -418,7 +452,7 @@ export async function reconcile({
       `${dryRun ? 'DRY_RUN would move' : 'Moving'} issue #${fresh.content.number} Inbox -> Ready`,
     );
     if (dryRun) continue;
-    await updateProjectStatus(api, freshContext, fresh.id, 'Ready');
+    await updateProjectStatus(api, context, fresh.id, 'Ready');
     updated++;
   }
   log(
@@ -444,17 +478,29 @@ export async function reconcileEpicLabels({
     'invalid',
     'wontfix',
   ]);
-  const epics = await paginate(async (cursor) => {
+  const LABELS = `labels(first: 50) { nodes { id name } ${PAGE} }`;
+  let epics;
+  if (issueNumber === undefined)
+    epics = await paginate(async (cursor) => {
+      const data = await api(
+        `query($cursor: String) { repository(owner: "samlevin", name: "mcc-stats-suite") {
+        issues(first: 100, after: $cursor, states: [OPEN, CLOSED], labels: ["epic"]) {
+          nodes { id number ${LABELS} } ${PAGE}
+        }
+      } }`,
+        { cursor },
+      );
+      return data.repository?.issues;
+    });
+  else {
     const data = await api(
-      `query($cursor: String) { repository(owner: "samlevin", name: "mcc-stats-suite") {
-      issues(first: 100, after: $cursor, states: [OPEN, CLOSED], labels: ["epic"]) {
-        nodes { id number } ${PAGE}
-      }
+      `query($number: Int!) { repository(owner: "samlevin", name: "mcc-stats-suite") {
+      issue(number: $number) { id number ${LABELS} }
     } }`,
-      { cursor },
+      { number: issueNumber },
     );
-    return data.repository?.issues;
-  });
+    epics = data.repository?.issue ? [data.repository.issue] : [];
+  }
   for (const epic of epics) {
     if (issueNumber !== undefined && epic.number !== issueNumber) continue;
     const labels = await paginate(async (cursor) => {
@@ -465,7 +511,7 @@ export async function reconcileEpicLabels({
         { id: epic.id, cursor },
       );
       return data.node?.labels;
-    });
+    }, epic.labels);
     if (!labels.some((label) => label.name === 'epic')) continue;
     const remove = labels.filter(
       (label) => forbidden.has(label.name) || label.name.startsWith('type:'),
@@ -482,6 +528,74 @@ export async function reconcileEpicLabels({
         { id: epic.id, labels: remove.map((label) => label.id) },
       );
   }
+}
+
+// A sweep skips when fewer GraphQL points than this remain, leaving the rest
+// of the hourly budget to people and agents that share the token's account.
+export const SWEEP_FLOOR = 1000;
+
+// The REST rate_limit endpoint reports the GraphQL budget without spending it.
+export function graphqlBudget(run = execFileSync) {
+  const graphql = JSON.parse(ghRest(['rate_limit'], run))?.resources?.graphql;
+  for (const key of ['limit', 'remaining', 'used', 'reset'])
+    if (!Number.isSafeInteger(graphql?.[key]))
+      throw new Error('GitHub returned no GraphQL rate limit');
+  const { limit, remaining, used, reset } = graphql;
+  return { limit, remaining, used, reset };
+}
+
+// Runs one tracker task between two readings of the GraphQL budget and
+// returns the exit code. A sweep skips below SWEEP_FLOOR. A single-issue run
+// that hits the rate limit warns and succeeds, because the next scheduled
+// sweep repeats its work; every other failure fails the run.
+export async function runTracker({
+  sweep,
+  task,
+  budget = graphqlBudget,
+  log = console.log,
+  warn = (message) => console.log(`::warning::${message}`),
+  error = console.error,
+}) {
+  const read = () => {
+    try {
+      return budget();
+    } catch (cause) {
+      warn(`Could not read the GraphQL budget: ${failureMessage(cause)}`);
+      return null;
+    }
+  };
+  const before = read();
+  if (before)
+    log(
+      `GraphQL budget before: ${before.remaining} of ${before.limit} points remain; the window resets at ${new Date(before.reset * 1000).toISOString()}.`,
+    );
+  if (sweep && before && before.remaining < SWEEP_FLOOR) {
+    warn(
+      `Skipped the sweep: ${before.remaining} GraphQL points remain, below the floor of ${SWEEP_FLOOR}. The next scheduled sweep reconciles.`,
+    );
+    return 0;
+  }
+  let status = 0;
+  try {
+    await task();
+  } catch (cause) {
+    if (!sweep && cause instanceof GitHubError && cause.kind === 'rate-limit')
+      warn(
+        `${failureMessage(cause)} The next scheduled sweep reconciles this issue.`,
+      );
+    else {
+      error(failureMessage(cause));
+      status = 1;
+    }
+  }
+  const after = read();
+  if (before && after)
+    log(
+      after.reset === before.reset
+        ? `GraphQL budget after: ${after.remaining} points remain; ${after.used - before.used} were used during the run, counting every client of this account.`
+        : `GraphQL budget after: ${after.remaining} points remain; the window reset during the run.`,
+    );
+  return status;
 }
 
 const CLI = defineCli(
@@ -529,8 +643,13 @@ if (
     const config = configuration(process.env, process.argv.slice(2));
     if (process.env.GITHUB_ACTIONS === 'true')
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
-    await reconcileEpicLabels({ api: ghGraphql, ...config });
-    await reconcile({ api: ghGraphql, ...config });
+    process.exitCode = await runTracker({
+      sweep: config.issueNumber === undefined,
+      task: async () => {
+        await reconcileEpicLabels({ api: ghGraphql, ...config });
+        await reconcile({ api: ghGraphql, ...config });
+      },
+    });
   } catch (error) {
     if (error instanceof CliHelp) console.log(error.message);
     else {

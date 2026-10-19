@@ -2,10 +2,14 @@ name: 'Tracker: reconcile issue states'
 run-name: "Reconcile issue states (${{ github.event_name == 'issues' && format('issue #{0} {1}', github.event.issue.number, github.event.action) || github.event_name }})"
 
 on:
+  # Title and body edits change neither triage nor containers, so `edited`
+  # starts no run.
   issues:
-    types: [opened, reopened, closed, edited, labeled, unlabeled]
+    types: [opened, reopened, closed, labeled, unlabeled]
+  # The hourly sweep catches project field and hierarchy changes, which have
+  # no Actions trigger, and any issue event whose run was skipped.
   schedule:
-    - cron: '7,22,37,52 * * * *'
+    - cron: '7 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -17,7 +21,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mcc-issue-triage
+  group: "${{ github.event_name == 'issues' && format('issue-states-issue-{0}', github.event.issue.number) || 'issue-states-sweep' }}"
   cancel-in-progress: false
 
 jobs:
@@ -41,6 +45,11 @@ jobs:
         env:
           MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
           DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        # An issue event reconciles only that issue and its hierarchy; a
+        # scheduled or manual run sweeps the project.
         run: |
-          node scripts/issue-triage.mjs
-          node scripts/issue-containers.mjs
+          scope=()
+          if [ -n "$ISSUE_NUMBER" ]; then scope=(--issue "$ISSUE_NUMBER"); fi
+          node scripts/issue-triage.mjs "${scope[@]}"
+          node scripts/issue-containers.mjs "${scope[@]}"

@@ -15,6 +15,7 @@ const repositoryFiles = new Set([
   'scripts/issue-triage.mjs',
   'scripts/issue-triage.test.mjs',
   'scripts/issue-containers.mjs',
+  'scripts/issue-containers.test.mjs',
   'scripts/issue-pr-metadata.mjs',
   'scripts/issue-pr-metadata.test.mjs',
   'scripts/issue-pr-status.mjs',
