@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/samlevin/mcc-stats-suite/compare/admin-v1.1.0...admin-v1.1.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* **cdk:** pin unset CDK feature flags to their current defaults ([#316](https://github.com/samlevin/mcc-stats-suite/issues/316)) ([6ec0dba](https://github.com/samlevin/mcc-stats-suite/commit/6ec0dba05b8bd93205c2563c0bab86fb904042e2)), closes [#281](https://github.com/samlevin/mcc-stats-suite/issues/281)
+
 ## [1.1.0](https://github.com/samlevin/mcc-stats-suite/compare/admin-v1.0.0...admin-v1.1.0) (2026-10-18)
 
 
