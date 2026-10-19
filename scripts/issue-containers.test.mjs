@@ -345,6 +345,43 @@ test('a marked container whose status update was lost is repaired once', async (
   assert.deepEqual(mock.kinds().slice(again), ['list', 'marker', 'discover']);
 });
 
+test('a marked container that is complete again keeps its marker', async () => {
+  // Another run marked #1 when it finished and is about to close it. #3
+  // reopens, this run reads #1 as open, marked, and unfinished, and #3 closes
+  // again before this run would remove the marker.
+  const mock = github([
+    { number: 1, marked: true },
+    { number: 2, parent: 1, state: 'CLOSED' },
+    { number: 3, parent: 1 },
+  ]);
+  let reads = 0;
+  const api = async (query, variables) => {
+    if (
+      query.includes('projectItems(first: 100)') &&
+      !query.includes('label(name:') &&
+      variables.id === 'I_1' &&
+      ++reads === 2
+    )
+      mock.issues.get('I_3').state = 'CLOSED';
+    return mock.api(query, variables);
+  };
+  assert.deepEqual(
+    await reconcileContainers({ api, dryRun: false, issueNumber: 3, ...quiet }),
+    { updated: 0 },
+  );
+  assert.equal(reads, 2);
+  assert.deepEqual(mock.mutations(), []);
+  assert.equal(mock.issues.get('I_1').marked, true);
+  assert.deepEqual(mock.kinds(), [
+    'issue',
+    'ancestor',
+    'marker',
+    'snapshot',
+    'discover',
+    'snapshot',
+  ]);
+});
+
 test('a closed child reconciles only its ancestors, never unrelated containers', async () => {
   const mock = github([
     { number: 1 },

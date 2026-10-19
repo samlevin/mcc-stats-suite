@@ -291,7 +291,8 @@ export async function reconcileContainers({
       changed.add(id);
       await setStatus(fresh, close ? 'Done' : 'Ready');
       updated++;
-      // A closed container keeps its marker; a reopened one loses it below.
+      // A closed container keeps its marker; a reopened one loses it below
+      // unless it is closed or complete again by then.
       if (close) continue;
     } else if (current.marked && !dryRun) {
       // Repair status if a prior state mutation succeeded but its project update failed.
@@ -306,8 +307,15 @@ export async function reconcileContainers({
         );
       if (current.state !== 'OPEN' || !current.marked) continue;
     } else continue;
+    // Runs for sibling issues reconcile the same container concurrently. A
+    // container that is closed or complete again may belong to another run
+    // that marked it and is about to close it, so it keeps the marker.
     const after = await snapshot(api, id);
-    if (after.state === 'OPEN' && after.marked)
+    if (
+      after.state === 'OPEN' &&
+      after.marked &&
+      after.subIssuesSummary.total !== after.subIssuesSummary.completed
+    )
       await api(
         `mutation($id: ID!, $label: ID!) {
         removeLabelsFromLabelable(input: { labelableId: $id, labelIds: [$label] }) { clientMutationId }
