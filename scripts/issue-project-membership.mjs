@@ -4,6 +4,7 @@ import {
   ghGraphql,
   paginate,
   REPOSITORY,
+  runTracker,
 } from './issue-triage.mjs';
 
 export async function addToProject({
@@ -130,15 +131,19 @@ if (
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
     }
     const dryRun = flag(process.env, 'DRY_RUN', 'true');
-    if (flag(process.env, 'SWEEP', 'false'))
-      await sweep({ api: ghGraphql, dryRun });
-    else
-      await addToProject({
-        api: ghGraphql,
-        kind: process.env.CONTENT_TYPE,
-        number: Number(process.env.CONTENT_NUMBER),
-        dryRun,
-      });
+    const sweeping = flag(process.env, 'SWEEP', 'false');
+    process.exitCode = await runTracker({
+      sweep: sweeping,
+      task: () =>
+        sweeping
+          ? sweep({ api: ghGraphql, dryRun })
+          : addToProject({
+              api: ghGraphql,
+              kind: process.env.CONTENT_TYPE,
+              number: Number(process.env.CONTENT_NUMBER),
+              dryRun,
+            }),
+    });
   } catch (error) {
     console.error(failureMessage(error));
     process.exitCode = 1;

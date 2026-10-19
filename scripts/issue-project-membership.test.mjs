@@ -299,7 +299,7 @@ test('the workflow adds opened issues and sweeps on a schedule or by hand', () =
     'workflow_dispatch',
   ]);
   assert.deepEqual(issues, { types: ['opened'] });
-  assert.deepEqual(schedule, [{ cron: '2,17,32,47 * * * *' }]);
+  assert.deepEqual(schedule, [{ cron: '2 * * * *' }]);
   const minutes = (cron) => cron.split(' ')[0].split(',').map(Number);
   const states = workflow('tracker-issue-states').on.schedule[0].cron;
   for (const minute of minutes(schedule[0].cron))

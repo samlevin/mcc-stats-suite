@@ -14,6 +14,7 @@ const jobTasks = {
 // run only when the repository scope selects them, not on every full gate.
 export const automationTests = [
   'scripts/issue-triage.test.mjs',
+  'scripts/issue-containers.test.mjs',
   'scripts/issue-pr-metadata.test.mjs',
   'scripts/issue-pr-status.test.mjs',
   'scripts/issue-project-membership.test.mjs',
