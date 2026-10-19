@@ -67,21 +67,24 @@ for key, body in outputs.items():
     if result.get("timed_out") is True:
         idle.add(key)
 missing["threads_without_usage"] = len(thread_ids - {key[0] for key in usage})
+complete = bool(usage) and missing["threads_without_usage"] == 0
 totals = {name: sum(v.get(name, 0) for v in usage.values())
           for name in ("input_tokens", "cached_input_tokens", "output_tokens")}
 print(json.dumps({
-    "threads": len(thread_ids), "model_calls": len(usage) if usage else None,
-    "peak_request_input_proxy": max((v["input_tokens"] for v in usage.values()), default=None),
+    "threads": len(thread_ids), "model_calls": len(usage) if complete else None,
+    "peak_request_input_proxy": max(v["input_tokens"] for v in usage.values()) if complete else None,
     "tool_output_characters": sum(map(len, outputs.values())),
     "agent_wait_calls": len(waits), "idle_timeout_wakeups": len(idle),
-    "usage": totals if usage else None,
-    "input_plus_output": totals["input_tokens"] + totals["output_tokens"] if usage else None,
+    "usage": totals if complete else None,
+    "known_partial_usage": totals if usage and not complete else None,
+    "known_partial_model_calls": len(usage) if usage and not complete else None,
+    "input_plus_output": totals["input_tokens"] + totals["output_tokens"] if complete else None,
     "limits": dict(missing)
 }, indent=2))
 PY
 ```
 
-Inspect coordination calls once to classify any runtime-specific wait tools, required progress updates, and status-only probes. The command classifies only direct `wait_agent` calls whose result has `timed_out`. Nested tool calls and other wait schemas require explicit classification, not an inferred zero. Record unavailable values. If only cumulative usage exists, use one final counter per thread, and report model-call count and peak unavailable unless another source provides them. Never sum every cumulative sample or mix it with per-response records.
+Inspect coordination calls once to classify any runtime-specific wait tools, required progress updates, and status-only probes. The command classifies only direct `wait_agent` calls whose result has `timed_out`. Nested tool calls and other wait schemas require explicit classification, not an inferred zero. If any participating thread lacks usage, the command reports aggregate model-call, peak-input, and token totals as unavailable. It labels any observed subset as `known_partial_usage` and `known_partial_model_calls`; those fields are not run totals. Record unavailable values. If only cumulative usage exists, use one final counter per thread, and report model-call count and peak unavailable unless another source provides them. Never sum every cumulative sample or mix it with per-response records.
 
 ## Retrieval and waiting examples
 
