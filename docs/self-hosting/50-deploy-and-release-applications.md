@@ -36,18 +36,18 @@ npm run app:destroy -- <application> --environment dev --ephemeral <name>
 
 ## Merge to production
 
-Pull requests never deploy applications. Only a push to `main` that passes CI deploys, and only the applications it affects. Foundation changes are applied with OpenTofu instead; see [Change the foundation later](40-change-foundation.md#change-the-foundation-later).
+Pull requests never deploy applications. `Release: release PR` deploys only applications whose releases Release Please publishes after a release pull request merges to `main`. Ordinary merges and releases containing only shared packages deploy nothing. Foundation changes are applied with OpenTofu instead; see [Change the foundation later](40-change-foundation.md#change-the-foundation-later).
 
-1. Merge the pull request after its checks pass.
-2. `CI: checks` validates the merge commit and records which applications it affects. A shared-package change affects every consumer. An infrastructure-only change affects none, and an empty selection deploys nothing.
-3. `Delivery: deploy to dev` deploys each affected application's `-dev` stack at that exact commit and verifies the resulting CloudFormation stack. For `match-to-csv`, verification also requires its Lambda functions and Step Functions state machines to be active. The dev run finishes without waiting for prod approval.
-4. When the dev run completes, `Delivery: promote to prod` starts a separate run. It checks the source dev and CI runs, their repository and `main` branch, the original CI application selection, and each application's successful dev job and deployment record. Only applications qualified at that full commit SHA reach prod, even if `main` has advanced. A failed, cancelled, skipped, or missing dev job cannot qualify its application. Another application's failure or cancellation does not block a successful application, even when the overall dev run concludes `cancelled`. Promotion stops if the source artifact is unavailable or application selection did not succeed.
-5. Finish the application's smoke test in dev; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv). Open the separate prod run from the Actions page. The `Request prod approval` job writes the reviewers, application, full commit SHA, and prod run link to its summary. Choose **Review deployments**, check the application and commit, and approve or reject with your GitHub account. The waiting job is named `Deploy <application> to prod (waits for approval)`. Pending or rejected approval leaves the completed dev result unchanged. Rejecting leaves production unchanged.
+1. Merge ordinary pull requests after their checks pass. Release Please collects their Conventional Commits into one release pull request.
+2. Review that release pull request's versions and changelogs, then merge it. Release Please publishes component releases and tags. The release workflow reads the action's per-path outputs, selects only `applications/` releases, and passes each application's release tag and full release commit SHA to delivery.
+3. Each released application deploys its `-dev` stack at that exact commit and verifies the resulting CloudFormation stack. For `match-to-csv`, verification also requires its Lambda functions and Step Functions state machines to be active.
+4. After that application's dev deployment succeeds, its prod job waits for approval in the same release run. Applications have independent dev-to-prod dependencies, so another application's failure does not block a successful one. A skipped dev deployment does not request prod approval.
+5. Finish the application's smoke test in dev; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv). Open the release run from the Actions page. Choose **Review deployments**, check the application, release tag and commit, and approve or reject with your GitHub account. The waiting job is named `Deploy <application> to prod (waits for approval)`. Pending or rejected approval leaves dev deployed. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.
 
-GitHub records every deployment, with its commit, application version, and shared-package versions, on the repository's Deployments page. Both entry workflows call the shared `_delivery-deploy-environment.yml` deployment implementation, which retains account checks, scoped secrets, per-application/environment concurrency, and the prod environment's reviewer and disabled administrator-bypass checks.
+GitHub records every deployment with its release tag, commit, application version and shared-package versions on the repository's Deployments page. Release delivery and rollback call `_delivery-deploy-environment.yml`, which retains account checks, scoped secrets and the prod environment's required reviewers with administrator bypass disabled. Deploy jobs run on `refs/heads/main` through that reusable workflow, even while checking out an older release commit, so the CDK role's OIDC trust needs no change.
 
-The handoff uses the dev run's attempt-specific source artifact and the original CI selection artifact. Missing or expired artifacts stop promotion. A source run rerun invalidates an older handoff; rerun all dev jobs to publish a source artifact for the new attempt. The chain is `CI: checks` -> `Delivery: deploy to dev` -> `Delivery: promote to prod`, within GitHub's three-level `workflow_run` limit.
+Each application and environment has one concurrency group shared by forward deploys and rollback. It queues up to 100 pending jobs and never cancels a running deploy. Queue order follows when jobs start waiting, so the reusable workflow checks versions after approval and after acquiring the queue lock. A forward release skips successfully if its version is equal to or older than the latest successful deployment for that application and environment. The job summary names the requested and deployed versions. Failed deployments do not advance that baseline; legacy deployment records use their recorded application version. Missing version metadata on a successful record stops forward deployment for investigation. Rollback bypasses the version comparison, and its successful deployment becomes the baseline for later forward releases.
 
 ## Validate match-to-csv
 
@@ -184,7 +184,7 @@ Addresses are typed as arguments and printed only to your terminal. The script r
 
 Release Please versions each application and the shared `@mcc/cdk-config`, `@mcc/contracts`, `@mcc/roster`, and `@mcc/recipients` packages from Conventional Commit titles. It keeps one release pull request open. Merging it creates tags such as `match-to-csv-v1.2.3` and published GitHub Releases. Review the changelogs before merging; a shared-package change bumps every dependent application in the same pull request.
 
-A release does not gate deployment. The release commit deploys like any other merge. The tags exist so you can roll back to a known version.
+Only published application releases start forward deployment. Shared packages have no stacks to deploy. Their dependent applications deploy when those applications also have releases. Release tags identify the exact revision for delivery and rollback.
 
 ## Roll back
 
@@ -197,6 +197,6 @@ Rollback redeploys a previous release of one application to prod. It does not re
 
 The workflow accepts only a published, non-prerelease release tag for that application, on `main`, whose version matches the package, and with a previous successful prod deployment of the same commit.
 
-Then fix forward. Open a normal pull request from current `main` that reverts or corrects the change, and let it go through CI, dev, and production approval. Do not reset `main` or move a release tag. Keep schema and data changes backward-compatible so a rollback stays safe.
+Then fix forward. Open a normal pull request from current `main` that reverts or corrects the change, merge it after CI passes, then merge its release pull request for dev deployment and production approval. Do not reset `main` or move a release tag. Keep schema and data changes backward-compatible so a rollback stays safe.
 
 Next: [Recover and troubleshoot](60-recover-and-troubleshoot.md).

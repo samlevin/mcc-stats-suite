@@ -30,14 +30,12 @@ test('workflow files and names match the convention table', () => {
     {
       '_delivery-deploy-environment.yml':
         'Delivery: deploy to one environment (reusable)',
-      '_delivery-promote-application.yml':
-        'Delivery: promote application (reusable)',
+      '_delivery-release-application.yml':
+        'Delivery: release application (reusable)',
       'ci-checks.yml': 'CI: checks',
       'ci-infrastructure-gate.yml': 'CI: infrastructure merge gate',
       'ci-pr-title.yml': 'CI: PR title',
       'ci-secret-scan.yml': 'CI: secret scan',
-      'delivery-deploy.yml': 'Delivery: deploy to dev',
-      'delivery-promote.yml': 'Delivery: promote to prod',
       'delivery-rollback.yml': 'Delivery: roll back prod',
       'release-pr.yml': 'Release: release PR',
       'tracker-issue-states.yml': 'Tracker: reconcile issue states',
