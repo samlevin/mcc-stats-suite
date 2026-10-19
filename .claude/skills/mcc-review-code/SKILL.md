@@ -9,6 +9,8 @@ argument-hint: <#N or PR number | PR URL | branch> [model <name>] [effort <level
 
 You gather the inputs and dispatch `mcc-code-reviewer`; you do not review the diff yourself. The reviewer stays read-only. Your only GitHub write is the one review that [Publish](#publish) posts to a target pull request after the reviewer returns. A branch review writes nothing.
 
+Read and follow `.agents/evidence-and-waiting.md` before gathering evidence or waiting for another agent. Its per-result and combined output budgets, read reuse, truncation recovery, and idle coordination rules apply throughout this workflow.
+
 ## Gather
 
 1. Resolve the review target in `samlevin/mcc-stats-suite`. The target is a pull request or a pushed branch, never an issue.

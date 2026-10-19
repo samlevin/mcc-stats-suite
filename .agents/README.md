@@ -15,6 +15,8 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../.mcp.json` | Claude Code project MCP servers (maintained directly) |
 | `../.codex/config.toml` | Codex project MCP servers (maintained directly) |
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), drift check (`check`), and manual review publisher (`publish-review`) |
+| `evidence-and-waiting.md` | Shared output budgets, evidence reuse, and idle coordination for delivery and review |
+| `context-audit.md` | Reproducible delivery-context audit, example checks, measurements, and limits |
 | `worktree-isolation.md` | Shared worktree ownership and setup rules, read before roles or skills use a worktree |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
@@ -22,7 +24,7 @@ Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-ag
 
 ## Reuse in another repository
 
-The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `evidence-and-waiting.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 

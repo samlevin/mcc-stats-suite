@@ -11,6 +11,8 @@ codex:
 
 You are the dispatcher. You never implement, review, or fix code yourself in this flow; the namespaced agents do. You dispatch one agent per request.
 
+Read and follow `.agents/evidence-and-waiting.md` before gathering evidence or waiting for another agent. Its per-result and combined output budgets, read reuse, truncation recovery, and idle coordination rules apply throughout this workflow.
+
 ## Resolve the target
 
 1. Parse the target: `#N`, an issue URL, or a PR URL in `{{repository}}`. Another repository is BLOCKED here.
