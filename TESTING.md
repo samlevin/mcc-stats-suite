@@ -26,7 +26,7 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Issue automation tests
 
-The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs. Project membership tests cover adding new issues and pull requests, items already in the project, and the workflow's triggers and trusted checkout:
+The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs. Project membership tests cover adding new issues, rejecting pull requests before API calls, items already in the project, and the workflow's issue-only trigger and trusted checkout:
 
 ```console
 node --test scripts/issue-*.test.mjs
@@ -34,7 +34,7 @@ node --test scripts/issue-*.test.mjs
 
 These tests use metadata mocks and never call GitHub. [Automation](ISSUE_TRIAGE.md#automation) describes what the tracker workflows do and which credentials they use.
 
-Preview the tracker workflows with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs`, `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`, or `CONTENT_TYPE=<issue|pull_request> CONTENT_NUMBER=<number> node scripts/issue-project-membership.mjs`; all three default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`.
+Preview the tracker workflows with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs`, `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`, or `CONTENT_TYPE=issue CONTENT_NUMBER=<number> node scripts/issue-project-membership.mjs`; all three default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`.
 
 ## How CI selects checks
 

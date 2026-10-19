@@ -36,7 +36,7 @@ Clear requests need little planning. For broad requests, establish boundaries, a
 
 Three workflows keep the project in step with the work.
 
-The [project membership workflow](.github/workflows/tracker-project-membership.yml) adds every new issue and pull request to MCC delivery when it opens, however it was created, including a pull request from a fork. Adding an item that is already in the project changes nothing. It runs trusted default-branch code only and uses `MCC_PROJECT_TOKEN`.
+The [project membership workflow](.github/workflows/tracker-project-membership.yml) adds every new issue to MCC delivery when it opens, however it was created. Pull requests are not added to the project. Adding an item that is already in the project changes nothing. It runs trusted default-branch code only and uses `MCC_PROJECT_TOKEN`.
 
 The [issue states workflow](.github/workflows/tracker-issue-states.yml) uses deterministic GitHub API calls, with no model usage. It moves an open issue from Inbox to Ready when Priority, exactly one supported severity, and Size are present. Other statuses are left alone by metadata triage. Ready means triaged; implementation still requires clear scope, acceptance criteria, validation, and satisfied dependencies.
 
