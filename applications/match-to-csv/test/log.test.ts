@@ -1,21 +1,30 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { log, type LogLevel } from '../src/lib/log';
-import { captureLogLines } from './support/log-lines';
+import { captureLogLines, withoutTimestamp } from './support/log-lines';
 
-test('log writes one JSON line with every field at the top level', () => {
+test('log writes one JSON line with every field and a timestamp at the top level', () => {
   const lines: string[] = [];
+  const before = Date.now();
   log(
     'INFO',
     'Screenshot processed',
     { submissionId: 'submission-1', runId: 'run-1', rowCount: 8 },
     (line) => lines.push(line),
   );
+  const after = Date.now();
 
   assert.equal(lines.length, 1);
   assert.ok(lines[0].endsWith('\n'));
   assert.equal(lines[0].indexOf('\n'), lines[0].length - 1);
-  assert.deepEqual(JSON.parse(lines[0]), {
+  assert.ok(lines[0].startsWith('{"level":"INFO",'));
+  const record = JSON.parse(lines[0]) as Record<string, unknown>;
+  assert.equal(typeof record.timestamp, 'string');
+  const timestamp = record.timestamp as string;
+  assert.match(timestamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  const time = Date.parse(timestamp);
+  assert.ok(time >= before && time <= after, timestamp);
+  assert.deepEqual(withoutTimestamp(record), {
     level: 'INFO',
     message: 'Screenshot processed',
     submissionId: 'submission-1',
@@ -33,7 +42,9 @@ test('log keeps the level of each record', () => {
   }
 
   assert.deepEqual(
-    lines.map((line) => JSON.parse(line) as Record<string, unknown>),
+    lines.map((line) =>
+      withoutTimestamp(JSON.parse(line) as Record<string, unknown>),
+    ),
     [
       { level: 'ERROR', message: 'ERROR message' },
       { level: 'WARN', message: 'WARN message' },
@@ -42,6 +53,16 @@ test('log keeps the level of each record', () => {
       { level: 'TRACE', message: 'TRACE message' },
     ],
   );
+});
+
+test('a detail named timestamp never replaces the record timestamp', () => {
+  const lines: string[] = [];
+  log('WARN', 'Clock detail', { timestamp: 'not a time' }, (line) =>
+    lines.push(line),
+  );
+
+  const record = JSON.parse(lines[0]) as { timestamp: string };
+  assert.ok(!Number.isNaN(Date.parse(record.timestamp)), record.timestamp);
 });
 
 test('log writes straight to stdout, never through console.log', (t) => {
@@ -60,14 +81,16 @@ test('log writes straight to stdout, never through console.log', (t) => {
   }
 
   assert.deepEqual(consoleLines, []);
-  assert.deepEqual(captured.lines, [
-    JSON.stringify({
+  assert.equal(captured.lines.length, 1);
+  assert.deepEqual(
+    withoutTimestamp(JSON.parse(captured.lines[0]) as Record<string, unknown>),
+    {
       level: 'ERROR',
       message: 'Unable to record processing failure',
       submissionId: 'submission-1',
       error: 'AccessDenied',
-    }),
-  ]);
+    },
+  );
 });
 
 // Keyed by LogLevel so the compiler fails here when a level is added.

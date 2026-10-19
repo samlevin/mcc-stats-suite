@@ -23,3 +23,12 @@ export function captureLogLines(): { lines: string[]; restore: () => void } {
   );
   return { lines, restore: () => mocked.mock.restore() };
 }
+
+/** A parsed `log()` record without the `timestamp` that changes per call. */
+export function withoutTimestamp(
+  record: Record<string, unknown>,
+): Record<string, unknown> {
+  const copy = { ...record };
+  delete copy.timestamp;
+  return copy;
+}

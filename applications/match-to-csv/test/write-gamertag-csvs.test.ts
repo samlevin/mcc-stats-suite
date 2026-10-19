@@ -11,7 +11,7 @@ import {
   writeGamertagCsvs,
   type WriteGamertagCsvsDependencies,
 } from '../src/lambdas/write-gamertag-csvs';
-import { captureLogLines } from './support/log-lines';
+import { captureLogLines, withoutTimestamp } from './support/log-lines';
 
 const submissionPrefix = 'submissions/submission-1';
 const exportPrefix = `${submissionPrefix}/export/gamertags/`;
@@ -538,7 +538,9 @@ test('no gamertag or file name reaches the output or the log', async () => {
   const result = await writeGamertagCsvs(event, dependencies(new Map()));
 
   assert.equal(logLines.length, 1);
-  assert.deepEqual(JSON.parse(logLines[0]), {
+  const record = JSON.parse(logLines[0]) as Record<string, unknown>;
+  assert.equal(typeof record.timestamp, 'string');
+  assert.deepEqual(withoutTimestamp(record), {
     level: 'INFO',
     message: 'Gamertag CSVs written',
     submissionId: 'submission-1',
