@@ -16,6 +16,7 @@ import type {
   RowColor,
   ScoreboardParseResult,
 } from '../src/lib/scoreboard-logic';
+import { captureLogLines } from './support/log-lines';
 
 const source = {
   screenshotId: 'screen-1',
@@ -400,8 +401,8 @@ test('runExtraction records no reason for a two-team board', async () => {
 test('runExtraction reads the roster before Textract and records its reference', async (t) => {
   const writes: Array<{ key: string; value: any }> = [];
   const calls: string[] = [];
-  const logLines: string[] = [];
-  t.mock.method(console, 'log', (line: string) => logLines.push(line));
+  const { lines: logLines, restore } = captureLogLines();
+  t.after(restore);
   const result = await runExtraction(
     { source },
     {

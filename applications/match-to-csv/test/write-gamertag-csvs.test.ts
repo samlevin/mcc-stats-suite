@@ -11,6 +11,7 @@ import {
   writeGamertagCsvs,
   type WriteGamertagCsvsDependencies,
 } from '../src/lambdas/write-gamertag-csvs';
+import { captureLogLines } from './support/log-lines';
 
 const submissionPrefix = 'submissions/submission-1';
 const exportPrefix = `${submissionPrefix}/export/gamertags/`;
@@ -142,14 +143,13 @@ function table(key: string, rows: CsvRow[]): unknown {
 }
 
 let logLines: string[] = [];
-const originalLog = console.log;
+let restoreStdout = () => {};
 beforeEach(() => {
-  logLines = [];
-  console.log = (line: string) => logLines.push(line);
+  ({ lines: logLines, restore: restoreStdout } = captureLogLines());
   delete process.env.OBJECT_PREFIX;
 });
 afterEach(() => {
-  console.log = originalLog;
+  restoreStdout();
   delete process.env.OBJECT_PREFIX;
 });
 
