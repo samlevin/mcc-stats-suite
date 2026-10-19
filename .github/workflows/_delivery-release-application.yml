@@ -1,0 +1,52 @@
+name: 'Delivery: release application (reusable)'
+
+on:
+  workflow_call:
+    inputs:
+      application:
+        required: true
+        type: string
+      sha:
+        required: true
+        type: string
+      release-tag:
+        required: true
+        type: string
+    secrets:
+      DEV_AWS_ACCOUNT_ID:
+        required: false
+      PROD_AWS_ACCOUNT_ID:
+        required: false
+
+permissions:
+  actions: read
+  contents: read
+  deployments: write
+  id-token: write
+
+jobs:
+  deploy-dev:
+    name: Deploy ${{ inputs.application }} to dev
+    uses: ./.github/workflows/_delivery-deploy-environment.yml
+    with:
+      application: ${{ inputs.application }}
+      environment: dev
+      sha: ${{ inputs.sha }}
+      operation: release
+      source: ${{ inputs.release-tag }}
+    secrets:
+      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+
+  deploy-prod:
+    name: Deploy ${{ inputs.application }} to prod
+    needs: deploy-dev
+    if: needs.deploy-dev.outputs.deployed == 'true'
+    uses: ./.github/workflows/_delivery-deploy-environment.yml
+    with:
+      application: ${{ inputs.application }}
+      environment: prod
+      sha: ${{ inputs.sha }}
+      operation: release
+      source: ${{ inputs.release-tag }}
+    secrets:
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

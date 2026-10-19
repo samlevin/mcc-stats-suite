@@ -15,6 +15,8 @@ jobs:
   update-release-pr:
     name: Update release PR and publish releases
     runs-on: ubuntu-latest
+    outputs:
+      applications: ${{ steps.selection.outputs.applications }}
     steps:
       - name: Create release token
         id: app-token
@@ -24,8 +26,56 @@ jobs:
           private-key: ${{ secrets.RELEASE_PLEASE_APP_PRIVATE_KEY }}
 
       - name: Run Release Please
+        id: release
         uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+      - name: Select released applications
+        id: selection
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          RELEASE_OUTPUTS: ${{ toJSON(steps.release.outputs) }}
+        with:
+          script: |
+            const outputs = JSON.parse(process.env.RELEASE_OUTPUTS);
+            const paths = JSON.parse(outputs.paths_released || '[]');
+            if (!Array.isArray(paths) || new Set(paths).size !== paths.length) {
+              throw new Error('Invalid released paths');
+            }
+            const allowed = ['admin', 'data-pipeline', 'match-to-csv', 'ocr-quality', 'player'];
+            const applications = paths.filter((path) => path.startsWith('applications/')).map((path) => {
+              const application = path.slice('applications/'.length);
+              const tag = outputs[`${path}--tag_name`];
+              const sha = outputs[`${path}--sha`];
+              if (!allowed.includes(application) ||
+                  !new RegExp(`^${application}-v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$`).test(tag) ||
+                  !/^[0-9a-f]{40}$/.test(sha)) {
+                throw new Error(`Invalid application release: ${path}`);
+              }
+              return { application, tag, sha };
+            });
+            core.setOutput('applications', JSON.stringify(applications));
+
+  deliver-applications:
+    name: Release ${{ matrix.release.application }} to dev and prod
+    needs: update-release-pr
+    if: github.ref == 'refs/heads/main' && needs.update-release-pr.outputs.applications != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.update-release-pr.outputs.applications) }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/_delivery-release-application.yml
+    with:
+      application: ${{ matrix.release.application }}
+      sha: ${{ matrix.release.sha }}
+      release-tag: ${{ matrix.release.tag }}
+    secrets:
+      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

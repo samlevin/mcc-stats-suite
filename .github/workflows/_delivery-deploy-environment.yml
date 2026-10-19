@@ -20,9 +20,13 @@ on:
         required: true
         type: string
       source:
-        description: Human-readable source such as main or a release tag
+        description: Application release tag
         required: true
         type: string
+    outputs:
+      deployed:
+        description: Whether this call deployed and verified the release
+        value: ${{ jobs.deploy.outputs.deployed }}
     # Repository secrets reach a called workflow only when the caller passes
     # them. Each caller passes the account of the environment it deploys.
     secrets:
@@ -30,10 +34,6 @@ on:
         required: false
       PROD_AWS_ACCOUNT_ID:
         required: false
-
-concurrency:
-  group: deploy-${{ inputs.application }}-${{ inputs.environment }}
-  cancel-in-progress: ${{ inputs.environment == 'dev' }}
 
 permissions:
   actions: read
@@ -66,6 +66,11 @@ jobs:
     name: "${{ format('Deploy {0} to {1}{2}', inputs.application, inputs.environment, inputs.environment == 'prod' && ' (waits for approval)' || '') }}"
     needs: verify-prod-protection
     if: ${{ always() && !cancelled() && (inputs.environment == 'dev' || needs.verify-prod-protection.result == 'success') }}
+    concurrency:
+      group: deploy-${{ inputs.application }}-${{ inputs.environment }}
+      queue: max
+    outputs:
+      deployed: ${{ steps.deploy.outcome == 'success' && steps.verify.outcome == 'success' }}
     # match-to-csv's ARM64 Lambda bundling needs a native ARM Docker host.
     runs-on: ${{ inputs.application == 'match-to-csv' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     environment:
@@ -86,7 +91,13 @@ jobs:
           APPLICATION: ${{ inputs.application }}
           DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
           TARGET_SHA: ${{ inputs.sha }}
+          OPERATION: ${{ inputs.operation }}
         run: |
+          test "${GITHUB_REF}" = "refs/heads/main"
+          case "${OPERATION}" in
+            release|rollback) ;;
+            *) exit 1 ;;
+          esac
           case "${APPLICATION}" in
             admin|data-pipeline|match-to-csv|ocr-quality|player) ;;
             *)
@@ -141,27 +152,83 @@ jobs:
         run: |
           METADATA="$(npm run release:metadata --silent -- --application "${APPLICATION}")"
           echo "metadata=${METADATA}" >> "${GITHUB_OUTPUT}"
+      - name: Guard forward release version
+        id: version-guard
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          APPLICATION: ${{ inputs.application }}
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_TAG: ${{ inputs.source }}
+          RELEASE_METADATA: ${{ steps.release-metadata.outputs.metadata }}
+        with:
+          script: |
+            const application = process.env.APPLICATION;
+            const tag = process.env.RELEASE_TAG;
+            const metadata = JSON.parse(process.env.RELEASE_METADATA);
+            const version = (value) => {
+              if (!/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value)) {
+                throw new Error(`Invalid stable release version: ${value}`);
+              }
+              return value.split('.').map(BigInt);
+            };
+            const candidate = metadata.application.version;
+            const requested = version(candidate);
+            if (metadata.application.name !== `@mcc/${application}` || tag !== `${application}-v${candidate}`) {
+              throw new Error('Release tag does not match the checked-out application version');
+            }
+            if (process.env.OPERATION === 'rollback') {
+              core.setOutput('deploy', 'true');
+              return;
+            }
+            const task = `deploy:${application}`;
+            const environment = process.env.DEPLOYMENT_ENVIRONMENT;
+            const deployments = await github.paginate(github.rest.repos.listDeployments, {
+              ...context.repo, environment, task, per_page: 100,
+            });
+            const exact = deployments.filter((item) => item.environment === environment && item.task === task &&
+              item.payload?.application === application).sort((left, right) => right.id - left.id);
+            for (const deployment of exact) {
+              const statuses = await github.paginate(github.rest.repos.listDeploymentStatuses, {
+                ...context.repo, deployment_id: deployment.id, per_page: 100,
+              });
+              if (statuses.sort((left, right) => right.id - left.id)[0]?.state !== 'success') continue;
+              const previous = deployment.payload?.release?.application?.version;
+              const deployed = version(previous);
+              const difference = requested.findIndex((part, index) => part !== deployed[index]);
+              if (difference === -1 || requested[difference] < deployed[difference]) {
+                core.setOutput('deploy', 'false');
+                await core.summary.addRaw(`Skipped ${tag} in ${environment}: version ${candidate} is not newer than the latest successful deployment (${previous}).`).write();
+                return;
+              }
+              break;
+            }
+            core.setOutput('deploy', 'true');
       - name: Start environment Turbo cache
-        if: vars.MCC_TURBO_CACHE == 'true'
+        if: steps.version-guard.outputs.deploy == 'true' && (vars.MCC_TURBO_CACHE == 'true')
         uses: ./.cache-workflow/.github/actions/turbo-s3-cache
         with:
           environment: ${{ inputs.environment }}
           account-id: ${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}
           region: ${{ env.AWS_REGION }}
       - name: Build selected application with dependencies
+        if: steps.version-guard.outputs.deploy == 'true'
         env:
           APPLICATION: ${{ inputs.application }}
         run: |
           PACKAGE_NAME="$(node -p 'require(`./applications/${process.env.APPLICATION}/package.json`).name')"
           npx turbo run build --filter="${PACKAGE_NAME}..."
       - name: Test selected application
+        if: steps.version-guard.outputs.deploy == 'true'
         run: npm test --workspace "applications/${{ inputs.application }}"
       - name: Assume the CDK deploy role
+        if: steps.version-guard.outputs.deploy == 'true'
         uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
         with:
           role-to-assume: arn:aws:iam::${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}:role/mcc-stats-suite-${{ inputs.environment }}-github-cdk-deploy
           aws-region: ${{ env.AWS_REGION }}
       - name: Verify target account
+        if: steps.version-guard.outputs.deploy == 'true'
         env:
           EXPECTED_ACCOUNT: ${{ env.MCC_DEV_ACCOUNT_ID || env.MCC_PROD_ACCOUNT_ID }}
         run: |
@@ -171,7 +238,7 @@ jobs:
             exit 1
           fi
       - name: Verify match-to-csv prerequisites
-        if: inputs.application == 'match-to-csv'
+        if: steps.version-guard.outputs.deploy == 'true' && (inputs.application == 'match-to-csv')
         env:
           DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
         run: |
@@ -230,20 +297,22 @@ jobs:
             echo "::notice::${ALARM_EMAIL_PARAMETER} is not set; alarms publish to the stack topic without an email subscription"
           fi
       - name: Synthesize CDK app
+        if: steps.version-guard.outputs.deploy == 'true'
         run: |
           npm run app:synth -- \
             "${{ inputs.application }}" \
             --environment "${{ inputs.environment }}"
       - name: Verify native Lambda bundles
-        if: inputs.application == 'match-to-csv'
+        if: steps.version-guard.outputs.deploy == 'true' && (inputs.application == 'match-to-csv')
         run: npm run verify:bundle --workspace applications/match-to-csv
       - name: Show prod CDK diff
-        if: inputs.environment == 'prod'
+        if: steps.version-guard.outputs.deploy == 'true' && (inputs.environment == 'prod')
         run: |
           npm run app:diff -- \
             "${{ inputs.application }}" \
             --environment prod
       - name: Create exact-revision deployment record
+        if: steps.version-guard.outputs.deploy == 'true'
         id: deployment
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
@@ -271,6 +340,7 @@ jobs:
                 operation: process.env.DEPLOYMENT_OPERATION,
                 release: JSON.parse(process.env.RELEASE_METADATA),
                 source: process.env.DEPLOYMENT_SOURCE,
+                releaseTag: process.env.DEPLOYMENT_SOURCE,
                 workflowRun: runUrl,
               },
             });
@@ -285,6 +355,7 @@ jobs:
             });
             return response.data.id;
       - name: Deploy CDK stacks
+        if: steps.version-guard.outputs.deploy == 'true'
         id: deploy
         run: |
           npm run app:deploy -- \
@@ -292,6 +363,7 @@ jobs:
             --environment "${{ inputs.environment }}" \
             --require-approval never
       - name: Verify deployed stack
+        if: steps.version-guard.outputs.deploy == 'true'
         id: verify
         env:
           APPLICATION: ${{ inputs.application }}

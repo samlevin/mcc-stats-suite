@@ -169,10 +169,8 @@ test('automation script tests run only in the repository scope', () => {
   // Workflows that build, deploy, or release always run the full gate.
   for (const path of [
     '.github/workflows/ci-checks.yml',
-    '.github/workflows/delivery-deploy.yml',
-    '.github/workflows/delivery-promote.yml',
     '.github/workflows/delivery-rollback.yml',
-    '.github/workflows/_delivery-promote-application.yml',
+    '.github/workflows/_delivery-release-application.yml',
     '.github/workflows/_delivery-deploy-environment.yml',
     '.github/workflows/release-pr.yml',
   ])
@@ -567,7 +565,7 @@ test('CI cdk-config tests cannot invoke another compiler or modify built declara
   }
 });
 
-test('workflow isolates cache namespaces and deploys dev and prod after CI', () => {
+test('workflow isolates cache namespaces and keeps validation independent of releases', () => {
   const parsedWorkflow = loadWorkflow('ci-checks');
   const workflow = readFileSync(
     new URL('../.github/workflows/ci-checks.yml', import.meta.url),
@@ -606,31 +604,12 @@ test('workflow isolates cache namespaces and deploys dev and prod after CI', () 
   assert.equal(gate.if, '${{ !cancelled() }}');
   // Job names are the required status-check contexts in the main ruleset.
   assert.equal(gate.name, 'Require every check selected for the changed files');
-  const dev = readFileSync(
-    new URL('../.github/workflows/delivery-deploy.yml', import.meta.url),
-    'utf8',
-  );
-  assert.match(dev, /workflows: \['CI: checks'\]/);
-  assert.match(dev, /github\.event\.workflow_run\.conclusion == 'success'/);
-  assert.match(dev, /_delivery-deploy-environment/);
-  assert.doesNotMatch(dev, /environment: prod|PROD_AWS_ACCOUNT_ID/);
-  const promotion = loadWorkflow('delivery-promote');
-  assert.deepEqual(promotion.on.workflow_run.workflows, [
-    'Delivery: deploy to dev',
-  ]);
-  assert.equal(
-    promotion.jobs.promote.uses,
-    './.github/workflows/_delivery-promote-application.yml',
-  );
-  const prod = readFileSync(
-    new URL(
-      '../.github/workflows/_delivery-promote-application.yml',
-      import.meta.url,
+  assert.equal(parsedWorkflow.jobs['select-applications'], undefined);
+  assert.ok(
+    !Object.values(parsedWorkflow.jobs).some((job) =>
+      job.uses?.includes('deploy'),
     ),
-    'utf8',
   );
-  assert.doesNotMatch(prod, /deploy-dev/);
-  assert.match(prod, /environment: prod/);
   assert.ok(!workflow.includes('continue-on-error'));
   assert.ok(!workflow.includes('pull_request_target'));
   const config = JSON.parse(
@@ -729,6 +708,7 @@ test('Turbo cache steps run only in repositories that opt in', () => {
     vars,
     github: { event_name: 'push', ref: 'refs/heads/main' },
     needs: { 'detect-changes': { outputs: { full: 'true' } } },
+    steps: { 'version-guard': { outputs: { deploy: 'true' } } },
   });
   for (const { id, step } of steps) {
     assert.equal(typeof step.if, 'string', id);
