@@ -2,6 +2,12 @@
 import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
 import { spawnSync } from 'node:child_process';
 import {
+  assemblyDirectory,
+  planReport,
+  readPlanAssembly,
+  runDiff,
+} from './cdk-plan-report.mjs';
+import {
   AccountGuardError,
   awsCli,
   profileSsoAccount,
@@ -20,7 +26,7 @@ const applications = new Set(APPLICATIONS);
 const actions = new Set(['synth', 'diff', 'deploy', 'destroy']);
 
 const CLI = defineCli(
-  'Usage: npm run app:<synth|diff|deploy|destroy> -- <application> [options] [CDK arguments]',
+  'Usage: npm run app:<synth|diff|deploy|destroy> -- <application> [options] [CDK arguments]\nDiff report reference: docs/cdk-plan-output.md',
   ['environment', 'ephemeral', 'profile'],
   { passthrough: true },
 );
@@ -138,6 +144,47 @@ const targetOptions = {
   profile,
 };
 const npmArguments = cdkArguments({ ...targetOptions, action, passthrough });
+
+if (action === 'diff') {
+  const { resolveDeployment } = await import('@mcc/cdk-config');
+  const context = { environment, ephemeral, expectedAccount };
+  const deployment = resolveDeployment(
+    { tryGetContext: (key) => context[key] },
+    application,
+    childEnvironment,
+  );
+  const started = Date.now();
+  const command = await runDiff(npmArguments, childEnvironment);
+  let assembly = {};
+  try {
+    assembly = readPlanAssembly(
+      assemblyDirectory(application, passthrough),
+      deployment.stackName,
+      started,
+    );
+  } catch (error) {
+    process.stderr.write(
+      `Plan resource summary unavailable: ${error.message}\n`,
+    );
+  }
+  try {
+    await new Promise((flushed) =>
+      process.stdout.write(
+        planReport({
+          deployment,
+          gitSha: childEnvironment.GIT_SHA,
+          ...assembly,
+          raw: command.raw,
+          status: command.status,
+        }),
+        flushed,
+      ),
+    );
+  } catch (error) {
+    process.stderr.write(`Plan explanation unavailable: ${error.message}\n`);
+  }
+  process.exit(command.status);
+}
 
 const command = spawnSync('npm', npmArguments, {
   stdio: 'inherit',
