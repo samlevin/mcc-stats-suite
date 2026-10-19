@@ -1,11 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { failureMessage, ghGraphql, REPOSITORY } from './issue-triage.mjs';
 
-const KINDS = {
-  issue: { field: 'issue', label: 'Issue' },
-  pull_request: { field: 'pullRequest', label: 'Pull request' },
-};
-
 export async function addToProject({
   api,
   kind,
@@ -13,25 +8,24 @@ export async function addToProject({
   dryRun = true,
   log = console.log,
 }) {
-  const target = Object.hasOwn(KINDS, kind) ? KINDS[kind] : null;
-  if (!target) throw new Error('CONTENT_TYPE must be issue or pull_request');
+  if (kind !== 'issue') throw new Error('CONTENT_TYPE must be issue');
   if (!Number.isSafeInteger(number) || number < 1)
-    throw new Error('A positive issue or pull request number is required');
+    throw new Error('A positive issue number is required');
   const [owner, name] = REPOSITORY.split('/');
   const data = await api(
     `query($owner: String!, $name: String!, $number: Int!) {
-      repository(owner: $owner, name: $name) { ${target.field}(number: $number) { id } }
+      repository(owner: $owner, name: $name) { issue(number: $number) { id } }
       user(login: "samlevin") { projectV2(number: 1) { id closed } }
     }`,
     { owner, name, number },
   );
-  const content = data.repository?.[target.field];
-  if (!content?.id) throw new Error(`${target.label} #${number} not found`);
+  const content = data.repository?.issue;
+  if (!content?.id) throw new Error(`Issue #${number} not found`);
   const project = data.user?.projectV2;
   if (!project?.id || project.closed)
     throw new Error('MCC delivery project is unavailable');
   if (dryRun) {
-    log(`${target.label} #${number}: would add to MCC delivery (dry run).`);
+    log(`Issue #${number}: would add to MCC delivery (dry run).`);
     return null;
   }
   // GitHub returns the existing item when the content is already in the
@@ -44,7 +38,7 @@ export async function addToProject({
   );
   const item = result.addProjectV2ItemById?.item?.id;
   if (!item) throw new Error('GitHub returned no project item');
-  log(`${target.label} #${number}: in MCC delivery as item ${item}.`);
+  log(`Issue #${number}: in MCC delivery as item ${item}.`);
   return item;
 }
 

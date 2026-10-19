@@ -54,7 +54,7 @@ Images must be readable, at least 640 by 360 pixels, and no larger than 10 MB (1
 
 ### Match date
 
-The trimmed plain-text body must contain only a valid calendar date in `M/D/YYYY` format. Leading zeros are accepted. HTML-only mail has no match date. Use the session's date even if play runs past midnight. A missing or invalid date rejects the submission with `MATCH_DATE_INVALID` before screenshots reach Textract.
+The plain-text body must contain a valid calendar date in `M/D/YYYY` format with a four-digit year. `process-email` uses the first valid date in reading order, skipping invalid candidates. Leading zeros, surrounding text, and signatures are allowed. A candidate touching a digit or slash is ignored, so a longer numeric date token cannot supply a date substring. HTML-only mail has no match date. Use the session's date even if play runs past midnight. A missing or invalid date rejects the submission with `MATCH_DATE_INVALID` before screenshots reach Textract.
 
 Only allowlisted senders receive the invalid-date reply from `noreply@<domain>`. Replies to that address are not read. In the SES sandbox, verify the sender's address as an SES reply recipient before testing this reply. A failed reply does not change the recorded rejection. See the [date and reply contract](../../specs/1.1-mcc-analytics-engine.md#44-match-date-and-error-reply).
 
