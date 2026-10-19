@@ -94,6 +94,22 @@ export interface RecipientDecision {
   recipients: string[];
 }
 
+/**
+ * Whether the match date error reply reached SES. `SKIPPED` means the sender
+ * is not allowlisted or `REPLY_FROM_DOMAIN` is unset.
+ */
+export type MatchDateReplyResult = 'SENT' | 'FAILED' | 'SKIPPED';
+
+/**
+ * What `processEmail` did. `result` is the workflow output. `matchDateReply`
+ * stays in the Lambda and is set only when `MATCH_DATE_INVALID` is among the
+ * rejection codes.
+ */
+export interface ProcessEmailOutcome {
+  result: ProcessEmailResult;
+  matchDateReply?: MatchDateReplyResult;
+}
+
 export interface SubmissionScreening {
   sesVerdicts: SesVerdicts;
   senderAllowlist: SenderAllowlistDecision;
@@ -267,7 +283,7 @@ const readParameter = createParameterReader(async (parameterName) => {
 export async function handler(
   event: ProcessEmailInput,
 ): Promise<ProcessEmailResult> {
-  return processEmail(event, defaultDependencies);
+  return (await processEmail(event, defaultDependencies)).result;
 }
 
 /**
@@ -279,7 +295,7 @@ export async function handler(
 export async function processEmail(
   event: ProcessEmailInput,
   dependencies: ProcessEmailDependencies,
-): Promise<ProcessEmailResult> {
+): Promise<ProcessEmailOutcome> {
   const evidenceBucket = requiredEnvironment('EVIDENCE_BUCKET');
   const receivedAt = readReceivedAt(event.receivedAt);
   log('INFO', 'Processing raw email', {
@@ -319,6 +335,7 @@ export async function processEmail(
   const screenshots: SourceScreenshot[] = [];
   const rejectedAttachments: RejectedAttachment[] = [];
   let rejectionCodes: SubmissionRejectionCode[];
+  let replyResult: MatchDateReplyResult | undefined;
 
   await dependencies.writeJson(
     evidenceBucket,
@@ -467,7 +484,7 @@ export async function processEmail(
     );
 
     if (rejectionCodes.includes('MATCH_DATE_INVALID')) {
-      await replyMatchDateInvalid(
+      replyResult = await replyMatchDateInvalid(
         dependencies,
         parsed,
         screening.senderAllowlist,
@@ -509,7 +526,10 @@ export async function processEmail(
 
   if (rejectionCodes.length > 0) {
     log('INFO', 'Submission rejected', { submissionId, rejectionCodes });
-    return { status: 'REJECTED', submissionId, rejectionCodes };
+    return {
+      result: { status: 'REJECTED', submissionId, rejectionCodes },
+      ...(replyResult === undefined ? {} : { matchDateReply: replyResult }),
+    };
   }
   log('INFO', 'Raw email processed', {
     submissionId,
@@ -517,12 +537,14 @@ export async function processEmail(
     rejectedAttachmentCount: rejectedAttachments.length,
   });
   return {
-    status: 'ACCEPTED',
-    submissionId,
-    matchDate: matchDate as string,
-    screenshots,
-    rejectedAttachments,
-    ...(receivedAt === undefined ? {} : { receivedAt }),
+    result: {
+      status: 'ACCEPTED',
+      submissionId,
+      matchDate: matchDate as string,
+      screenshots,
+      rejectedAttachments,
+      ...(receivedAt === undefined ? {} : { receivedAt }),
+    },
   };
 }
 
@@ -603,41 +625,44 @@ export function matchDateReply(
 }
 
 /**
- * Sends the match date error reply to the sender. Only allowlisted senders get
- * one, so a reply goes only to an address on the allowlist. A failed send is
- * logged and leaves the recorded rejection unchanged. No log line holds an
- * address or email content.
+ * Sends the match date error reply to the sender and returns whether SES
+ * accepted it. Only allowlisted senders get one, so a reply goes only to an
+ * address on the allowlist. A failed send is logged, returns `FAILED` and
+ * leaves the recorded rejection unchanged. No log line holds an address or
+ * email content.
  */
 async function replyMatchDateInvalid(
   dependencies: ProcessEmailDependencies,
   email: ParsedEmail,
   senderAllowlist: SenderAllowlistDecision,
   submissionId: string,
-): Promise<void> {
+): Promise<MatchDateReplyResult> {
   if (senderAllowlist.status !== 'ALLOWED') {
     log('WARN', 'Match date reply not sent: sender not allowlisted', {
       submissionId,
     });
-    return;
+    return 'SKIPPED';
   }
   const domain = process.env.REPLY_FROM_DOMAIN;
   if (!domain) {
     log('ERROR', 'Match date reply not sent: REPLY_FROM_DOMAIN is not set', {
       submissionId,
     });
-    return;
+    return 'SKIPPED';
   }
   try {
     await dependencies.sendEmail(
       matchDateReply(email, senderAllowlist.fromAddresses, domain),
     );
     log('INFO', 'Match date reply sent', { submissionId });
+    return 'SENT';
   } catch (error) {
     // SES error messages can name addresses, so only the error name is logged.
     log('ERROR', 'Unable to send the match date reply', {
       submissionId,
       error: error instanceof Error ? error.name : 'UnknownError',
     });
+    return 'FAILED';
   }
 }
 
