@@ -40,6 +40,24 @@ npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <nam
 
 Use the same `<name>` as your stack to configure its `ephemeral/<name>` namespace. Omit `--ephemeral` for the environment's `stable` namespace. `--environment` is required. Production uses `prod` and its administrator profile, accepts no `--ephemeral`, and asks for confirmation before writes. Sender-allowlist operators need the separate SSM permissions in its guide. Keep list output local.
 
+## Scripts reference
+
+Run NPM commands from the repository root with `--workspace @mcc/match-to-csv`. For the two `npx tsx` commands, first `cd applications/match-to-csv`. Build and test tools use their own option syntax; repository fixture tools accept `--help`.
+
+| Script | Purpose | Arguments |
+| --- | --- | --- |
+| `npm run build --workspace @mcc/match-to-csv` | Compile TypeScript, including fixture scripts | None required |
+| `npm run typecheck --workspace @mcc/match-to-csv` | Type-check without emitting files | None required |
+| `npm test --workspace @mcc/match-to-csv` | Run tests with coverage thresholds and AWS validation disabled | None required |
+| `npm run ci:test --workspace @mcc/match-to-csv` | Run the same tests with concurrency limited to two | None required |
+| `npm run verify:bundle --workspace @mcc/match-to-csv` | Check synthesized templates and Linux ARM64 Sharp bundles in `cdk.out` | None; synthesize first |
+| `npm run cdk:synth --workspace @mcc/match-to-csv` | Invoke the workspace CDK CLI; replace `cdk:synth` with `cdk:diff`, `cdk:deploy`, or `cdk:destroy` for those actions | Required `-- -c environment=dev` (or `prod`); optional `-c ephemeral=<name>` and other CDK options after `--`. Use the repository's [guarded `app:*` commands](../../README.md#scripts-reference) for local operations |
+| `npm run ci:synth --workspace @mcc/match-to-csv` | Synthesize the dev `ci` ephemeral stack | None required; Docker must support Linux ARM64 |
+| `npx tsx scripts/capture-textract.ts` | Capture real Textract responses and row colors | Required `<output-dir> <image>...`; output must be outside any Git working tree. Uses AWS credentials and Region from the environment |
+| `npx tsx scripts/reduce-capture.ts` | Replace real names and reduce a capture into a fixture | Required `--capture <file> --mapping <file> --name <name> --output <file>`; capture and mapping must be outside any Git working tree. No argument defaults |
+
+See [Capturing a real screenshot](test/fixtures/README.md#capturing-a-real-screenshot) for private capture handling, mapping examples, and expected-row transcription.
+
 ## Submit screenshots
 
 Read `/mcc/<environment>/match-to-csv/email-alias` and `email-domain` in SSM with an administrator or operator profile that can read them. Send to `<alias>@<domain>` for a stable stack, or `<alias>+<name>@<domain>` for your ephemeral stack. The [test email instructions](../../docs/getting-started.md#send-a-test-email) show how to read and combine the parameters. After an alias or domain change, redeploy an ephemeral stack to receive at the new address.
