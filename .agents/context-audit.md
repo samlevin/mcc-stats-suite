@@ -86,59 +86,132 @@ PY
 
 Inspect coordination calls once to classify any runtime-specific wait tools, required progress updates, and status-only probes. The command classifies only direct `wait_agent` calls whose result has `timed_out`. Nested tool calls and other wait schemas require explicit classification, not an inferred zero. If any participating thread lacks usage, the command reports aggregate model-call, peak-input, and token totals as unavailable. It labels any observed subset as `known_partial_usage` and `known_partial_model_calls`; those fields are not run totals. Record unavailable values. If only cumulative usage exists, use one final counter per thread, and report model-call count and peak unavailable unless another source provides them. Never sum every cumulative sample or mix it with per-response records.
 
-## Retrieval and waiting examples
+## Controlled before/after replay
 
-Run this deterministic retrieval replay with Python 3. It uses the same evidence for both retrieval strategies. The before strategy returns complete, unbounded results; the after strategy retains the full evidence locally in memory and returns counted ranges or selected fields. Counts are characters returned, not source bytes. The assertion on the reconstructed review proves that several bounded ranges still cover the full diff. No model, GitHub request, or remote CI is invoked.
+When historical exports are unavailable, use a reconstructed baseline and the candidate against the same fixed task, evidence, and cutoffs. This is a delivery evidence and coordination replay, not an observed model delivery. It needs no legacy logs. The baseline is the guidance at `63a65a1c5f7537e993b3a7ba9fa1ee287a3e4fcc`. Its implementer permits whole reads below about 2,000 lines, its reviewer has no equivalent output budget, and its waits have no prescribed cadence. The candidate uses [Evidence and waiting](evidence-and-waiting.md). The command checks those source assumptions and prints policy and fixture hashes so a later reproduction can identify its inputs.
+
+Both variants gather the same dispatch criteria, inspect the same implementation evidence, cover every review diff/caller/test range, reuse an unchanged read, and reach the same handoff after the child completes at virtual second 145. No implementation change, test execution, real review decision, model inference, GitHub write, or actual sleep occurs inside the replay. Long-line and review evidence remains fully in scope. The large GitHub fixture has one explicitly irrelevant field, which only the candidate omits from returned evidence. The baseline returns full results; the candidate selects fields and splits results into counted ranges. Tool-output measurements count the constructed JSON return envelopes, including scope labels and escaping, once per enclosing batch. They do not estimate runtime wrappers, model tokens, or quota use.
+
+For coordination, the baseline uses a chosen 30-second wait, matching the tool default in the audited interface. The old policy permits that cadence but does not require it. The candidate uses the longest permitted wait under the same 60-second loaded maximum. Both variants model progress deadlines at seconds 60 and 120, react to completion at second 145, send zero child probes, and preserve dependency order. These wait and update counts are modeled from a virtual clock. Changing the chosen baseline cadence changes that comparison; no historical cadence is inferred.
+
+Run from the repository root with Python 3 and Git:
 
 ```sh
 python3 - <<'PY'
-import json
+import hashlib, json, math, subprocess
+from pathlib import Path
 
-single, combined = 12_000, 24_000
-def ranges(text, size=10_000):
-    return [text[start:start + size] for start in range(0, len(text), size)]
-def emit(parts):
-    assert all(len(part) <= single for part in parts)
-    assert sum(map(len, parts)) <= combined
-    return sum(map(len, parts))
-long_line = "x" * 30_000 + "\n"
-assert len(long_line.splitlines()) < 2_000
-assert "".join(ranges(long_line)) == long_line
-assert all(emit([part]) <= single for part in ranges(long_line))
-reads = ["a" * 9_000, "b" * 9_000, "c" * 9_000]
-assert emit(reads[:2]) == 18_000
-assert emit(reads[2:]) == 9_000
-response = json.dumps({"number": 323, "body": "x" * 40_000, "unused": "y" * 40_000})
-selected = json.dumps({"number": json.loads(response)["number"]})
-assert emit([selected]) == 15
-diff = "diff evidence\n" * 4_000
-chunks = ranges(diff)
-assert "".join(chunks) == diff
-assert all(emit([part]) <= single for part in chunks)
-received = dict(enumerate(chunks))
-del received[2]  # a clipped retrieval must leave a visible coverage gap
-missing = set(range(len(chunks))) - received.keys()
-assert missing == {2}
-received[2] = chunks[2]  # recover before judging
-assert "".join(received[i] for i in range(len(chunks))) == diff
-assert min(3_600, 60) == 60  # tool maximum, loaded maximum, in seconds
-print(json.dumps({"long_line": len(long_line), "batch": sum(map(len, reads)),
-                  "github_before": len(response), "github_after": len(selected),
-                  "review_characters": len(diff), "review_ranges": len(chunks),
-                  "max_returned_range": max(map(len, chunks)), "wait_seconds": 60}))
+baseline = "63a65a1c5f7537e993b3a7ba9fa1ee287a3e4fcc"
+paths = [".agents/roles/implementer.md", ".agents/roles/code-reviewer.md",
+         ".agents/roles/orchestrator.md", ".agents/workflows/implement.md"]
+old = [subprocess.check_output(["git", "show", f"{baseline}:{p}"], text=True) for p in paths]
+new = [Path(p).read_text() for p in paths]
+policy = Path(".agents/evidence-and-waiting.md").read_text()
+assert "about 2,000 lines" in old[0] and "evidence-and-waiting.md" not in old[0]
+assert "12,000 characters" in policy and "24,000 characters" in policy
+encode = lambda value: json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+digest = lambda text: hashlib.sha256(text.encode()).hexdigest()
+criteria = ["full diff", "relevant callers", "tests", "all acceptance criteria"]
+response = encode({"number": 323, "criteria": criteria, "irrelevant": "y" * 80_000})
+evidence = {"long-line": "x" * 30_000 + "\n",
+            "file-a": "a" * 9_000, "file-b": "b" * 9_000, "file-c": "c" * 9_000,
+            "diff": "diff evidence\n" * 4_000,
+            "callers": "caller\n" * 1_000, "tests": "test\n" * 1_200,
+            "handoff": "coverage complete; child result recorded"}
+assert len(evidence["long-line"].splitlines()) < 2_000
+fixture = encode({"response": response, "evidence": evidence,
+                  "completion": 145, "loaded_wait_max": 60, "baseline_wait": 30})
+groups = [("dispatcher", ["github"]), ("implementer", ["long-line"]),
+          ("implementer", ["file-a", "file-b", "file-c"]),
+          ("reviewer", ["diff"]), ("reviewer", ["callers", "tests"]),
+          ("implementer", ["file-a"]), ("implementer", ["handoff"])]
+
+def replay(bounded):
+    sources = dict(evidence, github=response)
+    if bounded:
+        data = json.loads(response)
+        sources["github"] = encode({key: data[key] for key in ("number", "criteria")})
+    batches, covered, cache = [], {}, set()
+    reuse_hits = 0
+    def packet(role, rows):
+        return encode({"role": role, "results": rows})
+    for role, keys in groups:
+        rows = []
+        for key in keys:
+            identity = (role, key, digest(sources[key]))
+            if identity in cache:
+                reuse_hits += 1
+                continue
+            cache.add(identity)
+            text = sources[key]
+            size = 10_000 if bounded else len(text)
+            for start in range(0, len(text), size):
+                row = {"scope": key, "start": start, "text": text[start:start + size]}
+                if bounded and rows and len(packet(role, rows + [row])) > 22_000:
+                    batches.append(packet(role, rows)); rows = []
+                if bounded:
+                    assert len(encode(row)) <= 12_000
+                rows.append(row)
+                covered.setdefault(key, []).append((start, row["text"]))
+        if rows:
+            batches.append(packet(role, rows))
+    for key, text in sources.items():
+        assert "".join(part for _, part in sorted(covered[key])) == text
+    for key in ("number", "criteria"):
+        assert json.loads(sources["github"])[key] == json.loads(response)[key]
+    if bounded:
+        assert all(len(batch) <= 24_000 for batch in batches)
+    unchanged = ("implementer", "file-a", digest(sources["file-a"]))
+    assert unchanged in cache and reuse_hits == 1  # the repeat returns no output
+    wait_seconds = min(60, 60) if bounded else 30
+    waits = math.ceil(145 / wait_seconds)
+    return {"returned_payload_characters": sum(map(len, batches)),
+            "peak_batch_characters": max(map(len, batches)), "retrieval_batches": len(batches),
+            "modeled_wait_calls": waits, "modeled_idle_timeout_wakeups": waits - 1,
+            "modeled_progress_updates": 2, "modeled_status_probes": 0, "unchanged_read_reuses": reuse_hits,
+            "runtime_model_calls": None, "runtime_peak_context": None,
+            "runtime_input_cached_output": None, "coverage": "complete"}
+
+chunks = [evidence["diff"][i:i + 10_000] for i in range(0, len(evidence["diff"]), 10_000)]
+received = dict(enumerate(chunks)); del received[2]
+assert set(range(len(chunks))) - received.keys() == {2}
+received[2] = chunks[2]  # recover the missing range before judging
+assert "".join(received[i] for i in range(len(chunks))) == evidence["diff"]
+print(json.dumps({"baseline_revision": baseline, "baseline_policy_sha256": digest("".join(old)),
+                  "candidate_policy_sha256": digest("".join(new) + policy),
+                  "fixture_sha256": digest(fixture), "before": replay(False),
+                  "after": replay(True)}, indent=2))
 PY
 ```
 
-Expected results are 30,001 characters in one line, 27,000 in the batch, 80,041 in the GitHub fixture before selection and 15 after selection, and 56,000 review characters covered in six ranges of at most 10,000. Long lines and the review still require all their relevant characters, so bounded retrieval alone does not reduce those totals. Batching three compliant 9,000-character reads would exceed 24,000; two batches fit. Simulate a truncated range by omitting one chunk and check that the coverage ledger identifies the gap; retrieve it before the verdict. For a GitHub body needed by a criterion, retrieve every relevant body range as well as the selected metadata. Selecting metadata alone is valid only when the body is out of scope.
-
-For an idle child with a 60-second loaded maximum, a 60-second timeout returns no event, then the dispatcher immediately waits another 60 seconds without a probe or child message. Completion or user input ends that wait early. A required progress deadline still receives its update. This is a coordination trace check, not a claim that two waits cost no tokens. Audit actual timeout wakeups with runtime telemetry.
+The replay enforces its candidate payload assertions in Python. The delivery policy itself remains instructional. The baseline has no replay cap, allowing the long line and combined reads to demonstrate the gap. The same 56,000 review characters, relevant callers/tests, and criteria must be reconstructed before either variant reaches the common handoff cutoff. The missing-range example detects and repairs a gap before judging. Both variants model unchanged evidence reuse, so the comparison does not attribute any reduction to weakening #308's read-once rule.
 
 ## Recorded evidence and limits
 
-The issue #323 baseline covers three earlier delivery runs (#290, #291, #293). It reports approximately 13.50 million total tokens, including 12.73 million cached input tokens and 61,753 output tokens, approximately 1.52 million implementer tool-output characters, and 27 parent wait calls. The approximately 796,000 input tokens around wait cycles are already part of input; do not add them again. Those are supplied baseline aggregates, not measurements from this replay. Exact model-call count, peak context, timeout-only wakeups, role-separated input, and complete baseline thread exports are unavailable for that baseline here.
+The controlled replay results below are reproducible from the command above. Runtime model-call count, peak context, input/cached/output tokens, and actual idle model wakeups are unavailable for both variants because no inference runtime participates. The wait counts are modeled; payload counts are measured on the replay's constructed return envelopes. More retrieval batches do not establish more or fewer model calls because a runtime may batch, cache, or compact them differently.
 
-A partial #323 implementer observation at `2026-10-19T18:57:42.120Z` contains 21 model calls, a peak request-input proxy of 77,995 tokens, 162,941 returned tool-output characters, zero agent wait calls, and zero idle timeout wakeups. Input is 1,264,689 tokens, including 1,183,232 cached input tokens; output is 12,913, for input + output of 1,277,602. The observation includes setup before this policy was written. It excludes the dispatcher, the pending independent review, and the final handoff. Required user progress updates were not classified separately. It is a telemetry-method check, not a complete after run.
+| Metric | Reconstructed baseline | Candidate | Evidence type |
+| --- | --- | --- | --- |
+| Returned tool-output payload characters | 212,916 | 133,369 | Measured replay envelopes |
+| Peak combined return characters | 80,196 | 21,542 | Measured replay envelopes |
+| Retrieval batches | 6 | 10 | Measured replay trace |
+| Agent wait calls / idle timeout wakeups | 5 / 4 | 3 / 2 | Modeled at 30s / 60s cadence |
+| Required progress updates / status probes | 2 / 0 | 2 / 0 | Modeled at common deadlines |
+| Unchanged successful reads reused | 1 | 1 | Measured replay trace |
+| Model calls / peak runtime context | unavailable / unavailable | unavailable / unavailable | No inference runtime |
+| Input / cached input / output tokens | unavailable / unavailable / unavailable | unavailable / unavailable / unavailable | No inference runtime |
+| Relevant evidence coverage at handoff | complete | complete | Reconstructed text and criteria assertions |
 
-The deterministic before/after retrieval replay is comparable at the evidence-workload level. It measures selected output and complete range coverage. Its model calls, input/cached/output tokens, peak model context, and idle model wakeups are unavailable because it executes no model. It cannot establish a change in delivery-wide usage. A complete delivery comparison requires the matched runs and exports described above. Current delivery telemetry can be recorded at a named cutoff as a partial observation, with the missing final review and handoff stated explicitly. Do not compare a partial single-role observation with the three-run aggregate as a reduction.
+Input identifiers from the recorded replay:
 
-Runtime caching, compaction, prompt size, task scope, model, tool-output clipping, retries, and review rounds affect usage. Instructional limits can be exceeded; generation and parity checks prove matching guidance, not runtime compliance. Token counts do not establish subscription quota deductions. No fixed token reduction or quota saving follows from this policy or the retrieval replay.
+- Baseline policy SHA-256: `d1e4d1f7a9553c051b2db4db86be7701bf70b12e3617d5b31da4c46f25b02569`.
+- Candidate policy SHA-256: `63ad8f59628a9b1d9a88d9c638b84ccee70579cd724299a2fa1fa5361b158b9b`.
+- Fixture SHA-256: `43cdfdd331cd2b87499fbc73a2f3978165231ab6612d85f5bb1bc63476d4258f`.
+
+The issue #323 historical baseline reports approximately 13.50 million total tokens, including 12.73 million cached input tokens and 61,753 output tokens, approximately 1.52 million implementer tool-output characters, and 27 parent wait calls across #290, #291, and #293. The approximately 796,000 input tokens around wait cycles are already part of input. These are supplied context, not a comparator for this replay. Their raw exports are unavailable and are not needed to reproduce the controlled audit.
+
+A partial #323 implementer observation at `2026-10-19T18:57:42.120Z` contains 21 model calls, a peak request-input proxy of 77,995 tokens, 162,941 returned tool-output characters, zero agent wait calls, and zero idle timeout wakeups. Input is 1,264,689 tokens, including 1,183,232 cached input tokens; output is 12,913, for input + output of 1,277,602. It includes setup before this policy was written and excludes the dispatcher, independent review, and final handoff. Required user progress updates were not classified separately. It checks the telemetry method and is not the after column of the controlled comparison.
+
+For a prospective runtime comparison, run an authorized isolated delivery fixture twice from the same task/source snapshot, once with the pinned baseline guidance and once with candidate guidance. Keep model/effort, role set, review rounds, required checks, concurrency, wait limits, and cache conditions matched. Collect each role from dispatch through final handoff with the same cutoff. Report the metrics above separately by role and in aggregate using the extractor, marking missing metrics unavailable. Record any mismatch instead of claiming causation. This procedure collects new paired evidence; it does not require recovery of historical sessions.
+
+Runtime caching, compaction, prompt size, task scope, model, tool-output clipping, retries, and review rounds affect usage. Generation and parity checks prove matching guidance, not runtime compliance. Token counts do not establish subscription quota deductions. No fixed token reduction or quota saving follows from this policy or the controlled replay.
