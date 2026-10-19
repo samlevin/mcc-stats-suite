@@ -67,7 +67,7 @@ for (const [environment, ephemeral] of [
       if (resource.Type === 'AWS::IAM::Role')
         assert.match(
           resource.Properties.Description ?? '',
-          /^Execution role for .+: /,
+          /^(Execution role for .+: |Role EventBridge assumes to start )/,
         );
       if (resource.Type === 'AWS::Events::Rule')
         assert.match(
@@ -75,5 +75,19 @@ for (const [environment, ephemeral] of [
           /S3 stores a message/,
         );
     }
+    const roleDescription = (logicalIdPrefix: string) =>
+      Object.entries(resourceMap).find(
+        ([logicalId, resource]) =>
+          resource.Type === 'AWS::IAM::Role' &&
+          new RegExp(`^${logicalIdPrefix}[0-9A-F]{8}$`).test(logicalId),
+      )?.[1].Properties.Description;
+    assert.equal(
+      roleDescription('WorkflowEventsRole'),
+      'Role EventBridge assumes to start Workflow from stored-message events',
+    );
+    assert.match(
+      roleDescription('WorkflowRole') ?? '',
+      /^Execution role for Workflow: /,
+    );
   });
 }

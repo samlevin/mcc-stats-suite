@@ -24,8 +24,11 @@ export async function runDiff(
   stderr = process.stderr,
 ) {
   return new Promise((done) => {
+    // CDK sees pipes, so keep its colour when the caller's terminal shows it.
+    const color =
+      stdout.isTTY && env.FORCE_COLOR === undefined ? { FORCE_COLOR: '1' } : {};
     const child = spawn('npm', args, {
-      env,
+      env: { ...env, ...color },
       stdio: ['inherit', 'pipe', 'pipe'],
     });
     const output = [];

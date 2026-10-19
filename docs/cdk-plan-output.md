@@ -6,7 +6,7 @@ The raw CDK diff appears first. The explanation follows with the application, ex
 
 The proposed template supplies the resource list. Component metadata beside the match-to-csv constructs groups resources into email intake, OCR, CSV export, replay/evidence tools, and operational support. Each entry gives its purpose and three identifiers:
 
-- A construct path identifies an object in the CDK construct tree, such as `match-to-csv-dev/ProcessEmail/Resource`.
+- A construct ID is the name code gives a construct, such as `ProcessEmail`. A construct path joins those IDs from the stack down and identifies an object in the CDK construct tree, such as `match-to-csv-dev/ProcessEmail/Resource`.
 - A CloudFormation logical ID identifies the resource within the stack. CDK usually adds a hash. Keep these IDs stable to preserve resource identity.
 - A physical name identifies the AWS resource. The report distinguishes explicitly configured names, CDK-generated configured names, and names AWS generates at deployment. Intrinsic expressions stay unresolved. The report does not look up deployed names.
 

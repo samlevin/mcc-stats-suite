@@ -89,7 +89,14 @@ export class MatchToCsvStack extends Stack {
           },
         );
         if (node instanceof iam.CfnRole) {
-          node.description = `Execution role for ${owner?.node.id ?? 'match-to-csv'}: ${component?.purpose ?? 'support processing'}`;
+          const ownerId = owner?.node.id ?? 'match-to-csv';
+          const purpose = component?.purpose ?? 'support processing';
+          // EventBridge targets create an EventsRole that EventBridge assumes
+          // to start the target, not the target's own execution role.
+          node.description =
+            node.node.scope?.node.id === 'EventsRole'
+              ? `Role EventBridge assumes to start ${ownerId} from stored-message events`
+              : `Execution role for ${ownerId}: ${purpose}`;
         }
       },
     });
