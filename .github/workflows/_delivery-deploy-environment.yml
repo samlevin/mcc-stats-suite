@@ -28,11 +28,14 @@ on:
         description: Whether this call deployed and verified the release
         value: ${{ jobs.deploy.outputs.deployed }}
     # Repository secrets reach a called workflow only when the caller passes
-    # them. Each caller passes the account of the environment it deploys.
+    # them. Each caller passes the account of the environment it deploys, and
+    # the optional Slack webhook for deploy messages.
     secrets:
       DEV_AWS_ACCOUNT_ID:
         required: false
       PROD_AWS_ACCOUNT_ID:
+        required: false
+      SLACK_DEPLOY_WEBHOOK_URL:
         required: false
 
 permissions:
@@ -60,6 +63,44 @@ jobs:
             const reviewers = data.protection_rules?.find((rule) => rule.type === 'required_reviewers');
             if (!reviewers?.reviewers?.length || data.can_admins_bypass !== false) {
               throw new Error('prod requires reviewers and disabled administrator bypass; configure the Environment with separate authorization');
+            }
+      # A job waiting for approval runs no steps, so this job posts the approval
+      # request before the deploy job starts waiting. A missing webhook or a
+      # failed post only warns and never blocks the deploy.
+      - name: Post the prod approval request to Slack
+        continue-on-error: true
+        timeout-minutes: 1
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          APPLICATION: ${{ inputs.application }}
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_TAG: ${{ inputs.source }}
+        with:
+          script: |
+            const { APPLICATION, DEPLOYMENT_ENVIRONMENT, OPERATION, RELEASE_TAG } = process.env;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const rollback = OPERATION === 'rollback' ? ' (rollback)' : '';
+            const text = `${APPLICATION} ${RELEASE_TAG} -> ${DEPLOYMENT_ENVIRONMENT}${rollback}: waiting for approval ${runUrl}`;
+            core.info(text);
+            const webhook = process.env.SLACK_DEPLOY_WEBHOOK_URL;
+            if (!webhook) {
+              core.warning('SLACK_DEPLOY_WEBHOOK_URL is not set, so no Slack message was posted');
+              return;
+            }
+            try {
+              const response = await fetch(webhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  text: text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+                }),
+                signal: AbortSignal.timeout(10000),
+              });
+              if (!response.ok) core.warning(`Slack answered the deploy message with HTTP ${response.status}`);
+            } catch (error) {
+              core.warning(`Could not post the deploy message to Slack (${error.name})`);
             }
 
   deploy:
@@ -458,3 +499,86 @@ jobs:
             echo "- Commit: \`${TARGET_SHA}\`"
             echo "- Versions: \`${RELEASE_METADATA}\`"
           } >> "${GITHUB_STEP_SUMMARY}"
+
+  # Runs after every deploy outcome, including a rejected approval, where the
+  # deploy job never starts. A missing webhook or a failed post only warns.
+  notify-result:
+    name: Post the ${{ inputs.application }} ${{ inputs.environment }} result to Slack
+    needs:
+      - verify-prod-protection
+      - deploy
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+    steps:
+      - name: Post the deploy result to Slack
+        continue-on-error: true
+        timeout-minutes: 2
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
+          APPLICATION: ${{ inputs.application }}
+          DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_TAG: ${{ inputs.source }}
+          PROTECTION_RESULT: ${{ needs.verify-prod-protection.result }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          DEPLOYED: ${{ needs.deploy.outputs.deployed }}
+        with:
+          script: |
+            const { APPLICATION, DEPLOYMENT_ENVIRONMENT, OPERATION, RELEASE_TAG } = process.env;
+            const { PROTECTION_RESULT, DEPLOY_RESULT, DEPLOYED } = process.env;
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const describe = async () => {
+              if (DEPLOY_RESULT === 'success') {
+                return DEPLOYED === 'true'
+                  ? 'succeeded'
+                  : 'skipped, the version is not newer than the latest successful deployment';
+              }
+              if (DEPLOY_RESULT === 'cancelled') return 'cancelled';
+              if (DEPLOY_RESULT === 'skipped') {
+                return PROTECTION_RESULT === 'failure'
+                  ? 'failed, Verify prod reviewer protection did not pass'
+                  : 'cancelled';
+              }
+              // A rejected approval fails the deploy job before any step runs,
+              // so the job sets no outputs, and the run records the rejection.
+              if (DEPLOYMENT_ENVIRONMENT === 'prod' && DEPLOYED === '') {
+                try {
+                  const { data } = await github.rest.actions.getReviewsForRun({
+                    ...context.repo,
+                    run_id: context.runId,
+                  });
+                  if (data.some((review) => review.state === 'rejected' &&
+                      review.environments?.some((environment) => environment.name === 'prod'))) {
+                    return 'rejected';
+                  }
+                } catch (error) {
+                  core.warning(`Could not read the run's approvals (${error.name}), so the result reads failed`);
+                }
+              }
+              return 'failed';
+            };
+            const rollback = OPERATION === 'rollback' ? ' (rollback)' : '';
+            const text = `${APPLICATION} ${RELEASE_TAG} -> ${DEPLOYMENT_ENVIRONMENT}${rollback}: ${await describe()} ${runUrl}`;
+            core.info(text);
+            const webhook = process.env.SLACK_DEPLOY_WEBHOOK_URL;
+            if (!webhook) {
+              core.warning('SLACK_DEPLOY_WEBHOOK_URL is not set, so no Slack message was posted');
+              return;
+            }
+            try {
+              const response = await fetch(webhook, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  text: text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+                }),
+                signal: AbortSignal.timeout(10000),
+              });
+              if (!response.ok) core.warning(`Slack answered the deploy message with HTTP ${response.status}`);
+            } catch (error) {
+              core.warning(`Could not post the deploy message to Slack (${error.name})`);
+            }

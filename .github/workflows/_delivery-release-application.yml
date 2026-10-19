@@ -17,6 +17,8 @@ on:
         required: false
       PROD_AWS_ACCOUNT_ID:
         required: false
+      SLACK_DEPLOY_WEBHOOK_URL:
+        required: false
 
 permissions:
   actions: read
@@ -36,6 +38,7 @@ jobs:
       source: ${{ inputs.release-tag }}
     secrets:
       DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
 
   deploy-prod:
     name: Deploy ${{ inputs.application }} to prod
@@ -50,3 +53,4 @@ jobs:
       source: ${{ inputs.release-tag }}
     secrets:
       PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}

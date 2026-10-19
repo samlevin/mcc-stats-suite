@@ -367,6 +367,7 @@ const ALLOWED_SECRETS = [
   'MCC_PROJECT_TOKEN',
   'PROD_AWS_ACCOUNT_ID',
   'RELEASE_PLEASE_APP_PRIVATE_KEY',
+  'SLACK_DEPLOY_WEBHOOK_URL',
 ];
 // Retired names that no workflow or Terrateam step may read again.
 const RETIRED_NAMES = [
@@ -444,6 +445,7 @@ test('deployment selects the account and Region by environment and builds the ro
   assert.deepEqual(Object.keys(deployment.on.workflow_call.secrets).sort(), [
     'DEV_AWS_ACCOUNT_ID',
     'PROD_AWS_ACCOUNT_ID',
+    'SLACK_DEPLOY_WEBHOOK_URL',
   ]);
   const vars = {
     DEV_AWS_REGION: 'dev-region-1',
@@ -516,23 +518,40 @@ test('deployment selects the account and Region by environment and builds the ro
   assert.equal(missing.expectedAccount, '');
 });
 
-test('each deployment caller passes only the account secrets it deploys to', () => {
+const slackWebhook = '${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}';
+
+test('each deployment caller passes only the account secrets it deploys to and the Slack webhook', () => {
   assert.deepEqual(deployReleases.jobs['deliver-applications'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
   });
   assert.deepEqual(delivery.jobs['deploy-dev'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
   });
   assert.deepEqual(delivery.jobs['deploy-prod'].secrets, {
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
   });
   assert.deepEqual(
     workflow('delivery-rollback').jobs['rollback-prod'].secrets,
     {
       PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+      SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
     },
   );
+  for (const reusable of [delivery, deployment]) {
+    assert.deepEqual(
+      reusable.on.workflow_call.secrets.SLACK_DEPLOY_WEBHOOK_URL,
+      {
+        required: false,
+      },
+    );
+  }
+  for (const { name, text } of workflowFiles()) {
+    assert.doesNotMatch(text, /secrets:\s*inherit/, name);
+  }
 });
 
 test('no condition, job output, or deployment URL depends on a masked value', () => {
@@ -1642,5 +1661,267 @@ esac
         .status,
       expected,
     );
+  }
+});
+
+// Paths in a parsed workflow whose string value contains `needle`.
+const pathsContaining = (value, needle, path = []) =>
+  typeof value === 'string'
+    ? value.includes(needle)
+      ? [path.join('.')]
+      : []
+    : value && typeof value === 'object'
+      ? Object.entries(value).flatMap(([key, child]) =>
+          pathsContaining(child, needle, [...path, key]),
+        )
+      : [];
+
+const approvalStep = deployment.jobs['verify-prod-protection'].steps.find(
+  (step) => step.name === 'Post the prod approval request to Slack',
+);
+const resultJob = deployment.jobs['notify-result'];
+const runUrl = 'https://github.com/owner/repo/actions/runs/123';
+const webhook = 'https://hooks.slack.test/services/T000/B000/secret';
+
+// Runs a notify step's script with mocked fetch, core, and approvals API.
+const notify = async (
+  step,
+  env,
+  { respond = async () => ({ ok: true, status: 200 }), reviews = [] } = {},
+) => {
+  const posts = [];
+  const warnings = [];
+  const info = [];
+  const reviewRequests = [];
+  await runScript(step.with.script, {
+    process: { env: { SLACK_DEPLOY_WEBHOOK_URL: webhook, ...env } },
+    context: { repo, serverUrl: 'https://github.com', runId: 123 },
+    core: {
+      info: (message) => info.push(message),
+      warning: (message) => warnings.push(message),
+    },
+    github: {
+      rest: {
+        actions: {
+          getReviewsForRun: async (request) => {
+            reviewRequests.push(request);
+            if (reviews instanceof Error) throw reviews;
+            return { data: reviews };
+          },
+        },
+      },
+    },
+    fetch: async (url, options) => {
+      posts.push({ url, options });
+      return respond();
+    },
+  });
+  return {
+    posts,
+    warnings,
+    info,
+    reviewRequests,
+    texts: posts.map(({ options }) => JSON.parse(options.body).text),
+  };
+};
+
+const releaseEnv = (environment, operation = 'release') => ({
+  APPLICATION: 'match-to-csv',
+  DEPLOYMENT_ENVIRONMENT: environment,
+  OPERATION: operation,
+  RELEASE_TAG: 'match-to-csv-v3.2.1',
+});
+
+test('the webhook secret reaches only the env of the two Slack steps', () => {
+  assert.deepEqual(
+    pathsContaining(deployment, 'secrets.SLACK_DEPLOY_WEBHOOK_URL'),
+    [
+      'jobs.verify-prod-protection.steps.1.env.SLACK_DEPLOY_WEBHOOK_URL',
+      'jobs.notify-result.steps.0.env.SLACK_DEPLOY_WEBHOOK_URL',
+    ],
+  );
+  for (const step of [approvalStep, resultJob.steps[0]]) {
+    assert.equal(step.env.SLACK_DEPLOY_WEBHOOK_URL, slackWebhook);
+    // Only the script's fetch reads the URL; nothing logs or outputs it.
+    assert.doesNotMatch(step.with.script, /setOutput|exportVariable/);
+    assert.doesNotMatch(step.with.script, /core\.\w+\(webhook/);
+  }
+  assert.deepEqual(
+    pathsContaining(deployment.jobs.deploy, 'SLACK'),
+    [],
+    'the deploy job never sees the webhook',
+  );
+});
+
+test('the prod approval request posts after the protection check and before the deploy waits', async () => {
+  const guard = deployment.jobs['verify-prod-protection'];
+  assert.equal(guard.steps.length, 2);
+  assert.equal(guard.steps.indexOf(approvalStep), 1);
+  assert.equal(approvalStep.if, undefined, 'runs only when the check passed');
+  assert.equal(approvalStep['continue-on-error'], true);
+  assert.equal(approvalStep['timeout-minutes'], 1);
+  // The deploy job waits for approval only after this job finishes.
+  assert.equal(deployment.jobs.deploy.needs, 'verify-prod-protection');
+  for (const [operation, marker] of [
+    ['release', ''],
+    ['rollback', ' (rollback)'],
+  ]) {
+    const result = await notify(approvalStep, releaseEnv('prod', operation));
+    assert.equal(result.warnings.length, 0, result.warnings.join());
+    assert.equal(result.posts.length, 1);
+    const [{ url, options }] = result.posts;
+    assert.equal(url, webhook);
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers['Content-Type'], 'application/json');
+    assert.ok(options.signal, 'the post has a timeout');
+    assert.deepEqual(result.texts, [
+      `match-to-csv match-to-csv-v3.2.1 -&gt; prod${marker}: waiting for approval ${runUrl}`,
+    ]);
+    assert.deepEqual(result.info, [
+      `match-to-csv match-to-csv-v3.2.1 -> prod${marker}: waiting for approval ${runUrl}`,
+    ]);
+  }
+});
+
+test('the result job runs after every deploy outcome and cannot fail the deploy', () => {
+  assert.deepEqual(resultJob.needs, ['verify-prod-protection', 'deploy']);
+  assert.equal(resultJob.if, 'always()');
+  assert.deepEqual(resultJob.permissions, { actions: 'read' });
+  assert.equal(resultJob.steps.length, 1);
+  const [step] = resultJob.steps;
+  assert.equal(step['continue-on-error'], true);
+  assert.equal(step['timeout-minutes'], 2);
+  assert.deepEqual(step.env, {
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
+    APPLICATION: '${{ inputs.application }}',
+    DEPLOYMENT_ENVIRONMENT: '${{ inputs.environment }}',
+    OPERATION: '${{ inputs.operation }}',
+    RELEASE_TAG: '${{ inputs.source }}',
+    PROTECTION_RESULT: '${{ needs.verify-prod-protection.result }}',
+    DEPLOY_RESULT: '${{ needs.deploy.result }}',
+    DEPLOYED: '${{ needs.deploy.outputs.deployed }}',
+  });
+  // Nothing reads a notify job: the workflow output, and with it the dev gate
+  // before prod, comes from the deploy job alone.
+  assert.deepEqual(Object.keys(deployment.on.workflow_call.outputs), [
+    'deployed',
+  ]);
+  assert.deepEqual(
+    pathsContaining([deployment.on, deployment.jobs.deploy], 'notify'),
+    [],
+  );
+});
+
+test('the result message names the application, release, environment, outcome, and run', async () => {
+  const [step] = resultJob.steps;
+  const rejected = [{ state: 'rejected', environments: [{ name: 'prod' }] }];
+  const approved = [{ state: 'approved', environments: [{ name: 'prod' }] }];
+  const outcome = (DEPLOY_RESULT, DEPLOYED, PROTECTION_RESULT = 'success') => ({
+    DEPLOY_RESULT,
+    DEPLOYED,
+    PROTECTION_RESULT,
+  });
+  const notNewer =
+    'skipped, the version is not newer than the latest successful deployment';
+  for (const [environment, operation, result, expected, reviews] of [
+    ['dev', 'release', outcome('success', 'true', 'skipped'), 'succeeded'],
+    ['dev', 'release', outcome('success', 'false', 'skipped'), notNewer],
+    ['dev', 'release', outcome('failure', 'false', 'skipped'), 'failed'],
+    ['dev', 'release', outcome('failure', '', 'skipped'), 'failed', rejected],
+    ['dev', 'release', outcome('cancelled', '', 'skipped'), 'cancelled'],
+    ['dev', 'release', outcome('skipped', '', 'skipped'), 'cancelled'],
+    ['prod', 'release', outcome('success', 'true'), 'succeeded'],
+    ['prod', 'rollback', outcome('success', 'true'), 'succeeded'],
+    ['prod', 'release', outcome('failure', 'false'), 'failed', rejected],
+    ['prod', 'release', outcome('failure', ''), 'rejected', rejected],
+    ['prod', 'rollback', outcome('failure', ''), 'rejected', rejected],
+    ['prod', 'release', outcome('failure', ''), 'failed', approved],
+    ['prod', 'release', outcome('cancelled', ''), 'cancelled'],
+    [
+      'prod',
+      'release',
+      outcome('skipped', '', 'failure'),
+      'failed, Verify prod reviewer protection did not pass',
+    ],
+    ['prod', 'release', outcome('skipped', '', 'cancelled'), 'cancelled'],
+  ]) {
+    const posted = await notify(
+      step,
+      { ...releaseEnv(environment, operation), ...result },
+      { reviews },
+    );
+    const marker = operation === 'rollback' ? ' (rollback)' : '';
+    const where = `${environment} ${operation} ${JSON.stringify(result)}`;
+    assert.deepEqual(
+      posted.texts,
+      [
+        `match-to-csv match-to-csv-v3.2.1 -&gt; ${environment}${marker}: ${expected} ${runUrl}`,
+      ],
+      where,
+    );
+    assert.deepEqual(posted.warnings, [], where);
+    // Only a prod deploy job that ran no step looks up the run's approvals.
+    assert.deepEqual(
+      posted.reviewRequests,
+      environment === 'prod' &&
+        result.DEPLOY_RESULT === 'failure' &&
+        !result.DEPLOYED
+        ? [{ ...repo, run_id: 123 }]
+        : [],
+      where,
+    );
+  }
+  const unreadable = await notify(
+    step,
+    { ...releaseEnv('prod'), ...outcome('failure', '') },
+    { reviews: new Error('Resource not accessible') },
+  );
+  assert.deepEqual(unreadable.texts, [
+    `match-to-csv match-to-csv-v3.2.1 -&gt; prod: failed ${runUrl}`,
+  ]);
+  assert.match(
+    unreadable.warnings.join(),
+    /Could not read the run's approvals/,
+  );
+});
+
+test('Slack messages escape control characters, and a missing secret or failed post only warns', async () => {
+  for (const step of [approvalStep, resultJob.steps[0]]) {
+    const env = {
+      ...releaseEnv('prod'),
+      RELEASE_TAG: 'a<b>&c',
+      DEPLOY_RESULT: 'success',
+      DEPLOYED: 'true',
+    };
+    const escaped = await notify(step, env);
+    assert.match(
+      escaped.texts[0],
+      /^match-to-csv a&lt;b&gt;&amp;c -&gt; prod: /,
+    );
+    const unset = await notify(step, { ...env, SLACK_DEPLOY_WEBHOOK_URL: '' });
+    assert.deepEqual(unset.posts, []);
+    assert.deepEqual(unset.warnings, [
+      'SLACK_DEPLOY_WEBHOOK_URL is not set, so no Slack message was posted',
+    ]);
+    // An error status or a thrown fetch warns and resolves.
+    const refused = await notify(step, env, {
+      respond: async () => ({ ok: false, status: 404 }),
+    });
+    assert.deepEqual(refused.warnings, [
+      'Slack answered the deploy message with HTTP 404',
+    ]);
+    const thrown = await notify(step, env, {
+      respond: async () => {
+        throw new TypeError(`Failed to parse URL from ${webhook}`);
+      },
+    });
+    assert.deepEqual(thrown.warnings, [
+      'Could not post the deploy message to Slack (TypeError)',
+    ]);
+    for (const result of [escaped, unset, refused, thrown]) {
+      for (const line of [...result.warnings, ...result.info]) {
+        assert.ok(!line.includes(webhook), line);
+      }
+    }
   }
 });
