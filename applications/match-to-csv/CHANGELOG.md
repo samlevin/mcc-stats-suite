@@ -1,5 +1,12 @@
 # Changelog
 
+## [3.2.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.1.0...match-to-csv-v3.2.0) (2026-10-19)
+
+
+### Features
+
+* **cdk:** explain plan resources and changes ([#301](https://github.com/samlevin/mcc-stats-suite/issues/301)) ([5a1bc8c](https://github.com/samlevin/mcc-stats-suite/commit/5a1bc8ce85b2e03764bbdc26f17a0066b2e4af2b))
+
 ## [3.1.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.0.1...match-to-csv-v3.1.0) (2026-10-19)
 
 
