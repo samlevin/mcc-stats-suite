@@ -11,11 +11,12 @@ You gather the inputs and dispatch `mcc-code-reviewer`; you do not review the di
 ## Gather
 
 1. Resolve the review target in `samlevin/mcc-stats-suite`. The target is a pull request or a pushed branch, never an issue.
-   - `#N`, a bare number `N`, or a PR URL always names pull request N. Run `gh pr view N --json number,state,headRefName,headRefOid,baseRefName,baseRefOid,closingIssuesReferences,url`. Open, merged, and closed PRs are all valid targets; review the reported head against the reported base.
-   - If `gh pr view N` fails, stop and report that no pull request #N exists in the repository. Do not treat N as an issue number, and do not search for pull requests linked to issue N.
+   - `#N`, a bare number `N`, or a PR URL always names pull request N. Run `gh api repos/samlevin/mcc-stats-suite/pulls/N --jq '{number, state, merged, head_ref: .head.ref, head_sha: .head.sha, base_ref: .base.ref, base_sha: .base.sha, url: .html_url}'`. Open, merged, and closed PRs are all valid targets; review the reported head against the reported base.
+   - If that call fails, stop and report that no pull request #N exists in the repository. Do not treat N as an issue number, and do not search for pull requests linked to issue N.
+   - REST has no field for the issues a PR closes, so read them with the one GraphQL call this skill keeps: `gh pr view N -R samlevin/mcc-stats-suite --json closingIssuesReferences`.
    - A branch name resolves with `git ls-remote origin <branch>` for the head; the base is the merge base with `origin/main` unless the request names one.
 2. Fetch on the human checkout (read-only; fetching does not change a checkout) so the objects exist locally: `git fetch origin pull/N/head <base branch>` for a PR, which still works after a merged or closed PR's branch is deleted, or `git fetch origin <branch>` for a branch. The reviewer reads through `git diff` and `git show` in that worktree path.
-3. Take the acceptance criteria from the issue the PR closes, found in `closingIssuesReferences` (`gh issue view <issue> --json body,comments`). That issue only supplies criteria; it never changes the review target. For a branch, or a PR that closes no issue, use the request text as the criteria and say so in the packet.
+3. Take the acceptance criteria from the issue the PR closes, found in `closingIssuesReferences` (`gh api repos/samlevin/mcc-stats-suite/issues/<issue> --jq .body` and `gh api repos/samlevin/mcc-stats-suite/issues/<issue>/comments --paginate`). That issue only supplies criteria; it never changes the review target. For a branch, or a PR that closes no issue, use the request text as the criteria and say so in the packet.
 4. Parse overrides: `model <name>` and `effort <level>` apply to the reviewer. A partial override changes only the named setting.
 
 ## Dispatch
