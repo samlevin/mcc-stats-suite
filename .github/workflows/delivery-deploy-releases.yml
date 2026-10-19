@@ -1,0 +1,101 @@
+# `Release: release PR` starts this workflow on main only when Release Please
+# publishes at least one application release, so every run is a real deploy.
+# The CDK entry role trusts _delivery-deploy-environment.yml by its path in the
+# OIDC job_workflow_ref claim, not by this workflow's name, so renaming this file
+# or changing its name: needs no bootstrap change. Moving or renaming the
+# reusable file needs bootstrap applied first.
+name: 'Delivery: deploy application releases'
+run-name: Deploy ${{ join(fromJSON(inputs.releases).*.tag, ', ') }} to dev and prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      releases:
+        description: JSON list of {application, tag, sha} application releases
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  qualify-releases:
+    name: Qualify application releases
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.qualify.outputs.releases }}
+    steps:
+      - name: Check each release tag, commit, and main ancestry
+        id: qualify
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          RELEASES: ${{ inputs.releases }}
+        with:
+          script: |
+            if (context.ref !== 'refs/heads/main') {
+              throw new Error('Application releases deploy only from the main workflow definition');
+            }
+            let releases;
+            try {
+              releases = JSON.parse(process.env.RELEASES);
+            } catch {
+              throw new Error('Invalid releases: not JSON');
+            }
+            if (!Array.isArray(releases) || releases.length === 0) {
+              throw new Error('Invalid releases: expected a non-empty list');
+            }
+            const allowed = ['admin', 'data-pipeline', 'match-to-csv', 'ocr-quality', 'player'];
+            const seen = new Set();
+            const qualified = [];
+            for (const [index, release] of releases.entries()) {
+              const { application, tag, sha } = release ?? {};
+              if (!release || typeof release !== 'object' || Array.isArray(release) ||
+                  Object.keys(release).sort().join() !== 'application,sha,tag' ||
+                  !allowed.includes(application) || seen.has(application) ||
+                  typeof tag !== 'string' ||
+                  !new RegExp(`^${application}-v(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$`).test(tag) ||
+                  typeof sha !== 'string' || !/^[0-9a-f]{40}$/.test(sha)) {
+                throw new Error(`Invalid application release at index ${index}`);
+              }
+              seen.add(application);
+              const { data: published } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag });
+              if (published.draft || published.prerelease) {
+                throw new Error(`${tag} is not a published, non-prerelease GitHub Release`);
+              }
+              const { data: ref } = await github.rest.git.getRef({ ...context.repo, ref: `tags/${tag}` });
+              const commit = ref.object.type === 'tag'
+                ? (await github.rest.git.getTag({ ...context.repo, tag_sha: ref.object.sha })).data.object.sha
+                : ref.object.sha;
+              if (commit !== sha) {
+                throw new Error(`${tag} points to ${commit}, not ${sha}`);
+              }
+              const { data: comparison } = await github.rest.repos.compareCommitsWithBasehead({
+                ...context.repo, basehead: `${sha}...${context.sha}`, per_page: 1,
+              });
+              if (!['ahead', 'identical'].includes(comparison.status)) {
+                throw new Error(`${tag} commit ${sha} is not on main`);
+              }
+              qualified.push({ application, tag, sha });
+            }
+            core.setOutput('releases', JSON.stringify(qualified));
+
+  deliver-applications:
+    name: Release ${{ matrix.release.application }} to dev and prod
+    needs: qualify-releases
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.qualify-releases.outputs.releases) }}
+    permissions:
+      actions: read
+      contents: read
+      deployments: write
+      id-token: write
+    uses: ./.github/workflows/_delivery-release-application.yml
+    with:
+      application: ${{ matrix.release.application }}
+      sha: ${{ matrix.release.sha }}
+      release-tag: ${{ matrix.release.tag }}
+    secrets:
+      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}

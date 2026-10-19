@@ -36,6 +36,7 @@ test('workflow files and names match the convention table', () => {
       'ci-infrastructure-gate.yml': 'CI: infrastructure merge gate',
       'ci-pr-title.yml': 'CI: PR title',
       'ci-secret-scan.yml': 'CI: secret scan',
+      'delivery-deploy-releases.yml': 'Delivery: deploy application releases',
       'delivery-rollback.yml': 'Delivery: roll back prod',
       'release-pr.yml': 'Release: release PR',
       'tracker-issue-states.yml': 'Tracker: reconcile issue states',
