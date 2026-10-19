@@ -96,11 +96,34 @@ match-to-csv-e-<name>    local ephemeral stack in dev
 match-to-csv-prod        live stack
 ```
 
-## Start locally
+## Getting started
 
 [Getting started](docs/getting-started.md) is the one setup path. Its first tier needs no AWS access and ends with a passing `npm run check`. The second takes you through deploying your own ephemeral stack and sending it a test email. It also lists the checks to run for each kind of change.
 
 Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain names, populated backend files, variable files, state, or plans.
+
+## Scripts reference
+
+Run these commands from the repository root after `npm ci`. Pass command arguments after `--`, for example `npm run app:synth -- match-to-csv --environment dev --ephemeral example`. The [standalone script reference](scripts/README.md#scripts-reference) covers tracker and agent utilities. The [application reference](applications/match-to-csv/README.md#scripts-reference) covers fixture tools. NPM lifecycle hooks run automatically and are omitted here.
+
+| Script | Purpose | Arguments |
+| --- | --- | --- |
+| `npm run check` | Run formatting, lint, release checks, type checks, tests, and builds | None |
+| `npm run build` | Build all workspaces in dependency order | Optional Turbo options after `--`, such as `--filter=@mcc/contracts`; defaults to all workspaces |
+| `npm run build:shared` | Build the four shared packages | None |
+| `npm test` | Run repository script tests and workspace tests | None required |
+| `npm run typecheck` | Type-check workspaces | Optional Turbo options after `--`; defaults to all workspaces |
+| `npm run lint`, `npm run lint:fix` | Check lint rules, or fix code lint after building shared packages | None required; `lint:fix` excludes Markdown |
+| `npm run format`, `npm run format:check` | Write or check Prettier formatting | None required; Markdown is excluded by `.prettierignore` |
+| `npm run release:check` | Validate package, lockfile, and release metadata consistency | None |
+| `npm run release:metadata` | Print an application's release metadata as JSON | Required `--application <name>`, e.g. `--application match-to-csv` |
+| `npm run agents:generate`, `npm run agents:check` | Generate or verify Claude and Codex agent files | None |
+| `npm run cdk:local-template` | Rewrite the committed local CDK bootstrap template offline | None |
+| `npm run cdk:synth` | Run workspace CDK synthesis through Turbo | Required CDK environment context, e.g. `npm run cdk:synth -- -- -c environment=dev`; optional Turbo filters before the forwarding `--`. Prefer `app:synth` below for one stack |
+| `npm run app:synth`, `npm run app:diff`, `npm run app:deploy`, `npm run app:destroy` | Synthesize, compare, deploy, or remove one application's stack through account guards | Required application name; optional `--environment dev\|prod` (profile-derived, then `dev`), `--ephemeral <name>`, `--profile <profile>` (defaults to `AWS_PROFILE`), and CDK options. Local diff/deploy requires `--environment dev --ephemeral <name>`; destroy requires an ephemeral name. Stable deploys run only in GitHub Actions on `main` |
+| `npm run roster`, `npm run recipients` | Read or change gamertags or CSV recipient addresses | Required `--environment dev\|prod` and command (`list`, `history`, `add`, `deactivate`, `reactivate`); writes require gamertag/address operands. Optional namespace, profile, list/history, and write flags appear in the [operator reference](scripts/README.md#operator-arguments) |
+| `npm run tofu:fmt`, `npm run tofu:fmt:check` | Format or check all OpenTofu files recursively | None required; uses installed `tofu` |
+| `npm run tofu:check` | Check pinned OpenTofu versions, formatting, validation, and module tests with backends disabled | None; optional `--pinned-version` prints the version and exits |
 
 ## Develop and deploy
 

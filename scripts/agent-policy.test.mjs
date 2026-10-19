@@ -147,6 +147,28 @@ test('the binding resolves every placeholder and feature section', () => {
   );
 });
 
+test('worktree ignores preserve tracked agent definitions and configuration', () => {
+  const gitignore = readFileSync(
+    new URL('../.gitignore', import.meta.url),
+    'utf8',
+  ).split(/\r?\n/);
+  const worktrees = ['.claude/worktrees/', '.codex/worktrees/'];
+  for (const path of worktrees)
+    assert.ok(gitignore.includes(path), `missing .gitignore entry: ${path}`);
+
+  const probes = worktrees.map((path) => `${path}ignore-probe`);
+  const definitions = [...render().keys()].filter((path) =>
+    /^\.(claude|codex)\//.test(path),
+  );
+  const result = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], {
+    cwd: new URL('..', import.meta.url),
+    input: [...probes, ...definitions, '.codex/config.toml'].join('\n') + '\n',
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), probes);
+});
+
 test('generated output carries no unresolved placeholder and follows the binding', () => {
   for (const [path, content] of render()) {
     // The maintainer skill documents the placeholders literally.

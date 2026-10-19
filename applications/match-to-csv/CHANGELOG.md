@@ -1,5 +1,25 @@
 # Changelog
 
+## [3.1.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.0.1...match-to-csv-v3.1.0) (2026-10-19)
+
+
+### Features
+
+* **scripts:** share CLI parsing and command shortcuts ([#288](https://github.com/samlevin/mcc-stats-suite/issues/288)) ([5e3df0f](https://github.com/samlevin/mcc-stats-suite/commit/5e3df0ff1497a0ec9995cd651aefcaf0303394d7))
+
+
+### Bug Fixes
+
+* **match-to-csv:** use the first valid email body date ([#286](https://github.com/samlevin/mcc-stats-suite/issues/286)) ([4b9efbd](https://github.com/samlevin/mcc-stats-suite/commit/4b9efbd3527751494ef0b73e1ba2aae3eb64b6c7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @mcc/contracts bumped from 1.2.0 to 1.2.1
+    * @mcc/roster bumped from 1.1.1 to 1.1.2
+
 ## [3.0.1](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.0.0...match-to-csv-v3.0.1) (2026-10-18)
 
 
