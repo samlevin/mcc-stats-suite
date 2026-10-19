@@ -51,7 +51,7 @@ Each application and environment has one concurrency group shared by forward dep
 
 ### Slack deploy messages
 
-Slack deploy messages are optional and off by default. They turn on only when the repository secret `SLACK_DEPLOY_WEBHOOK_URL` is set, and that secret is the only setting. Without it, the Slack steps show as skipped in each run and the logs say nothing about Slack.
+Slack deploy messages are optional and off by default. They turn on only when the repository secret `SLACK_DEPLOY_WEBHOOK_URL` is set, and that secret is the only setting. Without it, the Slack steps show as skipped in each run and write no warning or notice.
 
 With the secret set, `_delivery-deploy-environment.yml` posts plain-text messages to that Slack incoming webhook, one per application for each of these events:
 
