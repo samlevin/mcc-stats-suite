@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import type { S3ObjectReference } from '@mcc/contracts';
+import type { ProcessEmailInput, S3ObjectReference } from '@mcc/contracts';
 import {
   attachmentRejectionCodes,
   createParameterReader,
@@ -11,6 +11,7 @@ import {
   parseSesRecipients,
   parseSesVerdicts,
   processEmail,
+  readReceivedAt,
   type ProcessEmailDependencies,
   type ReplyMessage,
 } from '../src/lambdas/process-email';
@@ -62,6 +63,10 @@ interface ScreeningCase {
   sendError?: Error;
   /** Undefined leaves REPLY_FROM_DOMAIN unset; absent uses REPLY_DOMAIN. */
   replyDomain?: string;
+  /** Fields the workflow adds to the raw email reference. */
+  input?: Omit<ProcessEmailInput, 'bucket' | 'key'>;
+  /** Valid PNG attachments in the message. Defaults to 1. */
+  screenshotCount?: number;
 }
 
 const ALIAS_PARAMETER = '/mcc/dev/match-to-csv/email-alias';
@@ -111,13 +116,15 @@ async function runScreening(options: ScreeningCase) {
         headerLines: options.headerLines,
         fromAddresses: options.fromAddresses,
         text: 'text' in options ? options.text : MATCH_DATE,
-        attachments: [
-          {
-            filename: 'scoreboard.png',
+        attachments: Array.from(
+          { length: options.screenshotCount ?? 1 },
+          (_, index) => ({
+            filename:
+              index === 0 ? 'scoreboard.png' : `scoreboard-${index + 1}.png`,
             contentType: 'image/png',
-            content: Buffer.from('png'),
-          },
-        ],
+            content: Buffer.from(`png-${index}`),
+          }),
+        ),
       };
     },
     async getSenderAllowlist(parameterName) {
@@ -151,7 +158,7 @@ async function runScreening(options: ScreeningCase) {
     logs.push(JSON.parse(line) as Record<string, unknown>);
   };
   const outcome = await processEmail(
-    { bucket: 'raw', key: 'incoming/message' },
+    { bucket: 'raw', key: 'incoming/message', ...options.input },
     dependencies,
   )
     .then(
@@ -173,6 +180,9 @@ async function runScreening(options: ScreeningCase) {
     ingestion: find('/ingestion.json'),
     completion: find('/completion.json'),
     event: find('/events/'),
+    sourceMetadata: jsonWrites
+      .filter((write) => write.key.endsWith('/source/metadata.json'))
+      .map((write) => write.value as Record<string, unknown>),
     objectWrites,
     allowlistReads,
     parameterReads,
@@ -223,6 +233,102 @@ test('processEmail accepts a listed sender with passing verdicts and records the
   assert.equal(run.event.type, 'SUBMISSION_ACCEPTED');
   assert.deepEqual(run.event.detail.sesVerdicts, sesVerdicts);
   assert.deepEqual(run.event.detail.senderAllowlist, senderAllowlist);
+});
+
+const RECEIVED_AT = '2026-05-02T18:30:00Z';
+const trace = {
+  executionId:
+    'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
+  retryCount: 0,
+  workflow: 'INGEST' as const,
+};
+
+test('processEmail copies receivedAt into its output and every screenshot', async () => {
+  const run = await runScreening({
+    fromAddresses: [LISTED_SENDER],
+    input: { receivedAt: RECEIVED_AT, trace },
+    screenshotCount: 2,
+  });
+
+  assert.equal(run.error, undefined);
+  assert.equal(run.result?.status, 'ACCEPTED');
+  assert.equal(run.result?.receivedAt, RECEIVED_AT);
+  assert.equal(run.result?.screenshots.length, 2);
+  for (const screenshot of run.result?.screenshots ?? []) {
+    assert.equal(screenshot.receivedAt, RECEIVED_AT);
+  }
+  assert.equal(run.sourceMetadata.length, 2);
+  for (const metadata of run.sourceMetadata) {
+    assert.equal(metadata.receivedAt, RECEIVED_AT, 'replays read it back');
+  }
+  assert.deepEqual(
+    run.ingestion.rawEmail,
+    { bucket: 'raw', key: 'incoming/message' },
+    'trace context is not evidence',
+  );
+});
+
+test('processEmail omits receivedAt when the input has none', async () => {
+  const run = await runScreening({
+    fromAddresses: [LISTED_SENDER],
+    screenshotCount: 2,
+  });
+
+  assert.equal(run.error, undefined);
+  assert.equal(run.result?.status, 'ACCEPTED');
+  assert.ok(run.result && !('receivedAt' in run.result));
+  assert.equal(run.result?.screenshots.length, 2);
+  for (const screenshot of run.result?.screenshots ?? []) {
+    assert.ok(!('receivedAt' in screenshot));
+  }
+  for (const metadata of run.sourceMetadata) {
+    assert.ok(!('receivedAt' in metadata));
+  }
+  assert.deepEqual(run.ingestion.rawEmail, {
+    bucket: 'raw',
+    key: 'incoming/message',
+  });
+});
+
+test('processEmail drops a malformed receivedAt instead of rejecting the email', async () => {
+  for (const receivedAt of [42, 'yesterday', '2026-02-30T00:00:00Z']) {
+    const run = await runScreening({
+      fromAddresses: [LISTED_SENDER],
+      input: { receivedAt: receivedAt as string },
+    });
+    assert.equal(run.error, undefined);
+    assert.equal(run.result?.screenshots.length, 1);
+    assert.ok(run.result && !('receivedAt' in run.result));
+    assert.ok(!('receivedAt' in (run.result?.screenshots[0] ?? {})));
+    assert.ok(!('receivedAt' in run.sourceMetadata[0]));
+  }
+});
+
+test('receivedAt is read only as an ISO 8601 timestamp', () => {
+  for (const value of [
+    '2026-05-02T18:30:00Z',
+    '2026-05-02T18:30:00.123Z',
+    '2024-02-29T23:59:59+05:30',
+  ]) {
+    assert.equal(readReceivedAt(value), value);
+  }
+  for (const value of [
+    undefined,
+    null,
+    42,
+    { time: RECEIVED_AT },
+    '',
+    'yesterday',
+    '2026-05-02',
+    '2026-05-02T18:30:00',
+    '2026-05-02 18:30:00Z',
+    '2026-02-30T00:00:00Z',
+    '2026-13-01T00:00:00Z',
+    '2026-05-02T25:00:00Z',
+    ` ${RECEIVED_AT}`,
+  ]) {
+    assert.equal(readReceivedAt(value), undefined, JSON.stringify(value));
+  }
 });
 
 test('processEmail rejects every sender when no allowlist parameter is named', async () => {

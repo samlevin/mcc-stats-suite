@@ -170,6 +170,28 @@ test('writes one file per roster gamertag, in screenshot order, with the match d
   });
 });
 
+test('trace context and receivedAt do not change the export', async () => {
+  const plain = new Map<string, string>();
+  const traced = new Map<string, string>();
+  const plainResult = await writeGamertagCsvs(event, dependencies(plain));
+  const tracedResult = await writeGamertagCsvs(
+    {
+      ...event,
+      receivedAt: '2026-03-07T21:00:00Z',
+      trace: {
+        executionId:
+          'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
+        retryCount: 0,
+        workflow: 'INGEST',
+      },
+    },
+    dependencies(traced),
+  );
+
+  assert.deepEqual(tracedResult, plainResult);
+  assert.deepEqual(Object.fromEntries(traced), Object.fromEntries(plain));
+});
+
 test('reads each run export of the submission from its extracted table', async () => {
   const reads: string[] = [];
   const base = dependencies(new Map());

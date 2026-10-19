@@ -275,6 +275,7 @@ export async function processEmail(
   dependencies: ProcessEmailDependencies,
 ): Promise<ProcessEmailOutput> {
   const evidenceBucket = requiredEnvironment('EVIDENCE_BUCKET');
+  const receivedAt = readReceivedAt(event.receivedAt);
   log('INFO', 'Processing raw email', {
     bucket: event.bucket,
     key: event.key,
@@ -318,7 +319,7 @@ export async function processEmail(
     {
       schemaVersion: 'email-submission/v1',
       submissionId,
-      rawEmail: event,
+      rawEmail: { bucket: event.bucket, key: event.key },
       messageId: parsed.messageId,
       subject: parsed.subject,
       matchDate: matchDate ?? null,
@@ -383,6 +384,7 @@ export async function processEmail(
         acquisitionType: 'SCREENSHOT',
         widthPx: metadata.width ?? 0,
         heightPx: metadata.height ?? 0,
+        ...(receivedAt === undefined ? {} : { receivedAt }),
       };
 
       await dependencies.writeJson(
@@ -510,11 +512,30 @@ export async function processEmail(
     rejectedAttachmentCount: rejectedAttachments.length,
   });
   return {
+    status: 'ACCEPTED',
     submissionId,
     matchDate: matchDate as string,
     screenshots,
     rejectedAttachments,
+    ...(receivedAt === undefined ? {} : { receivedAt }),
   };
+}
+
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Returns `receivedAt` from the workflow input when it is an ISO 8601
+ * timestamp, such as the `$.time` of the S3 event. The value is untrusted, so
+ * anything else is dropped rather than copied into evidence or rejected.
+ */
+export function readReceivedAt(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !ISO_TIMESTAMP.test(value)) return undefined;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const calendarDate =
+    date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return calendarDate && Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
