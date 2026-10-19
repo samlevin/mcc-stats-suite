@@ -15,13 +15,14 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../.mcp.json` | Claude Code project MCP servers (maintained directly) |
 | `../.codex/config.toml` | Codex project MCP servers (maintained directly) |
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), drift check (`check`), and manual review publisher (`publish-review`) |
+| `worktree-isolation.md` | Shared worktree ownership and setup rules, read before roles or skills use a worktree |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
 
 Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
 
 ## Reuse in another repository
 
-The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 
@@ -41,7 +42,7 @@ Issue creation is the one capability without an agent. It needs to ask the perso
 | Issue triage | `.claude/agents/mcc-issue-triager.md` (`Read, Grep, Glob, Bash`) | `.codex/agents/mcc-issue-triager.toml` (`:read-only`) | same source; spawn fixtures below |
 | Orchestration | `mcc-orchestrator` (`Agent, Bash, Read, Grep, Glob, Skill`) | `mcc-orchestrator` | same source |
 | Implementation | `mcc-implementer` (`isolation: worktree`) | `mcc-implementer` (creates `.codex/worktrees/<branch>`) | same source |
-| Stack management | `mcc-stack-manager` (`Bash, Read`) | `mcc-stack-manager` | same source |
+| Stack management | `mcc-stack-manager` (`Bash, Read`, read-only command planning) | `mcc-stack-manager` (read-only command planning) | same source |
 | Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source |
 | Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source |
 | Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security`, `/mcc-apply-foundation`, and `/mcc-apply-bootstrap` (not model-invocable), `/mcc-plain-language`, `/mcc-agents` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security`, `$mcc-apply-foundation`, and `$mcc-apply-bootstrap` (`allow_implicit_invocation: false`), `$mcc-plain-language`, `$mcc-agents` | same source; manifests generated |
@@ -52,6 +53,8 @@ Issue creation is the one capability without an agent. It needs to ask the perso
 | Playwriter | `.mcp.json`, server `playwriter` | `.codex/config.toml`, server `playwriter` | fresh-session server discovery below |
 
 "Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role and workflow for both tools and compares shared lines.
+
+[Agent worktree isolation](worktree-isolation.md) owns the setup and ownership rules for every role and skill. Stack managers inspect the creating implementer's worktree and return mutation commands for that implementer to execute.
 
 ## Model and effort policy
 

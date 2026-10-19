@@ -34,6 +34,8 @@ Without write access to the repository, you cannot assign yourself or change pro
 
 Keep decisions on the issue or PR. Newly found work that is out of scope becomes a new issue rather than a wider PR.
 
+Coding agents follow [Agent worktree isolation](.agents/worktree-isolation.md) for checkout ownership and setup.
+
 ## Branch names
 
 Name your branch `<login>/<issue>-<slug>`, with your GitHub login as the actor. `node scripts/branch-name.mjs <issue> --actor <login>` prints the name from the issue title:
