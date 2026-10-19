@@ -15,6 +15,7 @@ import { parse } from 'yaml';
 import { evaluate, runScript, workflow } from './workflow-test-helpers.mjs';
 const ci = workflow('ci-checks');
 const release = workflow('release-pr');
+const deployReleases = workflow('delivery-deploy-releases');
 const delivery = workflow('_delivery-release-application');
 const deployment = workflow('_delivery-deploy-environment');
 
@@ -337,8 +338,8 @@ test('CDK entry role trusts the reusable workflow every delivery workflow calls'
     'only the trusted workflow may assume the CDK entry role',
   );
   assert.deepEqual(topLevelCallers(file), [
+    'delivery-deploy-releases.yml',
     'delivery-rollback.yml',
-    'release-pr.yml',
   ]);
   // The bootstrap roots must use the module default, which this test pins.
   for (const environment of ['dev', 'prod']) {
@@ -516,7 +517,7 @@ test('deployment selects the account and Region by environment and builds the ro
 });
 
 test('each deployment caller passes only the account secrets it deploys to', () => {
-  assert.deepEqual(release.jobs['deliver-applications'].secrets, {
+  assert.deepEqual(deployReleases.jobs['deliver-applications'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
   });
@@ -1117,15 +1118,22 @@ test('only application releases from Release Please outputs deploy at their rele
     { ...outputs, 'applications/admin--sha': 'main' },
   ])
     await assert.rejects(select(invalid), /Invalid/);
-  const job = release.jobs['deliver-applications'];
-  assert.equal(job.strategy['fail-fast'], false);
-  assert.equal(
-    job.uses,
-    './.github/workflows/_delivery-release-application.yml',
-  );
-  assert.equal(job.with.sha, '${{ matrix.release.sha }}');
-  assert.equal(job.with['release-tag'], '${{ matrix.release.tag }}');
-  assert.equal(job.with.application, '${{ matrix.release.application }}');
+});
+
+test('the release workflow deploys nothing itself and starts the deploy workflow only for application releases', async () => {
+  // Deploys run in their own workflow, so a push that publishes no
+  // application release creates no deploy run.
+  for (const [id, job] of Object.entries(release.jobs)) {
+    assert.equal(job.uses, undefined, `release-pr.yml ${id} calls ${job.uses}`);
+    assert.doesNotMatch(JSON.stringify(job), /id-token|deployments/, id);
+  }
+  assert.deepEqual(Object.keys(release.jobs), [
+    'update-release-pr',
+    'start-application-deploys',
+  ]);
+  const job = release.jobs['start-application-deploys'];
+  assert.equal(job.needs, 'update-release-pr');
+  assert.deepEqual(job.permissions, { actions: 'write' });
   for (const ref of ['refs/heads/main', 'refs/tags/admin-v1.2.3']) {
     for (const applications of ['[]', '[{"application":"admin"}]']) {
       assert.equal(
@@ -1137,6 +1145,207 @@ test('only application releases from Release Please outputs deploy at their rele
       );
     }
   }
+  const [step] = job.steps;
+  assert.equal(job.steps.length, 1);
+  assert.equal(
+    step.env.RELEASES,
+    '${{ needs.update-release-pr.outputs.applications }}',
+  );
+  const applications = JSON.stringify([
+    { application: 'admin', tag: 'admin-v1.2.3', sha },
+  ]);
+  const dispatched = [];
+  await runScript(step.with.script, {
+    process: { env: { RELEASES: applications } },
+    context: { repo },
+    github: {
+      rest: {
+        actions: {
+          createWorkflowDispatch: async (request) => dispatched.push(request),
+        },
+      },
+    },
+  });
+  assert.deepEqual(dispatched, [
+    {
+      ...repo,
+      workflow_id: 'delivery-deploy-releases.yml',
+      ref: 'main',
+      inputs: { releases: applications },
+    },
+  ]);
+});
+
+test('the deploy workflow runs only from a dispatch on main', () => {
+  assert.deepEqual(triggers(deployReleases), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(deployReleases.on.workflow_dispatch.inputs), [
+    'releases',
+  ]);
+  assert.equal(
+    deployReleases.on.workflow_dispatch.inputs.releases.required,
+    true,
+  );
+  assert.deepEqual(deployReleases.permissions, { contents: 'read' });
+  assert.equal(
+    deployReleases['run-name'],
+    "Deploy ${{ join(fromJSON(inputs.releases).*.tag, ', ') }} to dev and prod",
+  );
+  const job = deployReleases.jobs['deliver-applications'];
+  assert.equal(job.needs, 'qualify-releases');
+  assert.equal(job.if, undefined);
+  assert.equal(job.strategy['fail-fast'], false);
+  assert.equal(
+    job.strategy.matrix.release,
+    '${{ fromJSON(needs.qualify-releases.outputs.releases) }}',
+  );
+  assert.equal(
+    job.uses,
+    './.github/workflows/_delivery-release-application.yml',
+  );
+  assert.deepEqual(job.with, {
+    application: '${{ matrix.release.application }}',
+    sha: '${{ matrix.release.sha }}',
+    'release-tag': '${{ matrix.release.tag }}',
+  });
+  assert.deepEqual(job.permissions, {
+    actions: 'read',
+    contents: 'read',
+    deployments: 'write',
+    'id-token': 'write',
+  });
+  const qualify = deployReleases.jobs['qualify-releases'];
+  assert.equal(qualify.permissions, undefined);
+  assert.equal(
+    qualify.outputs.releases,
+    '${{ steps.qualify.outputs.releases }}',
+  );
+});
+
+const qualifyStep = deployReleases.jobs['qualify-releases'].steps.find(
+  (step) => step.id === 'qualify',
+);
+const mainHead = 'c'.repeat(40);
+const qualify = async (
+  releases,
+  {
+    ref = 'refs/heads/main',
+    published = {},
+    tags = {},
+    annotated = {},
+    status = 'ahead',
+  } = {},
+) => {
+  let output;
+  const calls = [];
+  await runScript(qualifyStep.with.script, {
+    process: {
+      env: {
+        RELEASES:
+          typeof releases === 'string' ? releases : JSON.stringify(releases),
+      },
+    },
+    context: { repo, ref, sha: mainHead },
+    github: {
+      rest: {
+        repos: {
+          getReleaseByTag: async (request) => {
+            calls.push(['release', request.tag]);
+            return {
+              data: published[request.tag] ?? {
+                draft: false,
+                prerelease: false,
+              },
+            };
+          },
+          compareCommitsWithBasehead: async (request) => {
+            calls.push(['compare', request.basehead]);
+            return { data: { status } };
+          },
+        },
+        git: {
+          getRef: async (request) => {
+            calls.push(['ref', request.ref]);
+            const tag = request.ref.replace(/^tags\//, '');
+            return annotated[tag]
+              ? { data: { object: { type: 'tag', sha: 'd'.repeat(40) } } }
+              : { data: { object: { type: 'commit', sha: tags[tag] ?? sha } } };
+          },
+          getTag: async (request) => {
+            calls.push(['tag', request.tag_sha]);
+            return { data: { object: { type: 'commit', sha } } };
+          },
+        },
+      },
+    },
+    core: {
+      setOutput: (name, value) => {
+        assert.equal(name, 'releases');
+        output = JSON.parse(value);
+      },
+    },
+  });
+  return { output, calls };
+};
+
+test('the deploy workflow qualifies each release against its GitHub Release, tag commit, and main', async () => {
+  assert.equal(
+    qualifyStep.env.RELEASES,
+    '${{ inputs.releases }}',
+    'the script reads the input only from env',
+  );
+  const releases = [
+    { application: 'admin', tag: 'admin-v1.2.3', sha },
+    { application: 'match-to-csv', tag: 'match-to-csv-v3.10.0', sha },
+  ];
+  const { output, calls } = await qualify(releases);
+  assert.deepEqual(output, releases);
+  assert.deepEqual(calls, [
+    ['release', 'admin-v1.2.3'],
+    ['ref', 'tags/admin-v1.2.3'],
+    ['compare', `${sha}...${mainHead}`],
+    ['release', 'match-to-csv-v3.10.0'],
+    ['ref', 'tags/match-to-csv-v3.10.0'],
+    ['compare', `${sha}...${mainHead}`],
+  ]);
+  // An annotated tag resolves through its tag object to the commit.
+  assert.deepEqual(
+    (await qualify(releases.slice(0, 1), { annotated: { 'admin-v1.2.3': 1 } }))
+      .output,
+    releases.slice(0, 1),
+  );
+  assert.deepEqual(
+    (await qualify(releases.slice(0, 1), { status: 'identical' })).output,
+    releases.slice(0, 1),
+  );
+  const [admin] = releases;
+  for (const [releasesInput, options, message] of [
+    [[admin], { ref: 'refs/heads/feature' }, /only from the main workflow/],
+    ['not json', {}, /not JSON/],
+    [[], {}, /non-empty list/],
+    [{}, {}, /non-empty list/],
+    [[null], {}, /index 0/],
+    [[[admin]], {}, /index 0/],
+    [[{ ...admin, application: 'unknown' }], {}, /index 0/],
+    [[admin, admin], {}, /index 1/],
+    [[{ ...admin, tag: 'player-v1.2.3' }], {}, /index 0/],
+    [[{ ...admin, tag: 'admin-v1.2.3-rc.1' }], {}, /index 0/],
+    [[{ ...admin, sha: 'main' }], {}, /index 0/],
+    [[{ ...admin, extra: true }], {}, /index 0/],
+    [
+      [admin],
+      { published: { 'admin-v1.2.3': { draft: true, prerelease: false } } },
+      /not a published/,
+    ],
+    [
+      [admin],
+      { published: { 'admin-v1.2.3': { draft: false, prerelease: true } } },
+      /not a published/,
+    ],
+    [[admin], { tags: { 'admin-v1.2.3': 'e'.repeat(40) } }, /points to/],
+    [[admin], { status: 'diverged' }, /not on main/],
+    [[admin], { status: 'behind' }, /not on main/],
+  ])
+    await assert.rejects(qualify(releasesInput, options), message);
 });
 
 test('each release has its own successful dev dependency before prod approval', () => {

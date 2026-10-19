@@ -8,6 +8,7 @@ To work on the code, start with [Getting started](docs/getting-started.md). It t
 [![CI: secret scan](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-secret-scan.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-secret-scan.yml)
 [![CI: PR title](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-pr-title.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/ci-pr-title.yml)
 [![Release: release PR](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-pr.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/release-pr.yml)
+[![Delivery: deploy application releases](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-deploy-releases.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-deploy-releases.yml)
 [![Delivery: roll back prod](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-rollback.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/delivery-rollback.yml)
 [![Terrateam](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml/badge.svg)](https://github.com/samlevin/mcc-stats-suite/actions/workflows/terrateam.yml)
 

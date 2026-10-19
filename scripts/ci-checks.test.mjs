@@ -169,6 +169,7 @@ test('automation script tests run only in the repository scope', () => {
   // Workflows that build, deploy, or release always run the full gate.
   for (const path of [
     '.github/workflows/ci-checks.yml',
+    '.github/workflows/delivery-deploy-releases.yml',
     '.github/workflows/delivery-rollback.yml',
     '.github/workflows/_delivery-release-application.yml',
     '.github/workflows/_delivery-deploy-environment.yml',
@@ -618,6 +619,28 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
   assert.equal(config.cacheDir, '.turbo/cache');
   assert.equal(config.tasks['ci:synth'].cache, false);
   assert.equal(config.tasks['verify:bundle'].cache, false);
+});
+
+test('only the delivery workflows call the reusable deploy workflows', () => {
+  // CI and release runs never deploy, so a Slack subscription to the deploy
+  // workflow sees only real deploys.
+  const directory = new URL('../.github/workflows/', import.meta.url);
+  const callers = readdirSync(directory)
+    .filter((name) => /\.ya?ml$/.test(name))
+    .flatMap((name) =>
+      Object.entries(
+        parse(readFileSync(new URL(name, directory), 'utf8')).jobs ?? {},
+      )
+        .filter(([, job]) => job.uses?.startsWith('./.github/workflows/'))
+        .map(([id, job]) => `${name} ${id} -> ${job.uses.split('/').at(-1)}`),
+    )
+    .sort();
+  assert.deepEqual(callers, [
+    '_delivery-release-application.yml deploy-dev -> _delivery-deploy-environment.yml',
+    '_delivery-release-application.yml deploy-prod -> _delivery-deploy-environment.yml',
+    'delivery-deploy-releases.yml deliver-applications -> _delivery-release-application.yml',
+    'delivery-rollback.yml rollback-prod -> _delivery-deploy-environment.yml',
+  ]);
 });
 
 test('cache uses dedicated session credentials and environment contracts without cleanup', () => {

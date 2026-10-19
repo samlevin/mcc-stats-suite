@@ -58,24 +58,26 @@ jobs:
             });
             core.setOutput('applications', JSON.stringify(applications));
 
-  deliver-applications:
-    name: Release ${{ matrix.release.application }} to dev and prod
+  # Deploys run in their own workflow, so a run of it exists only when this push
+  # published an application release. GitHub starts a workflow_dispatch run
+  # even when GITHUB_TOKEN sends it.
+  start-application-deploys:
+    name: Start deploys for released applications
     needs: update-release-pr
     if: github.ref == 'refs/heads/main' && needs.update-release-pr.outputs.applications != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        release: ${{ fromJSON(needs.update-release-pr.outputs.applications) }}
+    runs-on: ubuntu-latest
     permissions:
-      actions: read
-      contents: read
-      deployments: write
-      id-token: write
-    uses: ./.github/workflows/_delivery-release-application.yml
-    with:
-      application: ${{ matrix.release.application }}
-      sha: ${{ matrix.release.sha }}
-      release-tag: ${{ matrix.release.tag }}
-    secrets:
-      DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
-      PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}
+      actions: write
+    steps:
+      - name: Dispatch the application deploy workflow
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          RELEASES: ${{ needs.update-release-pr.outputs.applications }}
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              ...context.repo,
+              workflow_id: 'delivery-deploy-releases.yml',
+              ref: 'main',
+              inputs: { releases: process.env.RELEASES },
+            });
