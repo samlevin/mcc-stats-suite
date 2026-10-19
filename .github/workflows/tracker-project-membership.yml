@@ -5,11 +5,11 @@ on:
   issues:
     types: [opened]
   # GitHub sometimes creates no run for an `opened` event, which never fires
-  # again for that issue, so a sweep adds every open issue still missing. It
-  # runs five minutes before each tracker-issue-states.yml run, which then
-  # triages the issues it added.
+  # again for that issue, so an hourly sweep adds every open issue still
+  # missing. It runs five minutes before the hourly tracker-issue-states.yml
+  # sweep, which then triages the issues it added.
   schedule:
-    - cron: '2,17,32,47 * * * *'
+    - cron: '2 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

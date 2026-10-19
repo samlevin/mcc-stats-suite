@@ -19,11 +19,15 @@ import {
   ghGraphql,
   GitHubError,
   ghRest,
+  graphqlBudget,
   paginate,
   readItem,
   reconcile,
+  reconcileEpicLabels,
   redact,
   REPOSITORY,
+  runTracker,
+  SWEEP_FLOOR,
 } from './issue-triage.mjs';
 
 // `gh api --include` output: a status line, CRLF headers, a blank line, the body.
@@ -426,7 +430,18 @@ test('entry-point messages never print raw subprocess errors', () => {
   );
 });
 
-test('every GitHub script exits non-zero with the shared rate-limit message', (t) => {
+const budget = (remaining, overrides = {}) => ({
+  limit: 5000,
+  remaining,
+  used: 5000 - remaining,
+  reset: RESET,
+  ...overrides,
+});
+
+// Installs a stand-in for gh that answers every GraphQL and REST call with a
+// rate limit and leaks the token on stderr. The free REST rate_limit endpoint
+// answers with a healthy GraphQL budget.
+function fakeGh(t) {
   const directory = mkdtempSync(join(tmpdir(), 'mcc-fake-gh-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   writeFileSync(
@@ -446,7 +461,10 @@ test('every GitHub script exits non-zero with the shared rate-limit message', (t
       message: 'API rate limit exceeded for user ID 1.',
     }),
   );
-  // Stands in for gh: answers every call with a rate limit and leaks the token on stderr.
+  writeFileSync(
+    join(directory, 'budget.txt'),
+    httpResponse(200, {}, { resources: { graphql: budget(4000) } }),
+  );
   writeFileSync(
     join(directory, 'gh'),
     [
@@ -454,6 +472,7 @@ test('every GitHub script exits non-zero with the shared rate-limit message', (t
       'cat > /dev/null',
       'case "$*" in',
       '  *graphql*) cat "$FAKE_GH_DIR/graphql.txt" ;;',
+      '  *rate_limit*) cat "$FAKE_GH_DIR/budget.txt"; exit 0 ;;',
       '  *) cat "$FAKE_GH_DIR/rest.txt" ;;',
       'esac',
       'echo "gh: stderr-marker $GH_TOKEN" >&2',
@@ -462,16 +481,8 @@ test('every GitHub script exits non-zero with the shared rate-limit message', (t
     ].join('\n'),
   );
   chmodSync(join(directory, 'gh'), 0o755);
-  const token = 'fake-token-value-188';
-  const scripts = [
-    ['issue-triage.mjs', ['--dry-run'], 'GraphQL'],
-    ['issue-containers.mjs', ['--dry-run'], 'GraphQL'],
-    ['issue-pr-metadata.mjs', [], 'GraphQL'],
-    ['issue-pr-status.mjs', [], 'GraphQL'],
-    ['branch-name.mjs', ['188'], 'REST'],
-  ];
-  for (const [script, args, api] of scripts) {
-    const result = spawnSync(
+  return (script, args, env = {}) =>
+    spawnSync(
       process.execPath,
       [fileURLToPath(new URL(script, import.meta.url)), ...args],
       {
@@ -479,14 +490,35 @@ test('every GitHub script exits non-zero with the shared rate-limit message', (t
         env: {
           PATH: `${directory}:${process.env.PATH}`,
           FAKE_GH_DIR: directory,
-          GH_TOKEN: token,
+          GH_TOKEN: 'fake-token-value-188',
           PR_NUMBER: '10',
           DRY_RUN: 'true',
+          ...env,
         },
       },
     );
+}
+
+const budgetLines = (stdout) =>
+  stdout
+    .split('\n')
+    .filter(Boolean)
+    .every((line) => line.startsWith('GraphQL budget '));
+
+test('sweeps and PR scripts exit non-zero with the shared rate-limit message', (t) => {
+  const run = fakeGh(t);
+  const scripts = [
+    ['issue-triage.mjs', ['--dry-run'], {}, 'GraphQL'],
+    ['issue-containers.mjs', ['--dry-run'], {}, 'GraphQL'],
+    ['issue-project-membership.mjs', [], { SWEEP: 'true' }, 'GraphQL'],
+    ['issue-pr-metadata.mjs', [], {}, 'GraphQL'],
+    ['issue-pr-status.mjs', [], {}, 'GraphQL'],
+    ['branch-name.mjs', ['188'], {}, 'REST'],
+  ];
+  for (const [script, args, env, api] of scripts) {
+    const result = run(script, args, env);
     assert.equal(result.status, 1, script);
-    assert.equal(result.stdout, '', script);
+    assert.ok(budgetLines(result.stdout), `${script}: ${result.stdout}`);
     const detail =
       api === 'GraphQL'
         ? 'RATE_LIMITED: API rate limit already exceeded for user ID 1.'
@@ -497,6 +529,184 @@ test('every GitHub script exits non-zero with the shared rate-limit message', (t
       script,
     );
   }
+});
+
+test('single-issue tracker runs warn and succeed when rate-limited', (t) => {
+  const run = fakeGh(t);
+  for (const [script, args, env] of [
+    ['issue-triage.mjs', ['--dry-run', '--issue', '5'], {}],
+    ['issue-containers.mjs', ['--dry-run', '--issue', '5'], {}],
+    [
+      'issue-project-membership.mjs',
+      [],
+      { CONTENT_TYPE: 'issue', CONTENT_NUMBER: '5' },
+    ],
+  ]) {
+    const result = run(script, args, env);
+    assert.equal(result.status, 0, `${script}: ${result.stderr}`);
+    assert.equal(result.stderr, '', script);
+    assert.ok(
+      result.stdout.includes(
+        `::warning::GitHub GraphQL request failed: RATE_LIMITED: API rate limit already exceeded for user ID 1. Rate limit reached; the limit resets at ${RESET_AT}. The next scheduled sweep reconciles this issue.\n`,
+      ),
+      script,
+    );
+    assert.match(result.stdout, /^GraphQL budget before: 4000 of 5000/);
+    assert.ok(!result.stdout.includes('fake-token-value-188'), script);
+  }
+});
+
+function tracker(readings, task, sweep) {
+  const out = { logs: [], warnings: [], errors: [], ran: false };
+  const queue = [...readings];
+  const promise = runTracker({
+    sweep,
+    task: async () => {
+      out.ran = true;
+      await task();
+    },
+    budget: () => {
+      const next = queue.shift();
+      if (next instanceof Error) throw next;
+      return next;
+    },
+    log: (line) => out.logs.push(line),
+    warn: (line) => out.warnings.push(line),
+    error: (line) => out.errors.push(line),
+  });
+  return promise.then((status) => ({ ...out, status }));
+}
+
+const rateLimited = () =>
+  new GitHubError('GitHub GraphQL request failed: RATE_LIMITED.', {
+    kind: 'rate-limit',
+  });
+
+test('a run logs the GraphQL points used between its two budget readings', async () => {
+  const result = await tracker(
+    [budget(4800), budget(4786)],
+    async () => {},
+    true,
+  );
+  assert.equal(result.status, 0);
+  assert.deepEqual(result.logs, [
+    `GraphQL budget before: 4800 of 5000 points remain; the window resets at ${RESET_AT}.`,
+    'GraphQL budget after: 4786 points remain; 14 were used during the run, counting every client of this account.',
+  ]);
+  const reset = await tracker(
+    [budget(1200), budget(4990, { reset: RESET + 3600 })],
+    async () => {},
+    true,
+  );
+  assert.equal(
+    reset.logs[1],
+    'GraphQL budget after: 4990 points remain; the window reset during the run.',
+  );
+});
+
+test('a sweep below the floor skips with a warning; a single-issue run still runs', async () => {
+  const skipped = await tracker(
+    [budget(SWEEP_FLOOR - 1)],
+    async () => {},
+    true,
+  );
+  assert.equal(skipped.status, 0);
+  assert.equal(skipped.ran, false);
+  assert.deepEqual(skipped.warnings, [
+    `Skipped the sweep: ${SWEEP_FLOOR - 1} GraphQL points remain, below the floor of ${SWEEP_FLOOR}. The next scheduled sweep reconciles.`,
+  ]);
+  const atFloor = await tracker(
+    [budget(SWEEP_FLOOR), budget(SWEEP_FLOOR)],
+    async () => {},
+    true,
+  );
+  assert.equal(atFloor.ran, true);
+  const event = await tracker([budget(10), budget(5)], async () => {}, false);
+  assert.equal(event.ran, true);
+  assert.deepEqual(event.warnings, []);
+});
+
+test('only a single-issue run tolerates a rate limit; other failures fail the run', async () => {
+  const event = await tracker(
+    [budget(10), budget(0)],
+    async () => {
+      throw rateLimited();
+    },
+    false,
+  );
+  assert.equal(event.status, 0);
+  assert.deepEqual(event.errors, []);
+  assert.deepEqual(event.warnings, [
+    'GitHub GraphQL request failed: RATE_LIMITED. The next scheduled sweep reconciles this issue.',
+  ]);
+  const sweep = await tracker(
+    [budget(4000), budget(0)],
+    async () => {
+      throw rateLimited();
+    },
+    true,
+  );
+  assert.equal(sweep.status, 1);
+  assert.deepEqual(sweep.errors, [
+    'GitHub GraphQL request failed: RATE_LIMITED.',
+  ]);
+  for (const failure of [
+    new GitHubError('GitHub GraphQL request failed: HTTP 502.', {
+      kind: 'other',
+    }),
+    new Error('Issue hierarchy cycle'),
+    Object.assign(new Error('rate limit text'), { kind: 'rate-limit' }),
+  ]) {
+    const result = await tracker(
+      [budget(4000), budget(4000)],
+      async () => {
+        throw failure;
+      },
+      false,
+    );
+    assert.equal(result.status, 1, failure.message);
+    assert.equal(result.errors.length, 1, failure.message);
+  }
+});
+
+test('an unreadable budget warns and the run continues without a floor', async () => {
+  const result = await tracker(
+    [new Error('no budget'), new Error('no budget')],
+    async () => {},
+    true,
+  );
+  assert.equal(result.status, 0);
+  assert.equal(result.ran, true);
+  assert.deepEqual(result.logs, []);
+  assert.deepEqual(result.warnings, [
+    'Could not read the GraphQL budget: no budget',
+    'Could not read the GraphQL budget: no budget',
+  ]);
+});
+
+test('the budget comes from the REST rate_limit endpoint', () => {
+  const calls = [];
+  const respond = (body) => (command, args) => {
+    calls.push([command, ...args]);
+    return httpResponse(200, {}, body);
+  };
+  assert.deepEqual(
+    graphqlBudget(
+      respond({
+        resources: {
+          core: budget(1),
+          graphql: { ...budget(4321), extra: true },
+        },
+      }),
+    ),
+    budget(4321),
+  );
+  assert.deepEqual(calls, [['gh', 'api', '--include', 'rate_limit']]);
+  for (const body of [
+    {},
+    { resources: { graphql: { ...budget(1), remaining: '1' } } },
+  ])
+    assert.throws(() => graphqlBudget(respond(body)), /no GraphQL rate limit/);
 });
 
 function issue(overrides = {}) {
@@ -595,6 +805,9 @@ test('pagination keeps every page, skips deleted nodes, and rejects broken curso
   );
 });
 
+// A mocked MCC delivery project. Listing and single-issue reads return each
+// item with the first page of its field values and labels nested; issue #1's
+// item overflows both, so its remaining pages come from follow-up reads.
 function mockApi({
   race,
   multipleSeverity = false,
@@ -602,16 +815,12 @@ function mockApi({
 } = {}) {
   const state = {
     mutations: [],
-    reads: 0,
-    pages: new Set(),
+    queries: [],
+    readItems: [],
     status: 'Inbox',
     otherStatus: 'Inbox',
-    readItems: [],
+    lastFields: {},
   };
-  const second = issue({
-    id: 'item-2',
-    content: { ...issue().content, id: 'issue-2', number: 2 },
-  });
   const definitions = Object.entries({
     Status: ['Inbox', 'Ready', 'In progress'],
     Priority: ['P0', 'P1', 'P2', 'P3'],
@@ -625,10 +834,59 @@ function mockApi({
     nodes,
     pageInfo: { hasNextPage: next, endCursor: next ? 'next' : null },
   });
+  const values = (fields) =>
+    Object.entries(fields).map(([name, value]) => ({
+      field: { id: `field-${name}` },
+      optionId: `option-${value}`,
+    }));
+  const extraLabels = () =>
+    multipleSeverity || state.extraSeverity ? [{ name: 'severity: high' }] : [];
+  const node = (id, fields) => {
+    const second = id === 'item-2';
+    fields ??= {
+      Status: second ? state.otherStatus : state.status,
+      Priority: 'P2',
+      Size: 'L',
+    };
+    state.lastFields[id] = fields;
+    const content = {
+      __typename: 'Issue',
+      id: second ? 'issue-2' : 'issue',
+      number: second || state.renumbered ? 2 : 1,
+      state: state.closed ? 'CLOSED' : 'OPEN',
+      repository: {
+        nameWithOwner: state.foreign ? 'other/repo' : REPOSITORY,
+      },
+      labels: second
+        ? connection([{ name: 'severity: none' }])
+        : connection([{ name: 'severity: none' }], true),
+    };
+    return {
+      id,
+      type: 'ISSUE',
+      project: { id: 'project' },
+      fieldValues: second
+        ? connection(values(fields))
+        : connection(values(fields).slice(0, 1), true),
+      content,
+    };
+  };
+  const listed = () => (additionalIssue ? ['item', 'item-2'] : ['item']);
   const api = async (query, variables) => {
     const page = variables.cursor ? 1 : 0;
+    if (query.startsWith('mutation')) {
+      assert.match(query, /updateProjectV2ItemFieldValue/);
+      state.mutations.push(variables);
+      if (variables.item === 'item-2') state.otherStatus = 'Ready';
+      else state.status = 'Ready';
+      return {
+        updateProjectV2ItemFieldValue: {
+          projectV2Item: { id: variables.item },
+        },
+      };
+    }
     if (query.includes('projectV2(number: 1)')) {
-      state.pages.add(`definitions-${page}`);
+      state.queries.push(`definitions-${page}`);
       return {
         user: {
           projectV2: {
@@ -640,20 +898,22 @@ function mockApi({
         },
       };
     }
-    if (query.includes('items(first:')) {
-      state.pages.add(`items-${page}`);
+    if (query.includes('items(first: 100')) {
+      state.queries.push(`items-${page}`);
       return {
         node: {
           items: page
-            ? connection(additionalIssue ? [issue(), second] : [issue()])
+            ? connection(listed().map((id) => node(id)))
             : connection(
                 [
-                  { id: 'pr', type: 'PULL_REQUEST' },
-                  { id: 'draft', type: 'DRAFT_ISSUE' },
+                  { id: 'pr', type: 'PULL_REQUEST', content: {} },
+                  { id: 'draft', type: 'DRAFT_ISSUE', content: null },
                   {
-                    ...issue(),
-                    id: 'other',
-                    content: { repository: { nameWithOwner: 'other/repo' } },
+                    ...node('other'),
+                    content: {
+                      __typename: 'Issue',
+                      repository: { nameWithOwner: 'other/repo' },
+                    },
                   },
                 ],
                 true,
@@ -661,84 +921,154 @@ function mockApi({
         },
       };
     }
-    if (query.includes('fieldValues(first:')) {
-      if (!page) {
-        state.reads++;
-        state.readItems.push(variables.id);
-      }
-      state.pages.add(`values-${page}`);
+    if (query.includes('projectItems(first: 20')) {
+      state.queries.push(`issue-items-${variables.number}`);
+      assert.match(query, /includeArchived: false/);
+      const id = { 1: 'item', 2: 'item-2' }[variables.number];
+      if (!id || !listed().includes(id)) return { repository: { issue: null } };
+      // The same issue in another project is never read or written.
+      const own = node(id);
+      const elsewhere = { ...own, id: 'elsewhere', project: { id: 'x' } };
+      return {
+        repository: {
+          issue: { projectItems: connection([elsewhere, own]) },
+        },
+      };
+    }
+    if (query.includes('fieldValues(first: 100, after: $cursor)')) {
+      state.queries.push(`values-${variables.id}`);
+      return {
+        node: {
+          fieldValues: connection(
+            values(state.lastFields[variables.id]).slice(1),
+          ),
+        },
+      };
+    }
+    if (query.includes('labels(first: 100, after: $cursor)')) {
+      state.queries.push(`labels-${variables.id}`);
+      return { node: { labels: connection(extraLabels()) } };
+    }
+    if (query.includes('... on ProjectV2Item {')) {
+      state.queries.push(`read-${variables.id}`);
+      state.readItems.push(variables.id);
       const fields = {
         Status: variables.id === 'item-2' ? state.otherStatus : state.status,
         Priority: 'P2',
         Size: 'L',
       };
-      if (state.reads >= 2 && race) race(fields, state);
-      const values = Object.entries(fields).map(([name, value]) => ({
-        field: { id: `field-${name}` },
-        optionId: `option-${value}`,
-      }));
-      return {
-        node: {
-          ...(variables.id === 'item-2' ? second : issue()),
-          project: { id: 'project' },
-          fieldValues: page
-            ? connection(values.slice(1))
-            : connection(values.slice(0, 1), true),
-        },
-      };
+      if (race) race(fields, state);
+      return { node: node(variables.id, fields) };
     }
-    if (query.includes('labels(first:')) {
-      state.pages.add(`labels-${page}`);
-      const content = {
-        ...(variables.id === 'issue-2' ? second.content : issue().content),
-      };
-      if (state.renumbered) content.number = 2;
-      if (state.closed) content.state = 'CLOSED';
-      if (state.foreign) content.repository = { nameWithOwner: 'other/repo' };
-      return {
-        node: {
-          ...content,
-          labels: page
-            ? connection(
-                multipleSeverity || state.extraSeverity
-                  ? [{ name: 'severity: high' }]
-                  : [],
-              )
-            : connection([{ name: 'severity: none' }], true),
-        },
-      };
-    }
-    if (query.includes('updateProjectV2ItemFieldValue')) {
-      state.mutations.push(variables);
-      if (variables.item === 'item-2') state.otherStatus = 'Ready';
-      else state.status = 'Ready';
-      return {
-        updateProjectV2ItemFieldValue: {
-          projectV2Item: { id: variables.item },
-        },
-      };
-    }
-    throw new Error('Unexpected mock query');
+    throw new Error(`Unexpected mock query ${query}`);
   };
   return { api, state, definitions };
 }
 
-test('discovery and item reads paginate definitions, field values and labels', async () => {
+test('discovery and item reads take nested pages first, then read only overflowing connections', async () => {
   const { api, state } = mockApi({ multipleSeverity: true });
   const context = await discover(api);
   assert.equal(context.fields.Size.id, 'field-Size');
   const item = await readItem(api, 'item', context);
   assert.equal(item.fields.Size, 'L');
+  assert.equal(item.fields.Status, 'Inbox');
   assert.deepEqual(item.labels, ['severity: none', 'severity: high']);
+  assert.equal(item.content.labels, undefined);
   assert.equal(eligible(item), false);
-  assert.deepEqual([...state.pages].sort(), [
+  assert.deepEqual(state.queries, [
     'definitions-0',
     'definitions-1',
-    'labels-0',
-    'labels-1',
-    'values-0',
-    'values-1',
+    'read-item',
+    'values-item',
+    'labels-issue',
   ]);
+});
+
+test('a sweep reads the project in pages with nested metadata and re-reads only candidates', async () => {
+  const { api, state } = mockApi({ additionalIssue: true });
+  assert.deepEqual(await reconcile({ api, log: () => {} }), {
+    candidates: 2,
+    updated: 0,
+  });
+  // Issue #2 fits in its nested pages; issue #1 overflows both connections.
+  assert.deepEqual(state.queries, [
+    'definitions-0',
+    'definitions-1',
+    'items-0',
+    'items-1',
+    'values-item',
+    'labels-issue',
+    'read-item',
+    'values-item',
+    'labels-issue',
+    'read-item-2',
+  ]);
+});
+
+test('a sweep at the current project size costs a few calls, not two per item', async () => {
+  const calls = [];
+  const items = Array.from({ length: 251 }, (_, index) => ({
+    id: `item-${index}`,
+    type: 'ISSUE',
+    project: { id: 'project' },
+    fieldValues: {
+      nodes: [{ field: { id: 'field-Status' }, optionId: 'option-Done' }],
+      pageInfo: { hasNextPage: false },
+    },
+    content: {
+      __typename: 'Issue',
+      id: `issue-${index}`,
+      number: index + 1,
+      state: 'OPEN',
+      repository: { nameWithOwner: REPOSITORY },
+      labels: { nodes: [], pageInfo: { hasNextPage: false } },
+    },
+  }));
+  const api = async (query, variables) => {
+    calls.push(query);
+    if (query.includes('projectV2(number: 1)'))
+      return {
+        user: {
+          projectV2: {
+            id: 'project',
+            fields: {
+              nodes: Object.entries({
+                Status: ['Inbox', 'Ready', 'Done'],
+                Priority: ['P0', 'P1', 'P2', 'P3'],
+                Size: ['XS', 'S', 'M', 'L'],
+              }).map(([name, options]) => ({
+                id: `field-${name}`,
+                name,
+                options: options.map((name) => ({
+                  id: `option-${name}`,
+                  name,
+                })),
+              })),
+              pageInfo: { hasNextPage: false },
+            },
+          },
+        },
+      };
+    assert.match(query, /items\(first: 100/);
+    const start = Number(variables.cursor ?? 0);
+    const end = start + 100;
+    return {
+      node: {
+        items: {
+          nodes: items.slice(start, end),
+          pageInfo: {
+            hasNextPage: end < items.length,
+            endCursor: String(end),
+          },
+        },
+      },
+    };
+  };
+  assert.deepEqual(await reconcile({ api, log: () => {} }), {
+    candidates: 0,
+    updated: 0,
+  });
+  assert.equal(calls.length, 4);
 });
 
 test('dry-run discovers every item page and never mutates; apply is idempotent', async () => {
@@ -748,7 +1078,7 @@ test('dry-run discovers every item page and never mutates; apply is idempotent',
     updated: 0,
   });
   assert.equal(state.mutations.length, 0);
-  assert.ok(state.pages.has('items-1'));
+  assert.ok(state.queries.includes('items-1'));
   assert.deepEqual(await reconcile({ api, dryRun: false, log: () => {} }), {
     candidates: 1,
     updated: 1,
@@ -794,12 +1124,12 @@ test('re-read rejects eligibility changes at the mutation boundary', async () =>
       candidates: 0,
       updated: 0,
     });
-    assert.equal(state.reads, 2);
+    assert.deepEqual(state.readItems, ['item']);
     assert.equal(state.mutations.length, 0);
   }
 });
 
-test('issue filter limits dry-run and apply to the requested issue and leaves another eligible issue untouched', async () => {
+test('issue filter reads only that issue and leaves another eligible issue untouched', async () => {
   for (const issueNumber of [1, 2]) {
     const { api, state } = mockApi({ additionalIssue: true });
     const logs = [];
@@ -812,7 +1142,10 @@ test('issue filter limits dry-run and apply to the requested issue and leaves an
     assert.equal(state.otherStatus, 'Inbox');
     assert.match(logs[0], new RegExp(`issue #${issueNumber} Inbox -> Ready`));
     const selectedId = issueNumber === 1 ? 'item' : 'item-2';
-    assert.deepEqual(state.readItems, [selectedId, selectedId]);
+    assert.deepEqual(state.readItems, [selectedId]);
+    // The project is never listed for one issue.
+    assert.ok(!state.queries.some((query) => query.startsWith('items-')));
+    assert.ok(state.queries.includes(`issue-items-${issueNumber}`));
     assert.deepEqual(
       await reconcile({ api, issueNumber, dryRun: false, log: () => {} }),
       { candidates: 1, updated: 1 },
@@ -837,7 +1170,7 @@ test('issue filter limits dry-run and apply to the requested issue and leaves an
   }
 });
 
-test('a missing issue filter match reads no individual issue metadata and performs no writes', async () => {
+test('an issue outside the project reads no item metadata and performs no writes', async () => {
   const { api, state } = mockApi({ additionalIssue: true });
   assert.deepEqual(
     await reconcile({ api, issueNumber: 3, dryRun: false, log: () => {} }),
@@ -1017,4 +1350,139 @@ test('catalog has unique names, supported severities, and all directly affected 
     assert.match(label.color, /^[a-f0-9]{6}$/);
     assert.ok(label.description.length > 0);
   }
+});
+
+test('pagination continues from a nested first page', async () => {
+  const cursors = [];
+  assert.deepEqual(
+    await paginate(
+      async (cursor) => {
+        cursors.push(cursor);
+        return { nodes: [3], pageInfo: { hasNextPage: false } };
+      },
+      { nodes: [1, 2], pageInfo: { hasNextPage: true, endCursor: 'two' } },
+    ),
+    [1, 2, 3],
+  );
+  assert.deepEqual(cursors, ['two']);
+  assert.deepEqual(
+    await paginate(
+      () => assert.fail('a complete nested page needs no request'),
+      { nodes: [1], pageInfo: { hasNextPage: false } },
+    ),
+    [1],
+  );
+});
+
+// Epics with their nested first label page. Epic #7 carries standard and type
+// labels; #9 overflows its first page, and its conflicting label comes later.
+function epicApi() {
+  const calls = [];
+  const writes = [];
+  const connection = (nodes, next = false) => ({
+    nodes,
+    pageInfo: { hasNextPage: next, endCursor: next ? 'next' : null },
+  });
+  const labels = {
+    E7: connection([
+      { id: 'L_epic', name: 'epic' },
+      { id: 'L_bug', name: 'bug' },
+      { id: 'L_type', name: 'type: feature' },
+      { id: 'L_severity', name: 'severity: none' },
+    ]),
+    E8: connection([
+      { id: 'L_epic', name: 'epic' },
+      { id: 'L_area', name: 'area: repository' },
+    ]),
+    E9: connection([{ id: 'L_epic', name: 'epic' }], true),
+  };
+  const epics = [
+    { id: 'E7', number: 7 },
+    { id: 'E8', number: 8 },
+    { id: 'E9', number: 9 },
+  ];
+  const api = async (query, variables) => {
+    calls.push(query);
+    if (query.startsWith('mutation')) {
+      assert.match(query, /removeLabelsFromLabelable/);
+      writes.push(variables);
+      return {};
+    }
+    if (query.includes('labels: ["epic"]'))
+      return {
+        repository: {
+          issues: connection(
+            epics.map((epic) => ({ ...epic, labels: labels[epic.id] })),
+          ),
+        },
+      };
+    if (query.includes('issue(number: $number)')) {
+      const epic = epics.find((epic) => epic.number === variables.number);
+      return {
+        repository: {
+          issue: epic
+            ? { ...epic, labels: labels[epic.id] }
+            : {
+                id: 'I_1',
+                number: 1,
+                labels: connection([{ id: 'L_bug', name: 'bug' }]),
+              },
+        },
+      };
+    }
+    assert.match(query, /labels\(first: 100, after: \$cursor\)/);
+    assert.equal(variables.id, 'E9');
+    return {
+      node: {
+        labels: connection([{ id: 'L_docs', name: 'documentation' }]),
+      },
+    };
+  };
+  return { api, calls, writes };
+}
+
+test('epic label reconciliation removes standard and type labels from epics only', async () => {
+  const github = epicApi();
+  const logs = [];
+  await reconcileEpicLabels({
+    api: github.api,
+    dryRun: false,
+    log: (line) => logs.push(line),
+  });
+  assert.deepEqual(github.writes, [
+    { id: 'E7', labels: ['L_bug', 'L_type'] },
+    { id: 'E9', labels: ['L_docs'] },
+  ]);
+  assert.deepEqual(logs, [
+    'Removing 2 conflicting category labels from epic #7',
+    'Removing 1 conflicting category labels from epic #9',
+  ]);
+  // One listing plus one follow-up page for the epic that overflowed.
+  assert.equal(github.calls.length - github.writes.length, 2);
+  const dry = epicApi();
+  await reconcileEpicLabels({ api: dry.api, log: () => {} });
+  assert.deepEqual(dry.writes, []);
+});
+
+test('epic label reconciliation for one issue reads only that issue', async () => {
+  const github = epicApi();
+  await reconcileEpicLabels({
+    api: github.api,
+    dryRun: false,
+    issueNumber: 7,
+    log: () => {},
+  });
+  assert.deepEqual(github.writes, [{ id: 'E7', labels: ['L_bug', 'L_type'] }]);
+  assert.equal(github.calls.length, 2);
+  assert.ok(!github.calls.some((query) => query.includes('labels: ["epic"]')));
+  // A non-epic issue keeps its labels.
+  const plain = epicApi();
+  await reconcileEpicLabels({
+    api: plain.api,
+    dryRun: false,
+    issueNumber: 1,
+    log: () => {},
+  });
+  assert.deepEqual(plain.writes, []);
+  assert.equal(plain.calls.length, 1);
 });
