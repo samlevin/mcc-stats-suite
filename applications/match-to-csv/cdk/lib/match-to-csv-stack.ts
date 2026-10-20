@@ -111,7 +111,8 @@ interface MatchToCsvStackProps extends StackProps {
   /**
    * SSM parameter that holds the email address subscribed to alarms. The
    * address resolves at deploy time, so it never appears in source or in the
-   * synthesized template. Without it, alarms still publish to the topic.
+   * synthesized template. Without it, alarms still publish to the topic. Only
+   * prod has alarms, so other stacks ignore it.
    */
   alarmEmailParameter?: string;
 }
@@ -654,9 +655,9 @@ export class MatchToCsvStack extends Stack {
       'Start the workflow for stored-message events under the stack inbound prefix',
     );
 
-    // Ephemeral stacks run under the local workload boundary, which grants no
-    // CloudWatch alarm or SNS administration, and nobody watches them.
-    if (!deployment.isEphemeral) {
+    // Only prod has alarms. Nobody watches dev or ephemeral stacks, and the
+    // local workload boundary grants no CloudWatch alarm or SNS administration.
+    if (deployment.environment === 'prod') {
       this.addAlarms({
         alarmEmailParameter,
         stateMachines: { Workflow: workflow, ReplayWorkflow: replayWorkflow },
