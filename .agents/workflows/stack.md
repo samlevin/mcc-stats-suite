@@ -35,6 +35,7 @@ Trunk `main` is never yours; it is usually checked out in the human checkout. St
 ## Never run
 
 - `gh stack sync` or `gh stack rebase`, with or without `--no-trunk`. Without `--no-trunk`, both fast-forward the local trunk branch, and `gh stack rebase` merges into whichever worktree has `main` checked out, the human checkout included. Cascade with plain git instead, as [Operations](#operations) shows, so every rebase carries `rebase.updateRefs=false`.
+- `gh stack push`. It fetches before constructing its leases, so they compare against the fetched remote heads instead of the previously verified SHA and can overwrite someone else's push. Use the explicit per-branch leases in [Operations](#operations).
 - `gh stack submit`, or `gh stack link` with anything but PR URLs. Both create PRs for branches that have none.
 - `gh stack add` with `-A`, `-u`, or `-m`, or any blanket staging. Commit with explicit paths yourself.
 - `gh stack unstack`, `--prune`, branch deletion, `git pull` on trunk, and `git branch -f` or `git update-ref` on any branch you do not own.
