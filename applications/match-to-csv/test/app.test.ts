@@ -222,7 +222,8 @@ type AlarmResource = {
   };
 };
 
-for (const environment of ['dev', 'prod'] as const) {
+// Only prod has alarms.
+for (const environment of ['prod'] as const) {
   test(`${environment} alarms publish failures to the stack topic`, () => {
     const template = synthesize({ environment });
     const prefix = `match-to-csv-${environment}`;
@@ -329,15 +330,17 @@ for (const environment of ['dev', 'prod'] as const) {
   });
 }
 
-test('ephemeral stacks create no alarms, topic, or subscription', () => {
-  const template = synthesize(
-    { environment: 'dev', ephemeral: 'test' },
-    { MCC_ALARM_EMAIL_PARAMETER: '/mcc/dev/match-to-csv/alarm-email' },
-  );
-  template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
-  template.resourceCountIs('AWS::SNS::Topic', 0);
-  template.resourceCountIs('AWS::SNS::Subscription', 0);
-});
+for (const ephemeral of [undefined, 'test'] as const) {
+  test(`dev ${ephemeral ? 'ephemeral' : 'stable'} stacks create no alarms, topic, or subscription`, () => {
+    const template = synthesize(
+      { environment: 'dev', ...(ephemeral ? { ephemeral } : {}) },
+      { MCC_ALARM_EMAIL_PARAMETER: '/mcc/dev/match-to-csv/alarm-email' },
+    );
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
+    template.resourceCountIs('AWS::SNS::Topic', 0);
+    template.resourceCountIs('AWS::SNS::Subscription', 0);
+  });
+}
 
 test('extract text reads only its own roster partition of the foundation roster table', () => {
   for (const [environment, ephemeral, namespace] of [

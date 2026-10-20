@@ -94,7 +94,7 @@ For a failure test, send an unsupported or undersized image. The submission reco
 
 Never commit test messages, recipient addresses, or domains.
 
-To get alarm email for a stable stack, create a `String` SSM parameter `/mcc/<environment>/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
+Only the prod stack has alarms. To get alarm email, create a `String` SSM parameter `/mcc/prod/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
 
 ## Manage the sender allowlist
 
