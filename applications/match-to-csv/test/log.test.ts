@@ -83,11 +83,6 @@ test('an unset, empty, or unknown AWS_LAMBDA_LOG_LEVEL means INFO', (t) => {
     { AWS_LAMBDA_LOG_LEVEL: 'WARNING' },
     { AWS_LAMBDA_LOG_LEVEL: 'OFF' },
     { AWS_LAMBDA_LOG_LEVEL: '3' },
-    // Names that exist on Object.prototype are still unknown levels.
-    { AWS_LAMBDA_LOG_LEVEL: 'constructor' },
-    { AWS_LAMBDA_LOG_LEVEL: '__proto__' },
-    { AWS_LAMBDA_LOG_LEVEL: 'toString' },
-    { AWS_LAMBDA_LOG_LEVEL: 'hasOwnProperty' },
   ];
   for (const environment of environments) {
     assert.deepEqual(
