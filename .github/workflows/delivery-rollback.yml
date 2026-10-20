@@ -175,3 +175,4 @@ jobs:
       source: ${{ inputs.release-tag }}
     secrets:
       PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}

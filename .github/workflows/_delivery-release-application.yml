@@ -17,6 +17,8 @@ on:
         required: false
       PROD_AWS_ACCOUNT_ID:
         required: false
+      SLACK_DEPLOY_WEBHOOK_URL:
+        required: false
 
 permissions:
   actions: read
@@ -36,11 +38,15 @@ jobs:
       source: ${{ inputs.release-tag }}
     secrets:
       DEV_AWS_ACCOUNT_ID: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
 
   deploy-prod:
     name: Deploy ${{ inputs.application }} to prod
     needs: deploy-dev
-    if: needs.deploy-dev.outputs.deployed == 'true'
+    # Prod depends only on the dev call's `deployed` output, which requires the
+    # dev deploy job to succeed after deploying and verifying. It never reads
+    # the dev call's overall result, so a failed Slack job cannot block prod.
+    if: always() && !cancelled() && needs.deploy-dev.outputs.deployed == 'true'
     uses: ./.github/workflows/_delivery-deploy-environment.yml
     with:
       application: ${{ inputs.application }}
@@ -50,3 +56,4 @@ jobs:
       source: ${{ inputs.release-tag }}
     secrets:
       PROD_AWS_ACCOUNT_ID: ${{ secrets.PROD_AWS_ACCOUNT_ID }}
+      SLACK_DEPLOY_WEBHOOK_URL: ${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}
