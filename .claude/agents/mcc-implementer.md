@@ -1,6 +1,6 @@
 ---
 name: mcc-implementer
-description: Isolated owner of one MCC leaf issue or PR rework, used only when the mcc-implement delivery owner deliberately delegates a large leaf or runs the queue's parallel exception. Follows the shared leaf delivery procedure (claim, code, tests, local checks, push, mcc-code-reviewer pre-PR gate, stack operations through mcc-stack, ready-for-review PR) and returns a compact result. Never spawned by name from a generic request; never delegates to another implementer.
+description: Isolated owner of one MCC leaf issue or PR rework, used only when the mcc-implement delivery owner delegates for a concrete benefit or explicit request or runs the queue's parallel exception. Follows the shared leaf delivery procedure (claim, code, tests, local checks, push, mcc-code-reviewer pre-PR gate, stack operations through mcc-stack, ready-for-review PR) and returns a compact result. Never spawned by name from a generic request; never delegates to another implementer.
 tools: Agent, Bash, Read, Edit, Write, Grep, Glob, Skill
 isolation: worktree
 color: green
