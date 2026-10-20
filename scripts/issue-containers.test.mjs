@@ -507,7 +507,6 @@ const expression = (value, context) =>
 test('issue events reconcile one issue; the hourly schedule and manual runs sweep', (t) => {
   const definition = workflow('tracker-issue-states');
   assert.deepEqual(definition.on.issues.types, [
-    'opened',
     'reopened',
     'closed',
     'labeled',
@@ -565,5 +564,66 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
   assert.equal(
     run(''),
     'scripts/issue-triage.mjs\nscripts/issue-containers.mjs\n',
+  );
+});
+
+test('label events run only for labels that can change triage or containers', () => {
+  const job = workflow('tracker-issue-states').jobs['reconcile-issues'];
+  // Actions maps `labels.*.name` to the label names and compares strings
+  // without regard to case.
+  const condition = job.if.replace(
+    /labels\.\*\.name/g,
+    'labels.map((label) => label.name)',
+  );
+  const runs = (event_name, event = {}, overrides = {}) =>
+    expression(condition, {
+      startsWith: (value, prefix) =>
+        String(value ?? '')
+          .toLowerCase()
+          .startsWith(prefix.toLowerCase()),
+      contains: (list, value) =>
+        list.some((item) => item.toLowerCase() === value.toLowerCase()),
+      github: {
+        event_name,
+        repository: 'samlevin/mcc-stats-suite',
+        ref: 'refs/heads/main',
+        event: {
+          repository: { default_branch: 'main' },
+          issue: { number: 7, labels: [] },
+          ...event,
+        },
+        ...overrides,
+      },
+    });
+  const label = (action, name, labels = []) =>
+    runs('issues', {
+      action,
+      label: { name },
+      issue: { number: 7, labels: labels.map((name) => ({ name })) },
+    });
+  for (const action of ['labeled', 'unlabeled']) {
+    for (const name of [
+      'severity: high',
+      'severity: none',
+      'epic',
+      'automation: container-closed',
+    ])
+      assert.equal(label(action, name), true, `${action} ${name}`);
+    for (const name of ['bug', 'area: repository', 'type: task'])
+      assert.equal(label(action, name), false, `${action} ${name}`);
+    // Triage removes conflicting labels from epics, so any epic label counts.
+    assert.equal(label(action, 'bug', ['epic', 'bug']), true, action);
+  }
+  for (const action of ['reopened', 'closed'])
+    assert.equal(runs('issues', { action }), true, action);
+  for (const event_name of ['schedule', 'workflow_dispatch'])
+    assert.equal(runs(event_name), true, event_name);
+  assert.equal(
+    runs('workflow_dispatch', {}, { ref: 'refs/heads/feature' }),
+    false,
+  );
+  assert.equal(
+    runs('issues', { action: 'closed' }, { repository: 'someone/fork' }),
+    false,
   );
 });

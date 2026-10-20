@@ -49,6 +49,12 @@ jobs:
           CONTENT_NUMBER: ${{ github.event.issue.number }}
           DRY_RUN: 'false'
         run: node scripts/issue-project-membership.mjs
+      # The item exists now, so this is the issue's first triage run.
+      - name: Triage the new issue
+        env:
+          MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: node scripts/issue-triage.mjs --apply --issue "$ISSUE_NUMBER"
 
   add-missing-issues:
     name: Add missing open issues to MCC delivery

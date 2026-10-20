@@ -367,19 +367,40 @@ test('the workflow adds opened issues and sweeps on a schedule or by hand', () =
       'sparse-checkout': 'scripts',
     });
     const runs = job.steps.filter((step) => step.run);
-    assert.equal(runs.length, 1);
     assert.equal(runs[0].run, 'node scripts/issue-project-membership.mjs');
-    assert.equal(
-      runs[0].env.MCC_PROJECT_TOKEN,
-      '${{ secrets.MCC_PROJECT_TOKEN }}',
-    );
+    for (const run of runs)
+      assert.equal(
+        run.env.MCC_PROJECT_TOKEN,
+        '${{ secrets.MCC_PROJECT_TOKEN }}',
+      );
   }
+  assert.equal(
+    definition.jobs['add-missing-issues'].steps.filter((step) => step.run)
+      .length,
+    1,
+  );
 });
 
-test('opened issues run the single-issue job unchanged', () => {
+test('opened issues are added to the project, then triaged once', () => {
   const job = workflow('tracker-project-membership').jobs['add-to-project'];
   assert.equal(job.name, 'Add the new issue to MCC delivery');
-  const run = job.steps.find((step) => step.run);
+  const [run, triage, ...rest] = job.steps.filter((step) => step.run);
+  assert.deepEqual(rest, []);
+  assert.equal(triage.name, 'Triage the new issue');
+  assert.equal(
+    triage.run,
+    'node scripts/issue-triage.mjs --apply --issue "$ISSUE_NUMBER"',
+  );
+  assert.deepEqual(Object.keys(triage.env).sort(), [
+    'ISSUE_NUMBER',
+    'MCC_PROJECT_TOKEN',
+  ]);
+  assert.equal(
+    expression(triage.env.ISSUE_NUMBER, {
+      github: { event: { issue: { number: 7 } } },
+    }),
+    7,
+  );
   assert.deepEqual(Object.keys(run.env).sort(), [
     'CONTENT_NUMBER',
     'CONTENT_TYPE',
