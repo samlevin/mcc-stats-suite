@@ -49,6 +49,8 @@ function fixture({
   statuses = [],
   bodies = {},
   sizes = {},
+  labels = {},
+  mergeBase = base,
 } = {}) {
   const calls = [];
   const api = {
@@ -64,9 +66,13 @@ function fixture({
           title: `Issue ${n}`,
           body: bodies[n] ?? '',
           state: closed.includes(n) ? 'closed' : 'open',
-          labels: [{ name: 'severity: critical' }],
+          labels: (labels[n] ?? ['severity: critical']).map((name) => ({
+            name,
+          })),
         };
       }
+      if (path.includes('/compare/'))
+        return { merge_base_commit: { sha: mergeBase } };
       if (path.endsWith('/status')) return { statuses };
       throw new Error(`unexpected GET ${path}`);
     },
@@ -252,17 +258,17 @@ test('--next resumes first and reports an earlier foreign claim instead of skipp
 test('stack readiness requires an open ready PR, passing checks, and exact approval pair', () => {
   const pr = pull(1);
   const good = [{ status: 'completed', conclusion: 'success' }];
-  assert.equal(stackReady(pr, good, []), true);
+  assert.equal(stackReady(pr, good, [], base), true);
   for (const bad of [
     { ...pr, draft: true },
     { ...pr, state: 'closed' },
     { ...pr, body: 'Closes #1' },
     { ...pr, head: { sha: 'c'.repeat(40) } },
   ])
-    assert.equal(stackReady(bad, good, []), false);
-  assert.equal(stackReady(pr, [], []), false);
-  assert.equal(stackReady(pr, [{ status: 'in_progress' }], []), false);
-  assert.equal(stackReady(pr, good, [{ state: 'failure' }]), false);
+    assert.equal(stackReady(bad, good, [], base), false);
+  assert.equal(stackReady(pr, [], [], base), false);
+  assert.equal(stackReady(pr, [{ status: 'in_progress' }], [], base), false);
+  assert.equal(stackReady(pr, good, [{ state: 'failure' }], base), false);
   assert.equal(
     queue({ deps: { 1: [99] }, pulls: [pull(99)] }).rows.find(
       (row) => row.issue === 1,
@@ -451,10 +457,10 @@ test('existing exact-SHA approval wording remains valid and stale legacy approva
   const pr = pull(1);
   pr.body = `Closes #1\nPre-PR review: APPROVE for \`${base}..${head}\`.`;
   const checks = [{ status: 'completed', conclusion: 'success' }];
-  assert.equal(stackReady(pr, checks, []), true);
+  assert.equal(stackReady(pr, checks, [], base), true);
   assert.equal(
-    stackReady({ ...pr, base: { sha: 'c'.repeat(40) } }, checks, []),
-    false,
+    stackReady({ ...pr, base: { sha: 'c'.repeat(40) } }, checks, [], base),
+    true,
   );
 });
 
@@ -540,4 +546,115 @@ test('parallel dispatch is blocked for invalid groups, dependency chains, shared
         (row) => row.parallelWith.length === 0,
       ),
     );
+});
+
+test('advanced live PR base keeps approval when REST verifies the recorded base is an ancestor', () => {
+  const pr = { ...pull(99), base: { ref: 'main', sha: 'd'.repeat(40) } };
+  const { rows, calls } = queue({ deps: { 1: [99] }, pulls: [pr] });
+  const row = rows.find((row) => row.issue === 1);
+  assert.equal(row.state, 'ready');
+  assert.equal(row.prerequisites[0].base, base);
+  assert.ok(calls.includes(`${repo}/compare/${base}...${head}`));
+  assert.equal(
+    queue({
+      deps: { 1: [99] },
+      pulls: [pr],
+      mergeBase: 'e'.repeat(40),
+    }).rows.find((row) => row.issue === 1).state,
+    'waiting',
+  );
+  assert.equal(
+    stackReady(pr, [{ status: 'completed', conclusion: 'success' }], []),
+    false,
+    'unverified ancestry cannot qualify',
+  );
+});
+
+test('every member of an overlapping dependency cycle is marked, including self cycles', () => {
+  const { rows } = queue({
+    tree: { 10: [1, 2, 3, 4, 5] },
+    deps: { 1: [2, 3], 2: [1], 3: [2], 4: [4] },
+  });
+  for (const n of [1, 2, 3, 4])
+    assert.match(rows.find((row) => row.issue === n).blocker, /BLOCKED: cycle/);
+  assert.equal(rows.find((row) => row.issue === 5).state, 'ready');
+});
+
+const laterHigh = () => ({
+  effort: 'high',
+  rule: 'H3-demonstrated-limit',
+  later: true,
+  question: 'Which ordering preserves evidence?',
+  evidence: 'case race-1 and medium attempt',
+  reason: 'The ordering design must change.',
+  criteria: Object.fromEntries(
+    policy.implementationEffort.rules['H3-demonstrated-limit'].requires.map(
+      (key) => [key, true],
+    ),
+  ),
+});
+const effortComment = (record) =>
+  comment(`<!-- mcc-effort ${JSON.stringify(record)} -->`);
+
+test('approved later effort persists through fresh ledgers and recovery dispatch metadata', () => {
+  const comments = {
+    1: [
+      effortComment({ effort: 'medium', rule: 'default' }),
+      effortComment(laterHigh()),
+    ],
+  };
+  for (let run = 0; run < 2; run++) {
+    const { rows } = queue({ comments });
+    assert.equal(rows[0].effort.effort, 'high');
+    assert.equal(rows[0].effort.later, true);
+    assert.match(
+      ledgerLine(rows[0]),
+      /effort=high; rule=H3-demonstrated-limit/,
+    );
+  }
+});
+
+test('malformed per-leaf records and duplicate escalations block only their own row', () => {
+  for (const bad of [
+    [comment('<!-- mcc-claim {bad} -->')],
+    [comment('<!-- mcc-effort {bad -->')],
+    [effortComment({ rule: 'user override', effort: 'high' })],
+    [effortComment(laterHigh()), effortComment(laterHigh())],
+  ]) {
+    const { rows, errors } = queue({ comments: { 1: bad } });
+    assert.equal(rows.length, 3);
+    assert.match(rows[0].blocker, /BLOCKED: issue #1 invalid data:/);
+    assert.equal(rows[1].state, 'ready');
+    assert.equal(rows[2].state, 'ready');
+    assert.equal(errors.length, 1);
+    assert.equal(nextLeaf(rows).issue, 2);
+  }
+});
+
+test('real issue labels, project Size, and written implementation notes never independently choose high', () => {
+  for (const scenario of [
+    {
+      labels: ['area: infrastructure', 'severity: critical'],
+      note: 'Apply the specified account-check pattern.',
+    },
+    {
+      labels: ['package: contracts', 'bug', 'severity: high'],
+      note: 'Perform the specified mechanical update across ten consumers.',
+    },
+    {
+      labels: ['bug', 'severity: critical'],
+      note: 'Two review rounds found only formatting and routine test fixes; retain the written design.',
+    },
+  ]) {
+    const { rows } = queue({
+      labels: { 1: scenario.labels },
+      sizes: { 1: 'L' },
+      bodies: {
+        1: `### Implementation notes\n\n${scenario.note}\nFiles: \`infrastructure/main.tf\`\nProvides: specified pattern\n`,
+      },
+    });
+    assert.equal(rows[0].size, 'L');
+    assert.equal(rows[0].effort.effort, 'medium');
+    assert.equal(rows[0].effort.rule, 'default');
+  }
 });

@@ -1786,25 +1786,7 @@ for (const rule of [
   });
 }
 
-test('specified patterns, metadata, and repeated routine corrections stay medium', () => {
-  for (const metadata of [
-    {
-      labels: ['infrastructure', 'risk high'],
-      size: 'L',
-      design: 'specified established account check',
-    },
-    {
-      labels: ['contracts', 'severity critical'],
-      consumers: 10,
-      design: 'mechanical consumer update',
-    },
-    {
-      reviewRounds: 2,
-      failures: ['formatting', 'environment', 'routine test fix'],
-    },
-    { unfamiliar: true, fileCount: 50, clearPlan: true },
-  ])
-    assert.equal(implementationEffort(policy, metadata).effort, 'medium');
+test('specified mechanisms and routine corrections fail the high criteria', () => {
   assert.equal(
     implementationEffort(policy, {
       decision: {
@@ -1886,5 +1868,27 @@ test('later escalation announces evidence and explicitly applies high once witho
         }),
       /Only one automatic/,
     );
+  }
+});
+
+test('delivery instructions persist later effort decisions and advance after a released blocker', () => {
+  const files = render();
+  for (const path of IMPLEMENT)
+    assert.match(
+      section(files.get(path), 'Later escalation'),
+      /parent posts exactly one later-escalation.*later:true.*question.*criteria/,
+    );
+  for (const path of QUEUE) {
+    const content = files.get(path);
+    assert.match(
+      section(content, 'Effort records'),
+      /parent posts exactly one new decision comment/,
+    );
+    assert.match(content, /"later":true/);
+    assert.match(
+      content,
+      /rerun the full ledger rather than blindly using `--next`/,
+    );
+    assert.match(content, /saved fixed-result file outside tracked paths/);
   }
 });

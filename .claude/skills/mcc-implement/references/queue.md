@@ -15,11 +15,29 @@ The script prints one ledger line per leaf with state, effort, rule, evidence, r
 - `waiting`: a blocker is unmet. Closed blockers count as met. An open blocker PR must be ready for review, pass checks, and carry exact-SHA pre-PR approval under [delivery.md](delivery.md#gate). Cycles and inaccessible dependencies stay BLOCKED.
 - `ready`: no unmet blocker. The implementer still runs [delivery.md](delivery.md)'s gate before claiming.
 
-`--next` selects a `resume` leaf before `ready` leaves. Claim records use `<!-- mcc-claim {"agent":"<delivery-agent>","branch":"<branch>","worktree":"<path>"} -->`; release uses the same agent with `"released":true`. Legacy claim comments are recognized too. Effort records follow the rubric and format in mcc-implement. Missing or nonqualifying decisions select medium; metadata never escalates effort. PRs record approval as `Pre-PR review: APPROVE; base=<full SHA>; head=<full SHA>`. Existing `Pre-PR review: APPROVE for base..head` records are also accepted, with optional Markdown around the pair. Passing checks with an absent or stale approval do not permit stacking.
+`--next` selects a `resume` leaf before `ready` leaves. Claim records use `<!-- mcc-claim {"agent":"<delivery-agent>","branch":"<branch>","worktree":"<path>"} -->`; release uses the same agent with `"released":true`. Legacy claim comments are recognized too. Effort records use [Effort records](#effort-records) below. Missing or nonqualifying decisions select medium; metadata never escalates effort. PRs record approval as `Pre-PR review: APPROVE; base=<full SHA>; head=<full SHA>`. Existing `Pre-PR review: APPROVE for base..head` records are also accepted, with optional Markdown around the pair. The approval head must match the current PR head, and a REST compare must verify that the recorded approval base is an ancestor of that head. The live PR base-branch tip may advance without invalidating that recorded pair. Passing checks with an absent approval, changed head, or unverified ancestry do not permit stacking.
+
+## Effort records
+
+The implementer includes the initial decision with its one claim comment. A default decision is:
+
+```html
+<!-- mcc-effort {"effort":"medium","rule":"default","evidence":"ticket/spec","reason":"The written plan resolves the design."} -->
+```
+
+A user override uses `rule:"user override"`, the actual selected `effort`, and its explicit constraint as `evidence` and `reason`. Explicit medium prevents automatic escalation.
+
+After approving a later escalation and announcing its evidence, the parent posts exactly one new decision comment before redispatch. This is exempt from the no-repeat-claim rule and never repeats the claim. The single-line JSON record includes `later:true`, the unresolved `question`, evidence, why medium is insufficient, and the matching policy rule's required `criteria` keys set to true. For example:
+
+```html
+<!-- mcc-effort {"effort":"high","rule":"H3-demonstrated-limit","later":true,"question":"How can concurrent writes preserve the specified ordering?","evidence":"Reproducible case race-1 and the medium attempt","reason":"The attempt requires revising the ordering design.","criteria":{"mediumAttempt":true,"reproducibleFailureOrFinding":true,"designRevisionRequired":true,"unresolvedReasoning":true}} -->
+```
+
+Post with `gh api repos/samlevin/mcc-stats-suite/issues/<N>/comments -F body=@<file>`. Keep the explanation with the record. Reruns and recovery reuse it, preserving high and the one-transition count; do not post a duplicate. A malformed claim or effort record blocks only its leaf, and the script still prints the other rows.
 
 ## Deliver
 
-Delivery is sequential by default. Dispatch the `--next` resume or ready leaf to one mcc-implementer, record its result before you start the next leaf, and rerun the script after each result and when resuming. An L leaf or failed gate gets planning or decomposition through mcc-create-github-issue within accepted scope, or a recorded blocker. Never invent epics or relax gates. An explicit `inline` small leaf or rework follows the exception in mcc-implement; it does not make a container inline.
+Delivery is sequential by default. Dispatch the `--next` resume or ready leaf to one mcc-implementer, record its result before you start the next leaf, and rerun the script after each result and when resuming. After a recorded BLOCKED result and claim release, rerun the full ledger rather than blindly using `--next`. Select the next resume or ready row excluding issue numbers recorded BLOCKED in this delivery's saved fixed-result file outside tracked paths. Keep those blocked outcomes in that file, not conversation queue state, and retry only when new evidence resolves the blocker. An earlier `owned elsewhere` row still requires the person's decision and is never silently skipped. An L leaf or failed gate gets planning or decomposition through mcc-create-github-issue within accepted scope, or a recorded blocker. Never invent epics or relax gates. An explicit `inline` small leaf or rework follows the exception in mcc-implement; it does not make a container inline.
 
 The main thread reads only the ledger and fixed result fields during normal delivery. Limit it to the queue script, spawning, recording results, and assessing compact escalation requests against the rubric. Do not read source, diffs, or detailed review reports. Read blocker details only when needed to explain a person's decision. The implementer reads the issue, verifies prerequisites, handles review findings, and owns stack operations. A person's correction continues in that same implementer at its existing effort. Replacement and later escalation follow mcc-implement, preserving explicit constraints and existing retry and two-round limits.
 

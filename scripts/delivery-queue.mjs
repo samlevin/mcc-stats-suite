@@ -8,7 +8,7 @@ const TRUSTED = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
 const text = (value) =>
   typeof value === 'string' ? value : (value?.raw ?? '');
 
-// Every invocation refetches GitHub. The map stores responses only for this run.
+// Every invocation refetches GitHub; this REST client keeps no response cache.
 export function restClient(run = execFileSync) {
   const get = (path, paginate = false) => {
     try {
@@ -59,7 +59,7 @@ export function claimRecord(comments) {
   for (const comment of comments) {
     if (!TRUSTED.has(comment.author_association)) continue;
     const body = comment.body ?? '';
-    const record = /<!-- mcc-claim (\{[^\n]*\}) -->/.exec(body);
+    const record = /<!-- mcc-claim ([^\n]*?) -->/.exec(body);
     if (record) {
       const value = JSON.parse(record[1]);
       if (value.released) {
@@ -93,7 +93,7 @@ export function effortRecord(comments, policy) {
   let transitions = 0;
   for (const comment of comments) {
     if (!TRUSTED.has(comment.author_association)) continue;
-    const match = /<!-- mcc-effort (\{[^\n]*\}) -->/.exec(comment.body ?? '');
+    const match = /<!-- mcc-effort ([^\n]*?) -->/.exec(comment.body ?? '');
     if (!match) continue;
     const record = JSON.parse(match[1]);
     if (record.rule === 'user override') constraint = record;
@@ -126,22 +126,39 @@ export function orderLeaves(leaves, nodes) {
   const remaining = new Set(leaves);
   const result = [];
   const cycles = new Map();
-  const visiting = [];
-  const seen = new Set();
+  const indices = new Map();
+  const low = new Map();
+  const stack = [];
+  const active = new Set();
   function visit(number) {
-    const start = visiting.indexOf(number);
-    if (start >= 0) {
-      const cycle = [...visiting.slice(start), number];
-      for (const member of cycle) cycles.set(member, cycle);
-      return;
+    indices.set(number, indices.size);
+    low.set(number, indices.get(number));
+    stack.push(number);
+    active.add(number);
+    for (const dep of nodes.get(number)?.dependencies ?? []) {
+      if (!indices.has(dep.number)) {
+        visit(dep.number);
+        low.set(number, Math.min(low.get(number), low.get(dep.number)));
+      } else if (active.has(dep.number))
+        low.set(number, Math.min(low.get(number), indices.get(dep.number)));
     }
-    if (seen.has(number)) return;
-    visiting.push(number);
-    for (const dep of nodes.get(number)?.dependencies ?? []) visit(dep.number);
-    visiting.pop();
-    seen.add(number);
+    if (low.get(number) !== indices.get(number)) return;
+    const component = [];
+    let member;
+    do {
+      member = stack.pop();
+      active.delete(member);
+      component.push(member);
+    } while (member !== number);
+    const selfCycle = (nodes.get(number)?.dependencies ?? []).some(
+      (dep) => dep.number === number,
+    );
+    if (component.length > 1 || selfCycle) {
+      component.sort((a, b) => a - b);
+      for (const n of component) cycles.set(n, component);
+    }
   }
-  for (const number of leaves) visit(number);
+  for (const number of leaves) if (!indices.has(number)) visit(number);
   // Kahn's algorithm gives a numeric tie break among currently eligible leaves.
   while (remaining.size) {
     function hasRemainingDependency(number, visited = new Set()) {
@@ -165,16 +182,23 @@ export function orderLeaves(leaves, nodes) {
   return { order: result, cycles };
 }
 
-export function stackReady(pr, checks, statuses) {
-  if (!pr || pr.state !== 'open' || pr.draft) return false;
-  const approval =
+export function approvalPair(pr) {
+  const match =
     /Pre-PR review: APPROVE(?:; base=([0-9a-f]{40}); head=([0-9a-f]{40})| for [`*_]*([0-9a-f]{40})\.\.([0-9a-f]{40}))/.exec(
-      pr.body ?? '',
+      pr?.body ?? '',
     );
+  return match
+    ? { base: match[1] ?? match[3], head: match[2] ?? match[4] }
+    : null;
+}
+
+export function stackReady(pr, checks, statuses, verifiedAncestor) {
+  if (!pr || pr.state !== 'open' || pr.draft) return false;
+  const approval = approvalPair(pr);
   if (
     !approval ||
-    (approval[1] ?? approval[3]) !== pr.base.sha ||
-    (approval[2] ?? approval[4]) !== pr.head.sha
+    approval.head !== pr.head.sha ||
+    approval.base !== verifiedAncestor
   )
     return false;
   const all = [
@@ -394,9 +418,12 @@ export function deliveryQueue(
     prs.filter((pr) => closingIssues(pr.body, repository).includes(n));
   const merged = (n) => closing(n).find((pr) => pr.merged_at);
   const open = (n) => closing(n).find((pr) => pr.state === 'open');
+  // Cache eligibility only within this ledger run.
   const checks = new Map();
   const qualifies = (pr) => {
     if (!pr || pr.draft) return false;
+    const approval = approvalPair(pr);
+    if (!approval || approval.head !== pr.head.sha) return false;
     const identity = `${pr.number}:${pr.base.sha}:${pr.head.sha}`;
     if (!checks.has(identity))
       checks.set(
@@ -405,101 +432,115 @@ export function deliveryQueue(
           pr,
           api.list(`${repo}/commits/${pr.head.sha}/check-runs`, 'check_runs'),
           api.get(`${repo}/commits/${pr.head.sha}/status`).statuses ?? [],
+          api.get(`${repo}/compare/${approval.base}...${pr.head.sha}`)
+            .merge_base_commit?.sha,
         ),
       );
     return checks.get(identity);
   };
   const { order, cycles } = orderLeaves(leaves, nodes);
   const rows = order.map((n) => {
-    const node = nodes.get(n);
-    if (node.error)
+    try {
+      const node = nodes.get(n);
+      if (node.error)
+        return {
+          issue: n,
+          state: 'waiting',
+          blocker: `BLOCKED: ${node.error}`,
+          effort: implementationEffort(policy),
+        };
+      const item = items.find(
+        (entry) =>
+          entry.content?.number === n &&
+          entry.content?.repository_url?.endsWith(`/repos/${repository}`),
+      );
+      const metadata = fieldValues(item, fields);
+      const claim = claimRecord(node.comments);
+      const pr = merged(n) ?? open(n);
+      const branch =
+        claim?.branch ??
+        branches.find((entry) => new RegExp(`^agent/${n}-`).test(entry.name))
+          ?.name;
+      const row = {
+        issue: n,
+        state: 'ready',
+        title: node.issue.title,
+        branch,
+        head: branches.find((entry) => entry.name === branch)?.commit.sha,
+        pr: pr?.html_url,
+        projectState: metadata.Status ?? 'unset',
+        size: metadata.Size,
+        priority: metadata.Priority ?? 'P2',
+        claim,
+        effort: effortRecord(node.comments, policy),
+        dependencies: node.dependencies.map((dep) => dep.number),
+        ownership: ownershipNotes(node.issue.body),
+        group: 'none',
+        base: { branch: 'main', sha: trunk.sha },
+        prerequisites: node.dependencies.map((dep) => {
+          const candidate = open(dep.number);
+          const met =
+            nodes.get(dep.number)?.issue?.state === 'closed' ||
+            Boolean(merged(dep.number));
+          return {
+            issue: dep.number,
+            repository,
+            met,
+            pr: candidate?.html_url,
+            branch: candidate?.head.ref,
+            head: candidate?.head.sha,
+            base: approvalPair(candidate)?.base,
+            stackReady: !met && qualifies(candidate),
+          };
+        }),
+      };
+      if (node.issue.state === 'closed' || merged(n)) row.state = 'done';
+      else if (open(n)) row.state = 'in review';
+      else if (claim) {
+        const owned =
+          actor &&
+          claim.agent === actor &&
+          worktrees.some(
+            (path) =>
+              path === claim.worktree || path.endsWith(`/${claim.worktree}`),
+          );
+        row.state =
+          Number(resume) === n || owned ? 'resume' : 'owned elsewhere';
+      } else {
+        const unmet = node.dependencies.filter(
+          (dep) =>
+            nodes.get(dep.number)?.issue?.state !== 'closed' &&
+            !merged(dep.number) &&
+            !qualifies(open(dep.number)),
+        );
+        if (unmet.length) {
+          row.state = 'waiting';
+          row.blocker = `unmet blockers: ${unmet.map((dep) => `#${dep.number}`).join(', ')}`;
+        }
+      }
+      const openBases = row.prerequisites.filter((entry) => entry.stackReady);
+      if (openBases.length === 1)
+        row.base = { branch: openBases[0].branch, sha: openBases[0].head };
+      if (openBases.length > 1 && ['ready', 'resume'].includes(row.state)) {
+        row.state = 'waiting';
+        row.blocker =
+          'multiple unmerged prerequisite branches require a stacking decision';
+      }
+      if (cycles.has(n)) {
+        row.state = 'waiting';
+        row.blocker = `BLOCKED: cycle component [${cycles.get(n).join(', ')}]`;
+      }
+      return row;
+    } catch (error) {
+      const message = `issue #${n} invalid data: ${error.message}`;
+      errors.push(message);
       return {
         issue: n,
         state: 'waiting',
-        blocker: `BLOCKED: ${node.error}`,
+        blocker: `BLOCKED: ${message}`,
         effort: implementationEffort(policy),
       };
-    const item = items.find(
-      (entry) =>
-        entry.content?.number === n &&
-        entry.content?.repository_url?.endsWith(`/repos/${repository}`),
-    );
-    const metadata = fieldValues(item, fields);
-    const claim = claimRecord(node.comments);
-    const pr = merged(n) ?? open(n);
-    const branch =
-      claim?.branch ??
-      branches.find((entry) => new RegExp(`^agent/${n}-`).test(entry.name))
-        ?.name;
-    const row = {
-      issue: n,
-      state: 'ready',
-      title: node.issue.title,
-      branch,
-      head: branches.find((entry) => entry.name === branch)?.commit.sha,
-      pr: pr?.html_url,
-      projectState: metadata.Status ?? 'unset',
-      size: metadata.Size,
-      priority: metadata.Priority ?? 'P2',
-      claim,
-      effort: effortRecord(node.comments, policy),
-      dependencies: node.dependencies.map((dep) => dep.number),
-      ownership: ownershipNotes(node.issue.body),
-      group: 'none',
-      base: { branch: 'main', sha: trunk.sha },
-      prerequisites: node.dependencies.map((dep) => {
-        const candidate = open(dep.number);
-        const met =
-          nodes.get(dep.number)?.issue?.state === 'closed' ||
-          Boolean(merged(dep.number));
-        return {
-          issue: dep.number,
-          repository,
-          met,
-          pr: candidate?.html_url,
-          branch: candidate?.head.ref,
-          head: candidate?.head.sha,
-          base: candidate?.base.sha,
-          stackReady: !met && qualifies(candidate),
-        };
-      }),
-    };
-    if (node.issue.state === 'closed' || merged(n)) row.state = 'done';
-    else if (open(n)) row.state = 'in review';
-    else if (claim) {
-      const owned =
-        actor &&
-        claim.agent === actor &&
-        worktrees.some(
-          (path) =>
-            path === claim.worktree || path.endsWith(`/${claim.worktree}`),
-        );
-      row.state = Number(resume) === n || owned ? 'resume' : 'owned elsewhere';
-    } else {
-      const unmet = node.dependencies.filter(
-        (dep) =>
-          nodes.get(dep.number)?.issue?.state !== 'closed' &&
-          !merged(dep.number) &&
-          !qualifies(open(dep.number)),
-      );
-      if (unmet.length) {
-        row.state = 'waiting';
-        row.blocker = `unmet blockers: ${unmet.map((dep) => `#${dep.number}`).join(', ')}`;
-      }
     }
-    const openBases = row.prerequisites.filter((entry) => entry.stackReady);
-    if (openBases.length === 1)
-      row.base = { branch: openBases[0].branch, sha: openBases[0].head };
-    if (openBases.length > 1 && ['ready', 'resume'].includes(row.state)) {
-      row.state = 'waiting';
-      row.blocker =
-        'multiple unmerged prerequisite branches require a stacking decision';
-    }
-    if (cycles.has(n)) {
-      row.state = 'waiting';
-      row.blocker = `BLOCKED: cycle ${cycles.get(n).join(' -> ')}`;
-    }
-    return row;
   });
   parallelMetadata(nodes, rows, merged);
   return { rows, errors };

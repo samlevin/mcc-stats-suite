@@ -44,7 +44,7 @@ While editing, run focused tests for changed behavior. Before the first push, ru
 
 ## Escalation
 
-When a medium attempt exposes a qualifying unresolved correctness problem, stop implementation and send the parent a compact escalation request: stable rubric rule, evidence, why medium with the written plan is insufficient, branch/head, completed checks, and open work. Do not silently increase effort. Explicit medium prevents automatic escalation. The parent validates and announces the decision under {{prefix}}implement before applying explicit runtime settings; allow at most one automatic medium-to-high transition per leaf. You never spawn another implementer. Ordinary corrections and recovery retain the existing effort, and escalation adds no retries or review rounds.
+When a medium attempt exposes a qualifying unresolved correctness problem, stop implementation and send the parent a compact escalation request: stable rubric rule, evidence, why medium with the written plan is insufficient, branch/head, completed checks, and open work. Do not silently increase effort. Explicit medium prevents automatic escalation. The parent validates and announces the decision, then posts exactly one later-escalation record with `later:true`, `question`, and matching `criteria` under [queue.md](queue.md#effort-records) before applying explicit runtime settings. This meaningful decision comment is exempt from the no-repeat-claim rule and is reused on recovery; allow at most one automatic medium-to-high transition per leaf. You never spawn another implementer. Ordinary corrections and recovery retain the existing effort, and escalation adds no retries or review rounds.
 
 ## Stack
 
