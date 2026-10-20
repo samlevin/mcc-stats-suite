@@ -15,6 +15,9 @@ import {
   check,
   generate,
   loadPolicy,
+  implementationDispatch,
+  implementationEffort,
+  effortAnnouncement,
   parseReviewReport,
   parseSource,
   placeholders,
@@ -717,69 +720,50 @@ test('removed coordination roles cannot be selected through any entry point', ()
   }
 });
 
-test('the implement entry point delivers a leaf inline by default in both tools', () => {
+test('default delivery dispatches isolated implementers and keeps the main thread thin', () => {
   const files = render();
   for (const path of IMPLEMENT) {
     const content = files.get(path);
-    assert.ok(
-      lineWith(content, 'You are the delivery owner', 'in this thread'),
-      `${path} must make the invoking thread the owner`,
-    );
-    assert.ok(
-      lineWith(
-        content,
-        /^\| Leaf issue \|/,
-        'inline in this thread',
-        'references/delivery.md',
-      ),
-      `${path} must route a leaf inline to the delivery procedure`,
-    );
-    assert.ok(
-      lineWith(
-        content,
-        /^\| PR rework \|/,
-        'inline in this thread',
-        'references/delivery.md',
-      ),
-      `${path} must route PR rework inline`,
-    );
-    assert.ok(
-      lineWith(
-        content,
-        /^\| Container or epic \|/,
-        'sequential dependency queue in this thread',
-        'references/queue.md',
-      ),
-      `${path} must route a container to the queue in this thread`,
-    );
-    // An implementer is spawned only from the exception section.
-    const exception = section(content, 'Isolated implementer exception');
-    for (const heading of ['Resolve the target', 'Pick the mode', 'Report'])
-      assert.doesNotMatch(
-        section(content, heading),
-        /subagent_type|spawn_agent/,
-        `${path} ${heading}`,
+    for (const target of ['Leaf issue', 'PR rework'])
+      assert.ok(
+        lineWith(
+          content,
+          `| ${target} |`,
+          `isolated ${PREFIX}implementer`,
+          'references/delivery.md',
+        ),
+        path,
       );
-    assert.match(exception, /By default you deliver the work yourself/);
-    assert.match(exception, /never spawns another implementer/);
-    // Inline skills cannot change the session model, and say so.
-    assert.ok(
-      lineWith(
-        section(content, 'Settings'),
-        'cannot change them',
-        'Advisory policy:',
-      ),
-      `${path} must report the main-thread policy as advisory`,
-    );
-    assert.doesNotMatch(content, /^model:/m, path);
+    for (const requirement of [
+      'explicit `inline` keyword',
+      'queue ledger and fixed result fields only',
+      'Do not read source or diffs',
+      'detailed review reports',
+      'scripts/delivery-queue.mjs',
+      "leaf's ledger line",
+      'actual base branch and SHA',
+      'Owned by other running leaves:',
+      'reads its own issue',
+      'never spawns another implementer',
+    ])
+      assert.ok(content.includes(requirement), `${path}: ${requirement}`);
+    assert.doesNotMatch(content, /concrete-benefit|concrete benefit/);
+    assert.match(content, /session settings.*cannot change/s);
+    assert.match(content, /Advisory policy:/);
+    assert.doesNotMatch(content, /^model:/m);
   }
   const [claude, codex] = IMPLEMENT.map((path) =>
-    section(files.get(path), 'Isolated implementer exception'),
+    section(files.get(path), 'Dispatch and continuation'),
   );
   assert.match(claude, new RegExp(`subagent_type: ${PREFIX}implementer`));
+  assert.match(claude, /`model` and `effort` explicitly copied/);
+  assert.match(
+    codex,
+    /`agent_type`, `model`, and `reasoning_effort` explicitly copied/,
+  );
   assert.match(codex, /fork_turns: "none"/);
-  assert.doesNotMatch(claude, /spawn_agent/);
-  assert.doesNotMatch(codex, /subagent_type/);
+  assert.match(claude, /SendMessage/);
+  assert.match(codex, /continue mechanism/);
 });
 
 test('a container runs as a dependency queue in the owning thread', () => {
@@ -1623,26 +1607,39 @@ test('evidence reuse retains complete relevant output and meaningful validation'
   }
 });
 
-test('optional implementation delegation requires a benefit beyond task size', () => {
+test('queue recomputes and main reads only fixed results until a blocker needs a person', () => {
   const files = render();
-  for (const path of IMPLEMENT) {
-    const exception = section(
-      files.get(path),
-      'Isolated implementer exception',
-    );
-    assert.match(exception, /request says `isolated`/);
-    assert.match(exception, /name a concrete benefit/);
-    assert.match(exception, /Task size alone does not justify delegation/);
-    assert.match(exception, /bounded assignment/);
-  }
   for (const path of QUEUE) {
-    assert.match(
-      section(files.get(path), 'Deliver'),
-      /concrete-benefit delegation rule/,
-    );
-    const parallel = section(files.get(path), 'Parallel exception');
-    assert.match(parallel, /explicitly asked for parallel delivery/);
-    assert.match(parallel, /different groups/);
+    const content = files.get(path);
+    for (const rule of [
+      'scripts/delivery-queue.mjs',
+      'refetches',
+      'fixed result fields',
+      'Do not read source, diffs, or detailed review reports',
+      'rerun the script after each result',
+      'Ask the person before taking it over',
+    ])
+      assert.ok(content.includes(rule), `${path}: ${rule}`);
+  }
+  for (const path of IMPLEMENT) {
+    const content = files.get(path);
+    const escalation = section(content, 'Later escalation');
+    for (const rule of [
+      'at most one automatic medium-to-high transition',
+      'end the old agent',
+      '--effort high',
+      'explicit spawn settings',
+      'no',
+      'two-round',
+    ])
+      assert.ok(
+        (escalation + section(content, 'Settings')).includes(rule),
+        `${path}: ${rule}`,
+      );
+    assert.match(content, /first progress message/);
+    assert.match(content, /Implementation effort: medium ->/);
+    assert.match(content, /Implementation effort: medium \(default\)/);
+    assert.match(content, /reads only the verdict and blocker lines/);
   }
 });
 
@@ -1709,4 +1706,185 @@ test('spec plans require offline validation, triage, confirmation and journaled 
     'utf8',
   );
   assert.match(role, /spec-to-issues for a whole delivery plan/);
+});
+
+test('implementation is medium while every review dispatch has its own high settings', () => {
+  for (const tool of TOOLS) {
+    const packet = implementationDispatch(policy, { tool, issue: 1 });
+    assert.equal(packet.implementer.effort, 'medium');
+    assert.equal(packet.reviewer.effort, 'high');
+    assert.equal(
+      packet.implementer.model,
+      tool === 'claude' ? 'claude-opus-5-5' : 'gpt-6.1-sol',
+    );
+    assert.equal(
+      packet.reviewer.model,
+      tool === 'claude' ? 'opus' : 'gpt-6.1-sol',
+    );
+    for (const role of ['implementer', 'reviewer']) {
+      assert.equal(packet[role].spawn.model, packet[role].model);
+      assert.equal(
+        packet[role].spawn[tool === 'claude' ? 'effort' : 'reasoning_effort'],
+        packet[role].effort,
+      );
+      if (tool === 'codex') assert.equal(packet[role].spawn.fork_turns, 'none');
+    }
+    assert.equal(
+      packet.announcement,
+      'Implementation effort: medium (default)',
+    );
+  }
+  const files = render();
+  for (const path of DELIVERY) {
+    const review = section(files.get(path), 'Pre-PR review');
+    assert.match(review, /--role code-reviewer/);
+    if (path.startsWith('.claude'))
+      assert.match(review, /`model` and `effort` explicitly/);
+    else {
+      assert.match(review, /`agent_type`, `model`, and `reasoning_effort`/);
+      assert.match(review, /fork_turns: "none"/);
+    }
+  }
+});
+
+const assessment = (rule) => ({
+  effort: 'high',
+  rule,
+  question: 'How do the unresolved constraints preserve correctness?',
+  evidence: 'spec §4 and failing case race-1',
+  reason: 'The supplied plan leaves the competing write orders unresolved.',
+  criteria: Object.fromEntries(
+    policy.implementationEffort.rules[rule].requires.map((key) => [key, true]),
+  ),
+});
+for (const rule of [
+  'H1-boundary',
+  'H2-coupled-design',
+  'H3-demonstrated-limit',
+]) {
+  test(`${rule} requires every criterion and concrete evidence`, () => {
+    const decision = assessment(rule);
+    assert.equal(implementationEffort(policy, { decision }).effort, 'high');
+    for (const key of policy.implementationEffort.rules[rule].requires)
+      assert.equal(
+        implementationEffort(policy, {
+          decision: {
+            ...decision,
+            criteria: { ...decision.criteria, [key]: false },
+          },
+        }).effort,
+        'medium',
+        key,
+      );
+    for (const key of ['evidence', 'reason', 'question'])
+      assert.equal(
+        implementationEffort(policy, { decision: { ...decision, [key]: '' } })
+          .effort,
+        'medium',
+        key,
+      );
+  });
+}
+
+test('specified patterns, metadata, and repeated routine corrections stay medium', () => {
+  for (const metadata of [
+    {
+      labels: ['infrastructure', 'risk high'],
+      size: 'L',
+      design: 'specified established account check',
+    },
+    {
+      labels: ['contracts', 'severity critical'],
+      consumers: 10,
+      design: 'mechanical consumer update',
+    },
+    {
+      reviewRounds: 2,
+      failures: ['formatting', 'environment', 'routine test fix'],
+    },
+    { unfamiliar: true, fileCount: 50, clearPlan: true },
+  ])
+    assert.equal(implementationEffort(policy, metadata).effort, 'medium');
+  assert.equal(
+    implementationEffort(policy, {
+      decision: {
+        ...assessment('H1-boundary'),
+        criteria: {
+          ...assessment('H1-boundary').criteria,
+          mechanismUnresolved: false,
+        },
+      },
+    }).effort,
+    'medium',
+  );
+  assert.equal(
+    implementationEffort(policy, {
+      decision: {
+        ...assessment('H3-demonstrated-limit'),
+        criteria: {
+          ...assessment('H3-demonstrated-limit').criteria,
+          designRevisionRequired: false,
+        },
+      },
+    }).effort,
+    'medium',
+  );
+});
+
+test('explicit medium prevents escalation and missing inputs remain blockers', () => {
+  const packet = implementationDispatch(policy, {
+    tool: 'codex',
+    issue: 2,
+    effort: 'medium',
+    decision: assessment('H2-coupled-design'),
+  });
+  assert.equal(packet.implementer.effort, 'medium');
+  assert.equal(packet.selected.rule, 'user override');
+  assert.equal(packet.reviewer.effort, 'high');
+  for (const blocker of policy.implementationEffort.blockers)
+    assert.throws(
+      () =>
+        implementationDispatch(policy, {
+          tool: 'codex',
+          blocker,
+          decision: assessment('H1-boundary'),
+        }),
+      new RegExp(blocker),
+    );
+});
+
+test('later escalation announces evidence and explicitly applies high once without new review rounds', () => {
+  for (const tool of TOOLS) {
+    const decision = { ...assessment('H3-demonstrated-limit'), later: true };
+    const packet = implementationDispatch(policy, {
+      tool,
+      issue: 7,
+      decision,
+      transitions: 0,
+    });
+    assert.equal(
+      packet.implementer.spawn[
+        tool === 'codex' ? 'reasoning_effort' : 'effort'
+      ],
+      'high',
+    );
+    assert.equal(packet.implementer.source.effort, 'override');
+    assert.equal(packet.reviewer.effort, 'high');
+    assert.equal(packet.announcement, effortAnnouncement(7, decision));
+    assert.match(
+      packet.announcement,
+      /medium -> high; issue: #7; rule: H3-demonstrated-limit; evidence: spec/,
+    );
+    assert.match(packet.announcement, /reason: The supplied plan/);
+    assert.throws(
+      () =>
+        implementationDispatch(policy, {
+          tool,
+          issue: 7,
+          decision,
+          transitions: 1,
+        }),
+      /Only one automatic/,
+    );
+  }
 });

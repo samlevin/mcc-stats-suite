@@ -197,6 +197,97 @@ export function resolve(
   return resolved;
 }
 
+// Recorded effort assessments contain evidence, never a score derived from labels.
+export function implementationEffort(
+  policy,
+  { override, decision, transitions = 0, blocker } = {},
+) {
+  const rubric = policy.implementationEffort;
+  const ordinary = {
+    effort: rubric.default,
+    rule: 'default',
+    evidence: 'ticket/spec',
+    reason: 'The written plan resolves the design.',
+  };
+  if (blocker) return { ...ordinary, blocker };
+  if (override)
+    return {
+      effort: override,
+      rule: 'user override',
+      evidence: 'explicit user constraint',
+      reason: 'The request selects this effort.',
+    };
+  if (!decision) return ordinary;
+  if (decision.rule === 'user override') {
+    if (
+      !decision.evidence?.trim() ||
+      !decision.reason?.trim() ||
+      !decision.effort
+    )
+      throw new Error(
+        'An effort override record needs effort, evidence, and reason',
+      );
+    return { ...decision };
+  }
+  const rule = rubric.rules[decision.rule];
+  if (!rule || decision.effort !== rubric.automaticMaximum) return ordinary;
+  if (
+    !decision.evidence?.trim() ||
+    !decision.reason?.trim() ||
+    !decision.question?.trim()
+  )
+    return ordinary;
+  if (!rule.requires.every((key) => decision.criteria?.[key] === true))
+    return ordinary;
+  if (decision.later && transitions >= rubric.maximumTransitions)
+    throw new Error(
+      'Only one automatic medium-to-high transition is allowed per leaf',
+    );
+  return { ...decision };
+}
+
+export function effortAnnouncement(issue, decision) {
+  if (decision.rule === 'default')
+    return 'Implementation effort: medium (default)';
+  return `Implementation effort: medium -> ${decision.effort}; issue: #${issue}; rule: ${decision.rule}; evidence: ${decision.evidence}; reason: ${decision.reason}`;
+}
+
+// Each role gets its own resolver call and spawn object, including on escalation.
+export function implementationDispatch(
+  policy,
+  {
+    tool,
+    issue,
+    model,
+    effort,
+    reviewer = {},
+    decision,
+    transitions = 0,
+    blocker,
+  } = {},
+) {
+  const selected = implementationEffort(policy, {
+    override: effort,
+    decision,
+    transitions,
+    blocker,
+  });
+  if (selected.blocker) throw new Error(selected.blocker);
+  const implementer = resolve(policy, {
+    tool,
+    role: 'implementer',
+    model,
+    ...(selected.rule === 'default' ? {} : { effort: selected.effort }),
+  });
+  const review = resolve(policy, { tool, role: 'code-reviewer', ...reviewer });
+  return {
+    selected,
+    implementer,
+    reviewer: review,
+    announcement: effortAnnouncement(issue, selected),
+  };
+}
+
 // Shared Markdown sources carry YAML frontmatter plus optional blocks that
 // belong to one tool: <!-- claude-only --> ... <!-- /claude-only -->.
 export function parseSource(text) {

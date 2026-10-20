@@ -10,6 +10,8 @@ const repositoryFiles = new Set([
   '.github/CODEOWNERS',
   'CODEOWNERS',
   'LICENSE',
+  'scripts/delivery-queue.mjs',
+  'scripts/delivery-queue.test.mjs',
   'scripts/branch-name.mjs',
   'scripts/branch-name.test.mjs',
   'scripts/issue-triage.mjs',
