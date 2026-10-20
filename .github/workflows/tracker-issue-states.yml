@@ -45,7 +45,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
       DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
       ISSUE_NUMBER: ${{ github.event.issue.number }}
     steps:
@@ -66,16 +65,21 @@ jobs:
       - name: Add missing open issues to MCC delivery
         if: ${{ github.event_name != 'issues' && !cancelled() && steps.node.outcome == 'success' }}
         env:
+          MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
           SWEEP: 'true'
         run: node scripts/issue-project-membership.mjs
       - name: Triage issues
         if: ${{ !cancelled() && steps.node.outcome == 'success' }}
+        env:
+          MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
         run: |
           scope=()
           if [ -n "$ISSUE_NUMBER" ]; then scope=(--issue "$ISSUE_NUMBER"); fi
           node scripts/issue-triage.mjs "${scope[@]}"
       - name: Close finished containers
         if: ${{ !cancelled() && steps.node.outcome == 'success' }}
+        env:
+          MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
         run: |
           scope=()
           if [ -n "$ISSUE_NUMBER" ]; then scope=(--issue "$ISSUE_NUMBER"); fi

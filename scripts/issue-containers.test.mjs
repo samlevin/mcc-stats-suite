@@ -538,7 +538,8 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
     );
   assert.equal(definition.concurrency['cancel-in-progress'], false);
   const job = definition.jobs['reconcile-issues'];
-  assert.equal(job.env.MCC_PROJECT_TOKEN, '${{ secrets.MCC_PROJECT_TOKEN }}');
+  // Only the steps that run the scripts get the project token.
+  assert.equal(job.env.MCC_PROJECT_TOKEN, undefined);
   assert.equal(expression(job.env.ISSUE_NUMBER, { github: issue }), 7);
   const dryRun = (event_name, inputs = {}) =>
     expression(job.env.DRY_RUN, { github: { event_name }, inputs });
@@ -556,6 +557,12 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
     ],
   );
   assert.equal(steps[0].env.SWEEP, 'true');
+  for (const step of steps)
+    assert.equal(
+      step.env.MCC_PROJECT_TOKEN,
+      '${{ secrets.MCC_PROJECT_TOKEN }}',
+      step.name,
+    );
   // Run the steps with a stand-in for node that records its arguments and
   // fails for the script named in FAIL.
   const directory = mkdtempSync(join(tmpdir(), 'mcc-fake-node-'));
@@ -566,6 +573,8 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
   );
   chmodSync(join(directory, 'node'), 0o755);
   let runs = 0;
+  // `failed` reports the sweep steps only; a failed setup step fails the job
+  // on its own.
   const run = (issueNumber, { fail = '', setup = 'success' } = {}) => {
     const log = join(directory, `log-${runs++}`);
     writeFileSync(log, '');
@@ -604,6 +613,10 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
     'scripts/issue-containers.mjs',
   ])
     assert.deepEqual(run('', { fail }), { log: sweep, failed: true }, fail);
+  assert.deepEqual(run('7', { fail: 'scripts/issue-triage.mjs' }), {
+    log: 'scripts/issue-triage.mjs --issue 7\nscripts/issue-containers.mjs --issue 7\n',
+    failed: true,
+  });
   assert.deepEqual(run('', { setup: 'failure' }), { log: '', failed: false });
 });
 
