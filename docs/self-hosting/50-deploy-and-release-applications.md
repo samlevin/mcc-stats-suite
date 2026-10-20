@@ -12,7 +12,7 @@ Each application owns a CDK stack per environment:
 
 For a stable deploy, the wrapper confirms that the active AWS account matches `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID`, or the profile's `sso_account_id` when the variable is unset. It then builds `@mcc/cdk-config` and runs `cdk deploy` for the application, passing any other options through unchanged. The wrapper does not compare the release with the deployed template, so it will not stop a change that removes or replaces a stateful resource or a custom resource. The production job prints a CDK diff before it deploys, but nothing gates the deploy on that diff. If the deploy fails, see [Recover and troubleshoot](60-recover-and-troubleshoot.md#cdk-deployment-failure).
 
-The CDK wrapper, roster, and recipients accept `-env` for `--environment`, `-e` for `--ephemeral`, and `-p` for `--profile`. Both `-env dev` and `-env=dev` work. Use `-h` or `--help` for the command's options. The [shared CLI convention](../../scripts/README.md) lists the alias table, value syntax, and entry point coverage.
+The CDK wrapper, roster, recipients, and sender allowlist scripts accept `-env` for `--environment` and `-p` for `--profile`, and all but the sender allowlist accept `-e` for `--ephemeral`. Both `-env dev` and `-env=dev` work. Use `-h` or `--help` for the command's options. The [shared CLI convention](../../scripts/README.md) lists the alias table, value syntax, and entry point coverage.
 
 ## Ephemeral stacks
 
@@ -45,11 +45,41 @@ Pull requests never deploy applications. `Delivery: deploy application releases`
 5. Finish the application's smoke test in dev; for `match-to-csv`, see [Validate match-to-csv](#validate-match-to-csv). Open the `Delivery: deploy application releases` run from the Actions page. Choose **Review deployments**, check the application, release tag and commit, and approve or reject with your GitHub account. The waiting job is named `Deploy <application> to prod (waits for approval)`. Pending or rejected approval leaves dev deployed. Rejecting leaves production unchanged.
 6. Review the production CDK diff, confirm the deployment and stack verification succeed, and run the application's production health check.
 
-To get Slack messages only for deploys, subscribe a channel with the GitHub app for Slack to this one workflow: `/github subscribe <owner>/<repository> workflows:{name:"Delivery: deploy application releases"}`. Every run of it is a deploy, so the channel gets the dev result, the prod approval request, and the prod result, and nothing for merges that release no application.
-
 GitHub records every deployment with its release tag, commit, application version and shared-package versions on the repository's Deployments page. Release delivery and rollback call `_delivery-deploy-environment.yml`, which retains account checks, scoped secrets and the prod environment's required reviewers with administrator bypass disabled. Deploy jobs run on `refs/heads/main` through that reusable workflow, even while checking out an older release commit, so the CDK role's OIDC trust needs no change.
 
 Each application and environment has one concurrency group shared by forward deploys and rollback. It queues up to 100 pending jobs and never cancels a running deploy. Queue order follows when jobs start waiting, so the reusable workflow checks versions after approval and after acquiring the queue lock. A forward release skips successfully if its version is equal to or older than the latest successful deployment for that application and environment. The job summary names the requested and deployed versions. Failed deployments do not advance that baseline; legacy deployment records use their recorded application version. Missing version metadata on a successful record stops forward deployment for investigation. Rollback bypasses the version comparison, and its successful deployment becomes the baseline for later forward releases.
+
+### Slack deploy messages
+
+Slack deploy messages are optional and off by default. They turn on only when the repository secret `SLACK_DEPLOY_WEBHOOK_URL` is set, and that secret is the only setting. Without it, the Slack steps show as skipped in each run and write no warning or notice.
+
+With the secret set, `_delivery-deploy-environment.yml` posts plain-text messages to that Slack incoming webhook, one per application for each of these events:
+
+- **Dev result:** `match-to-csv match-to-csv-v3.2.1 -> dev: succeeded <run link>`. The result is `succeeded`, `failed`, `cancelled`, or `skipped` when the version is not newer than the latest successful deployment.
+- **Prod approval request:** `match-to-csv match-to-csv-v3.2.1 -> prod: waiting for approval <run link>`. `Verify prod reviewer protection` posts it after its check passes and before the deploy job waits. Open the link to approve or reject.
+- **Prod result:** `match-to-csv match-to-csv-v3.2.1 -> prod: succeeded <run link>`. The result is `succeeded`, `failed`, `rejected`, `cancelled`, or `skipped`.
+
+Rollbacks post the prod approval request and the prod result with `prod (rollback)` in place of `prod`. A merge that releases no application posts nothing.
+
+Each delivery workflow passes the secret explicitly to the reusable workflows. Only the two jobs that post to Slack receive it, and only their Slack steps send it. When Slack does not answer within 10 seconds or returns an error, the step logs a warning and the deploy continues. A Slack failure never fails or blocks a deploy.
+
+To turn the messages on:
+
+1. In Slack, create an app from scratch at <https://api.slack.com/apps> in your workspace. Under **Incoming Webhooks**, turn on **Activate Incoming Webhooks**, choose **Add New Webhook to Workspace**, pick the channel, and copy the webhook URL.
+2. Store the URL as a repository secret. `gh secret set` prompts for the value, so it stays out of your shell history:
+
+   ```console
+   gh secret set SLACK_DEPLOY_WEBHOOK_URL --repo <owner>/<repository>
+   ```
+
+3. If the channel subscribes to this repository with the GitHub app for Slack, remove the workflow and deployment subscriptions so each deploy is reported once. Run these in the channel:
+
+   ```console
+   /github unsubscribe <owner>/<repository> workflows
+   /github unsubscribe <owner>/<repository> deployments
+   ```
+
+To turn the messages off, delete the secret. To move them to another channel, add a webhook for that channel and replace the secret.
 
 ## Validate match-to-csv
 
@@ -60,71 +90,45 @@ After a `match-to-csv` change reaches dev, and before approving prod:
 3. In the evidence bucket, confirm the run contains the source image, metadata, run manifest, start and success events, Textract request and response, normalized observations, extracted table, CSV, and completion object.
 4. Compare the CSV with the screenshot. OCR differences are observations to label, not corruption.
 
-For a failure test, send an unsupported or undersized image. The submission records a rejection and the workflow does not report an empty success. For a provider failure, the run contains `RUN_STARTED`, `RUN_FAILED`, the provider request, and a failed completion object.
+For a rejection test, send only an unsupported or undersized image. The submission's `completion.json` has status `REJECTED` with `NO_PROCESSABLE_SCREENSHOTS`, and the execution ends as succeeded at the `Submission rejected` state without running OCR. For a provider failure, the run contains `RUN_STARTED`, `RUN_FAILED`, the provider request, and a failed completion object.
 
 Never commit test messages, recipient addresses, or domains.
 
-To get alarm email for a stable stack, create a `String` SSM parameter `/mcc/<environment>/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
+Only the prod stack has alarms. To get alarm email, create a `String` SSM parameter `/mcc/prod/match-to-csv/alarm-email` holding the address, then redeploy. The [application README](../../applications/match-to-csv/README.md) describes the alarms.
 
 ## Manage the sender allowlist
 
-The optional `match-to-csv` sender allowlist is the SSM parameter `/mcc/<environment>/match-to-csv/sender-allowlist`. Use `/mcc/dev/match-to-csv/sender-allowlist` for shared dev and every ephemeral stack, and `/mcc/prod/match-to-csv/sender-allowlist` for production. A dev allowlist change affects all those dev stacks.
+The `match-to-csv` sender allowlist is required. It is the SSM parameter `/mcc/<environment>/match-to-csv/sender-allowlist`. Use `/mcc/dev/match-to-csv/sender-allowlist` for shared dev and every ephemeral stack, and `/mcc/prod/match-to-csv/sender-allowlist` for production. A dev allowlist change affects all those dev stacks. Create the environment's parameter before its first deploy of `match-to-csv`.
 
-Create the parameter by hand as `String` or `StringList`. `process-email` splits the value on commas or whitespace and matches addresses without regard to case. Use comma-separated addresses for `StringList`, as Parameter Store requires. When the parameter exists, every `From` address must be listed. A message with no `From` address is rejected. If the parameter is missing, the allowlist accepts every sender; SES verdict screening and attachment validation still apply.
+`process-email` splits the value on commas or whitespace and matches addresses without regard to case. Every `From` address must be listed. A message with no `From` address is rejected. When the parameter is missing or lists no address, every message is rejected with `SENDER_NOT_ALLOWED`, and `ingestion.json` records `senderAllowlist.status` as `NOT_CONFIGURED`. Any other read error, such as throttling or denied access, fails the invocation before it writes evidence and does not reject the message.
 
-`process-email` checks the allowlist for each message. A warm Lambda caches the parameter value, including a missing parameter, for 60 seconds. Creation, updates, and deletion therefore take effect within one minute without a plan, pull request, or deploy. Keep this parameter hand-managed. Never add it to OpenTofu or commit its value or real sender addresses to the repository.
+`process-email` checks the allowlist for each message. A warm Lambda caches the parameter value, including a missing parameter, for 60 seconds. Changes therefore take effect within one minute without a plan, pull request, or deploy. Keep this parameter out of OpenTofu, and never commit its value or real sender addresses to the repository.
 
-### AWS console
-
-1. Sign in to the target environment's AWS account with its administrator permission set, as configured in [prerequisites](00-prerequisites.md#accounts), and select the Region where `match-to-csv` is deployed. Open **Systems Manager -> Parameter Store**.
-2. To create the allowlist, choose **Create parameter**. Enter the environment's full parameter name above, choose the **Standard** tier, and choose **String** or **StringList** as the type. For `String`, keep the data type as **text**. Enter the allowed addresses, such as `player@example.test,teammate@example.test`, then choose **Create parameter**. See AWS's [console creation reference](https://docs.aws.amazon.com/systems-manager/latest/userguide/parameter-create-console.html) for the field descriptions.
-3. To update it, open the parameter and choose **Edit**. Replace the value with the complete desired list, save the changes, then check the saved value.
-4. To remove the restriction, select the parameter in Parameter Store, choose **Delete**, and confirm deletion. A missing parameter accepts every sender through the allowlist.
-
-### AWS CLI
-
-Use the administrator profiles from [prerequisites](00-prerequisites.md#sso-profiles). These examples use `mcc-dev-admin` in the dev account and its configured workload Region. For production, change both the profile to `mcc-prod-admin` and `environment` to `prod` before running any command. The local `mcc-dev` deploy profile cannot manage the allowlist. An alternative operator profile needs `ssm:PutParameter`, `ssm:GetParameter`, and `ssm:DeleteParameter` on `/mcc/<environment>/match-to-csv/sender-allowlist` in the target account and Region.
+Administrators change the allowlist with `scripts/sender-allowlist.mjs`, using the administrator profiles from [prerequisites](00-prerequisites.md#sso-profiles). The local `mcc-dev` deploy profile cannot manage it. Another operator profile needs `ssm:GetParameter` and `ssm:PutParameter` on the parameter in the target account and Region. The script also needs the AWS CLI and a repository checkout with dependencies installed.
 
 ```console
 export AWS_PROFILE=mcc-dev-admin
-environment=dev
-allowlist_parameter="/mcc/${environment}/match-to-csv/sender-allowlist"
 aws sso login --profile "$AWS_PROFILE"
-aws sts get-caller-identity
+npm run sender-allowlist -- --environment dev list
+npm run sender-allowlist -- --environment dev add 'player@example.test' 'teammate@example.test'
+npm run sender-allowlist -- --environment dev remove 'teammate@example.test'
 ```
 
-Confirm that `get-caller-identity` reports the intended dev or prod account before changing the parameter.
+For production, use `mcc-prod-admin` and `--environment prod`. `--environment` is required, and the script has no `--ephemeral` option. Before any other AWS call, the script runs the same account check as `scripts/cdk-app.mjs` and `npm run recipients`: it needs `AWS_PROFILE` or `--profile`, refuses a profile whose name implies the other environment, and refuses to continue unless the active account matches `MCC_DEV_ACCOUNT_ID` or `MCC_PROD_ACCOUNT_ID`, or the profile's `sso_account_id` when the variable is unset.
 
-Create or replace the complete list with [`put-parameter --overwrite`](https://docs.aws.amazon.com/cli/latest/reference/ssm/put-parameter.html). Replace these placeholder addresses with your allowed senders locally. Use the existing parameter's type when updating it; this example creates a `String`.
+- `list` prints the parameter's type, version, and addresses, or says that the parameter is missing or empty.
+- `add` takes one or more addresses and writes them lowercase. It refuses an invalid address (`INVALID_ADDRESS`) and an address already listed in any case (`ALREADY_LISTED`). When the parameter is missing, `add` creates it as a `StringList`.
+- `remove` takes one or more addresses, matched ignoring case. It refuses an address that is not listed (`NOT_LISTED`), and refuses to remove the last address (`LAST_ADDRESS`). To replace the only address, add the new one first. The script never deletes the parameter.
+- Each write saves the whole list as comma-separated addresses and keeps the parameter's existing type. The script refuses a parameter of any type other than `String` or `StringList`.
+- In `prod`, each write prints the change and asks you to type `yes`. Pass `--yes` to skip the prompt.
+- After each write, the script reads the parameter back. Parameter Store has no conditional write, so when the saved list or version differs from what the script wrote, another change was saved at the same time. The script then exits 2 with `READ_BACK_MISMATCH` and prints both lists. Run `list` and repeat the change if it is still needed.
+- Exit status is 0 on success, 1 when a change is refused or declined, and 2 for a usage, account, AWS, or read-back error.
 
-```console
-aws ssm put-parameter \
-  --name "$allowlist_parameter" \
-  --type String \
-  --value 'player@example.test,teammate@example.test' \
-  --overwrite
-```
-
-Read the saved type, value, and version:
-
-```console
-aws ssm get-parameter \
-  --name "$allowlist_parameter" \
-  --query 'Parameter.{Type:Type,Value:Value,Version:Version}'
-```
-
-To add or remove a sender, rerun `put-parameter --overwrite` with the entire revised list, then read it back. To remove the restriction entirely, delete the parameter:
-
-```console
-aws ssm delete-parameter --name "$allowlist_parameter"
-aws ssm get-parameter --name "$allowlist_parameter"
-```
-
-The final read should return `ParameterNotFound`. Sender addresses in CLI history and output stay local; never copy them into a commit, issue, or pull request.
+Addresses are typed as arguments and printed only to your terminal. The script reads no input file and writes no file. Keep its output out of commits, issues, and pull requests.
 
 ### Verify in dev
 
-After saving the dev allowlist, wait one minute for cached values to expire, then send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result. After an update or deletion, wait one minute and send a new message to verify the new behavior without redeploying.
+After changing the dev allowlist, wait one minute for cached values to expire, then send a valid screenshot from a listed sender to your dev or ephemeral recipient and confirm the workflow processes it. Send another from an unlisted sender and confirm the submission's `completion.json` has status `REJECTED` and rejection code `SENDER_NOT_ALLOWED`. Its `ingestion.json` records `senderAllowlist.status` as `DENIED`, and the raw MIME remains stored. Use messages that pass SES spam and virus checks so those checks do not obscure the allowlist result.
 
 ## Maintain the gamertag roster
 

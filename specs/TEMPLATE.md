@@ -322,12 +322,16 @@ This section is the backlog source for building the component. It is written to 
 
 ### 20.1 How to file this plan
 
+- File the whole plan with `/mcc-spec-to-issues <spec-path> plan` (Codex: `$mcc-spec-to-issues`). Use `file` to print the triaged tree and confirm before GitHub writes; use the saved external state to resume an interrupted filing. The plan has one root container, with phase epics underneath. Backlog is excluded when filing v1.
 - Each **phase** becomes one epic, titled with the phase title, with its goal and exit criteria as the body. Create epics only when someone explicitly asks for filing.
-- Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. File with `/mcc-create-github-issue`.
+- Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. Use `/mcc-create-github-issue` for ad hoc issues outside a spec plan.
 - **Size** is XS, S or M. Split a slice by independently testable behavior when it outgrows one reviewable PR; the original Plan ID becomes the container.
+- A **split slice** keeps its original heading and all required slice fields, adds `- **Split into:** P0.2.1, P0.2.2`, and puts each child under a five-hash heading such as `##### P0.2.1 <Child title> (S)`. Each child has all slice fields, a stable ID extending its parent, and independently testable Acceptance bullets. One split level is supported.
+- **Priority** is optional (`- **Priority:** P0|P1|P2|P3`), default P2. **Labels** is optional (`- **Labels:** enhancement, severity: none, package: contracts`), with names from `.github/labels.json`. Without it, leaves use enhancement, severity: none, and package/area labels inferred from Files (area: repository when no package is named). Phase epics default to epic, severity: none, area: repository; the root defaults to severity: none, area: repository. Only the triager forms independence groups.
 - **Blocked by** lists Plan IDs. Create native blocked-by links after every issue in the batch exists.
 - **Acceptance** bullets become the issue's acceptance criteria verbatim. Every slice also inherits §20.3.
 - **Spec** lists the sections the implementer must read. Link them; this document stays the source of truth.
+- An active slice cannot depend on an excluded Backlog slice. Resolve that scope in the spec before filing. Blocked-by entries name slices in this plan only; references to another spec need a resolved local delivery plan before filing.
 - Plan IDs are stable. Deferred slices keep their IDs and move to the backlog phase; new slices take the next free number in their phase.
 
 ### 20.2 Seam contracts

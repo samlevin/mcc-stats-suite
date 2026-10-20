@@ -116,8 +116,9 @@ test('workspaces install locally without a package registry or token', () => {
 
 // Runs the real step body under GitHub's default `bash -e` with stub `aws` and
 // `dig` commands, so the parameter, rule set, identity, and MX gates are
-// exercised rather than matched as text.
+// exercised rather than matched as text. The stub environment defaults to dev.
 function runPrerequisites(stub) {
+  const environment = stub.environment ?? 'dev';
   const step = deployment.jobs.deploy.steps.find(
     (candidate) => candidate.name === 'Verify match-to-csv prerequisites',
   );
@@ -132,16 +133,16 @@ function runPrerequisites(stub) {
   mkdirSync(bin);
   const names = [
     '/cdk-bootstrap/hnb659fds/version',
-    '/mcc/dev/match-to-csv/raw-email-bucket-name',
-    '/mcc/dev/match-to-csv/evidence-bucket-name',
-    '/mcc/dev/match-to-csv/data-key-arn',
-    '/mcc/dev/match-to-csv/receipt-rule-set-name',
-    '/mcc/dev/match-to-csv/email-domain',
-    '/mcc/dev/roster/table-name',
+    `/mcc/${environment}/match-to-csv/raw-email-bucket-name`,
+    `/mcc/${environment}/match-to-csv/evidence-bucket-name`,
+    `/mcc/${environment}/match-to-csv/data-key-arn`,
+    `/mcc/${environment}/match-to-csv/receipt-rule-set-name`,
+    `/mcc/${environment}/match-to-csv/email-domain`,
+    `/mcc/${environment}/roster/table-name`,
   ].slice(0, stub.parameterCount ?? 7);
   const values = {
-    '/mcc/dev/match-to-csv/receipt-rule-set-name': 'mcc-match-to-csv-dev',
-    '/mcc/dev/match-to-csv/email-domain': 'mail.example.com',
+    [`/mcc/${environment}/match-to-csv/receipt-rule-set-name`]: `mcc-match-to-csv-${environment}`,
+    [`/mcc/${environment}/match-to-csv/email-domain`]: 'mail.example.com',
   };
   writeFileSync(
     join(directory, 'parameters.json'),
@@ -155,9 +156,9 @@ function runPrerequisites(stub) {
       '#!/usr/bin/env bash',
       `echo "aws $*" >> "${join(directory, 'calls.log')}"`,
       'case "$1 $2 $4" in',
-      `  "ssm get-parameters /mcc/dev/match-to-csv/alarm-email") echo "${stub.alarmEmailCount ?? 0}" ;;`,
+      `  "ssm get-parameters "*/match-to-csv/alarm-email) echo "${stub.alarmEmailCount ?? 0}" ;;`,
       `  "ssm get-parameters "*) cat "${join(directory, 'parameters.json')}" ;;`,
-      `  "ses describe-active-receipt-rule-set "*) echo "${stub.active ?? 'mcc-match-to-csv-dev'}" ;;`,
+      `  "ses describe-active-receipt-rule-set "*) echo "${stub.active ?? `mcc-match-to-csv-${environment}`}" ;;`,
       `  "ses get-identity-verification-attributes "*) echo "${stub.identity ?? 'Success'}" ;;`,
       '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
       'esac',
@@ -175,7 +176,7 @@ function runPrerequisites(stub) {
     encoding: 'utf8',
     env: {
       PATH: `${bin}:${process.env.PATH}`,
-      DEPLOYMENT_ENVIRONMENT: 'dev',
+      DEPLOYMENT_ENVIRONMENT: environment,
       AWS_REGION: 'us-east-2',
       GITHUB_ENV: githubEnv,
     },
@@ -190,46 +191,74 @@ function runPrerequisites(stub) {
   };
 }
 
+// The calls every match-to-csv prerequisite check makes before the prod-only
+// alarm email lookup.
+const prerequisiteCalls = (environment) => [
+  'aws ssm get-parameters --names /cdk-bootstrap/hnb659fds/version ' +
+    `/mcc/${environment}/match-to-csv/raw-email-bucket-name ` +
+    `/mcc/${environment}/match-to-csv/evidence-bucket-name ` +
+    `/mcc/${environment}/match-to-csv/data-key-arn ` +
+    `/mcc/${environment}/match-to-csv/receipt-rule-set-name ` +
+    `/mcc/${environment}/match-to-csv/email-domain ` +
+    `/mcc/${environment}/roster/table-name --output json`,
+  'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
+  'aws ses get-identity-verification-attributes --identities mail.example.com ' +
+    '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
+  'dig +short MX mail.example.com',
+];
+const alarmEmailCall =
+  'aws ssm get-parameters --names /mcc/prod/match-to-csv/alarm-email ' +
+  '--query length(Parameters) --output text';
+
 test('match-to-csv prerequisites pass and mask the published domain', () => {
-  const result = runPrerequisites({});
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  // Masked before any other use. Nothing exports MCC_EMAIL_DOMAIN, because a
-  // release whose stack reads it declares receipt rules the foundation owns.
-  assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
-  assert.equal(result.githubEnv, '');
+  for (const environment of ['dev', 'prod']) {
+    const result = runPrerequisites({ environment });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    // Masked before any other use. Nothing exports MCC_EMAIL_DOMAIN, because a
+    // release whose stack reads it declares receipt rules the foundation owns.
+    assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
+    assert.equal(result.githubEnv, '');
+    // The step asks for exactly the seven parameters and checks the published
+    // domain, not some other value, against SES and DNS.
+    assert.deepEqual(result.calls.slice(0, 4), prerequisiteCalls(environment));
+  }
   assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
-  // The step asks for exactly the seven parameters and checks the published
-  // domain, not some other value, against SES and DNS.
-  assert.deepEqual(result.calls, [
-    'aws ssm get-parameters --names /cdk-bootstrap/hnb659fds/version ' +
-      '/mcc/dev/match-to-csv/raw-email-bucket-name ' +
-      '/mcc/dev/match-to-csv/evidence-bucket-name ' +
-      '/mcc/dev/match-to-csv/data-key-arn ' +
-      '/mcc/dev/match-to-csv/receipt-rule-set-name ' +
-      '/mcc/dev/match-to-csv/email-domain ' +
-      '/mcc/dev/roster/table-name --output json',
-    'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
-    'aws ses get-identity-verification-attributes --identities mail.example.com ' +
-      '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
-    'dig +short MX mail.example.com',
-    'aws ssm get-parameters --names /mcc/dev/match-to-csv/alarm-email ' +
-      '--query length(Parameters) --output text',
-  ]);
+});
+
+test('match-to-csv prerequisites look for the alarm email only in prod', () => {
+  // Only the prod stack has alarms, so dev never reads or exports the alarm
+  // email parameter, even when one exists.
+  for (const alarmEmailCount of [0, 1]) {
+    const dev = runPrerequisites({ environment: 'dev', alarmEmailCount });
+    assert.equal(dev.status, 0, dev.stderr + dev.stdout);
+    assert.deepEqual(dev.calls, prerequisiteCalls('dev'));
+    assert.equal(dev.githubEnv, '');
+    assert.doesNotMatch(dev.stdout, /alarm/);
+  }
+  const prod = runPrerequisites({ environment: 'prod' });
+  assert.equal(prod.status, 0, prod.stderr + prod.stdout);
+  assert.deepEqual(prod.calls, [...prerequisiteCalls('prod'), alarmEmailCall]);
+  assert.equal(prod.githubEnv, '');
   assert.match(
-    result.stdout,
-    /::notice::\/mcc\/dev\/match-to-csv\/alarm-email is not set/,
+    prod.stdout,
+    /::notice::\/mcc\/prod\/match-to-csv\/alarm-email is not set/,
   );
 });
 
-test('match-to-csv prerequisites export the optional alarm email parameter name', () => {
-  const result = runPrerequisites({ alarmEmailCount: 1 });
+test('match-to-csv prod prerequisites export the optional alarm email parameter name', () => {
+  const result = runPrerequisites({ environment: 'prod', alarmEmailCount: 1 });
   assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.deepEqual(result.calls, [
+    ...prerequisiteCalls('prod'),
+    alarmEmailCall,
+  ]);
   // Only the parameter name leaves the step. CloudFormation resolves the
   // address itself, so the step never reads the value.
   assert.equal(
     result.githubEnv,
-    'MCC_ALARM_EMAIL_PARAMETER=/mcc/dev/match-to-csv/alarm-email\n',
+    'MCC_ALARM_EMAIL_PARAMETER=/mcc/prod/match-to-csv/alarm-email\n',
   );
+  assert.doesNotMatch(result.stdout, /::notice::/);
   assert.ok(
     result.calls.every((call) => !call.includes('get-parameter ')),
     'the step never reads the alarm email value',
@@ -367,6 +396,7 @@ const ALLOWED_SECRETS = [
   'MCC_PROJECT_TOKEN',
   'PROD_AWS_ACCOUNT_ID',
   'RELEASE_PLEASE_APP_PRIVATE_KEY',
+  'SLACK_DEPLOY_WEBHOOK_URL',
 ];
 // Retired names that no workflow or Terrateam step may read again.
 const RETIRED_NAMES = [
@@ -444,6 +474,7 @@ test('deployment selects the account and Region by environment and builds the ro
   assert.deepEqual(Object.keys(deployment.on.workflow_call.secrets).sort(), [
     'DEV_AWS_ACCOUNT_ID',
     'PROD_AWS_ACCOUNT_ID',
+    'SLACK_DEPLOY_WEBHOOK_URL',
   ]);
   const vars = {
     DEV_AWS_REGION: 'dev-region-1',
@@ -516,23 +547,40 @@ test('deployment selects the account and Region by environment and builds the ro
   assert.equal(missing.expectedAccount, '');
 });
 
-test('each deployment caller passes only the account secrets it deploys to', () => {
+const slackWebhook = '${{ secrets.SLACK_DEPLOY_WEBHOOK_URL }}';
+
+test('each deployment caller passes only the account secrets it deploys to and the Slack webhook', () => {
   assert.deepEqual(deployReleases.jobs['deliver-applications'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
   });
   assert.deepEqual(delivery.jobs['deploy-dev'].secrets, {
     DEV_AWS_ACCOUNT_ID: '${{ secrets.DEV_AWS_ACCOUNT_ID }}',
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
   });
   assert.deepEqual(delivery.jobs['deploy-prod'].secrets, {
     PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
   });
   assert.deepEqual(
     workflow('delivery-rollback').jobs['rollback-prod'].secrets,
     {
       PROD_AWS_ACCOUNT_ID: '${{ secrets.PROD_AWS_ACCOUNT_ID }}',
+      SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
     },
   );
+  for (const reusable of [delivery, deployment]) {
+    assert.deepEqual(
+      reusable.on.workflow_call.secrets.SLACK_DEPLOY_WEBHOOK_URL,
+      {
+        required: false,
+      },
+    );
+  }
+  for (const { name, text } of workflowFiles()) {
+    assert.doesNotMatch(text, /secrets:\s*inherit/, name);
+  }
 });
 
 test('no condition, job output, or deployment URL depends on a masked value', () => {
@@ -1368,16 +1416,47 @@ test('each release has its own successful dev dependency before prod approval', 
     });
   }
   assert.equal(prod.needs, 'deploy-dev');
-  for (const deployed of ['true', 'false', '']) {
-    assert.equal(
-      evaluate(prod.if, { needs: { 'deploy-dev': { outputs: { deployed } } } }),
-      deployed === 'true',
-    );
-  }
+  // Prod keys on the dev call's `deployed` output, which requires the dev
+  // deploy job itself to succeed. The dev call's overall result also covers
+  // its Slack job, so prod never reads it and a failed post never blocks prod.
   assert.equal(
-    deployment.on.workflow_call.outputs.deployed.value,
-    '${{ jobs.deploy.outputs.deployed }}',
+    prod.if,
+    "always() && !cancelled() && needs.deploy-dev.outputs.deployed == 'true'",
   );
+  const output = deployment.on.workflow_call.outputs.deployed.value;
+  assert.equal(
+    output,
+    "${{ jobs.deploy.result == 'success' && jobs.deploy.outputs.deployed == 'true' }}",
+  );
+  const results = ['success', 'failure', 'skipped', 'cancelled'];
+  for (const deployResult of results)
+    for (const jobDeployed of ['true', 'false', ''])
+      for (const callResult of results)
+        for (const cancelled of [false, true]) {
+          // Actions writes a boolean expression result to an output as text.
+          const deployed = String(
+            evaluate(expression(output), {
+              jobs: {
+                deploy: {
+                  result: deployResult,
+                  outputs: { deployed: jobDeployed },
+                },
+              },
+            }),
+          );
+          assert.equal(
+            evaluate(prod.if, {
+              always: () => true,
+              cancelled: () => cancelled,
+              needs: {
+                'deploy-dev': { result: callResult, outputs: { deployed } },
+              },
+            }),
+            !cancelled && deployResult === 'success' && jobDeployed === 'true',
+            `dev deploy job ${deployResult} with deployed '${jobDeployed}', ` +
+              `dev call ${callResult}, run cancelled ${cancelled}`,
+          );
+        }
   assert.match(
     deployment.jobs.deploy.outputs.deployed,
     /steps.deploy.outcome == 'success' && steps.verify.outcome == 'success'/,
@@ -1642,5 +1721,310 @@ esac
         .status,
       expected,
     );
+  }
+});
+
+// Paths in a parsed workflow whose string value contains `needle`.
+const pathsContaining = (value, needle, path = []) =>
+  typeof value === 'string'
+    ? value.includes(needle)
+      ? [path.join('.')]
+      : []
+    : value && typeof value === 'object'
+      ? Object.entries(value).flatMap(([key, child]) =>
+          pathsContaining(child, needle, [...path, key]),
+        )
+      : [];
+
+const approvalStep = deployment.jobs['verify-prod-protection'].steps.find(
+  (step) => step.name === 'Post the prod approval request to Slack',
+);
+const resultJob = deployment.jobs['notify-result'];
+const runUrl = 'https://github.com/owner/repo/actions/runs/123';
+const webhook = 'https://hooks.slack.test/services/T000/B000/secret';
+
+// Runs a notify step's script with mocked fetch, core, and approvals API.
+const notify = async (
+  step,
+  env,
+  { respond = async () => ({ ok: true, status: 200 }), reviews = [] } = {},
+) => {
+  const posts = [];
+  const warnings = [];
+  const info = [];
+  const reviewRequests = [];
+  await runScript(step.with.script, {
+    process: { env: { SLACK_DEPLOY_WEBHOOK_URL: webhook, ...env } },
+    context: { repo, serverUrl: 'https://github.com', runId: 123 },
+    core: {
+      info: (message) => info.push(message),
+      warning: (message) => warnings.push(message),
+    },
+    github: {
+      rest: {
+        actions: {
+          getReviewsForRun: async (request) => {
+            reviewRequests.push(request);
+            if (reviews instanceof Error) throw reviews;
+            return { data: reviews };
+          },
+        },
+      },
+    },
+    fetch: async (url, options) => {
+      posts.push({ url, options });
+      return respond();
+    },
+  });
+  return {
+    posts,
+    warnings,
+    info,
+    reviewRequests,
+    texts: posts.map(({ options }) => JSON.parse(options.body).text),
+  };
+};
+
+const releaseEnv = (environment, operation = 'release') => ({
+  APPLICATION: 'match-to-csv',
+  DEPLOYMENT_ENVIRONMENT: environment,
+  OPERATION: operation,
+  RELEASE_TAG: 'match-to-csv-v3.2.1',
+});
+
+const slackGate = "env.SLACK_DEPLOY_WEBHOOK_URL != ''";
+
+test('the webhook secret reaches only the env of the two jobs that post to Slack', () => {
+  assert.deepEqual(
+    pathsContaining(deployment, 'secrets.SLACK_DEPLOY_WEBHOOK_URL'),
+    [
+      'jobs.verify-prod-protection.env.SLACK_DEPLOY_WEBHOOK_URL',
+      'jobs.notify-result.env.SLACK_DEPLOY_WEBHOOK_URL',
+    ],
+  );
+  for (const step of [approvalStep, resultJob.steps[0]]) {
+    // Only the script's fetch reads the URL; nothing logs or outputs it.
+    assert.doesNotMatch(step.with.script, /setOutput|exportVariable/);
+    assert.match(
+      step.with.script,
+      /fetch\(process\.env\.SLACK_DEPLOY_WEBHOOK_URL, \{/,
+    );
+    assert.doesNotMatch(step.with.script, /core\.\w+\([^)]*SLACK_DEPLOY/);
+  }
+  assert.deepEqual(
+    pathsContaining(deployment.jobs.deploy, 'SLACK'),
+    [],
+    'the deploy job never sees the webhook',
+  );
+});
+
+test('the prod approval request posts after the protection check and before the deploy waits', async () => {
+  const guard = deployment.jobs['verify-prod-protection'];
+  assert.equal(guard.steps.length, 2);
+  assert.equal(guard.steps.indexOf(approvalStep), 1);
+  // Without an `always()` the step also runs only when the check passed.
+  assert.equal(approvalStep.if, slackGate);
+  assert.equal(approvalStep['continue-on-error'], true);
+  assert.equal(approvalStep['timeout-minutes'], 1);
+  // The deploy job waits for approval only after this job finishes.
+  assert.equal(deployment.jobs.deploy.needs, 'verify-prod-protection');
+  for (const [operation, marker] of [
+    ['release', ''],
+    ['rollback', ' (rollback)'],
+  ]) {
+    const result = await notify(approvalStep, releaseEnv('prod', operation));
+    assert.equal(result.warnings.length, 0, result.warnings.join());
+    assert.equal(result.posts.length, 1);
+    const [{ url, options }] = result.posts;
+    assert.equal(url, webhook);
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers['Content-Type'], 'application/json');
+    assert.ok(options.signal, 'the post has a timeout');
+    assert.deepEqual(result.texts, [
+      `match-to-csv match-to-csv-v3.2.1 -&gt; prod${marker}: waiting for approval ${runUrl}`,
+    ]);
+    assert.deepEqual(result.info, [
+      `match-to-csv match-to-csv-v3.2.1 -> prod${marker}: waiting for approval ${runUrl}`,
+    ]);
+  }
+});
+
+test('the result job runs after every deploy outcome and cannot fail the deploy', () => {
+  assert.deepEqual(resultJob.needs, ['verify-prod-protection', 'deploy']);
+  assert.equal(resultJob.if, 'always()');
+  assert.deepEqual(resultJob.permissions, { actions: 'read' });
+  assert.deepEqual(resultJob.env, { SLACK_DEPLOY_WEBHOOK_URL: slackWebhook });
+  assert.equal(resultJob.steps.length, 1);
+  const [step] = resultJob.steps;
+  assert.equal(step.if, slackGate);
+  assert.equal(step['continue-on-error'], true);
+  assert.equal(step['timeout-minutes'], 2);
+  assert.deepEqual(step.env, {
+    APPLICATION: '${{ inputs.application }}',
+    DEPLOYMENT_ENVIRONMENT: '${{ inputs.environment }}',
+    OPERATION: '${{ inputs.operation }}',
+    RELEASE_TAG: '${{ inputs.source }}',
+    PROTECTION_RESULT: '${{ needs.verify-prod-protection.result }}',
+    DEPLOY_RESULT: '${{ needs.deploy.result }}',
+    DEPLOYED: '${{ needs.deploy.outputs.deployed }}',
+  });
+  // The workflow output comes from the deploy job alone and never from a
+  // notify job. A caller that reads only that output, as the prod gate does,
+  // does not depend on the notify job's result.
+  assert.deepEqual(Object.keys(deployment.on.workflow_call.outputs), [
+    'deployed',
+  ]);
+  assert.deepEqual(
+    pathsContaining([deployment.on, deployment.jobs.deploy], 'notify'),
+    [],
+  );
+});
+
+test('the result message names the application, release, environment, outcome, and run', async () => {
+  const [step] = resultJob.steps;
+  const rejected = [{ state: 'rejected', environments: [{ name: 'prod' }] }];
+  const approved = [{ state: 'approved', environments: [{ name: 'prod' }] }];
+  const outcome = (DEPLOY_RESULT, DEPLOYED, PROTECTION_RESULT = 'success') => ({
+    DEPLOY_RESULT,
+    DEPLOYED,
+    PROTECTION_RESULT,
+  });
+  const notNewer =
+    'skipped, the version is not newer than the latest successful deployment';
+  for (const [environment, operation, result, expected, reviews] of [
+    ['dev', 'release', outcome('success', 'true', 'skipped'), 'succeeded'],
+    ['dev', 'release', outcome('success', 'false', 'skipped'), notNewer],
+    ['dev', 'release', outcome('failure', 'false', 'skipped'), 'failed'],
+    // A step after deploy and verify failed, such as Finish deployment record.
+    ['dev', 'release', outcome('failure', 'true', 'skipped'), 'failed'],
+    ['dev', 'release', outcome('failure', '', 'skipped'), 'failed', rejected],
+    ['dev', 'release', outcome('cancelled', '', 'skipped'), 'cancelled'],
+    ['dev', 'release', outcome('skipped', '', 'skipped'), 'cancelled'],
+    ['prod', 'release', outcome('success', 'true'), 'succeeded'],
+    ['prod', 'rollback', outcome('success', 'true'), 'succeeded'],
+    ['prod', 'release', outcome('failure', 'false'), 'failed', rejected],
+    ['prod', 'release', outcome('failure', 'true'), 'failed', rejected],
+    ['prod', 'release', outcome('failure', ''), 'rejected', rejected],
+    ['prod', 'rollback', outcome('failure', ''), 'rejected', rejected],
+    ['prod', 'release', outcome('failure', ''), 'failed', approved],
+    ['prod', 'release', outcome('cancelled', ''), 'cancelled'],
+    [
+      'prod',
+      'release',
+      outcome('skipped', '', 'failure'),
+      'failed, Verify prod reviewer protection did not pass',
+    ],
+    ['prod', 'release', outcome('skipped', '', 'cancelled'), 'cancelled'],
+  ]) {
+    const posted = await notify(
+      step,
+      { ...releaseEnv(environment, operation), ...result },
+      { reviews },
+    );
+    const marker = operation === 'rollback' ? ' (rollback)' : '';
+    const where = `${environment} ${operation} ${JSON.stringify(result)}`;
+    assert.deepEqual(
+      posted.texts,
+      [
+        `match-to-csv match-to-csv-v3.2.1 -&gt; ${environment}${marker}: ${expected} ${runUrl}`,
+      ],
+      where,
+    );
+    assert.deepEqual(posted.warnings, [], where);
+    // Only a prod deploy job that ran no step looks up the run's approvals.
+    assert.deepEqual(
+      posted.reviewRequests,
+      environment === 'prod' &&
+        result.DEPLOY_RESULT === 'failure' &&
+        !result.DEPLOYED
+        ? [{ ...repo, run_id: 123 }]
+        : [],
+      where,
+    );
+  }
+  const unreadable = await notify(
+    step,
+    { ...releaseEnv('prod'), ...outcome('failure', '') },
+    { reviews: new Error('Resource not accessible') },
+  );
+  assert.deepEqual(unreadable.texts, [
+    `match-to-csv match-to-csv-v3.2.1 -&gt; prod: failed ${runUrl}`,
+  ]);
+  assert.match(
+    unreadable.warnings.join(),
+    /Could not read the run's approvals/,
+  );
+});
+
+test('Slack messages are off unless the webhook secret is set', () => {
+  assert.deepEqual(deployment.jobs['verify-prod-protection'].env, {
+    SLACK_DEPLOY_WEBHOOK_URL: slackWebhook,
+  });
+  // Every step that posts to Slack runs only when the secret is set, so an
+  // unset secret skips it and writes nothing about Slack.
+  const posting = Object.values(deployment.jobs).flatMap((job) =>
+    (job.steps ?? []).filter((step) => /fetch\(/.test(step.with?.script ?? '')),
+  );
+  assert.deepEqual(posting, [approvalStep, resultJob.steps[0]]);
+  for (const step of posting) {
+    assert.equal(step.if, slackGate, step.name);
+    assert.equal(step.env.SLACK_DEPLOY_WEBHOOK_URL, undefined, step.name);
+  }
+  // Actions reads an unset secret as an empty string.
+  for (const [value, runs] of [
+    ['', false],
+    [webhook, true],
+  ]) {
+    assert.equal(
+      evaluate(slackGate, { env: { SLACK_DEPLOY_WEBHOOK_URL: value } }),
+      runs,
+    );
+  }
+  assert.doesNotMatch(
+    readFileSync(
+      new URL(
+        '../.github/workflows/_delivery-deploy-environment.yml',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+    /is not set, so no Slack message/,
+  );
+});
+
+test('Slack messages escape control characters, and a failed post only warns', async () => {
+  for (const step of [approvalStep, resultJob.steps[0]]) {
+    const env = {
+      ...releaseEnv('prod'),
+      RELEASE_TAG: 'a<b>&c',
+      DEPLOY_RESULT: 'success',
+      DEPLOYED: 'true',
+    };
+    const escaped = await notify(step, env);
+    assert.match(
+      escaped.texts[0],
+      /^match-to-csv a&lt;b&gt;&amp;c -&gt; prod: /,
+    );
+    assert.deepEqual(escaped.warnings, []);
+    // An error status or a thrown fetch warns and resolves.
+    const refused = await notify(step, env, {
+      respond: async () => ({ ok: false, status: 404 }),
+    });
+    assert.deepEqual(refused.warnings, [
+      'Slack answered the deploy message with HTTP 404',
+    ]);
+    const thrown = await notify(step, env, {
+      respond: async () => {
+        throw new TypeError(`Failed to parse URL from ${webhook}`);
+      },
+    });
+    assert.deepEqual(thrown.warnings, [
+      'Could not post the deploy message to Slack (TypeError)',
+    ]);
+    for (const result of [escaped, refused, thrown]) {
+      for (const line of [...result.warnings, ...result.info]) {
+        assert.ok(!line.includes(webhook), line);
+      }
+    }
   }
 });

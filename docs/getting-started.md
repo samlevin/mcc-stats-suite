@@ -123,11 +123,11 @@ domain=$(aws ssm get-parameter --profile mcc-dev-admin --name /mcc/dev/match-to-
 echo "$alias+<name>@$domain"
 ```
 
-From your own mail client, send that address a message with a PNG or JPEG screenshot attached. `match-to-csv` accepts images of at least 640 by 360 pixels and up to 10 MB. If the dev sender allowlist exists, your `From` address must be on it. See [Manage the sender allowlist](self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist). Keep the address, the domain, and your test messages out of commits, issues, and pull requests.
+From your own mail client, send that address a message with a PNG or JPEG screenshot attached. `match-to-csv` accepts images of at least 640 by 360 pixels and up to 10 MB. Your `From` address must be on the dev sender allowlist, which is required. Without it, every message is rejected. See [Manage the sender allowlist](self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist). Keep the address, the domain, and your test messages out of commits, issues, and pull requests.
 
 ### Check the result
 
-Find your stack's workflow and its latest execution. Its status should be `SUCCEEDED`. A message with no processable screenshot fails its execution instead.
+Find your stack's workflow and its latest execution. Its status should be `SUCCEEDED`. A rejected message, such as one with no processable screenshot, also ends as `SUCCEEDED`, at the `Submission rejected` state, and runs no OCR.
 
 ```console
 state_machine=$(aws cloudformation describe-stacks --profile mcc-dev-admin --stack-name match-to-csv-e-<name> --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" --output text)

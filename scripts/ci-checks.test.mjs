@@ -622,8 +622,8 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
 });
 
 test('only the delivery workflows call the reusable deploy workflows', () => {
-  // CI and release runs never deploy, so a Slack subscription to the deploy
-  // workflow sees only real deploys.
+  // CI and release runs never deploy, so only real deploys post Slack deploy
+  // messages.
   const directory = new URL('../.github/workflows/', import.meta.url);
   const callers = readdirSync(directory)
     .filter((name) => /\.ya?ml$/.test(name))
