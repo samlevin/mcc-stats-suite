@@ -555,6 +555,14 @@ test('every main workflow task payload carries INGEST trace context', () => {
     trace: trace('INGEST'),
   });
   assert.equal(processEmail.ResultPath, undefined);
+  const processEmailWithout =
+    definition.States['Process email and attachments without receivedAt'];
+  assert.deepEqual(processEmailWithout.Parameters, {
+    'bucket.$': '$.bucket',
+    'key.$': '$.key',
+    trace: trace('INGEST'),
+  });
+  assert.equal(processEmailWithout.ResultPath, undefined);
 
   const map = definition.States['Process attachments'];
   assert.deepEqual(map.ItemSelector, { 'source.$': '$$.Map.Item.Value' });
@@ -579,7 +587,7 @@ test('every main workflow task payload carries INGEST trace context', () => {
     ...Object.values(definition.States),
     ...Object.values(item),
   ].filter((state) => state.Type === 'Task');
-  assert.equal(tasks.length, 4);
+  assert.equal(tasks.length, 6);
   for (const task of tasks) {
     assert.deepEqual(
       (task.Parameters as { trace: unknown }).trace,
@@ -646,6 +654,75 @@ test('the stored-email rule starts the workflow with the object and its receive 
   });
 });
 
+/**
+ * Walks a Choice on `$.receivedAt` and returns the states it runs with and
+ * without the field.
+ */
+function receivedAtBranches(definition: StateDefinition, choiceName: string) {
+  const choice = definition.States[choiceName];
+  assert.equal(choice.Type, 'Choice', choiceName);
+  const choices = choice.Choices as Record<string, unknown>[];
+  assert.equal(choices.length, 1, choiceName);
+  assert.equal(choices[0].Variable, '$.receivedAt', choiceName);
+  assert.equal(choices[0].IsPresent, true, choiceName);
+  return {
+    present: choices[0].Next as string,
+    absent: choice.Default as string,
+  };
+}
+
+test('a main workflow start without receivedAt runs steps that never read it', () => {
+  const definition = stateMachineDefinition(
+    synthesize({ environment: 'dev' }),
+    'match-to-csv-dev',
+  );
+  // EventBridge sets receivedAt, a manual start may send only bucket and key.
+  assert.equal(definition.StartAt, 'Input has receivedAt');
+  assert.deepEqual(receivedAtBranches(definition, 'Input has receivedAt'), {
+    present: 'Process email and attachments',
+    absent: 'Process email and attachments without receivedAt',
+  });
+  for (const name of [
+    'Process email and attachments',
+    'Process email and attachments without receivedAt',
+  ]) {
+    assert.match(
+      definition.States[name].Resource as string,
+      /^token:ProcessEmail/,
+      name,
+    );
+    assert.equal(definition.States[name].Next, 'Process attachments', name);
+  }
+  // process-email omits receivedAt from its output when the input had none
+  // or a malformed one, so the gamertag step checks again.
+  assert.equal(
+    definition.States['Process attachments'].Next,
+    'Email output has receivedAt',
+  );
+  assert.deepEqual(
+    receivedAtBranches(definition, 'Email output has receivedAt'),
+    {
+      present: 'Write gamertag CSVs',
+      absent: 'Write gamertag CSVs without receivedAt',
+    },
+  );
+
+  // Only the branches taken when receivedAt is present read it, because a
+  // JSONPath field with a missing path fails the execution.
+  const item = (
+    definition.States['Process attachments'].ItemProcessor as StateDefinition
+  ).States;
+  const readers = Object.entries({ ...definition.States, ...item })
+    .filter(([, state]) => JSON.stringify(state).includes('$.receivedAt'))
+    .filter(([, state]) => state.Type !== 'Choice')
+    .map(([name]) => name)
+    .sort();
+  assert.deepEqual(readers, [
+    'Process email and attachments',
+    'Write gamertag CSVs',
+  ]);
+});
+
 test('the main workflow writes gamertag CSVs only after the attachments Map', () => {
   const template = synthesize({ environment: 'dev' });
   const definition = stateMachineDefinition(template, 'match-to-csv-dev');
@@ -653,27 +730,37 @@ test('the main workflow writes gamertag CSVs only after the attachments Map', ()
   assert.equal(map.Type, 'Map');
   // No Catch: a failed item fails the Map and the execution before the step.
   assert.equal(map.Catch, undefined);
-  assert.equal(map.Next, 'Write gamertag CSVs');
+  assert.equal(map.Next, 'Email output has receivedAt');
 
-  const step = definition.States['Write gamertag CSVs'];
-  assert.equal(step.Type, 'Task');
-  assert.equal(step.End, true);
-  assert.equal(step.Catch, undefined);
-  assert.match(step.Resource as string, /^token:WriteGamertagCsvs/);
-  // Only the keys, the match date, receivedAt and trace context enter the
-  // step, never a row.
-  assert.deepEqual(step.Parameters, {
+  // Only the keys, the match date, trace context and receivedAt when present
+  // enter the step, never a row.
+  const parameters = {
     'submissionId.$': '$.submissionId',
     'matchDate.$': '$.matchDate',
     'exports.$': '$.results[*].summary',
-    'receivedAt.$': '$.receivedAt',
     trace: trace('INGEST'),
-  });
-  assert.equal(step.ResultPath, '$.gamertagCsvs');
-  assert.deepEqual(
-    step.Retry,
-    definition.States['Process email and attachments'].Retry,
-  );
+  };
+  for (const [name, expected] of [
+    ['Write gamertag CSVs', { ...parameters, 'receivedAt.$': '$.receivedAt' }],
+    ['Write gamertag CSVs without receivedAt', parameters],
+  ] as const) {
+    const step = definition.States[name];
+    assert.equal(step.Type, 'Task', name);
+    assert.equal(step.End, true, name);
+    assert.equal(step.Catch, undefined, name);
+    assert.match(step.Resource as string, /^token:WriteGamertagCsvs/, name);
+    assert.deepEqual(step.Parameters, expected, name);
+    assert.equal(step.ResultPath, '$.gamertagCsvs', name);
+  }
+
+  const step = definition.States['Write gamertag CSVs'];
+  for (const name of [
+    'Process email and attachments',
+    'Process email and attachments without receivedAt',
+    'Write gamertag CSVs without receivedAt',
+  ]) {
+    assert.deepEqual(definition.States[name].Retry, step.Retry, name);
+  }
   assert.deepEqual(step.Retry, [
     {
       ErrorEquals: [
