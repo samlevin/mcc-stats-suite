@@ -1,6 +1,6 @@
 ---
 name: mcc-create-github-issue
-description: Plan and file MCC GitHub issues, native sub-issues, and explicitly requested epics using the repository's issue forms, labels, and MCC delivery project fields, with independent mcc-issue-triager metadata. Use for create/file/open/draft issue requests in samlevin/mcc-stats-suite. Does not implement or open PRs.
+description: Plan and file MCC GitHub issues, native sub-issues, and explicitly requested epics using the repository's issue forms, labels, and MCC delivery project fields. Classifies inline by default and asks mcc-issue-triager for independent triage when a batch needs independent classification, decomposition, or dependency judgment. Use for create/file/open/draft issue requests in samlevin/mcc-stats-suite. Does not implement or open PRs.
 argument-hint: '[what to file] [triager model <name>] [triager effort <level>]'
 model: sonnet
 effort: medium
@@ -11,7 +11,7 @@ effort: medium
 
 ## Resolve
 
-Repository `samlevin/mcc-stats-suite`, project [MCC delivery](https://github.com/users/samlevin/projects/1) (number 1, owner `samlevin`). Read `.agents/issue-creation.md` and the matching `.github/ISSUE_TEMPLATE/*.yml`; `AGENTS.md` is already loaded. Read `ISSUE_TRIAGE.md` only for a classification question. Discover labels (`gh api repos/samlevin/mcc-stats-suite/labels --paginate`), project fields and options (`gh api users/samlevin/projectsV2/1/fields --paginate`), and native issue types (`gh api orgs/<owner>/issue-types` when the repository owner is an organization; a user-owned repository has none) once per batch, and reuse the results. Every GitHub call you make in this skill is REST through `gh api`; the repository scripts it runs keep their own calls. Repository commands run read-only against the human checkout; do not modify it.
+Repository `samlevin/mcc-stats-suite`, project [MCC delivery](https://github.com/users/samlevin/projects/1) (number 1, owner `samlevin`). Read `.agents/issue-creation.md` and the matching `.github/ISSUE_TEMPLATE/*.yml`; `AGENTS.md` is already loaded. Read `ISSUE_TRIAGE.md` when you classify drafts, which is the default. Discover labels (`gh api repos/samlevin/mcc-stats-suite/labels --paginate`), project fields and options (`gh api users/samlevin/projectsV2/1/fields --paginate`), and native issue types (`gh api orgs/<owner>/issue-types` when the repository owner is an organization; a user-owned repository has none) once per batch, and reuse the results. Every GitHub call you make in this skill is REST through `gh api`; the repository scripts it runs keep their own calls. Repository commands run read-only against the human checkout; do not modify it.
 
 This skill pins the main-thread model and effort for the turn from `.agents/policy.json` (`issue-creation`). A `model` or `effort` override in the request applies to this turn by naming it (`/model`, `--model`, `--effort`), not through this skill.
 
@@ -26,7 +26,15 @@ Search for duplicates first (`gh api -X GET search/issues -f q='repo:samlevin/mc
 
 ## Triage
 
-Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Spawn one `mcc-issue-triager` for the batch with the resolved model and effort. Send only the drafts (ref, title, body, parent ref, and planned blocked-by refs), accepted decisions, the discovered label and option lists, and the `Policy:` line (`Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, labels, and independence groups. On SPLIT_REQUIRED, split and re-triage only the affected drafts, plus their sibling leaves when the split changes a new container's leaves. There is no second pass otherwise. Never triage yourself in place of the triager.
+Classify inline by default: set severity, Priority, Size, labels, and LEAF or CONTAINER for each draft by `ISSUE_TRIAGE.md` and `.agents/issue-creation.md`.
+
+Spawn one `mcc-issue-triager` for the batch instead when the filing needs independent judgment:
+
+- Classification: the request asks for independent triage, or a draft's severity, Size, or leaf-or-container scope stays uncertain after you read `ISSUE_TRIAGE.md`.
+- Decomposition: a draft may hold more than one logical outcome, or the batch creates a container or epic.
+- Dependency judgment: a new container or epic has two or more leaf children, which need independence groups, or the batch adds blocked-by edges among its new issues.
+
+Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Send only the drafts (ref, title, body, parent ref, and planned blocked-by refs), accepted decisions, the discovered label and option lists, which reason above applies, and the `Policy:` line (`Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, labels, and independence groups; once you spawn it, never override its verdict with your own. On SPLIT_REQUIRED, split and re-triage only the affected drafts, plus their sibling leaves when the split changes a new container's leaves. There is no second pass otherwise. Only the triager forms independence groups.
 
 Spawn with the Agent tool: `subagent_type: mcc-issue-triager`, passing `model` and `effort` from the resolver explicitly.
 
@@ -38,4 +46,4 @@ Order: parents, then children, then native parent links, then blocked-by edges (
 
 ## Verify and return
 
-Read back bodies, independence records, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, independence groups, the triager's `Requested settings: Policy: <as dispatched>` line, and any partial result or uncertainty, compactly.
+Read back bodies, independence records, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, independence groups, either `Triage: inline` or the triager's `Requested settings: Policy: <as dispatched>` line verbatim with the reason you spawned it, and any partial result or uncertainty, compactly.

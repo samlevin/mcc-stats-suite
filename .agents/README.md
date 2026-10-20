@@ -7,7 +7,10 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `policy.json` | The repository binding (namespace prefix, repository, project, tracker documents, feature flags), the model and effort per capability and tool, and the values each tool accepts |
 | `roles/*.md` | Source of each agent role (shared text, with `<!-- claude-only -->` and `<!-- codex-only -->` blocks) |
 | `workflows/*.md` | Source of each skill, the user-facing entry points |
-| `workflows/<name>/` | Supporting references copied verbatim into both tools' skills |
+| `workflows/<name>/` | Supporting references copied into both tools' skills, with placeholders resolved and, in Markdown, only that tool's tool-only blocks |
+| `workflows/implement/references/delivery.md` | The one leaf delivery procedure, for the main thread and an isolated implementer alike |
+| `workflows/implement/references/queue.md` | The container dependency queue the main thread runs |
+| `workflows/stack.md` | The stack skill, the one source for branch, link, rebase, and sync safety |
 | `skills/mcc-*/` | Generated Codex skills (`SKILL.md`, `agents/openai.yaml`) |
 | `../.codex/agents/mcc-*.toml` | Generated Codex custom agents |
 | `../.claude/agents/mcc-*.md` | Generated Claude Code subagents |
@@ -16,45 +19,54 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../.codex/config.toml` | Codex project MCP servers (maintained directly) |
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), drift check (`check`), and manual review publisher (`publish-review`) |
 | `worktree-isolation.md` | Shared worktree ownership and setup rules, read before roles or skills use a worktree |
-| `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` |
+| `evidence.md` | Shared retrieval and waiting rules for delivery owners, isolated implementers, and code reviewers |
+| `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue`; owns the independence group definition and record format |
 
 Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
 
 ## Reuse in another repository
 
-The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `evidence.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 
 Both tools support both packaging forms, and the repository uses both, each for what it does well.
 
-Agents are the role-bearing unit. An agent definition carries the role boundary (read-only reviewer, implementer that may write and push), an isolated context, a tool allowlist in Claude Code and a permission profile in Codex, and the slot where the model and effort policy applies. The repository defines six roles: `mcc-issue-triager`, `mcc-orchestrator`, `mcc-implementer`, `mcc-stack-manager`, `mcc-code-reviewer`, and `mcc-security-reviewer`.
+Skills carry the work that runs in the thread a person is talking to. `mcc-implement` makes that thread the delivery owner: it creates and owns the worktree, claims the issue, implements, validates, runs stack operations through the `mcc-stack` skill, and opens the PR, for a leaf, a PR rework, or a container's dependency queue. `mcc-create-github-issue` drafts, classifies, and files issues the same way. Neither needs a dispatcher, an orchestrator, or a stack manager, so none exists.
 
-Skills are the entry points and the policy adapter. A skill is what a person invokes (`/mcc-implement`, `$mcc-implement`), it runs in the main thread where it can ask a question, and it is the only place that can apply the repository policy at spawn time. That last point decides the split for Codex: a Codex agent file that sets `model` or `model_reasoning_effort` takes precedence over every spawn-time value, so a pinned agent file would defeat prompt overrides. The generated Codex agents therefore carry neither field, and the skills pass the resolved values to `spawn_agent` on every dispatch. Codex also loads repository skills in an untrusted project but loads project agents only after trust, so a skill is the right place to tell the contributor that the agents are missing. In Claude Code the per-invocation `model` and `effort` parameters already override frontmatter, so the generated Claude agents pin the policy and the skills still pass the resolved values explicitly for the same reason: a dispatch must never depend on a session or contributor default.
+Agents are for work that needs a fresh context or a hard boundary. An agent definition carries the role boundary (read-only reviewer, implementer that may write and push), an isolated context, a tool allowlist in Claude Code and a permission profile in Codex, and the slot where the model and effort policy applies. The repository defines four roles:
 
-Issue creation is the one capability without an agent. It needs to ask the person about material unknowns, and a forked subagent cannot do that in either tool, so it runs in the main thread as a skill and spawns `mcc-issue-triager` for the independent classification.
+- `mcc-code-reviewer`: the independent, read-only pre-PR gate and requested reviews. A reviewer must not share the implementer's context or self-assessment, so it is always a separate agent.
+- `mcc-security-reviewer`: explicitly requested read-only security review.
+- `mcc-issue-triager`: independent classification, decomposition, and dependency judgment, only when a filing batch needs it.
+- `mcc-implementer`: an isolated delivery owner for one leaf, used deliberately to keep a large leaf's exploration out of the main conversation, or for the queue's parallel exception. It follows the same procedure as the main thread and never delegates to another implementer.
+
+Skills are also the entry points and the policy adapter. A skill is what a person invokes (`/mcc-implement`, `$mcc-implement`), it runs in the main thread where it can ask a question, and it is the only place that can apply the repository policy at spawn time. That last point decides the split for Codex: a Codex agent file that sets `model` or `model_reasoning_effort` takes precedence over every spawn-time value, so a pinned agent file would defeat prompt overrides. The generated Codex agents therefore carry neither field, and the skills pass the resolved values to `spawn_agent` on every dispatch. Codex also loads repository skills in an untrusted project but loads project agents only after trust, so a skill is the right place to tell the contributor that the agents are missing. In Claude Code the per-invocation `model` and `effort` parameters already override frontmatter, so the generated Claude agents pin the policy and the skills still pass the resolved values explicitly for the same reason: a dispatch must never depend on a session or contributor default.
+
+A skill cannot change the session model in either tool, so inline work runs at whatever model and effort the session has. `mcc-implement` reports the `implementation` policy as `Advisory policy:` and spawns no agent to enforce it. Claude Code skill frontmatter can pin a model for the turn that loads the skill; `mcc-create-github-issue` uses that for its one-turn filing flow, while `mcc-implement` does not, because a delivery spans many turns and both tools should behave alike.
 
 ## Parity matrix
 
 | Component | Claude Code | Codex | Checked by |
 | --- | --- | --- | --- |
-| Issue creation | `.claude/skills/mcc-create-github-issue` (pins `sonnet`/`medium` for the turn) | `.agents/skills/mcc-create-github-issue` | same source; skill fixture lists both |
-| Issue triage | `.claude/agents/mcc-issue-triager.md` (`Read, Grep, Glob, Bash`) | `.codex/agents/mcc-issue-triager.toml` (`:read-only`) | same source; spawn fixtures below |
-| Orchestration | `mcc-orchestrator` (`Agent, Bash, Read, Grep, Glob, Skill`) | `mcc-orchestrator` | same source |
-| Implementation | `mcc-implementer` (`isolation: worktree`) | `mcc-implementer` (creates `.codex/worktrees/<branch>`) | same source |
-| Stack management | `mcc-stack-manager` (`Bash, Read`, read-only command planning) | `mcc-stack-manager` (read-only command planning) | same source |
-| Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source |
-| Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source |
-| Entry points | `/mcc-implement`, `/mcc-review-code`, `/mcc-review-security`, `/mcc-apply-foundation`, and `/mcc-apply-bootstrap` (not model-invocable), `/mcc-plain-language`, `/mcc-agents` | `$mcc-implement`, `$mcc-review-code`, `$mcc-review-security`, `$mcc-apply-foundation`, and `$mcc-apply-bootstrap` (`allow_implicit_invocation: false`), `$mcc-plain-language`, `$mcc-agents` | same source; manifests generated |
+| Leaf and PR rework delivery (main thread, default) | `/mcc-implement`; worktree under `.claude/worktrees/`; reviewer through the Agent tool | `$mcc-implement`; worktree under `.codex/worktrees/`; reviewer through `spawn_agent` | same source and `references/delivery.md`; routing tests |
+| Container queue (main thread, sequential) | `/mcc-implement` with `references/queue.md` | `$mcc-implement` with `references/queue.md` | same source; routing tests |
+| Isolated implementation (exception) | `mcc-implementer` (`isolation: worktree`), spawned through the Agent tool | `mcc-implementer` (creates `.codex/worktrees/<branch>`), spawned with `fork_turns: "none"` | same source; routing tests |
+| Stack operations | `/mcc-stack`, loaded by the worktree's creator with the Skill tool | `$mcc-stack`, loaded by the worktree's creator | same source; routing tests |
+| Issue creation | `.claude/skills/mcc-create-github-issue` (pins `sonnet`/`medium` for the turn) | `.agents/skills/mcc-create-github-issue` | same source; routing tests |
+| Issue triage (when filing needs it) | `.claude/agents/mcc-issue-triager.md` (`Read, Grep, Glob, Bash`) | `.codex/agents/mcc-issue-triager.toml` (`:read-only`) | same source |
+| Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source; routing tests |
+| Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source; routing tests |
+| Entry points | `/mcc-implement`, `/mcc-stack`, `/mcc-review-code`, `/mcc-review-security`, `/mcc-apply-foundation`, and `/mcc-apply-bootstrap` (not model-invocable), `/mcc-plain-language`, `/mcc-agents` | `$mcc-implement`, `$mcc-stack`, `$mcc-review-code`, `$mcc-review-security`, `$mcc-apply-foundation`, and `$mcc-apply-bootstrap` (`allow_implicit_invocation: false`), `$mcc-plain-language`, `$mcc-agents` | same source; manifests generated |
 | Foundation apply | the agent runs `gh`, `git`, `aws`, `tofu`, `direnv`, `jq`, and `shasum` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
 | Bootstrap apply | the agent runs `git`, `aws`, `tofu`, `direnv`, `jq`, `shasum`, `npm`, `npx`, and `node` through Bash; worktree under `.claude/worktrees/` | the same commands in the shell; worktree under `.codex/worktrees/` | same source |
 | Policy resolution | `node scripts/agent-policy.mjs resolve --tool claude ...` | `... --tool codex ...` | `scripts/agent-policy.test.mjs` |
 | Playwright MCP | `.mcp.json`, server `playwright` | `.codex/config.toml`, server `playwright` | fresh-session server discovery below |
 | Playwriter | `.mcp.json`, server `playwriter` | `.codex/config.toml`, server `playwriter` | fresh-session server discovery below |
 
-"Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role and workflow for both tools and compares shared lines.
+"Same source" means the Claude and Codex files are rendered from one Markdown file; only the tool-only blocks differ (how to spawn, how to load a skill, how the worktree is created, and the Claude reviewer's optional detached checkout). The test suite renders every role, workflow, and Markdown reference for both tools and requires every shared line in both renderings. "Routing tests" in `scripts/agent-policy.test.mjs` also check behavior: each source names the same agents, skills, and references in both tools; `mcc-implement` routes a leaf and a rework inline and a container to the queue, and spawns an implementer only from its exception section; the queue stays sequential unless a person asks for parallel delivery; the delivery owner loads `mcc-stack` itself; the pre-PR review stays mandatory on its paths; issue filing classifies inline unless it needs independent judgment; and only the four roles above resolve and generate, so no generated file names an `orchestrator` or `stack-manager` agent.
 
-[Agent worktree isolation](worktree-isolation.md) owns the setup and ownership rules for every role and skill. Stack managers inspect the creating implementer's worktree and return mutation commands for that implementer to execute.
+[Agent worktree isolation](worktree-isolation.md) owns the setup and ownership rules for every role and skill. The worktree's creator runs every mutation in it, stack operations included.
 
 ## Model and effort policy
 
@@ -62,9 +74,7 @@ Issue creation is the one capability without an agent. It needs to ask the perso
 | --- | --- | --- |
 | Issue creation (main thread) | `sonnet` / `medium` | `gpt-6.1-sol` / `medium` |
 | Issue triage | `haiku` / `low` | `gpt-6-luna` / `low` |
-| Orchestration | `sonnet` / `medium` | `gpt-6-luna` / `medium` |
-| Implementation | `opus` / `high` | `gpt-6.1-sol` / `high` |
-| Stack management | `sonnet` / `low` | `gpt-6-luna` / `low` |
+| Implementation (binding for an isolated implementer, advisory for the main thread) | `opus` / `high` | `gpt-6.1-sol` / `high` |
 | Code review | `opus` / `high` | `gpt-6.1-sol` / `high` |
 | Security review | `opus` / `max` | `gpt-6-astra` / `high` |
 
@@ -72,7 +82,7 @@ Issue creation is the one capability without an agent. It needs to ask the perso
 
 ### Precedence
 
-1. An explicit `model <name>` or `effort <level>` in the request wins, for the role the skill dispatches. A role prefix targets a handoff: `reviewer effort max`, `implementer model opus`, `stack model sonnet`, `triager effort medium`.
+1. An explicit `model <name>` or `effort <level>` in the request wins, for the role the skill dispatches. A role prefix targets a handoff: `reviewer effort max`, `implementer model opus`, `triager effort medium`. In `mcc-implement`, an unprefixed override targets an isolated implementer; inline work runs at the session settings, and the skill says so instead of applying the override.
 2. Otherwise the repository policy applies.
 3. A partial override changes only the named setting; the other stays at the policy value (`source` in the resolver output says which).
 4. Overrides last for the task and the handoffs they name. Nothing rewrites `policy.json`, `~/.claude`, or `~/.codex`.
@@ -81,9 +91,9 @@ The resolver refuses a model or effort the repository does not list and prints w
 
 ### Reports
 
-Each dispatched role reports `Requested settings: Policy: <as dispatched>`. The policy line records the requested model and effort and whether each came from policy or an explicit override. Caller workflows retain that label when relaying results, including a container's per-leaf reports and issue triage results. These values describe the dispatch request, not what the runtime ran: `CLAUDE_CODE_EFFORT_LEVEL` and a Codex agent file field override them silently (see [Known limitations](#known-limitations)). Use the effective-model verification row below when that matters. Routine reports omit model self-identification, runtime-verification fields, and automatic verification warnings or discussions; `AGENTS.md` states this once for every role and skill.
+Each dispatched role reports `Requested settings: Policy: <as dispatched>`. The policy line records the requested model and effort and whether each came from policy or an explicit override. Caller workflows retain that label when relaying results, including a container's per-leaf rows and issue triage results. Inline work reports `Advisory policy: ...` instead, because nothing dispatched it and it runs at the session settings. These values describe the dispatch request, not what the runtime ran: `CLAUDE_CODE_EFFORT_LEVEL` and a Codex agent file field override them silently (see [Known limitations](#known-limitations)). Use the effective-model verification row below when that matters. Routine reports omit model self-identification, runtime-verification fields, and automatic verification warnings or discussions; `AGENTS.md` states this once for every role and skill.
 
-For example, a default Codex implementation reports `Requested settings: Policy: tool=codex role=implementer model=gpt-6.1-sol effort=high (model: policy, effort: policy)`. A code review requested with `model gpt-6-sol effort xhigh` reports `Requested settings: Policy: tool=codex role=code-reviewer model=gpt-6-sol effort=xhigh (model: override, effort: override)`.
+For example, an inline Codex delivery reports `Advisory policy: tool=codex capability=implementation model=gpt-6.1-sol effort=high (session settings apply)`, and an isolated Codex implementer reports `Requested settings: Policy: tool=codex role=implementer model=gpt-6.1-sol effort=high (model: policy, effort: policy)`. A code review requested with `model gpt-6-sol effort xhigh` reports `Requested settings: Policy: tool=codex role=code-reviewer model=gpt-6-sol effort=xhigh (model: override, effort: override)`.
 
 ### Vendor differences and adapters
 
@@ -91,7 +101,7 @@ For example, a default Codex implementation reports `Requested settings: Policy:
 | --- | --- | --- |
 | Where the policy is applied | agent frontmatter (`model`, `effort`) plus explicit Agent tool parameters | explicit `spawn_agent` parameters only; agent files omit both fields on purpose |
 | Precedence in the runtime | per-invocation parameter > frontmatter > `CLAUDE_CODE_SUBAGENT_MODEL` > session model; `CLAUDE_CODE_EFFORT_LEVEL` beats every effort source | agent file field > spawn value > `[agents].default_subagent_*` > parent |
-| Main-thread skill model | skill frontmatter pins it for the turn | not possible; start the session with `codex -m <model> -c model_reasoning_effort=<effort>` |
+| Main-thread skill model | skill frontmatter can pin it for the turn that loads the skill (used by `mcc-create-github-issue` only); otherwise set the session with `/model` or `claude --model <model> --effort <effort>` | not possible; start the session with `codex -m <model> -c model_reasoning_effort=<effort>` |
 | Built-in guidance | none against overrides | the `spawn_agent` description says not to set `model` unless the user asks; the skills override that because the repository policy is the user's standing request |
 | Effective-model verification (operator check) | the Agent tool call shows the parameters, and the subagent's system prompt names its model | the child cannot read its model reliably; verify with `sqlite3 ~/.codex/state_5.sqlite "select agent_role, model, reasoning_effort from threads order by rowid desc limit 5"` (Codex 0.162 schema) or the thread view |
 
@@ -101,7 +111,7 @@ The per-invocation `effort` parameter needs Claude Code 2.1.292 or later; Codex 
 
 Claude Code loads `.claude/agents/` and `.claude/skills/` by walking up from the working directory to the repository root, so they load from the root, a nested directory, and a linked worktree. No trust step gates them. A project agent with the same name as a personal agent replaces the personal one, and a personal skill shadows a project skill of the same name. `/mcc-review-security` has `disable-model-invocation: true`, so only a person can start it.
 
-Codex loads `.agents/skills/` from every directory between the working directory and the repository root, in trusted and untrusted projects alike. It loads `.codex/agents/` only when the project is trusted (`trust_level = "trusted"` for the repository path in `~/.codex/config.toml`, which Codex writes when you accept the trust prompt). A linked worktree inherits the main checkout's trust. Until the project is trusted, `spawn_agent` reports an unknown `agent_type` for `mcc-*`, and the skills say so instead of continuing. Codex lists skills that share a name side by side rather than picking one. `$mcc-review-security` has `allow_implicit_invocation: false`, so Codex never picks it on its own.
+Codex loads `.agents/skills/` from every directory between the working directory and the repository root, in trusted and untrusted projects alike. It loads `.codex/agents/` only when the project is trusted (`trust_level = "trusted"` for the repository path in `~/.codex/config.toml`, which Codex writes when you accept the trust prompt). A linked worktree inherits the main checkout's trust. Until the project is trusted, `spawn_agent` reports an unknown `agent_type` for `mcc-*`, and the skills say so instead of continuing. Inline delivery and stack operations need no agent, so they start without trust, but a delivery that needs the pre-PR reviewer stops at that gate. Codex lists skills that share a name side by side rather than picking one. `$mcc-review-security` has `allow_implicit_invocation: false`, so Codex never picks it on its own.
 
 Every identifier here starts with `mcc-` so that it cannot collide with a contributor's own agents and skills in either tool.
 
@@ -129,7 +139,9 @@ To check discovery, open a fresh session in a new worktree and run `claude mcp l
 
 ## Known limitations
 
-- Codex skills cannot change the session model, so the issue-creation policy for Codex is advisory for the main thread and binding only for the spawned triager.
+- Codex skills cannot change the session model, so the issue-creation policy for Codex is advisory for the main thread and binding only for a spawned triager.
+- `mcc-implement` cannot change the session model in either tool. The implementation policy binds only an isolated implementer; inline delivery runs at the session settings and reports the policy as advisory.
+- Inline delivery keeps the leaf's exploration in the main conversation. For a large leaf, choose the isolated implementer exception deliberately.
 - Claude Code honors `CLAUDE_CODE_EFFORT_LEVEL` above everything, including the repository policy and a prompt override. Leave it unset when you want the repository defaults.
 - Reports carry requested settings, never verified ones. Codex cannot verify a child's model from inside the child; the thread table or thread view is the ground truth.
 - Prompt overrides are read from natural language by the dispatching skill; the resolver validates the values but cannot see the request.
