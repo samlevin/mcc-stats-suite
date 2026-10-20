@@ -1376,6 +1376,92 @@ test('the local permission set assumes only the four local roles', () => {
   );
 });
 
+test('the local permission set reads only ephemeral match-to-csv logs', () => {
+  const permissionSet = JSON.parse(
+    readFileSync(
+      'docs/self-hosting/policies/local-cdk-deployer-dev.json.template',
+      'utf8',
+    ),
+  );
+  const unscoped = ['logs:DescribeLogGroups', 'logs:StopQuery'];
+  const scoped = new Set();
+  for (const entry of permissionSet.Statement) {
+    const actions = [entry.Action]
+      .flat()
+      .filter((action) => action.toLowerCase().startsWith('logs:'));
+    if (actions.length === 0) continue;
+    assert.equal(entry.Effect, 'Allow', entry.Sid);
+    for (const action of actions) {
+      assert.doesNotMatch(action, /\*/, `${entry.Sid} names ${action}`);
+    }
+    if (actions.every((action) => unscoped.includes(action))) continue;
+    assert.deepEqual(
+      actions.filter((action) => unscoped.includes(action)),
+      [],
+      `${entry.Sid} mixes unscoped actions with log group actions`,
+    );
+    for (const resource of [entry.Resource].flat()) {
+      assert.match(
+        resource,
+        /^arn:aws:logs:AWS_REGION:DEV_ACCOUNT_ID:log-group:\/aws\/(lambda|vendedlogs\/states)\/match-to-csv-e-\*(:\*)?$/,
+        entry.Sid,
+      );
+    }
+    for (const action of actions) scoped.add(action);
+  }
+  assert.ok(scoped.has('logs:GetQueryResults'));
+  assert.ok(scoped.has('logs:GetLogGroupFields'));
+  assert.doesNotMatch(JSON.stringify(permissionSet), /DescribeQueries/i);
+
+  const group = (name) =>
+    `arn:aws:logs:AWS_REGION:DEV_ACCOUNT_ID:log-group:${name}`;
+  const ephemeral = [
+    group('/aws/lambda/match-to-csv-e-alice-ExtractText'),
+    group('/aws/vendedlogs/states/match-to-csv-e-alice'),
+  ];
+  const stable = [
+    group('/aws/lambda/match-to-csv-dev-ExtractText'),
+    group('/aws/vendedlogs/states/match-to-csv-dev'),
+    group('/aws/lambda/other-app-e-alice-Handler'),
+    'arn:aws:logs:AWS_REGION:PROD_ACCOUNT_ID:log-group:/aws/lambda/match-to-csv-e-alice-ExtractText',
+  ];
+  for (const action of scoped) {
+    for (const resource of ephemeral) {
+      assert.equal(allowed(permissionSet, action, resource), true, action);
+    }
+    for (const resource of stable) {
+      assert.equal(allowed(permissionSet, action, resource), false, action);
+    }
+  }
+  assert.equal(
+    allowed(
+      permissionSet,
+      'logs:GetLogEvents',
+      `${ephemeral[0]}:log-stream:2026/01/01/[$LATEST]abc`,
+    ),
+    true,
+  );
+  assert.equal(
+    allowed(
+      permissionSet,
+      'logs:GetLogEvents',
+      `${stable[0]}:log-stream:2026/01/01/[$LATEST]abc`,
+    ),
+    false,
+  );
+  for (const action of unscoped) {
+    assert.equal(allowed(permissionSet, action, '*'), true, action);
+  }
+  for (const action of [
+    'logs:DescribeQueries',
+    'logs:PutLogEvents',
+    'logs:DeleteLogGroup',
+  ]) {
+    assert.equal(allowed(permissionSet, action, ephemeral[0]), false, action);
+    assert.equal(allowed(permissionSet, action, '*'), false, action);
+  }
+});
+
 test('the toolkit stack policy keeps the local policies from being deleted', () => {
   const stackPolicy = JSON.parse(
     readFileSync(`${LOCAL_ROOT}/stack-policy.json`, 'utf8'),
