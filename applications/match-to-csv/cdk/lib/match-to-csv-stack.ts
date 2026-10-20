@@ -1,5 +1,13 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@mcc/cdk-config';
+import type {
+  ExtractTextOutput,
+  ProcessEmailInput,
+  ProcessingRunInput,
+  TraceContext,
+  WorkflowKind,
+  WriteGamertagCsvsInput,
+} from '@mcc/contracts';
 import {
   Aspects,
   CfnOutput,
@@ -41,6 +49,60 @@ import {
   ZERO_ROW_EXTRACTIONS_METRIC,
 } from '../../src/lib/metrics';
 import { REPLY_LOCAL_PART } from '../../src/lib/reply-address';
+
+/**
+ * The Step Functions context each Lambda task payload carries (spec 1.3
+ * §4.1). It is read when the task starts, so a retried attempt reports its
+ * own retry count.
+ */
+function traceContext(workflow: WorkflowKind): TraceContext {
+  return {
+    executionId: sfn.JsonPath.executionId,
+    retryCount: sfn.JsonPath.numberAt('$$.State.RetryCount'),
+    workflow,
+  };
+}
+
+/** The `extract-text` task payload in both workflows. */
+function extractTextPayload(workflow: WorkflowKind): sfn.TaskInput {
+  return sfn.TaskInput.fromObject({
+    source: sfn.JsonPath.objectAt('$.source'),
+    trace: traceContext(workflow),
+  } satisfies Record<keyof ProcessingRunInput, unknown>);
+}
+
+/**
+ * The `write-extracted-csv` task payload in both workflows: every field of
+ * the `extract-text` output, with this task's own trace context.
+ */
+function writeExtractedCsvPayload(workflow: WorkflowKind): sfn.TaskInput {
+  return sfn.TaskInput.fromObject({
+    runId: sfn.JsonPath.stringAt('$.runId'),
+    source: sfn.JsonPath.objectAt('$.source'),
+    rows: sfn.JsonPath.listAt('$.rows'),
+    normalizedArtifact: sfn.JsonPath.objectAt('$.normalizedArtifact'),
+    roster: sfn.JsonPath.objectAt('$.roster'),
+    trace: traceContext(workflow),
+  } satisfies Record<keyof ExtractTextOutput, unknown>);
+}
+
+/**
+ * Runs `withReceivedAt` when the state has `$.receivedAt` and
+ * `withoutReceivedAt` otherwise. The EventBridge rule always sets
+ * `receivedAt`, but a manual start may leave it out and `process-email` drops
+ * a malformed one. A JSONPath payload field fails the execution when its path
+ * is missing, so only the first branch may read `$.receivedAt`.
+ */
+function whenReceivedAt(
+  scope: Construct,
+  id: string,
+  withReceivedAt: sfn.IChainable,
+  withoutReceivedAt: sfn.IChainable,
+): sfn.Choice {
+  return new sfn.Choice(scope, id)
+    .when(sfn.Condition.isPresent('$.receivedAt'), withReceivedAt)
+    .otherwise(withoutReceivedAt);
+}
 
 interface MatchToCsvStackProps extends StackProps {
   deployment: DeploymentConfig;
@@ -363,43 +425,73 @@ export class MatchToCsvStack extends Stack {
       }),
     );
 
-    const processEmailTask = new tasks.LambdaInvoke(
-      this,
-      'Process email and attachments',
-      {
+    // Each step that passes `receivedAt` on has a variant without it, chosen
+    // by whenReceivedAt.
+    const processEmailTask = (id: string, payload: object) =>
+      new tasks.LambdaInvoke(this, id, {
         lambdaFunction: processEmail,
         payloadResponseOnly: true,
+        payload: sfn.TaskInput.fromObject(payload),
         retryOnServiceExceptions: false,
-      },
-    );
+      });
+    const processEmailPayload = {
+      bucket: sfn.JsonPath.stringAt('$.bucket'),
+      key: sfn.JsonPath.stringAt('$.key'),
+      trace: traceContext('INGEST'),
+    } satisfies Record<keyof Omit<ProcessEmailInput, 'receivedAt'>, unknown>;
+    const processEmailTasks = [
+      processEmailTask('Process email and attachments', {
+        ...processEmailPayload,
+        receivedAt: sfn.JsonPath.stringAt('$.receivedAt'),
+      } satisfies Record<keyof ProcessEmailInput, unknown>),
+      processEmailTask(
+        'Process email and attachments without receivedAt',
+        processEmailPayload,
+      ),
+    ] as const;
     const extractTextTask = new tasks.LambdaInvoke(this, 'Extract text', {
       lambdaFunction: extractText,
       payloadResponseOnly: true,
+      payload: extractTextPayload('INGEST'),
       retryOnServiceExceptions: false,
     });
     const writeCsvTask = new tasks.LambdaInvoke(this, 'Write extracted CSV', {
       lambdaFunction: writeExtractedCsv,
       payloadResponseOnly: true,
+      payload: writeExtractedCsvPayload('INGEST'),
       resultPath: '$.summary',
       retryOnServiceExceptions: false,
     });
-    // Runs only after every Map item succeeds. Its input holds the export keys
-    // and match date and never a row, so no roster gamertag enters the state.
-    const writeGamertagCsvsTask = new tasks.LambdaInvoke(
-      this,
-      'Write gamertag CSVs',
-      {
+    // Runs only after every Map item succeeds. Its input holds the export
+    // keys, the match date, trace context and receivedAt when present, and
+    // never a row, so no roster gamertag enters the state.
+    const writeGamertagCsvsTask = (id: string, payload: object) =>
+      new tasks.LambdaInvoke(this, id, {
         lambdaFunction: writeGamertagCsvs,
         payloadResponseOnly: true,
-        payload: sfn.TaskInput.fromObject({
-          submissionId: sfn.JsonPath.stringAt('$.submissionId'),
-          matchDate: sfn.JsonPath.stringAt('$.matchDate'),
-          exports: sfn.JsonPath.listAt('$.results[*].summary'),
-        }),
+        payload: sfn.TaskInput.fromObject(payload),
         resultPath: '$.gamertagCsvs',
         retryOnServiceExceptions: false,
-      },
-    );
+      });
+    const writeGamertagCsvsPayload = {
+      submissionId: sfn.JsonPath.stringAt('$.submissionId'),
+      matchDate: sfn.JsonPath.stringAt('$.matchDate'),
+      exports: sfn.JsonPath.listAt('$.results[*].summary'),
+      trace: traceContext('INGEST'),
+    } satisfies Record<
+      keyof Omit<WriteGamertagCsvsInput, 'receivedAt'>,
+      unknown
+    >;
+    const writeGamertagCsvsTasks = [
+      writeGamertagCsvsTask('Write gamertag CSVs', {
+        ...writeGamertagCsvsPayload,
+        receivedAt: sfn.JsonPath.stringAt('$.receivedAt'),
+      } satisfies Record<keyof WriteGamertagCsvsInput, unknown>),
+      writeGamertagCsvsTask(
+        'Write gamertag CSVs without receivedAt',
+        writeGamertagCsvsPayload,
+      ),
+    ] as const;
 
     const transientErrors = [
       'Lambda.ClientExecutionTimeoutException',
@@ -421,10 +513,10 @@ export class MatchToCsvStack extends Stack {
       backoffRate: 2,
     };
     for (const task of [
-      processEmailTask,
+      ...processEmailTasks,
       extractTextTask,
       writeCsvTask,
-      writeGamertagCsvsTask,
+      ...writeGamertagCsvsTasks,
     ]) {
       task.addRetry(retry);
     }
@@ -452,7 +544,16 @@ export class MatchToCsvStack extends Stack {
       stateMachineName: deployment.resourcePrefix,
       stateMachineType: sfn.StateMachineType.STANDARD,
       definitionBody: sfn.DefinitionBody.fromChainable(
-        processEmailTask.next(processAttachments).next(writeGamertagCsvsTask),
+        whenReceivedAt(this, 'Input has receivedAt', ...processEmailTasks)
+          .afterwards()
+          .next(processAttachments)
+          .next(
+            whenReceivedAt(
+              this,
+              'Email output has receivedAt',
+              ...writeGamertagCsvsTasks,
+            ),
+          ),
       ),
       timeout: Duration.minutes(15),
       logs: {
@@ -470,6 +571,7 @@ export class MatchToCsvStack extends Stack {
     const replayExtract = new tasks.LambdaInvoke(this, 'Replay extract text', {
       lambdaFunction: extractText,
       payloadResponseOnly: true,
+      payload: extractTextPayload('REPLAY'),
       retryOnServiceExceptions: false,
     });
     const replayWrite = new tasks.LambdaInvoke(
@@ -478,6 +580,7 @@ export class MatchToCsvStack extends Stack {
       {
         lambdaFunction: writeExtractedCsv,
         payloadResponseOnly: true,
+        payload: writeExtractedCsvPayload('REPLAY'),
         retryOnServiceExceptions: false,
       },
     );
@@ -531,7 +634,8 @@ export class MatchToCsvStack extends Stack {
         input: events.RuleTargetInput.fromObject({
           bucket: events.EventField.fromPath('$.detail.bucket.name'),
           key: events.EventField.fromPath('$.detail.object.key'),
-        }),
+          receivedAt: events.EventField.time,
+        } satisfies Record<keyof Omit<ProcessEmailInput, 'trace'>, unknown>),
       }),
     );
 
