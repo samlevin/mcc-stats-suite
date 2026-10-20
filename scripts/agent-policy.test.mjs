@@ -804,6 +804,21 @@ test('a container runs as a dependency queue in the owning thread', () => {
     assert.match(parallel, /no overlapping files or shared contracts/);
     assert.match(parallel, /At most one leaf per group runs at a time/);
     assert.match(parallel, /Never infer, form, extend, or merge groups/);
+    // Each concurrent implementer learns what the other running leaves own.
+    assert.ok(
+      lineWith(
+        parallel,
+        'carries an `Owned by other running leaves:` field',
+        'issue numbers of the other leaves',
+        'files and shared contracts',
+      ),
+      `${path} must hand each concurrent leaf the other leaves' ownership`,
+    );
+    // Resume checks out the existing branch instead of creating it.
+    assert.ok(
+      lineWith(content, '`resume`', 'git worktree add <path> <branch>'),
+      `${path} must check out the existing branch on resume`,
+    );
     // A claim whose worktree is missing here is never taken over silently.
     assert.ok(
       lineWith(content, '`resume`', '`git worktree list`'),
@@ -881,6 +896,17 @@ test('the delivery owner runs stack operations itself through the shared stack s
     );
     assert.match(operations, /gh stack link --base main <PR URL>/, path);
     assert.match(operations, /Never adopt, rebase, or push the prerequisite/);
+    // Rework and resume of an earlier delivery's branch have working paths.
+    assert.ok(
+      lineWith(content, 'earlier delivery', 'head branch of the target PR'),
+      `${path} must define ownership for rework and resume`,
+    );
+    assert.match(
+      operations,
+      /rebase\.updateRefs=false rebase --onto <new parent head> <old parent head>`, then push with `git push --force-with-lease=<branch>:<verified remote head> origin HEAD:<branch>`/,
+      path,
+    );
+    assert.match(operations, /`git worktree add <path> <branch>`/, path);
     assert.ok(
       lineWith(content, 'Authority:', 'never covers merges'),
       `${path} must not authorize merges`,
@@ -949,6 +975,9 @@ test('an isolated implementer follows the shared procedure and delegates nothing
   for (const content of [claude, codex]) {
     assert.ok(lineWith(content, 'Never spawn another implementer'));
     assert.ok(lineWith(content, 'BLOCKED: container'));
+    assert.ok(
+      lineWith(content, '`Owned by other running leaves:`', 'return BLOCKED'),
+    );
   }
 });
 

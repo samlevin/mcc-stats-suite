@@ -17,7 +17,12 @@ Authority: the delivery request covers building your own branches, pushing them,
 3. For each branch in the stack: its local head (`git rev-parse <branch>`), its remote head (`git ls-remote origin <branch>`), its intended parent (trunk `origin/main`, the previous layer, or a prerequisite's pushed head), and whether that parent is an ancestor (`git merge-base --is-ancestor <parent> <branch>`).
 4. `gh stack view --json` for the tracked stack. Its state lives in the shared git directory, so it can list other worktrees' stacks; act only on yours.
 
-You own a branch only when you created it for this delivery, with a name from `node scripts/branch-name.mjs`, and it is checked out in your worktree or in none. Trunk `main` is never yours; it is usually checked out in the human checkout. Stop and report when any of these holds:
+You own a branch in two cases, and only while it is checked out in your worktree or in none:
+
+- You created it for this delivery, with a name from `node scripts/branch-name.mjs`.
+- It comes from an earlier delivery that you are reworking or resuming: `node scripts/branch-name.mjs` named it for this issue, it is the head branch of the target PR or of the claim you resume, and you verified its remote head before your first mutation. That verified head is the expected SHA for your first push.
+
+Trunk `main` is never yours; it is usually checked out in the human checkout. Stop and report when any of these holds:
 
 - A command could move a branch that another worktree has checked out, or a branch you do not own. Report that worktree's path or the branch.
 - Ownership is ambiguous, or a branch holds commits you did not make.
@@ -41,6 +46,9 @@ You own a branch only when you created it for this delivery, with a name from `n
 - Link: after the PRs exist, run `gh stack link --base main <PR URL> ...` bottom to top, prerequisite PRs first, with PR URLs only.
 - Cascade: after a lower layer changes, rebase each later layer onto its parent, bottom to top: `git -c rebase.updateRefs=false rebase --onto <new parent head> <old parent head> <layer>`. When the trunk moved, rebase layer 1 first with `git -c rebase.updateRefs=false rebase --onto origin/main <old base SHA> <layer 1>`. Every immediate base stays the actual parent: the trunk, the previous layer, or the prerequisite head.
 - Sync after a merge: when layer k's PR merged, rebase layer k+1 with `git -c rebase.updateRefs=false rebase --onto origin/main <old layer k head> <layer k+1>`, then cascade the rest. Read the next PR's base with `gh api repos/samlevin/mcc-stats-suite/pulls/<n> --jq .base.ref`; when it still names the merged branch, set it with `gh api -X PATCH repos/samlevin/mcc-stats-suite/pulls/<n> -f base=main`, only on PRs you opened. Leave merged branches and the stack in place.
+- Rework or resume: work on an earlier delivery's branch in one of two ways.
+  - With the local branch checked out: when no worktree has it checked out, run `git worktree add <path> <branch>` if the local branch exists, or `git worktree add --track -b <branch> <path> origin/<branch>` if only the remote branch does. Make sure the local head equals the verified remote head; fast-forward with `git merge --ff-only origin/<branch>` when it is behind, and stop when it has diverged. The Cascade and Push commands in this list then work unchanged.
+  - With a detached HEAD at `origin/<branch>`, as the rework path in the delivery procedure starts: run the cascade without naming a branch, `git -c rebase.updateRefs=false rebase --onto <new parent head> <old parent head>`, then push with `git push --force-with-lease=<branch>:<verified remote head> origin HEAD:<branch>`. Rebase and push one layer at a time, bottom to top, detaching at each next layer's `origin/<branch>` after the layer below is pushed.
 - Push: push each branch on its own. Use `git push -u origin <branch>` for a first push, and afterwards `git push --force-with-lease=<branch>:<expected SHA> origin <branch>`, where the expected SHA is the remote head you last pushed or verified. A rejection means someone else pushed: stop for that branch and report it. Pushes are not atomic, so report every remote head afterwards.
 
 ## Conflicts

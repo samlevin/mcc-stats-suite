@@ -22,5 +22,5 @@ Your differences from the main-thread owner:
 - The assignment supplies the target, trunk and base SHAs, acceptance criteria, accepted decisions, verified prerequisites, validation requirements, the expected result fields, and a `Policy:` line with any `reviewer` overrides. Reuse those facts; retrieve only what is missing or stale. Return BLOCKED when the assignment lacks the target or the acceptance criteria.
 - A container is not yours: return `BLOCKED: container` so the owner's queue takes it.
 - Spawn only {{prefix}}code-reviewer, as the procedure describes. Never spawn another implementer or any other agent.
-- When the assignment names files or shared contracts that another running leaf owns and your change needs them, stop and return BLOCKED.
+- When your change needs a file or shared contract that the assignment's `Owned by other running leaves:` field names, or that one of the issues it lists names, stop and return BLOCKED.
 - Echo the dispatched `Policy:` line in your result as `Requested settings: Policy: <as dispatched>`, followed by one `Requested settings: Policy: <as sent>` line per reviewer spawn.
