@@ -4,7 +4,7 @@ Repository-owned Node commands use `scripts/cli.cjs`, with declarations separate
 
 ## Getting started
 
-Install the [pinned Node.js/npm](../docs/getting-started.md#tier-1-run-the-checks-locally) and run `npm ci` from the repository root. Run all commands below from that root, even though this README lives in `scripts/`. Roster and recipient commands also need built shared packages; their `npm run` entry points build them automatically. AWS commands need an authenticated profile, and tracker commands need `gh` with repository and Projects access. Keep command output containing private values local.
+Install the [pinned Node.js/npm](../docs/getting-started.md#tier-1-run-the-checks-locally) and run `npm ci` from the repository root. Run all commands below from that root, even though this README lives in `scripts/`. Roster, recipient, and sender allowlist commands also need built shared packages; their `npm run` entry points build them automatically. AWS commands need an authenticated profile, and tracker commands need `gh` with repository and Projects access. Keep command output containing private values local.
 
 ## Scripts reference
 
@@ -14,6 +14,7 @@ Use `--help` on commands with declared options. The [root reference](../README.m
 | --- | --- | --- |
 | `node scripts/cdk-app.mjs` | Run guarded CDK operations for one application | Required `<synth\|diff\|deploy\|destroy> <application>`; optional `--environment dev\|prod` (profile-derived, then `dev`), `--ephemeral <name>`, `--profile <profile>` (defaults to `AWS_PROFILE`), and CDK arguments. Prefer the [NPM wrappers and their deployment restrictions](../README.md#scripts-reference) |
 | `npm run roster`, `npm run recipients` | Read or change gamertags or CSV recipient addresses | Required `--environment dev\|prod` and command; optional flags and operand counts are in [Operator arguments](#operator-arguments). Pass arguments after `--` |
+| `npm run sender-allowlist` | Read or change the `match-to-csv` sender allowlist parameter | Required `--environment dev\|prod` and `list`, `add <address>...`, or `remove <address>...`; optional `--profile <profile>` (defaults to `AWS_PROFILE`) and `--yes` for prod writes. Pass arguments after `--`. Rules are in [Manage the sender allowlist](../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) |
 | `node scripts/branch-name.mjs` | Print a branch name from a GitHub issue's current title | Required positive issue number; optional `--actor <login>` (default `agent`) and `--layer <n>` (default `1`) |
 | `node scripts/release-metadata.mjs` | Check release metadata or print one application's metadata | Required `--check` or `--application <name>`; no default mode |
 | `node scripts/issue-triage.mjs` | Reconcile epic labels and move eligible Inbox issues to Ready | Optional `--issue <number>`, `--dry-run` or `--apply`; defaults to dry run unless `DRY_RUN=false` |
@@ -48,15 +49,15 @@ Every migrated command accepts `-h` or `--help`. Help exits successfully before 
 
 Aliases are exact tokens. `-env` means environment; it is never `-e` plus `nv` or a group of flags. Attached forms such as `-envdev` and grouped short flags are unsupported. Only declared options are normalized. Unknown options fail with usage, except for CDK passthrough. Repeating an option, including through two spellings with the same value, fails. Commands reject conflicting selections such as `--all --inactive`, `--apply --dry-run`, and `--role ... --capability ...`.
 
-`--` ends option parsing. Roster, recipients, branch naming, and fixture capture treat following arguments as operands, including names beginning with a dash. CDK forwards the marker and everything after it unchanged. CDK passthrough spellings and order stay intact, and prohibited deployment options remain subject to the wrapper's guards. Use equals when a CDK option's value resembles a wrapper option, such as `--output=-env`.
+`--` ends option parsing. Roster, recipients, sender allowlist, branch naming, and fixture capture treat following arguments as operands, including names beginning with a dash. CDK forwards the marker and everything after it unchanged. CDK passthrough spellings and order stay intact, and prohibited deployment options remain subject to the wrapper's guards. Use equals when a CDK option's value resembles a wrapper option, such as `--output=-env`.
 
 | Long option | Alias | Commands |
 | --- | --- | --- |
 | `--help` | `-h` | Every migrated command |
-| `--environment` | `-env` | CDK wrapper, roster, recipients |
+| `--environment` | `-env` | CDK wrapper, roster, recipients, sender allowlist |
 | `--ephemeral` | `-e` | CDK wrapper, roster, recipients |
-| `--profile` | `-p` | CDK wrapper, roster, recipients |
-| `--yes` | `-y` | Roster and recipient writes |
+| `--profile` | `-p` | CDK wrapper, roster, recipients, sender allowlist |
+| `--yes` | `-y` | Roster, recipient, and sender allowlist writes |
 | `--reason` | `-r` | Roster and recipient writes |
 | `--actor` | `-a` | Branch naming |
 | `--layer` | `-l` | Branch naming |
@@ -79,6 +80,6 @@ node scripts/issue-triage.mjs -n -i 285
 node scripts/agent-policy.mjs resolve -t codex --role implementer
 ```
 
-The CDK wrapper defaults its environment from the profile, then `dev`. Roster and recipients require an explicit environment. Tracker commands default to dry run, unless `DRY_RUN=false` or `--apply` selects writes. Production confirmation and account checks run in the command, after parsing.
+The CDK wrapper defaults its environment from the profile, then `dev`. Roster, recipients, and sender allowlist require an explicit environment. Tracker commands default to dry run, unless `DRY_RUN=false` or `--apply` selects writes. Production confirmation and account checks run in the command, after parsing.
 
 External CLIs (`aws`, `cdk`, `gh`, `turbo`, `tofu`, and package/build tools) retain their own parsers. Application CDK bin files receive context through CDK.

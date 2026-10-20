@@ -33,6 +33,8 @@
     "roster": "node scripts/roster.mjs",
     "prerecipients": "npm run build:shared --silent",
     "recipients": "node scripts/recipients.mjs",
+    "presender-allowlist": "npm run build:shared --silent",
+    "sender-allowlist": "node scripts/sender-allowlist.mjs",
     "tofu:fmt": "tofu fmt -recursive infrastructure",
     "tofu:fmt:check": "tofu fmt -check -recursive infrastructure",
     "tofu:check": "bash scripts/tofu-checks.sh"
