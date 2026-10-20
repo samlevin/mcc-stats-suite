@@ -116,8 +116,9 @@ test('workspaces install locally without a package registry or token', () => {
 
 // Runs the real step body under GitHub's default `bash -e` with stub `aws` and
 // `dig` commands, so the parameter, rule set, identity, and MX gates are
-// exercised rather than matched as text.
+// exercised rather than matched as text. The stub environment defaults to dev.
 function runPrerequisites(stub) {
+  const environment = stub.environment ?? 'dev';
   const step = deployment.jobs.deploy.steps.find(
     (candidate) => candidate.name === 'Verify match-to-csv prerequisites',
   );
@@ -132,16 +133,16 @@ function runPrerequisites(stub) {
   mkdirSync(bin);
   const names = [
     '/cdk-bootstrap/hnb659fds/version',
-    '/mcc/dev/match-to-csv/raw-email-bucket-name',
-    '/mcc/dev/match-to-csv/evidence-bucket-name',
-    '/mcc/dev/match-to-csv/data-key-arn',
-    '/mcc/dev/match-to-csv/receipt-rule-set-name',
-    '/mcc/dev/match-to-csv/email-domain',
-    '/mcc/dev/roster/table-name',
+    `/mcc/${environment}/match-to-csv/raw-email-bucket-name`,
+    `/mcc/${environment}/match-to-csv/evidence-bucket-name`,
+    `/mcc/${environment}/match-to-csv/data-key-arn`,
+    `/mcc/${environment}/match-to-csv/receipt-rule-set-name`,
+    `/mcc/${environment}/match-to-csv/email-domain`,
+    `/mcc/${environment}/roster/table-name`,
   ].slice(0, stub.parameterCount ?? 7);
   const values = {
-    '/mcc/dev/match-to-csv/receipt-rule-set-name': 'mcc-match-to-csv-dev',
-    '/mcc/dev/match-to-csv/email-domain': 'mail.example.com',
+    [`/mcc/${environment}/match-to-csv/receipt-rule-set-name`]: `mcc-match-to-csv-${environment}`,
+    [`/mcc/${environment}/match-to-csv/email-domain`]: 'mail.example.com',
   };
   writeFileSync(
     join(directory, 'parameters.json'),
@@ -155,9 +156,9 @@ function runPrerequisites(stub) {
       '#!/usr/bin/env bash',
       `echo "aws $*" >> "${join(directory, 'calls.log')}"`,
       'case "$1 $2 $4" in',
-      `  "ssm get-parameters /mcc/dev/match-to-csv/alarm-email") echo "${stub.alarmEmailCount ?? 0}" ;;`,
+      `  "ssm get-parameters "*/match-to-csv/alarm-email) echo "${stub.alarmEmailCount ?? 0}" ;;`,
       `  "ssm get-parameters "*) cat "${join(directory, 'parameters.json')}" ;;`,
-      `  "ses describe-active-receipt-rule-set "*) echo "${stub.active ?? 'mcc-match-to-csv-dev'}" ;;`,
+      `  "ses describe-active-receipt-rule-set "*) echo "${stub.active ?? `mcc-match-to-csv-${environment}`}" ;;`,
       `  "ses get-identity-verification-attributes "*) echo "${stub.identity ?? 'Success'}" ;;`,
       '  *) echo "unexpected aws $*" >&2; exit 2 ;;',
       'esac',
@@ -175,7 +176,7 @@ function runPrerequisites(stub) {
     encoding: 'utf8',
     env: {
       PATH: `${bin}:${process.env.PATH}`,
-      DEPLOYMENT_ENVIRONMENT: 'dev',
+      DEPLOYMENT_ENVIRONMENT: environment,
       AWS_REGION: 'us-east-2',
       GITHUB_ENV: githubEnv,
     },
@@ -190,46 +191,74 @@ function runPrerequisites(stub) {
   };
 }
 
+// The calls every match-to-csv prerequisite check makes before the prod-only
+// alarm email lookup.
+const prerequisiteCalls = (environment) => [
+  'aws ssm get-parameters --names /cdk-bootstrap/hnb659fds/version ' +
+    `/mcc/${environment}/match-to-csv/raw-email-bucket-name ` +
+    `/mcc/${environment}/match-to-csv/evidence-bucket-name ` +
+    `/mcc/${environment}/match-to-csv/data-key-arn ` +
+    `/mcc/${environment}/match-to-csv/receipt-rule-set-name ` +
+    `/mcc/${environment}/match-to-csv/email-domain ` +
+    `/mcc/${environment}/roster/table-name --output json`,
+  'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
+  'aws ses get-identity-verification-attributes --identities mail.example.com ' +
+    '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
+  'dig +short MX mail.example.com',
+];
+const alarmEmailCall =
+  'aws ssm get-parameters --names /mcc/prod/match-to-csv/alarm-email ' +
+  '--query length(Parameters) --output text';
+
 test('match-to-csv prerequisites pass and mask the published domain', () => {
-  const result = runPrerequisites({});
-  assert.equal(result.status, 0, result.stderr + result.stdout);
-  // Masked before any other use. Nothing exports MCC_EMAIL_DOMAIN, because a
-  // release whose stack reads it declares receipt rules the foundation owns.
-  assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
-  assert.equal(result.githubEnv, '');
+  for (const environment of ['dev', 'prod']) {
+    const result = runPrerequisites({ environment });
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    // Masked before any other use. Nothing exports MCC_EMAIL_DOMAIN, because a
+    // release whose stack reads it declares receipt rules the foundation owns.
+    assert.equal(result.stdout.split('\n')[0], '::add-mask::mail.example.com');
+    assert.equal(result.githubEnv, '');
+    // The step asks for exactly the seven parameters and checks the published
+    // domain, not some other value, against SES and DNS.
+    assert.deepEqual(result.calls.slice(0, 4), prerequisiteCalls(environment));
+  }
   assert.equal(deployment.jobs.deploy.env.MCC_EMAIL_DOMAIN, undefined);
-  // The step asks for exactly the seven parameters and checks the published
-  // domain, not some other value, against SES and DNS.
-  assert.deepEqual(result.calls, [
-    'aws ssm get-parameters --names /cdk-bootstrap/hnb659fds/version ' +
-      '/mcc/dev/match-to-csv/raw-email-bucket-name ' +
-      '/mcc/dev/match-to-csv/evidence-bucket-name ' +
-      '/mcc/dev/match-to-csv/data-key-arn ' +
-      '/mcc/dev/match-to-csv/receipt-rule-set-name ' +
-      '/mcc/dev/match-to-csv/email-domain ' +
-      '/mcc/dev/roster/table-name --output json',
-    'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
-    'aws ses get-identity-verification-attributes --identities mail.example.com ' +
-      '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
-    'dig +short MX mail.example.com',
-    'aws ssm get-parameters --names /mcc/dev/match-to-csv/alarm-email ' +
-      '--query length(Parameters) --output text',
-  ]);
+});
+
+test('match-to-csv prerequisites look for the alarm email only in prod', () => {
+  // Only the prod stack has alarms, so dev never reads or exports the alarm
+  // email parameter, even when one exists.
+  for (const alarmEmailCount of [0, 1]) {
+    const dev = runPrerequisites({ environment: 'dev', alarmEmailCount });
+    assert.equal(dev.status, 0, dev.stderr + dev.stdout);
+    assert.deepEqual(dev.calls, prerequisiteCalls('dev'));
+    assert.equal(dev.githubEnv, '');
+    assert.doesNotMatch(dev.stdout, /alarm/);
+  }
+  const prod = runPrerequisites({ environment: 'prod' });
+  assert.equal(prod.status, 0, prod.stderr + prod.stdout);
+  assert.deepEqual(prod.calls, [...prerequisiteCalls('prod'), alarmEmailCall]);
+  assert.equal(prod.githubEnv, '');
   assert.match(
-    result.stdout,
-    /::notice::\/mcc\/dev\/match-to-csv\/alarm-email is not set/,
+    prod.stdout,
+    /::notice::\/mcc\/prod\/match-to-csv\/alarm-email is not set/,
   );
 });
 
-test('match-to-csv prerequisites export the optional alarm email parameter name', () => {
-  const result = runPrerequisites({ alarmEmailCount: 1 });
+test('match-to-csv prod prerequisites export the optional alarm email parameter name', () => {
+  const result = runPrerequisites({ environment: 'prod', alarmEmailCount: 1 });
   assert.equal(result.status, 0, result.stderr + result.stdout);
+  assert.deepEqual(result.calls, [
+    ...prerequisiteCalls('prod'),
+    alarmEmailCall,
+  ]);
   // Only the parameter name leaves the step. CloudFormation resolves the
   // address itself, so the step never reads the value.
   assert.equal(
     result.githubEnv,
-    'MCC_ALARM_EMAIL_PARAMETER=/mcc/dev/match-to-csv/alarm-email\n',
+    'MCC_ALARM_EMAIL_PARAMETER=/mcc/prod/match-to-csv/alarm-email\n',
   );
+  assert.doesNotMatch(result.stdout, /::notice::/);
   assert.ok(
     result.calls.every((call) => !call.includes('get-parameter ')),
     'the step never reads the alarm email value',
