@@ -2,7 +2,7 @@
 # Model and reasoning effort are intentionally absent: mcc skills pass the
 # repository policy (gpt-6.1-sol, high) or a prompt override to spawn_agent.
 name = "mcc-implementer"
-description = "Isolated owner of one MCC leaf issue or PR rework, used only when the mcc-implement delivery owner deliberately delegates a large leaf or runs the queue's parallel exception. Follows the shared leaf delivery procedure (claim, code, tests, local checks, push, mcc-code-reviewer pre-PR gate, stack operations through mcc-stack, ready-for-review PR) and returns a compact result. Never spawned by name from a generic request; never delegates to another implementer."
+description = "Isolated owner of one MCC leaf issue or PR rework, used only when the mcc-implement delivery owner delegates for a concrete benefit or explicit request or runs the queue's parallel exception. Follows the shared leaf delivery procedure (claim, code, tests, local checks, push, mcc-code-reviewer pre-PR gate, stack operations through mcc-stack, ready-for-review PR) and returns a compact result. Never spawned by name from a generic request; never delegates to another implementer."
 developer_instructions = '''
 You own one leaf issue, or one rework of its existing PR, inside `samlevin/mcc-stats-suite`, under a bounded assignment from the mcc-implement delivery owner. You run the shared leaf delivery procedure as its delivery owner, so its rules on worktrees, claims, checks, review, stacks, PRs, authority, and results apply to you unchanged.
 

@@ -19,6 +19,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `../.codex/config.toml` | Codex project MCP servers (maintained directly) |
 | `../scripts/agent-policy.mjs` | Resolver (`resolve`), generator (`generate`), drift check (`check`), and manual review publisher (`publish-review`) |
 | `worktree-isolation.md` | Shared worktree ownership and setup rules, read before roles or skills use a worktree |
+| `review.md` | Shared reviewer packet, initial coverage, and re-review scope, loaded for code review |
 | `evidence.md` | Shared retrieval and waiting rules for delivery owners, isolated implementers, and code reviewers |
 | `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue`; owns the independence group definition and record format |
 
@@ -26,7 +27,7 @@ Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-ag
 
 ## Reuse in another repository
 
-The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `evidence.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
+The role and workflow sources name no repository. They carry `{{placeholders}}` (`{{prefix}}`, `{{label}}`, `{{repository}}`, `{{project.*}}`, `{{docs.*}}`) and `{{#infrastructure}}` sections that the generator resolves from `binding` in `policy.json`. Another repository copies `roles/`, `workflows/`, `worktree-isolation.md`, `evidence.md`, `review.md`, `scripts/agent-policy.mjs`, and its test, writes its own `policy.json` with its own `binding`, and runs `npm run agents:generate`; its agents and skills come out under its own prefix, and its `agents:check` keeps them current. Text that only makes sense with CI-applied infrastructure (Terrateam, OpenTofu, CDK) is inside `{{#infrastructure}}` sections and drops out when `features.infrastructure` is false.
 
 ## Agents and skills
 
@@ -39,7 +40,7 @@ Agents are for work that needs a fresh context or a hard boundary. An agent defi
 - `mcc-code-reviewer`: the independent, read-only pre-PR gate and requested reviews. A reviewer must not share the implementer's context or self-assessment, so it is always a separate agent.
 - `mcc-security-reviewer`: explicitly requested read-only security review.
 - `mcc-issue-triager`: independent classification, decomposition, and dependency judgment, only when a filing batch needs it.
-- `mcc-implementer`: an isolated delivery owner for one leaf, used deliberately to keep a large leaf's exploration out of the main conversation, or for the queue's parallel exception. It follows the same procedure as the main thread and never delegates to another implementer.
+- `mcc-implementer`: an isolated delivery owner for one leaf, used for an explicit request or a stated concrete benefit, or for the queue's parallel exception. Size alone does not trigger delegation. It follows the same procedure as the main thread and never delegates to another implementer.
 
 Skills are also the entry points and the policy adapter. A skill is what a person invokes (`/mcc-implement`, `$mcc-implement`), it runs in the main thread where it can ask a question, and it is the only place that can apply the repository policy at spawn time. That last point decides the split for Codex: a Codex agent file that sets `model` or `model_reasoning_effort` takes precedence over every spawn-time value, so a pinned agent file would defeat prompt overrides. The generated Codex agents therefore carry neither field, and the skills pass the resolved values to `spawn_agent` on every dispatch. Codex also loads repository skills in an untrusted project but loads project agents only after trust, so a skill is the right place to tell the contributor that the agents are missing. In Claude Code the per-invocation `model` and `effort` parameters already override frontmatter, so the generated Claude agents pin the policy and the skills still pass the resolved values explicitly for the same reason: a dispatch must never depend on a session or contributor default.
 
@@ -141,7 +142,7 @@ To check discovery, open a fresh session in a new worktree and run `claude mcp l
 
 - Codex skills cannot change the session model, so the issue-creation policy for Codex is advisory for the main thread and binding only for a spawned triager.
 - `mcc-implement` cannot change the session model in either tool. The implementation policy binds only an isolated implementer; inline delivery runs at the session settings and reports the policy as advisory.
-- Inline delivery keeps the leaf's exploration in the main conversation. For a large leaf, choose the isolated implementer exception deliberately.
+- Inline delivery keeps the leaf's exploration in the main conversation. Use the isolated implementer exception only for a stated concrete benefit or an explicit request.
 - Claude Code honors `CLAUDE_CODE_EFFORT_LEVEL` above everything, including the repository policy and a prompt override. Leave it unset when you want the repository defaults.
 - Reports carry requested settings, never verified ones. Codex cannot verify a child's model from inside the child; the thread table or thread view is the ground truth.
 - Prompt overrides are read from natural language by the dispatching skill; the resolver validates the values but cannot see the request.

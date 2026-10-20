@@ -12,7 +12,7 @@ Authority: the delivery request covers building your own branches, pushing them,
 
 ## Inspect before every mutation
 
-1. `git fetch origin`. This updates only remote-tracking refs, never a local branch.
+1. Use current verified prerequisite facts, refreshing remote refs with `git fetch origin` when they may have moved. This updates only remote-tracking refs, never a local branch. Reuse unchanged inspection results within the operation; ownership, remote heads, and ancestry must still be current before mutation.
 2. `git worktree list --porcelain`: note which worktree has each branch checked out.
 3. For each branch in the stack: its local head (`git rev-parse <branch>`), its remote head (`git ls-remote origin <branch>`), its intended parent (trunk `origin/main`, the previous layer, or a prerequisite's pushed head), and whether that parent is an ancestor (`git merge-base --is-ancestor <parent> <branch>`).
 4. `gh stack view --json` for the tracked stack. Its state lives in the shared git directory, so it can list other worktrees' stacks; act only on yours.

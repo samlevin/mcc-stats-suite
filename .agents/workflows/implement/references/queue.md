@@ -20,7 +20,7 @@ The main thread running {{prefix}}implement follows this file for a container is
 
 Delivery is sequential by default. Take the first `ready` leaf, deliver it through [delivery.md](delivery.md), and record its result (an open PR or a recorded blocker) in the ledger before you start the next leaf. After each result, recompute the `waiting` leaves, because a new ready-for-review PR can let a dependent leaf stack on it. An L leaf, or one that fails the gate, gets planning or decomposition through the {{prefix}}create-github-issue skill within the accepted scope, or a recorded blocker. Never create an epic implicitly, and never relax a gate.
 
-When one leaf is large enough that its exploration would crowd out the rest of the queue, you may hand that leaf to one isolated {{prefix}}implementer, as the {{prefix}}implement skill describes, and wait for its result before you continue.
+Apply the concrete-benefit delegation rule in the {{prefix}}implement skill to an optional isolated leaf, then wait for its result before continuing. Reuse intake metadata and verified prerequisites when each leaf enters delivery; refresh only facts that may have changed. A recorded result replaces additional status-only comments.
 
 ## Parallel exception
 
