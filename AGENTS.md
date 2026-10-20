@@ -38,6 +38,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | `implement #N`, an issue URL, or a PR URL | `/mcc-implement` | `$mcc-implement` | none by default: the invoking thread delivers a leaf or PR rework itself and runs a container as a dependency queue; `mcc-code-reviewer` for the pre-PR gate; one isolated `mcc-implementer` only as an explicit exception |
 | Build, link, rebase, or sync stacked branches during delivery | `/mcc-stack` | `$mcc-stack` | none; the agent that created the worktree runs it |
 | File or draft issues | `/mcc-create-github-issue` | `$mcc-create-github-issue` | none by default (inline classification); `mcc-issue-triager` (read-only) when the batch needs independent classification, decomposition, or dependency judgment |
+| File a spec delivery plan | `/mcc-spec-to-issues` | `$mcc-spec-to-issues` | `mcc-issue-triager` for the whole plan after offline pre-flight; confirmation before filing |
 | Review a pushed branch or PR | `/mcc-review-code` | `$mcc-review-code` | `mcc-code-reviewer` (read-only, reports to you; the skill posts the report to a target PR) |
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
 | Write a PR body, issue body, comment, or doc | `/mcc-plain-language` | `$mcc-plain-language` | none |
