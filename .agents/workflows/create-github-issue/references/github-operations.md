@@ -1,6 +1,6 @@
 # GitHub operations
 
-Every call here is REST through `gh api`. `gh issue`, `gh project`, and `gh api graphql` spend the GraphQL limit, so none of them appear here. When `gh api` needs an option you are unsure of, check `gh api --help`.
+Every call here is REST through `gh api`. `gh issue`, `gh project`, and `gh api graphql` spend the GraphQL limit, so none of them appear here. The one exception is the repository's membership script below, which makes its own GraphQL calls, about 2 points per issue. When `gh api` needs an option you are unsure of, check `gh api --help`.
 
 Create: write the body to a scratch file outside the repository (real newlines; protects backticks and `$`), then:
 `gh api repos/{{repository}}/issues -f title='T' -F body=@/abs/body.md -f 'labels[]=L' [-f type='NativeType'] [-f 'assignees[]=LOGIN'] [-F milestone=NUMBER] --jq '"\(.number) \(.id) \(.html_url)"'`
@@ -15,9 +15,9 @@ Independence record: after the children exist, read the container's current body
 
 Project: select it by owner and number, never by title.
 `gh api users/{{project.owner}}/projectsV2/{{project.number}}/fields --paginate`
-Each single-select field lists its `options` with their `id` and `name`. A repository workflow adds each new issue to the project within about a minute. Never add an item yourself (no `POST` to the project's `items`). Find the item the workflow added:
-`gh api -X GET users/{{project.owner}}/projectsV2/{{project.number}}/items -f per_page=100 --paginate --jq '.[] | select(.content.number == N and .content.repository_url == "https://api.github.com/repos/{{repository}}") | .id'`
-It prints the item ID (ITEM). An empty result means the item is not there yet. Repeat every 10 seconds for up to 3 minutes. If it is still missing, skip that issue's fields and post-create commands and report it as unfinished: name the issue, say that it is not in the project and its fields are unset, and point to the repository's Actions runs for the issue. Once the item exists, write `{"fields":[{"id":FID,"value":"OID"}]}` to a scratch file, with one entry per field (FID is the numeric field ID, OID the option ID), and set the fields:
+Each single-select field lists its `options` with their `id` and `name`. Add each new issue to the project with the repository script, never with a direct `POST` to the project's `items`:
+`CONTENT_TYPE=issue CONTENT_NUMBER=N DRY_RUN=false node scripts/issue-project-membership.mjs`
+It prints `Issue #N: in MCC delivery as item ITEM.`, where ITEM is the numeric item ID. When the membership workflow already added the issue, the script prints that existing item and adds nothing. If the script exits non-zero, or prints no item line (it warns and exits 0 when the GraphQL limit is spent), skip that issue's fields and post-create commands and report it as unfinished: name the issue, say that it is not in the project and its fields are unset, and include the script's output. Once you have the item, write `{"fields":[{"id":FID,"value":"OID"}]}` to a scratch file, with one entry per field (FID is the numeric field ID, OID the option ID), and set the fields:
 `gh api -X PATCH users/{{project.owner}}/projectsV2/{{project.number}}/items/ITEM --input /abs/fields.json`
 Resolve IDs from current metadata and never copy them across projects. If project authorization is missing, keep the created issue and report the gap. Never refresh auth or add scopes without permission.
 

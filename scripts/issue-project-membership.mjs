@@ -35,15 +35,18 @@ export async function addToProject({
     return null;
   }
   // GitHub returns the existing item when the content is already in the
-  // project, so reruns and earlier manual adds neither fail nor duplicate.
+  // project, so reruns and earlier adds by the workflow neither fail nor
+  // duplicate. The item's full database ID is the ID that the REST
+  // `projectsV2/<n>/items/<id>` endpoints take, which issue filers use.
   const result = await api(
     `mutation($project: ID!, $content: ID!) {
-      addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id } }
+      addProjectV2ItemById(input: { projectId: $project, contentId: $content }) { item { id fullDatabaseId } }
     }`,
     { project: project.id, content: content.id },
   );
-  const item = result.addProjectV2ItemById?.item?.id;
-  if (!item) throw new Error('GitHub returned no project item');
+  const item = result.addProjectV2ItemById?.item?.fullDatabaseId;
+  if (!item || !/^[1-9]\d*$/.test(item))
+    throw new Error('GitHub returned no project item');
   log(`Issue #${number}: in MCC delivery as item ${item}.`);
   return item;
 }
