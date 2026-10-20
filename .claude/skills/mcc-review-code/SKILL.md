@@ -24,7 +24,7 @@ You gather the inputs and dispatch `mcc-code-reviewer`; you do not review the di
 
 Run `node scripts/agent-policy.mjs resolve --tool <tool> --role code-reviewer`, adding `--model` or `--effort` only for an override. If it exits non-zero, stop and report its message verbatim. Compose `Policy: tool=<tool> role=code-reviewer model=<model> effort=<effort> (model: <source>, effort: <source>)`.
 
-Packet: `review_mode=requested`, repo, PR URL (for a PR target), issue URL (or `none` when the criteria come from the request), acceptance criteria, remote branch, base SHA, head SHA, the worktree path, and the `Policy:` line. Leave out your own opinion of the change.
+Build the factual packet from `.agents/review.md`, including accepted decisions, a changed-file summary, relevant validation results (or unavailable), and verified prerequisites when applicable. Packet: `review_mode=requested`, repo, PR URL (for a PR target), issue URL (or `none` when the criteria come from the request), acceptance criteria, remote branch, base SHA, head SHA, the worktree path, and the `Policy:` line. Leave out your own opinion of the change.
 
 Use the Agent tool with `subagent_type: mcc-code-reviewer` and the resolver's `model` and `effort` passed explicitly.
 

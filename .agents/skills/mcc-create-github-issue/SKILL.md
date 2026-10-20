@@ -1,6 +1,6 @@
 ---
 name: mcc-create-github-issue
-description: "Plan and file MCC GitHub issues, native sub-issues, and explicitly requested epics using the repository's issue forms, labels, and MCC delivery project fields, with independent mcc-issue-triager metadata. Use for create/file/open/draft issue requests in samlevin/mcc-stats-suite. Does not implement or open PRs."
+description: "Plan and file MCC GitHub issues, native sub-issues, and explicitly requested epics using the repository's issue forms, labels, and MCC delivery project fields. Classifies inline by default and asks mcc-issue-triager for independent triage when a batch needs independent classification, decomposition, or dependency judgment. Use for create/file/open/draft issue requests in samlevin/mcc-stats-suite. Does not implement or open PRs."
 ---
 <!-- Generated from .agents/workflows/create-github-issue.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 
@@ -8,13 +8,13 @@ description: "Plan and file MCC GitHub issues, native sub-issues, and explicitly
 
 ## Resolve
 
-Repository `samlevin/mcc-stats-suite`, project [MCC delivery](https://github.com/users/samlevin/projects/1) (number 1, owner `samlevin`). Read `.agents/issue-creation.md` and the matching `.github/ISSUE_TEMPLATE/*.yml`; `AGENTS.md` is already loaded. Read `ISSUE_TRIAGE.md` only for a classification question. Discover labels (`gh api repos/samlevin/mcc-stats-suite/labels --paginate`), project fields and options (`gh api users/samlevin/projectsV2/1/fields --paginate`), and native issue types (`gh api orgs/<owner>/issue-types` when the repository owner is an organization; a user-owned repository has none) once per batch, and reuse the results. Every GitHub call you make in this skill is REST through `gh api`; the repository scripts it runs keep their own calls. Repository commands run read-only against the human checkout; do not modify it.
+Repository `samlevin/mcc-stats-suite`, project [MCC delivery](https://github.com/users/samlevin/projects/1) (number 1, owner `samlevin`). Read `.agents/issue-creation.md` and the matching `.github/ISSUE_TEMPLATE/*.yml`; `AGENTS.md` is already loaded. Read `ISSUE_TRIAGE.md` when you classify drafts, which is the default. Discover labels (`gh api repos/samlevin/mcc-stats-suite/labels --paginate`), project fields and options (`gh api users/samlevin/projectsV2/1/fields --paginate`), and native issue types (`gh api orgs/<owner>/issue-types` when the repository owner is an organization; a user-owned repository has none) once per batch, and reuse the results. Every GitHub call you make in this skill is REST through `gh api`; the repository scripts it runs keep their own calls. Repository commands run read-only against the human checkout; do not modify it.
 
 Codex skills cannot set the session model. The repository policy for `issue-creation` is `node scripts/agent-policy.mjs resolve --tool codex --capability issue-creation`; state its model and effort in your first message as `Advisory policy: ...`, not as requested settings, because nothing dispatched this session and it runs whatever model Codex started with. Start Codex with `codex -m <model> -c model_reasoning_effort=<effort>` to run the session at that policy, or at an explicit override.
 
 ## Plan
 
-Search for duplicates first (`gh api -X GET search/issues -f q='repo:samlevin/mcc-stats-suite is:issue <terms>'`). Well-scoped requests go straight to drafting. For broad ones, plan only outcomes, boundaries, acceptance criteria, and prerequisites, and ask only about material unknowns. Keep supplied decisions. Never invent impact, repro steps, tests, or architecture.
+For a small fix, use the supplied outcome, criteria, and validation directly; no separate planning document is needed. Reuse current discovery results and verified prerequisites, and retrieve only missing or stale metadata. Search for duplicates first (`gh api -X GET search/issues -f q='repo:samlevin/mcc-stats-suite is:issue <terms>'`). Well-scoped requests go straight to drafting. For broad ones, plan only outcomes, boundaries, acceptance criteria, and prerequisites, and ask only about material unknowns. Keep supplied decisions. Never invent impact, repro steps, tests, or architecture.
 
 - Leaf = one logical feature, bug, or change. It uses `task.yml` or `bug.yml` with acceptance criteria and validation.
 - Multiple independent outcomes become native sub-issues under a `container.yml` parent: What/Why/How, no acceptance criteria, no branch or PR. It closes when its children close. Containers may nest.
@@ -23,7 +23,15 @@ Search for duplicates first (`gh api -X GET search/issues -f q='repo:samlevin/mc
 
 ## Triage
 
-Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Spawn one `mcc-issue-triager` for the batch with the resolved model and effort. Send only the drafts (ref, title, body, parent ref, and planned blocked-by refs), accepted decisions, the discovered label and option lists, and the `Policy:` line (`Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, labels, and independence groups. On SPLIT_REQUIRED, split and re-triage only the affected drafts, plus their sibling leaves when the split changes a new container's leaves. There is no second pass otherwise. Never triage yourself in place of the triager.
+Classify inline by default: set severity, Priority, Size, labels, and LEAF or CONTAINER for each draft by `ISSUE_TRIAGE.md` and `.agents/issue-creation.md`.
+
+Spawn one `mcc-issue-triager` for the batch instead when the filing needs independent judgment:
+
+- Classification: the request asks for independent triage, or a draft's severity, Size, or leaf-or-container scope stays uncertain after you read `ISSUE_TRIAGE.md`.
+- Decomposition: a draft may hold more than one logical outcome, or the batch creates a container or epic.
+- Dependency judgment: a new container or epic has two or more leaf children, which need independence groups, or the batch adds blocked-by edges among its new issues.
+
+Resolve the triager settings with `node scripts/agent-policy.mjs resolve --tool <tool> --role issue-triager`, adding `--model` or `--effort` only for a `triager` override in the request. If it exits non-zero, stop and report its message. Send only the drafts (ref, title, body, parent ref, and planned blocked-by refs), accepted decisions, the discovered label and option lists, which reason above applies, and the `Policy:` line (`Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (model: <source>, effort: <source>)`). Do not send the transcript or your intended verdict. Apply its severity, Priority, Size, labels, and independence groups; once you spawn it, never override its verdict with your own. On SPLIT_REQUIRED, split and re-triage only the affected drafts, plus their sibling leaves when the split changes a new container's leaves. There is no second pass otherwise. Only the triager forms independence groups.
 
 Spawn with `spawn_agent`: `agent_type: mcc-issue-triager`, `model` and `reasoning_effort` from the resolver's `spawn` object, `fork_turns: "none"`. Always pass both values; the agent file carries neither. An unknown `agent_type` means the project is not trusted in Codex yet; say so and stop.
 
@@ -35,4 +43,4 @@ Order: parents, then children, then native parent links, then blocked-by edges (
 
 ## Verify and return
 
-Read back bodies, independence records, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, independence groups, the triager's `Requested settings: Policy: <as dispatched>` line, and any partial result or uncertainty, compactly.
+Read back bodies, independence records, labels, parent and dependency direction, project membership, and fields. Return URLs, the hierarchy, dependencies, independence groups, either `Triage: inline` or the triager's `Requested settings: Policy: <as dispatched>` line verbatim with the reason you spawned it, and any partial result or uncertainty, compactly.

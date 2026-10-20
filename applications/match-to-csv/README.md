@@ -26,7 +26,7 @@ These are separate settings:
 
 - The [gamertag roster](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-gamertag-roster) resolves OCR player names and determines which rows enter per-gamertag CSVs. Each run records the roster version it used. An empty roster permits processing but produces no per-gamertag files.
 - The [CSV recipient list](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-csv-recipient-list) stores intended export recipients. No application reads it yet. CSVs remain in S3 for manual retrieval. Automatic email delivery is tracked in [#207](https://github.com/samlevin/mcc-stats-suite/issues/207).
-- The optional [sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) controls who may submit email. It is an SSM parameter shared by all dev stacks, including ephemeral ones. Adding a CSV recipient does not allow that address to submit.
+- The required [sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) controls who may submit email. It is an SSM parameter shared by all dev stacks, including ephemeral ones, and administrators change it with `npm run sender-allowlist`. Adding a CSV recipient does not allow that address to submit.
 
 Roster and recipient commands require administrator credentials such as `mcc-dev-admin`, with DynamoDB, KMS, and SSM permissions. The local `mcc-dev` deploy profile is insufficient, and no narrower roster/recipient operator policy exists. Sign in with the administrator profile, then list and add entries:
 
@@ -38,7 +38,7 @@ npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <nam
 npm run recipients -- --environment dev --profile mcc-dev-admin --ephemeral <name> add '<recipient-address>'
 ```
 
-Use the same `<name>` as your stack to configure its `ephemeral/<name>` namespace. Omit `--ephemeral` for the environment's `stable` namespace. `--environment` is required. Production uses `prod` and its administrator profile, accepts no `--ephemeral`, and asks for confirmation before writes. Sender-allowlist operators need the separate SSM permissions in its guide. Keep list output local.
+Use the same `<name>` as your stack to configure its `ephemeral/<name>` namespace. Omit `--ephemeral` for the environment's `stable` namespace. `--environment` is required. Production uses `prod` and its administrator profile, accepts no `--ephemeral`, and asks for confirmation before writes. Sender allowlist operators need the SSM permissions in its guide. Keep list output local.
 
 ## Scripts reference
 
@@ -68,7 +68,7 @@ For example, send a message to your stack's address with this plain-text body an
 10/18/2026
 ```
 
-Images must be readable, at least 640 by 360 pixels, and no larger than 10 MB (10,000,000 bytes) each. Only Halo 3 two-team boards are supported. Free-for-all, three-team boards, and boards without two distinguishable team colors produce no rows. A message without a processable screenshot is rejected and its workflow fails. See [Evidence layout](#evidence-layout) for the full layout limits.
+Images must be readable, at least 640 by 360 pixels, and no larger than 10 MB (10,000,000 bytes) each. Only Halo 3 two-team boards are supported. Free-for-all, three-team boards, and boards without two distinguishable team colors produce no rows. A message without a processable screenshot is rejected with `NO_PROCESSABLE_SCREENSHOTS`. See [Evidence layout](#evidence-layout) for the full layout limits.
 
 ### Match date
 
@@ -78,13 +78,13 @@ Only allowlisted senders receive the invalid-date reply from `noreply@<domain>`.
 
 ### Sender screening
 
-SES spam or virus `FAIL` verdicts reject a message. SPF and DKIM verdicts are recorded but not enforced. When the sender allowlist exists, every `From` address must be listed. Without it, any sender can pass this check. Changes take effect within one minute. Ephemeral stacks also reject mail not addressed to their current plus-address.
+SES spam or virus `FAIL` verdicts reject a message. SPF and DKIM verdicts are recorded but not enforced. Every `From` address must be on the sender allowlist. When the allowlist parameter is missing or lists no address, every message is rejected with `SENDER_NOT_ALLOWED`. Changes take effect within one minute. Ephemeral stacks also reject mail not addressed to their current plus-address.
 
-A rejected submission retains its raw MIME and records the reason in `completion.json`, including `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, `RECIPIENT_NOT_ALLOWED`, `MATCH_DATE_INVALID`, or `NO_PROCESSABLE_SCREENSHOTS`. See [intake details](../../specs/1.1-mcc-analytics-engine.md#4-email-intake-interface).
+A rejected submission retains its raw MIME and records the reason in `completion.json`, including `SPAM_VERDICT_FAILED`, `VIRUS_VERDICT_FAILED`, `SENDER_NOT_ALLOWED`, `RECIPIENT_NOT_ALLOWED`, `MATCH_DATE_INVALID`, or `NO_PROCESSABLE_SCREENSHOTS`. Its Step Functions execution ends as succeeded at the `Submission rejected` state without running OCR, so a rejection fires no failure alarm. See [intake details](../../specs/1.1-mcc-analytics-engine.md#4-email-intake-interface).
 
 ## Find results
 
-Use an administrator or operator profile with CloudFormation, Step Functions, SSM, and S3 read access. The local deploy profile cannot read the submission address or results. Use your CloudFormation stack's `StateMachineArn` output to find the workflow in Step Functions, then confirm your submission's execution is `SUCCEEDED`. The [result-check commands](../../docs/getting-started.md#check-the-result) find the workflow and list evidence in S3.
+Use an administrator or operator profile with CloudFormation, Step Functions, SSM, and S3 read access. The local deploy profile cannot read the submission address or results. Use your CloudFormation stack's `StateMachineArn` output to find the workflow in Step Functions, then confirm your submission's execution is `SUCCEEDED`. A rejected submission also ends as `SUCCEEDED`, at the `Submission rejected` state, and its `completion.json` has status `REJECTED`. The [result-check commands](../../docs/getting-started.md#check-the-result) find the workflow and list evidence in S3.
 
 The bucket name is `/mcc/<environment>/match-to-csv/evidence-bucket-name` in SSM. Start at `submissions/{submissionId}/` for stable stacks or `ephemeral/<name>/submissions/{submissionId}/` for ephemeral ones:
 
