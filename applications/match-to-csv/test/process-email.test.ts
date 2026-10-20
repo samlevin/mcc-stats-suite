@@ -163,8 +163,16 @@ async function runScreening(options: ScreeningCase) {
     dependencies,
   )
     .then(
-      (result) => ({ result, error: undefined }),
-      (error: Error) => ({ result: undefined, error }),
+      ({ result, matchDateReply }) => ({
+        result,
+        matchDateReply,
+        error: undefined,
+      }),
+      (error: Error) => ({
+        result: undefined,
+        matchDateReply: undefined,
+        error,
+      }),
     )
     .finally(captured.restore);
   const logs = captured.lines.map(
@@ -878,7 +886,7 @@ test('processEmail preserves images and returns every processable attachment', a
     timestamp: () => '2026-01-01T00:00:00.000Z',
   };
 
-  const result = await processEmail(
+  const { result } = await processEmail(
     { bucket: 'raw', key: 'incoming/message' },
     dependencies,
   );
@@ -945,10 +953,12 @@ test('processEmail records and returns the rejection of an email without a scree
   };
 
   assert.deepEqual(
-    await processEmail(
-      { bucket: 'raw', key: 'incoming/message' },
-      dependencies,
-    ),
+    (
+      await processEmail(
+        { bucket: 'raw', key: 'incoming/message' },
+        dependencies,
+      )
+    ).result,
     {
       status: 'REJECTED',
       submissionId: 'id',
@@ -1186,6 +1196,7 @@ for (const [label, text] of [
     assert.equal(run.event.type, 'SUBMISSION_REJECTED');
     assert.deepEqual(run.event.detail.rejectionCodes, ['MATCH_DATE_INVALID']);
     assert.equal(run.sends.length, 1);
+    assert.equal(run.matchDateReply, 'SENT');
     const [reply] = run.sends;
     assert.equal(reply.from, 'noreply@mail.example.test');
     assert.deepEqual(reply.to, ['player@example.test']);
@@ -1303,6 +1314,7 @@ for (const [label, rawEmail] of [
     assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
     assert.deepEqual(run.objectWrites, []);
     assert.equal(run.sends.length, 1);
+    assert.equal(run.matchDateReply, 'SENT');
     assert.deepEqual(run.sends[0].to, ['player@example.test']);
     assert.equal(run.sends[0].subject, 'Re: Tonight');
   });
@@ -1366,6 +1378,11 @@ for (const [label, options, codes] of [
     assert.deepEqual(run.completion.rejectionCodes, codes);
     assert.deepEqual(run.objectWrites, []);
     assert.deepEqual(run.sends, []);
+    assert.equal(
+      run.matchDateReply,
+      undefined,
+      'no reply result without MATCH_DATE_INVALID',
+    );
   });
 
   test(`processEmail preserves ${label} with a valid date among surrounding text`, async () => {
@@ -1394,7 +1411,7 @@ test('processEmail sends no reply when no attachment is processable', async () =
   process.env.REPLY_FROM_DOMAIN = REPLY_DOMAIN;
   const sends: ReplyMessage[] = [];
   const jsonWrites: Array<{ key: string; value: any }> = [];
-  const result = await processEmail(
+  const { result } = await processEmail(
     { bucket: 'raw', key: 'incoming/message' },
     {
       async getRawEmail() {
@@ -1451,6 +1468,7 @@ test('processEmail logs a failed reply without an address or email content and k
   const run = await runScreening({ ...listedSender, text: '', sendError });
 
   assertRejected(run, ['MATCH_DATE_INVALID']);
+  assert.equal(run.matchDateReply, 'FAILED');
   assert.equal(run.sends.length, 1, 'the send was attempted');
   assert.equal(run.completion.status, 'REJECTED');
   assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
@@ -1478,6 +1496,7 @@ for (const [label, options] of [
     assert.equal(run.ingestion.senderAllowlist.status, 'NOT_CONFIGURED');
     assert.equal(run.ingestion.matchDate, null);
     assert.deepEqual(run.completion.rejectionCodes, ['SENDER_NOT_ALLOWED']);
+    assert.equal(run.matchDateReply, undefined);
     assert.deepEqual(run.objectWrites, []);
     assert.deepEqual(run.sends, []);
   });
@@ -1490,7 +1509,10 @@ test('processEmail sends no reply without a reply domain', async () => {
     text: '',
   });
 
+  assertRejected(run, ['MATCH_DATE_INVALID']);
+  assert.equal(run.matchDateReply, 'SKIPPED');
   assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
+  assert.equal(run.event.type, 'SUBMISSION_REJECTED');
   assert.deepEqual(run.sends, []);
   assert.ok(
     run.logs.some(
