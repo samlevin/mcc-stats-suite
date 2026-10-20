@@ -204,6 +204,7 @@ test('all root CLI entries help and reject malformed input without subprocesses'
     ['cdk-app', ['deploy', 'admin'], ['-env=dev', '--environment=prod'], 1],
     ['roster', [], ['--unknown'], 2],
     ['recipients', [], ['--unknown'], 2],
+    ['sender-allowlist', [], ['--unknown'], 2],
     ['branch-name', [], ['285', '-a=sam', '--actor=other'], 1],
     ['release-metadata', [], ['--unknown'], 1],
     ['issue-triage', [], ['--apply', '-n'], 1],

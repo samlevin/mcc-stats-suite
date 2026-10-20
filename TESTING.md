@@ -93,6 +93,6 @@ Run the selection, concurrency, failure propagation, cache policy, and deploymen
 node --test scripts/ci-checks.test.mjs
 ```
 
-Application delivery regression checks run with `node --test scripts/deployment-workflows.test.mjs`. They use workflow definitions and mocked GitHub responses to verify release selection, exact release commits, required production approval protection, and account checks without AWS calls. The same suite checks per-application dev-success gating, shared deployment queues, stale-version skips and the rollback exception with prior prod qualification.
+Application delivery regression checks run with `node --test scripts/deployment-workflows.test.mjs`. They use workflow definitions and mocked GitHub responses to verify release selection, exact release commits, required production approval protection, and account checks without AWS calls. The same suite checks per-application dev-success gating, shared deployment queues, stale-version skips and the rollback exception with prior prod qualification. It also runs the Slack deploy message steps with a mocked webhook to check each message's text, that every caller passes `SLACK_DEPLOY_WEBHOOK_URL` explicitly, that each Slack step runs only when the secret is set, and that a failed post only warns.
 
 `node --test scripts/workflow-names.test.mjs` checks workflow, job, and step names against the convention in [CONTRIBUTING.md](CONTRIBUTING.md#name-github-actions-workflows), including the three check names the `main` ruleset requires.
