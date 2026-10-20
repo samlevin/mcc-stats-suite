@@ -224,3 +224,50 @@ test('numbered spec list items link to their owning section', () => {
     /\[§3.1\].*#3-runtime/,
   );
 });
+
+test('bold-labeled acceptance bullets remain verbatim in draft issue bodies', () => {
+  const bullet = '  - **Compatibility:** Existing APIs remain available.';
+  const plan = parse(
+    conforming.replace('  - Existing APIs remain available.', bullet),
+  );
+  assert.deepEqual(plan.errors, []);
+  const node = plan.nodes.find((n) => n.ref === 'P0.1');
+  assert.ok(node.fields.Acceptance.includes(bullet));
+  assert.ok(node.body.includes(bullet));
+});
+
+test('slice headings at incorrect levels reject the entire plan', () => {
+  for (const level of [1, 2, 3, 6]) {
+    const plan = parse(
+      conforming.replace(
+        '#### P0.3 Describe storage API (XS)',
+        `${'#'.repeat(level)} P0.3 Describe storage API (XS)`,
+      ),
+    );
+    assert.ok(
+      plan.errors.some(
+        (error) =>
+          error.includes('P0.3') && /slice heading|split level/.test(error),
+      ),
+      `${level}: ${plan.errors.join('\n')}`,
+    );
+  }
+});
+
+test('phase headings at incorrect levels cannot truncate the plan silently', () => {
+  for (const level of [1, 2, 4, 5, 6]) {
+    const plan = parse(
+      conforming.replace(
+        '### Phase 0: Contracts',
+        `${'#'.repeat(level)} Phase 0: Contracts`,
+      ),
+    );
+    assert.ok(
+      plan.errors.some(
+        (error) =>
+          error.includes('Phase 0: Contracts') &&
+          error.includes('phase heading must use three hashes'),
+      ),
+    );
+  }
+});

@@ -40,7 +40,7 @@ function fields(text) {
   const result = {};
   let current;
   for (const line of text.split('\n')) {
-    const match = /^\s*(?:- )?\*\*([^*]+?)(?::\*\*|\*\*:)\s*(.*)$/.exec(line);
+    const match = /^(?:- )?\*\*([^*]+?)(?::\*\*|\*\*:)\s*(.*)$/.exec(line);
     if (match) {
       current = match[1];
       result[current] = match[2];
@@ -70,7 +70,10 @@ export function buildPlan(text, { specPath, repository, labels }) {
   const lines = text.split(/\r?\n/);
   const start = all.findIndex((h) => /^20\. Delivery plan/.test(h.title));
   if (start < 0) return { errors: ['§20: missing delivery plan'], nodes: [] };
-  const end = all.findIndex((h, i) => i > start && h.level <= 2);
+  const end = all.findIndex(
+    (h, i) =>
+      i > start && h.level <= 2 && !/^(?:P\d+\.\d|Phase\b)/.test(h.title),
+  );
   const planHeadings = all.slice(start + 1, end < 0 ? undefined : end);
   const contents = (h) => {
     const next = all.find((item) => item.line > h.line);
@@ -129,6 +132,17 @@ export function buildPlan(text, { specPath, repository, labels }) {
       if (!known.has(label)) fail(node.ref, `unknown label ${label}`);
   };
   for (const h of planHeadings) {
+    if (/^Phase\b/.test(h.title) && h.level !== 3) {
+      fail(h.title, 'phase heading must use three hashes');
+      continue;
+    }
+    if (/^P\d+\.\d/.test(h.title) && ![4, 5].includes(h.level)) {
+      fail(
+        h.title,
+        'slice heading must use four hashes, or five for a split child',
+      );
+      continue;
+    }
     const phaseMatch = /^Phase (\d+): (.+)$/.exec(h.title);
     if (h.level === 3 && phaseMatch) {
       const ref = `phase-${phaseMatch[1]}`;
