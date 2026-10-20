@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -512,13 +518,12 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
     'labeled',
     'unlabeled',
   ]);
-  for (const name of ['tracker-issue-states', 'tracker-project-membership']) {
-    const [minute, hour, ...rest] =
-      workflow(name).on.schedule[0].cron.split(' ');
-    assert.match(minute, /^\d+$/, name);
-    assert.deepEqual([hour, ...rest], ['*', '*', '*', '*'], name);
-    assert.equal(workflow(name).on.schedule.length, 1, name);
-  }
+  assert.equal(definition.on.schedule.length, 1);
+  const [minute, hour, ...rest] = definition.on.schedule[0].cron.split(' ');
+  assert.match(minute, /^\d+$/);
+  assert.deepEqual([hour, ...rest], ['*', '*', '*', '*']);
+  // The membership sweep runs only inside this hourly job.
+  assert.equal(workflow('tracker-project-membership').on.schedule, undefined);
   const issue = { event_name: 'issues', event: { issue: { number: 7 } } };
   assert.equal(
     expression(definition.concurrency.group, { github: issue }),
@@ -532,39 +537,74 @@ test('issue events reconcile one issue; the hourly schedule and manual runs swee
       'issue-states-sweep',
     );
   assert.equal(definition.concurrency['cancel-in-progress'], false);
-  const step = definition.jobs['reconcile-issues'].steps.find(
-    (step) => step.run,
+  const job = definition.jobs['reconcile-issues'];
+  assert.equal(job.env.MCC_PROJECT_TOKEN, '${{ secrets.MCC_PROJECT_TOKEN }}');
+  assert.equal(expression(job.env.ISSUE_NUMBER, { github: issue }), 7);
+  const dryRun = (event_name, inputs = {}) =>
+    expression(job.env.DRY_RUN, { github: { event_name }, inputs });
+  assert.equal(dryRun('issues'), 'false');
+  assert.equal(dryRun('schedule'), 'false');
+  assert.equal(dryRun('workflow_dispatch', { dry_run: true }), 'true');
+  assert.equal(dryRun('workflow_dispatch', { dry_run: false }), 'false');
+  const steps = job.steps.filter((step) => step.run);
+  assert.deepEqual(
+    steps.map((step) => step.name),
+    [
+      'Add missing open issues to MCC delivery',
+      'Triage issues',
+      'Close finished containers',
+    ],
   );
-  assert.equal(expression(step.env.ISSUE_NUMBER, { github: issue }), 7);
-  // Run the step with a stand-in for node that records its arguments.
+  assert.equal(steps[0].env.SWEEP, 'true');
+  // Run the steps with a stand-in for node that records its arguments and
+  // fails for the script named in FAIL.
   const directory = mkdtempSync(join(tmpdir(), 'mcc-fake-node-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   writeFileSync(
     join(directory, 'node'),
-    '#!/bin/sh\necho "$*" >> "$NODE_LOG"\n',
+    '#!/bin/sh\necho "$*" >> "$NODE_LOG"\n[ "$1" != "$FAIL" ]\n',
   );
   chmodSync(join(directory, 'node'), 0o755);
-  const run = (issueNumber) => {
-    const log = join(directory, `log-${issueNumber || 'sweep'}`);
-    const result = spawnSync('bash', ['-e', '-c', step.run], {
-      encoding: 'utf8',
-      env: {
-        PATH: `${directory}:${process.env.PATH}`,
-        NODE_LOG: log,
-        ISSUE_NUMBER: issueNumber,
-      },
-    });
-    assert.equal(result.status, 0, result.stderr);
-    return spawnSync('cat', [log], { encoding: 'utf8' }).stdout;
+  let runs = 0;
+  const run = (issueNumber, { fail = '', setup = 'success' } = {}) => {
+    const log = join(directory, `log-${runs++}`);
+    writeFileSync(log, '');
+    let failed = false;
+    for (const step of steps) {
+      const runsStep = expression(step.if, {
+        github: { event_name: issueNumber ? 'issues' : 'schedule' },
+        cancelled: () => false,
+        steps: { node: { outcome: setup } },
+      });
+      if (!runsStep) continue;
+      const result = spawnSync('bash', ['-e', '-c', step.run], {
+        encoding: 'utf8',
+        env: {
+          PATH: `${directory}:${process.env.PATH}`,
+          NODE_LOG: log,
+          FAIL: fail,
+          ISSUE_NUMBER: issueNumber,
+        },
+      });
+      if (result.status !== 0) failed = true;
+    }
+    return { log: readFileSync(log, 'utf8'), failed };
   };
-  assert.equal(
-    run('7'),
-    'scripts/issue-triage.mjs --issue 7\nscripts/issue-containers.mjs --issue 7\n',
-  );
-  assert.equal(
-    run(''),
-    'scripts/issue-triage.mjs\nscripts/issue-containers.mjs\n',
-  );
+  assert.deepEqual(run('7'), {
+    log: 'scripts/issue-triage.mjs --issue 7\nscripts/issue-containers.mjs --issue 7\n',
+    failed: false,
+  });
+  const sweep =
+    'scripts/issue-project-membership.mjs\nscripts/issue-triage.mjs\nscripts/issue-containers.mjs\n';
+  assert.deepEqual(run(''), { log: sweep, failed: false });
+  // A failed sweep still lets the later sweeps run, and the job fails.
+  for (const fail of [
+    'scripts/issue-project-membership.mjs',
+    'scripts/issue-triage.mjs',
+    'scripts/issue-containers.mjs',
+  ])
+    assert.deepEqual(run('', { fail }), { log: sweep, failed: true }, fail);
+  assert.deepEqual(run('', { setup: 'failure' }), { log: '', failed: false });
 });
 
 test('label events run only for labels that can change triage or containers', () => {
