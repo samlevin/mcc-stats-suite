@@ -49,6 +49,10 @@ export const EXIT_ERROR = 2;
 // The parameter types process-email reads as plain text.
 const SUPPORTED_TYPES = ['String', 'StringList'];
 
+// A parsed From address never holds angle brackets or quotes, so an entry
+// containing one would never match a sender.
+const DISPLAY_CHARACTERS = /[<>"]/;
+
 const CLI = defineCli(USAGE, ['environment', 'profile', 'yes']);
 const GLOBAL_OPTIONS = ['--environment', '--profile'];
 const COMMANDS = {
@@ -350,7 +354,9 @@ async function write(context, command, operands) {
 function added(before, operands) {
   const after = [...before];
   for (const operand of operands) {
-    const address = normalizeAddress(operand)?.toLowerCase();
+    const address = DISPLAY_CHARACTERS.test(operand)
+      ? null
+      : normalizeAddress(operand)?.toLowerCase();
     if (!address) {
       refuse('INVALID_ADDRESS', `${operand.trim()} is not a valid address.`);
     }

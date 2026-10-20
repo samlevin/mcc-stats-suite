@@ -392,6 +392,21 @@ test('every refusal exits 1 and writes nothing', async () => {
       /Refused: INVALID_ADDRESS/,
     ],
     [
+      dev('add', '<two@example.test>'),
+      devAllowlist('one@example.test'),
+      /Refused: INVALID_ADDRESS\. <two@example\.test> is not a valid address/,
+    ],
+    [
+      dev('add', '"two"@example.test'),
+      devAllowlist('one@example.test'),
+      /Refused: INVALID_ADDRESS/,
+    ],
+    [
+      dev('add', 'three@example.test', 'two@example.test>'),
+      devAllowlist('one@example.test'),
+      /Refused: INVALID_ADDRESS/,
+    ],
+    [
       dev('add', 'ONE@example.test'),
       devAllowlist('one@example.test'),
       /Refused: ALREADY_LISTED\. one@example\.test is already on the allowlist/,
