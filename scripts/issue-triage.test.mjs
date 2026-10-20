@@ -15,6 +15,8 @@ import {
   configuration,
   discover,
   eligible,
+  SETTLED_STATUSES,
+  SWEEP_FILTER,
   failureMessage,
   ghGraphql,
   GitHubError,
@@ -833,6 +835,7 @@ function mockApi({
     mutations: [],
     queries: [],
     readItems: [],
+    itemFilters: [],
     status: 'Inbox',
     otherStatus: 'Inbox',
     lastFields: {},
@@ -918,6 +921,7 @@ function mockApi({
     }
     if (query.includes('items(first: 100')) {
       state.queries.push(`items-${page}`);
+      state.itemFilters.push(variables.filter);
       return {
         node: {
           items: page
@@ -1097,6 +1101,8 @@ test('dry-run discovers every item page and never mutates; apply is idempotent',
   });
   assert.equal(state.mutations.length, 0);
   assert.ok(state.queries.includes('items-1'));
+  // Every page asks only for open issues whose Status can still qualify.
+  assert.deepEqual(state.itemFilters, [SWEEP_FILTER, SWEEP_FILTER]);
   assert.deepEqual(await reconcile({ api, dryRun: false, log: () => {} }), {
     candidates: 1,
     updated: 1,
@@ -1521,4 +1527,18 @@ test('epic label reconciliation for one issue reads only that issue', async () =
   });
   assert.deepEqual(plain.writes, []);
   assert.equal(plain.calls.length, 1);
+});
+
+test('the sweep filter excludes exactly the statuses eligible() never moves', () => {
+  assert.equal(
+    SWEEP_FILTER,
+    'is:issue is:open -status:Ready,"In progress","In review",Done',
+  );
+  const base = issue();
+  const qualifies = (Status) =>
+    eligible(issue({ fields: { ...base.fields, Status } }));
+  for (const Status of SETTLED_STATUSES)
+    assert.equal(qualifies(Status), false, Status);
+  for (const Status of [undefined, 'Inbox'])
+    assert.equal(qualifies(Status), true, String(Status));
 });
