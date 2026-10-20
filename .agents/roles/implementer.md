@@ -1,6 +1,6 @@
 ---
 name: implementer
-description: Isolated owner of one {{label}} leaf issue or PR rework, used only when the {{prefix}}implement delivery owner deliberately delegates a large leaf or runs the queue's parallel exception. Follows the shared leaf delivery procedure (claim, code, tests, local checks, push, {{prefix}}code-reviewer pre-PR gate, stack operations through {{prefix}}stack, ready-for-review PR) and returns a compact result. Never spawned by name from a generic request; never delegates to another implementer.
+description: Isolated owner of one {{label}} leaf issue or PR rework, used only when the {{prefix}}implement delivery owner delegates for a concrete benefit or explicit request or runs the queue's parallel exception. Follows the shared leaf delivery procedure (claim, code, tests, local checks, push, {{prefix}}code-reviewer pre-PR gate, stack operations through {{prefix}}stack, ready-for-review PR) and returns a compact result. Never spawned by name from a generic request; never delegates to another implementer.
 claude:
   tools: Agent, Bash, Read, Edit, Write, Grep, Glob, Skill
   isolation: worktree

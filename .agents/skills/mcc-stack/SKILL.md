@@ -12,7 +12,7 @@ Authority: the delivery request covers building your own branches, pushing them,
 
 ## Inspect before every mutation
 
-1. `git fetch origin`. This updates only remote-tracking refs, never a local branch.
+1. Use current verified prerequisite facts, refreshing remote refs with `git fetch origin` when they may have moved. This updates only remote-tracking refs, never a local branch. Reuse unchanged inspection results within the operation; ownership, remote heads, and ancestry must still be current before mutation.
 2. `git worktree list --porcelain`: note which worktree has each branch checked out.
 3. For each branch in the stack: its local head (`git rev-parse <branch>`), its remote head (`git ls-remote origin <branch>`), its intended parent (trunk `origin/main`, the previous layer, or a prerequisite's pushed head), and whether that parent is an ancestor (`git merge-base --is-ancestor <parent> <branch>`).
 4. `gh stack view --json` for the tracked stack. Its state lives in the shared git directory, so it can list other worktrees' stacks; act only on yours.
@@ -32,6 +32,7 @@ Trunk `main` is never yours; it is usually checked out in the human checkout. St
 ## Never run
 
 - `gh stack sync` or `gh stack rebase`, with or without `--no-trunk`. Without `--no-trunk`, both fast-forward the local trunk branch, and `gh stack rebase` merges into whichever worktree has `main` checked out, the human checkout included. Cascade with plain git instead, as [Operations](#operations) shows, so every rebase carries `rebase.updateRefs=false`.
+- `gh stack push`. It fetches before constructing its leases, so they compare against the fetched remote heads instead of the previously verified SHA and can overwrite someone else's push. Use the explicit per-branch leases in [Operations](#operations).
 - `gh stack submit`, or `gh stack link` with anything but PR URLs. Both create PRs for branches that have none.
 - `gh stack add` with `-A`, `-u`, or `-m`, or any blanket staging. Commit with explicit paths yourself.
 - `gh stack unstack`, `--prune`, branch deletion, `git pull` on trunk, and `git branch -f` or `git update-ref` on any branch you do not own.

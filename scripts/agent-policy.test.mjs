@@ -472,6 +472,7 @@ test('every role and workflow renders for both tools with matching bodies', () =
     'agents',
     'implement',
     'create-github-issue',
+    'spec-to-issues',
     'review-code',
     'review-security',
     'plain-language',
@@ -877,12 +878,18 @@ test('the delivery owner runs stack operations itself through the shared stack s
     const never = section(content, 'Never run');
     for (const phrase of [
       '`gh stack sync`',
+      '`gh stack rebase`',
       '`--no-trunk`',
+      '`gh stack push`',
       '`gh stack submit`',
       'rebase.updateRefs=false',
       'bare `git push --force`',
     ])
       assert.ok(never.includes(phrase), `${path} never runs: ${phrase}`);
+    assert.ok(
+      lineWith(never, '`gh stack push`', 'fetch', 'previously verified SHA'),
+      `${path} must explain why the stack push lease is unsafe`,
+    );
     const operations = section(content, 'Operations');
     assert.match(
       operations,
@@ -1541,4 +1548,165 @@ test('a role without a policy entry or source is rejected', () => {
     source.replace('name: sample', 'name: extra'),
   );
   assert.throws(() => render(base), /Role extra has no entry/);
+});
+
+test('review entry points share bounded packets and preserve independent coverage', () => {
+  const files = render();
+  const review = readFileSync(
+    new URL('../.agents/review.md', import.meta.url),
+    'utf8',
+  );
+  for (const path of [
+    ...DELIVERY,
+    `.claude/skills/${PREFIX}review-code/SKILL.md`,
+    `.agents/skills/${PREFIX}review-code/SKILL.md`,
+    `.claude/agents/${PREFIX}code-reviewer.md`,
+    `.codex/agents/${PREFIX}code-reviewer.toml`,
+  ]) {
+    const content = files.get(path);
+    assert.ok(content.includes('.agents/review.md'), path);
+    for (const field of [
+      'accepted decisions',
+      'changed-file summary',
+      'validation results',
+      'verified prerequisites',
+    ])
+      assert.ok(content.includes(field), `${path}: ${field}`);
+  }
+  for (const rule of [
+    'full in-scope base/head diff',
+    'relevant callers and contracts',
+    'Retrieve only missing or stale context',
+    'previous base/head SHAs',
+    'complete previous report',
+    'Expand review when subsequent changes affect additional behavior',
+    'including changes introduced by a moved base',
+    'missed earlier',
+    'exact reviewed base/head pair',
+    'otherwise perform a complete initial review',
+  ])
+    assert.ok(review.includes(rule), rule);
+  assert.doesNotMatch(review, /report only defects the fixes introduced/);
+});
+
+test('evidence reuse retains complete relevant output and meaningful validation', () => {
+  const evidence = readFileSync(
+    new URL('../.agents/evidence.md', import.meta.url),
+    'utf8',
+  );
+  for (const rule of [
+    'targeted `rg` searches',
+    'Read each unchanged file once',
+    'A new commit SHA alone does not invalidate',
+    'local temporary file outside tracked paths',
+    'Keep the file available',
+    'Never let a filter hide a failing exit status',
+    'retrieve the missing part',
+    'Never act on partial output',
+    'never wait for, poll, or rerun remote CI',
+  ])
+    assert.ok(evidence.includes(rule), rule);
+  const files = render();
+  for (const path of DELIVERY) {
+    const build = section(files.get(path), 'Build');
+    assert.match(build, /focused tests/);
+    assert.match(build, /every required scope-appropriate check/);
+    assert.match(build, /rerun affected checks and broaden validation/);
+    assert.match(
+      build,
+      /Meaningful behavioral tests and required checks remain mandatory/,
+    );
+    const claim = section(files.get(path), 'Claim');
+    assert.match(claim, /Reuse current metadata and verified prerequisites/);
+    assert.match(claim, /one useful claim comment/);
+    assert.match(claim, /Do not add status-only comments or repeat the claim/);
+  }
+});
+
+test('optional implementation delegation requires a benefit beyond task size', () => {
+  const files = render();
+  for (const path of IMPLEMENT) {
+    const exception = section(
+      files.get(path),
+      'Isolated implementer exception',
+    );
+    assert.match(exception, /request says `isolated`/);
+    assert.match(exception, /name a concrete benefit/);
+    assert.match(exception, /Task size alone does not justify delegation/);
+    assert.match(exception, /bounded assignment/);
+  }
+  for (const path of QUEUE) {
+    assert.match(
+      section(files.get(path), 'Deliver'),
+      /concrete-benefit delegation rule/,
+    );
+    const parallel = section(files.get(path), 'Parallel exception');
+    assert.match(parallel, /explicitly asked for parallel delivery/);
+    assert.match(parallel, /different groups/);
+  }
+});
+
+test('spec plans require offline validation, triage, confirmation and journaled resume in both tools', () => {
+  const files = render();
+  for (const tool of ['claude', 'codex']) {
+    const directory = tool === 'claude' ? '.claude/skills' : '.agents/skills';
+    const path = `${directory}/${PREFIX}spec-to-issues`;
+    const skill = files.get(`${path}/SKILL.md`);
+    for (const rule of [
+      'Before any GitHub write',
+      'scripts/spec-to-issues.mjs plan',
+      'duplicate Plan IDs or titles',
+      'dependency cycles',
+      'unknown labels',
+      'After pre-flight and before printing the tree',
+      'for the whole plan',
+      '--role issue-triager',
+      'as accepted decisions',
+      'never override them',
+      'Only the triager forms independence groups',
+      'Never form, extend, or merge groups yourself',
+      'only as context',
+      'Wait for explicit confirmation',
+      'plan or dry run makes no GitHub writes',
+      'phase epic or split-slice container whose direct leaf children',
+      'root container gets no record',
+      'reuses the saved triager verdict and groups without spawning the triager again',
+      'finish every missing independence record',
+      'spec change since the confirmed plan requires a new pre-flight, triage, and confirmation',
+      'Never edit labels, project settings, or project Status',
+      'Never touch an issue this run did not create',
+      'issue-triage.mjs --apply --issue N',
+      'issue-containers.mjs --apply --issue N',
+    ])
+      assert.ok(skill.includes(rule), `${path}: ${rule}`);
+    const state = files.get(`${path}/references/state.md`);
+    for (const rule of [
+      'outside the repository',
+      'Full triager report',
+      'Persist the groups',
+      'before sending the POST',
+      'at least one second',
+      'Never blindly retry a POST',
+      'exact marker',
+      'without another POST',
+      'without spawning the triager again',
+      'Resume must finish every record',
+      'voids confirmation',
+    ])
+      assert.ok(state.includes(rule), `${path}/state: ${rule}`);
+    const operations = files.get(`${path}/references/github-operations.md`);
+    for (const rule of [
+      'REST through `gh api`',
+      'sub_issue_id',
+      'dependencies/blocked_by',
+      'Never include Status',
+      'Never put a record on the root',
+    ])
+      assert.ok(operations.includes(rule), `${path}/operations: ${rule}`);
+  }
+  const role = readFileSync(
+    new URL('../.agents/roles/issue-triager.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(role, /spec-to-issues for a whole delivery plan/);
 });

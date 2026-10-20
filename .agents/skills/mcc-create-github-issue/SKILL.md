@@ -14,7 +14,7 @@ Codex skills cannot set the session model. The repository policy for `issue-crea
 
 ## Plan
 
-Search for duplicates first (`gh api -X GET search/issues -f q='repo:samlevin/mcc-stats-suite is:issue <terms>'`). Well-scoped requests go straight to drafting. For broad ones, plan only outcomes, boundaries, acceptance criteria, and prerequisites, and ask only about material unknowns. Keep supplied decisions. Never invent impact, repro steps, tests, or architecture.
+For a small fix, use the supplied outcome, criteria, and validation directly; no separate planning document is needed. Reuse current discovery results and verified prerequisites, and retrieve only missing or stale metadata. Search for duplicates first (`gh api -X GET search/issues -f q='repo:samlevin/mcc-stats-suite is:issue <terms>'`). Well-scoped requests go straight to drafting. For broad ones, plan only outcomes, boundaries, acceptance criteria, and prerequisites, and ask only about material unknowns. Keep supplied decisions. Never invent impact, repro steps, tests, or architecture.
 
 - Leaf = one logical feature, bug, or change. It uses `task.yml` or `bug.yml` with acceptance criteria and validation.
 - Multiple independent outcomes become native sub-issues under a `container.yml` parent: What/Why/How, no acceptance criteria, no branch or PR. It closes when its children close. Containers may nest.

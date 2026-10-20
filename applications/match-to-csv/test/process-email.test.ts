@@ -15,6 +15,7 @@ import {
   type ProcessEmailDependencies,
   type ReplyMessage,
 } from '../src/lambdas/process-email';
+import { captureLogLines } from './support/log-lines';
 
 afterEach(() => {
   delete process.env.EVIDENCE_BUCKET;
@@ -101,7 +102,6 @@ async function runScreening(options: ScreeningCase) {
   const allowlistReads: string[] = [];
   const parameterReads: string[] = [];
   const sends: ReplyMessage[] = [];
-  const logs: Array<Record<string, unknown>> = [];
   let inspections = 0;
   let id = 0;
   const dependencies: ProcessEmailDependencies = {
@@ -153,10 +153,7 @@ async function runScreening(options: ScreeningCase) {
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
   };
-  const consoleLog = console.log;
-  console.log = (line: string) => {
-    logs.push(JSON.parse(line) as Record<string, unknown>);
-  };
+  const captured = captureLogLines();
   const outcome = await processEmail(
     { bucket: 'raw', key: 'incoming/message', ...options.input },
     dependencies,
@@ -165,9 +162,10 @@ async function runScreening(options: ScreeningCase) {
       (result) => ({ result, error: undefined }),
       (error: Error) => ({ result: undefined, error }),
     )
-    .finally(() => {
-      console.log = consoleLog;
-    });
+    .finally(captured.restore);
+  const logs = captured.lines.map(
+    (line) => JSON.parse(line) as Record<string, unknown>,
+  );
   const find = (fragment: string): Record<string, any> => {
     const write = jsonWrites.find((candidate) =>
       candidate.key.includes(fragment),

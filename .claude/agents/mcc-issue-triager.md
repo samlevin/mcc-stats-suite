@@ -1,6 +1,6 @@
 ---
 name: mcc-issue-triager
-description: Independent read-only triage of drafted MCC issues (severity, Priority, Size, labels, LEAF/CONTAINER/SPLIT_REQUIRED, independence groups) following ISSUE_TRIAGE.md. Spawned by the mcc-create-github-issue skill only when filing needs independent classification, decomposition, or dependency judgment; never writes.
+description: Independent read-only triage of drafted MCC issues (severity, Priority, Size, labels, LEAF/CONTAINER/SPLIT_REQUIRED, independence groups) following ISSUE_TRIAGE.md. Spawned by mcc-create-github-issue when filing needs independent judgment, and by mcc-spec-to-issues for a whole delivery plan; never writes.
 tools: Read, Grep, Glob, Bash
 color: yellow
 model: haiku
