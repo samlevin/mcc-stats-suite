@@ -453,7 +453,7 @@ test('external children and dependencies block before an MCC number collision is
   }
 });
 
-test('existing exact-SHA approval wording remains valid and stale legacy approvals fail', () => {
+test('legacy approvals allow a moved base branch and reject a changed head', () => {
   const pr = pull(1);
   pr.body = `Closes #1\nPre-PR review: APPROVE for \`${base}..${head}\`.`;
   const checks = [{ status: 'completed', conclusion: 'success' }];
@@ -461,6 +461,10 @@ test('existing exact-SHA approval wording remains valid and stale legacy approva
   assert.equal(
     stackReady({ ...pr, base: { sha: 'c'.repeat(40) } }, checks, [], base),
     true,
+  );
+  assert.equal(
+    stackReady({ ...pr, head: { sha: 'd'.repeat(40) } }, checks, [], base),
+    false,
   );
 });
 
