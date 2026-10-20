@@ -28,15 +28,24 @@ function thresholdSeverity(environment: NodeJS.ProcessEnv): number {
 }
 
 /**
- * Writes one self-formatted JSON line, or nothing when `level` is below
- * `AWS_LAMBDA_LOG_LEVEL`.
+ * Writes one JSON record per line straight to stdout, or nothing when `level`
+ * is below `AWS_LAMBDA_LOG_LEVEL`. Under the JSON log format the Lambda
+ * runtime wraps `console.log` output in its own record at `INFO`, with the
+ * line as a string in `message`, where Logs Insights cannot query the
+ * record's fields. Under the text log format it prefixes the line with a
+ * timestamp and request ID. A direct stdout write reaches CloudWatch as
+ * written under both formats. Under the JSON format Lambda reads the record's
+ * level from `level` only when `timestamp` is a valid RFC 3339 time, and
+ * otherwise treats the record as `INFO`, so every record carries one.
  */
 export function log(
   level: LogLevel,
   message: string,
   details: Record<string, unknown> = {},
+  write: (line: string) => void = (line) => process.stdout.write(line),
   environment: NodeJS.ProcessEnv = process.env,
 ): void {
   if (LEVEL_SEVERITY[level] < thresholdSeverity(environment)) return;
-  console.log(JSON.stringify({ level, message, ...details }));
+  const timestamp = new Date().toISOString();
+  write(`${JSON.stringify({ level, message, ...details, timestamp })}\n`);
 }
