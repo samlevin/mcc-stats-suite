@@ -5,6 +5,23 @@ export interface S3ObjectReference {
 
 export type AcquisitionType = 'SCREENSHOT' | 'PHOTO' | 'OTHER';
 
+/** The state machine that invoked a Lambda (spec 1.3 §4.1). */
+export type WorkflowKind = 'INGEST' | 'REPLAY';
+
+/**
+ * The Step Functions context a workflow can pass to a Lambda task (spec 1.3
+ * §4.1). It is absent when the task payload does not set it, as in direct
+ * invocations. Handlers read it as untrusted input and never reject a
+ * malformed value.
+ */
+export interface TraceContext {
+  /** `$$.Execution.Id`, the execution ARN. */
+  executionId: string;
+  /** `$$.State.RetryCount`. */
+  retryCount: number;
+  workflow: WorkflowKind;
+}
+
 export interface SourceScreenshot extends S3ObjectReference {
   screenshotId: string;
   submissionId: string;
@@ -14,6 +31,12 @@ export interface SourceScreenshot extends S3ObjectReference {
   acquisitionType: AcquisitionType;
   widthPx: number;
   heightPx: number;
+  /**
+   * When S3 received the raw email, as ISO 8601, copied from
+   * `ProcessEmailInput.receivedAt`. Absent when the input had none, and in
+   * documents written before it existed.
+   */
+  receivedAt?: string;
 }
 
 /**
@@ -174,9 +197,15 @@ export interface CsvRow {
   playerResolution?: PlayerResolution;
 }
 
-export type ProcessEmailInput = S3ObjectReference;
+/** The raw email object, plus the context the ingest workflow can add. */
+export interface ProcessEmailInput extends S3ObjectReference {
+  /** `$.time` of the S3 `Object Created` event, as ISO 8601. */
+  receivedAt?: string;
+  trace?: TraceContext;
+}
 
 export interface ProcessEmailOutput {
+  status: 'ACCEPTED';
   submissionId: string;
   /**
    * The first valid match date in the plain-text email body, as `YYYY-MM-DD`.
@@ -186,7 +215,20 @@ export interface ProcessEmailOutput {
   matchDate: string;
   screenshots: SourceScreenshot[];
   rejectedAttachments: RejectedAttachment[];
+  /** `ProcessEmailInput.receivedAt`, when the input had a well-formed one. */
+  receivedAt?: string;
 }
+
+/** The result for a submission rejected as a whole (spec 1.3 §10.1). */
+export interface ProcessEmailRejectedOutput {
+  status: 'REJECTED';
+  submissionId: string;
+  rejectionCodes: SubmissionRejectionCode[];
+}
+
+/** A `process-email` result of either kind, told apart by `status`. */
+export type ProcessEmailResult =
+  ProcessEmailOutput | ProcessEmailRejectedOutput;
 
 export type AttachmentRejectionCode =
   | 'NOT_AN_IMAGE'
@@ -221,6 +263,7 @@ export interface RejectedAttachment {
 
 export interface ProcessingRunInput {
   source: SourceScreenshot;
+  trace?: TraceContext;
 }
 
 export interface ExtractTextOutput {
@@ -231,6 +274,7 @@ export interface ExtractTextOutput {
   normalizedArtifact: S3ObjectReference;
   /** Present on runs from spec 1.2 P3.1 on. */
   roster?: RosterReference;
+  trace?: TraceContext;
 }
 
 export interface WriteExtractedCsvOutput extends S3ObjectReference {
@@ -248,6 +292,9 @@ export interface WriteGamertagCsvsInput {
   /** `ProcessEmailOutput.matchDate`, as `YYYY-MM-DD`. */
   matchDate: string;
   exports: WriteExtractedCsvOutput[];
+  /** `ProcessEmailOutput.receivedAt`, when present. */
+  receivedAt?: string;
+  trace?: TraceContext;
 }
 
 /**
