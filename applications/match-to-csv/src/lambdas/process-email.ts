@@ -8,7 +8,7 @@ import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
 import type {
   AttachmentRejectionCode,
   ProcessEmailInput,
-  ProcessEmailOutput,
+  ProcessEmailResult,
   RejectedAttachment,
   S3ObjectReference,
   SourceScreenshot,
@@ -92,6 +92,22 @@ export interface RecipientDecision {
   status: 'NOT_CONFIGURED' | 'ALLOWED' | 'DENIED';
   /** Envelope recipients from the Received header SES added. */
   recipients: string[];
+}
+
+/**
+ * Whether the match date error reply reached SES. `SKIPPED` means the sender
+ * is not allowlisted or `REPLY_FROM_DOMAIN` is unset.
+ */
+export type MatchDateReplyResult = 'SENT' | 'FAILED' | 'SKIPPED';
+
+/**
+ * What `processEmail` did. `result` is the workflow output. `matchDateReply`
+ * stays in the Lambda and is set only when `MATCH_DATE_INVALID` is among the
+ * rejection codes.
+ */
+export interface ProcessEmailOutcome {
+  result: ProcessEmailResult;
+  matchDateReply?: MatchDateReplyResult;
 }
 
 export interface SubmissionScreening {
@@ -266,15 +282,22 @@ const readParameter = createParameterReader(async (parameterName) => {
 
 export async function handler(
   event: ProcessEmailInput,
-): Promise<ProcessEmailOutput> {
-  return processEmail(event, defaultDependencies);
+): Promise<ProcessEmailResult> {
+  return (await processEmail(event, defaultDependencies)).result;
 }
 
+/**
+ * Stores and screens one raw email. A submission rejected as a whole is a
+ * result, not an error: its evidence is recorded and a `REJECTED` result is
+ * returned, so the workflow ends as succeeded. It throws only when it cannot
+ * finish its work.
+ */
 export async function processEmail(
   event: ProcessEmailInput,
   dependencies: ProcessEmailDependencies,
-): Promise<ProcessEmailOutput> {
+): Promise<ProcessEmailOutcome> {
   const evidenceBucket = requiredEnvironment('EVIDENCE_BUCKET');
+  const receivedAt = readReceivedAt(event.receivedAt);
   log('INFO', 'Processing raw email', {
     bucket: event.bucket,
     key: event.key,
@@ -311,6 +334,8 @@ export async function processEmail(
   const submissionPrefix = namespacedObjectKey(`submissions/${submissionId}`);
   const screenshots: SourceScreenshot[] = [];
   const rejectedAttachments: RejectedAttachment[] = [];
+  let rejectionCodes: SubmissionRejectionCode[];
+  let replyResult: MatchDateReplyResult | undefined;
 
   await dependencies.writeJson(
     evidenceBucket,
@@ -318,7 +343,7 @@ export async function processEmail(
     {
       schemaVersion: 'email-submission/v1',
       submissionId,
-      rawEmail: event,
+      rawEmail: { bucket: event.bucket, key: event.key },
       messageId: parsed.messageId,
       subject: parsed.subject,
       matchDate: matchDate ?? null,
@@ -368,7 +393,7 @@ export async function processEmail(
         metadataError = error;
       }
 
-      const rejectionCodes = attachmentRejectionCodes(
+      const attachmentCodes = attachmentRejectionCodes(
         content,
         metadata,
         metadataError,
@@ -383,6 +408,7 @@ export async function processEmail(
         acquisitionType: 'SCREENSHOT',
         widthPx: metadata.width ?? 0,
         heightPx: metadata.height ?? 0,
+        ...(receivedAt === undefined ? {} : { receivedAt }),
       };
 
       await dependencies.writeJson(
@@ -397,8 +423,8 @@ export async function processEmail(
           contentId: attachment.cid,
           uploadedAt: dependencies.timestamp(),
           processingStatus:
-            rejectionCodes.length === 0 ? 'ACCEPTED' : 'REJECTED',
-          rejectionCodes,
+            attachmentCodes.length === 0 ? 'ACCEPTED' : 'REJECTED',
+          rejectionCodes: attachmentCodes,
           metadata,
           metadataError: metadataError
             ? errorSummary(metadataError)
@@ -406,13 +432,13 @@ export async function processEmail(
         },
       );
 
-      if (rejectionCodes.length > 0) {
+      if (attachmentCodes.length > 0) {
         rejectedAttachments.push({
           attachmentIndex: index,
           attachmentName,
           contentType: attachment.contentType,
           fileSizeBytes: content.byteLength,
-          rejectionCodes,
+          rejectionCodes: attachmentCodes,
           source,
         });
       } else {
@@ -420,7 +446,7 @@ export async function processEmail(
       }
     }
 
-    const rejectionCodes: SubmissionRejectionCode[] =
+    rejectionCodes =
       submissionRejectionCodes.length > 0
         ? submissionRejectionCodes
         : screenshots.length === 0
@@ -457,64 +483,86 @@ export async function processEmail(
       },
     );
 
-    if (submissionRejectionCodes.length > 0) {
-      if (submissionRejectionCodes.includes('MATCH_DATE_INVALID')) {
-        await replyMatchDateInvalid(
-          dependencies,
-          parsed,
-          screening.senderAllowlist,
-          submissionId,
-        );
-      }
-      throw new SubmissionRejectedError(submissionRejectionCodes);
+    if (rejectionCodes.includes('MATCH_DATE_INVALID')) {
+      replyResult = await replyMatchDateInvalid(
+        dependencies,
+        parsed,
+        screening.senderAllowlist,
+        submissionId,
+      );
     }
-    if (!accepted) throw new NoProcessableScreenshotsError();
   } catch (error) {
-    if (!(error instanceof SubmissionRejectedError)) {
-      const failure = errorSummary(error);
-      await Promise.all([
-        dependencies.writeJson(
-          evidenceBucket,
-          `${submissionPrefix}/completion.json`,
-          {
-            schemaVersion: 'email-submission-completion/v1',
-            submissionId,
-            status: 'FAILED',
-            completedAt: dependencies.timestamp(),
-            acceptedScreenshotCount: screenshots.length,
-            rejectedAttachments,
-            error: failure,
-          },
-        ),
-        submissionEvent(
-          dependencies,
-          evidenceBucket,
-          submissionPrefix,
+    const failure = errorSummary(error);
+    await Promise.all([
+      dependencies.writeJson(
+        evidenceBucket,
+        `${submissionPrefix}/completion.json`,
+        {
+          schemaVersion: 'email-submission-completion/v1',
           submissionId,
-          'SUBMISSION_FAILED',
-          { error: failure },
-        ),
-      ]).catch((recordError) => {
-        log('ERROR', 'Unable to record submission failure', {
-          submissionId,
-          error: errorSummary(recordError),
-        });
+          status: 'FAILED',
+          completedAt: dependencies.timestamp(),
+          acceptedScreenshotCount: screenshots.length,
+          rejectedAttachments,
+          error: failure,
+        },
+      ),
+      submissionEvent(
+        dependencies,
+        evidenceBucket,
+        submissionPrefix,
+        submissionId,
+        'SUBMISSION_FAILED',
+        { error: failure },
+      ),
+    ]).catch((recordError) => {
+      log('ERROR', 'Unable to record submission failure', {
+        submissionId,
+        error: errorSummary(recordError),
       });
-    }
+    });
     throw error;
   }
 
+  if (rejectionCodes.length > 0) {
+    log('INFO', 'Submission rejected', { submissionId, rejectionCodes });
+    return {
+      result: { status: 'REJECTED', submissionId, rejectionCodes },
+      ...(replyResult === undefined ? {} : { matchDateReply: replyResult }),
+    };
+  }
   log('INFO', 'Raw email processed', {
     submissionId,
     screenshotCount: screenshots.length,
     rejectedAttachmentCount: rejectedAttachments.length,
   });
   return {
-    submissionId,
-    matchDate: matchDate as string,
-    screenshots,
-    rejectedAttachments,
+    result: {
+      status: 'ACCEPTED',
+      submissionId,
+      matchDate: matchDate as string,
+      screenshots,
+      rejectedAttachments,
+      ...(receivedAt === undefined ? {} : { receivedAt }),
+    },
   };
+}
+
+const ISO_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * Returns `receivedAt` from the workflow input when it is an ISO 8601
+ * timestamp, such as the `$.time` of the S3 event. The value is untrusted, so
+ * anything else is dropped rather than copied into evidence or rejected.
+ */
+export function readReceivedAt(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !ISO_TIMESTAMP.test(value)) return undefined;
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const calendarDate =
+    date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return calendarDate && Number.isFinite(Date.parse(value)) ? value : undefined;
 }
 
 const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -577,41 +625,44 @@ export function matchDateReply(
 }
 
 /**
- * Sends the match date error reply to the sender. Only allowlisted senders get
- * one, so a reply goes only to an address on the allowlist. A failed send is
- * logged and leaves the recorded rejection unchanged. No log line holds an
- * address or email content.
+ * Sends the match date error reply to the sender and returns whether SES
+ * accepted it. Only allowlisted senders get one, so a reply goes only to an
+ * address on the allowlist. A failed send is logged, returns `FAILED` and
+ * leaves the recorded rejection unchanged. No log line holds an address or
+ * email content.
  */
 async function replyMatchDateInvalid(
   dependencies: ProcessEmailDependencies,
   email: ParsedEmail,
   senderAllowlist: SenderAllowlistDecision,
   submissionId: string,
-): Promise<void> {
+): Promise<MatchDateReplyResult> {
   if (senderAllowlist.status !== 'ALLOWED') {
     log('WARN', 'Match date reply not sent: sender not allowlisted', {
       submissionId,
     });
-    return;
+    return 'SKIPPED';
   }
   const domain = process.env.REPLY_FROM_DOMAIN;
   if (!domain) {
     log('ERROR', 'Match date reply not sent: REPLY_FROM_DOMAIN is not set', {
       submissionId,
     });
-    return;
+    return 'SKIPPED';
   }
   try {
     await dependencies.sendEmail(
       matchDateReply(email, senderAllowlist.fromAddresses, domain),
     );
     log('INFO', 'Match date reply sent', { submissionId });
+    return 'SENT';
   } catch (error) {
     // SES error messages can name addresses, so only the error name is logged.
     log('ERROR', 'Unable to send the match date reply', {
       submissionId,
       error: error instanceof Error ? error.name : 'UnknownError',
     });
+    return 'FAILED';
   }
 }
 
@@ -830,22 +881,6 @@ function errorSummary(error: unknown): { name: string; message: string } {
     return { name: error.name, message: error.message };
   }
   return { name: 'UnknownError', message: String(error) };
-}
-
-/** A recorded rejection: the workflow fails, but not as a FAILED submission. */
-class SubmissionRejectedError extends Error {
-  constructor(rejectionCodes: SubmissionRejectionCode[]) {
-    super(`Submission rejected: ${rejectionCodes.join(', ')}`);
-    this.name = 'SubmissionRejectedError';
-  }
-}
-
-class NoProcessableScreenshotsError extends SubmissionRejectedError {
-  constructor() {
-    super(['NO_PROCESSABLE_SCREENSHOTS']);
-    this.message = 'Email contains no processable screenshot attachments';
-    this.name = 'NoProcessableScreenshotsError';
-  }
 }
 
 function requiredEnvironment(name: string): string {

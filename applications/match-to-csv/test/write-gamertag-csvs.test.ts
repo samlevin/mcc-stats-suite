@@ -11,6 +11,7 @@ import {
   writeGamertagCsvs,
   type WriteGamertagCsvsDependencies,
 } from '../src/lambdas/write-gamertag-csvs';
+import { captureLogLines, withoutTimestamp } from './support/log-lines';
 
 const submissionPrefix = 'submissions/submission-1';
 const exportPrefix = `${submissionPrefix}/export/gamertags/`;
@@ -142,14 +143,13 @@ function table(key: string, rows: CsvRow[]): unknown {
 }
 
 let logLines: string[] = [];
-const originalLog = console.log;
+let restoreStdout = () => {};
 beforeEach(() => {
-  logLines = [];
-  console.log = (line: string) => logLines.push(line);
+  ({ lines: logLines, restore: restoreStdout } = captureLogLines());
   delete process.env.OBJECT_PREFIX;
 });
 afterEach(() => {
-  console.log = originalLog;
+  restoreStdout();
   delete process.env.OBJECT_PREFIX;
 });
 
@@ -168,6 +168,28 @@ test('writes one file per roster gamertag, in screenshot order, with the match d
     fileCount: 3,
     rowCount: 5,
   });
+});
+
+test('trace context and receivedAt do not change the export', async () => {
+  const plain = new Map<string, string>();
+  const traced = new Map<string, string>();
+  const plainResult = await writeGamertagCsvs(event, dependencies(plain));
+  const tracedResult = await writeGamertagCsvs(
+    {
+      ...event,
+      receivedAt: '2026-03-07T21:00:00Z',
+      trace: {
+        executionId:
+          'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
+        retryCount: 0,
+        workflow: 'INGEST',
+      },
+    },
+    dependencies(traced),
+  );
+
+  assert.deepEqual(tracedResult, plainResult);
+  assert.deepEqual(Object.fromEntries(traced), Object.fromEntries(plain));
 });
 
 test('reads each run export of the submission from its extracted table', async () => {
@@ -516,7 +538,9 @@ test('no gamertag or file name reaches the output or the log', async () => {
   const result = await writeGamertagCsvs(event, dependencies(new Map()));
 
   assert.equal(logLines.length, 1);
-  assert.deepEqual(JSON.parse(logLines[0]), {
+  const record = JSON.parse(logLines[0]) as Record<string, unknown>;
+  assert.equal(typeof record.timestamp, 'string');
+  assert.deepEqual(withoutTimestamp(record), {
     level: 'INFO',
     message: 'Gamertag CSVs written',
     submissionId: 'submission-1',

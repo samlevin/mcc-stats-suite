@@ -472,9 +472,11 @@ test('every role and workflow renders for both tools with matching bodies', () =
     'agents',
     'implement',
     'create-github-issue',
+    'spec-to-issues',
     'review-code',
     'review-security',
     'plain-language',
+    'stack',
   ]) {
     assert.ok(
       names.includes(`.claude/skills/${PREFIX}${skill}/SKILL.md`),
@@ -498,32 +500,61 @@ test('every role and workflow renders for both tools with matching bodies', () =
       `.agents/skills/${PREFIX}create-github-issue/references/github-operations.md`,
     ),
   );
-  // Tool-only blocks aside, the two renderings of a source are the same text.
-  for (const role of Object.keys(policy.roles)) {
-    const shared = renderBody(
-      parseSource(
-        substitute(
-          readFileSync(
-            new URL(`../.agents/roles/${role}.md`, import.meta.url),
-            'utf8',
-          ),
-          policy,
-        ),
-      ).body,
-      'claude',
-    )
-      .split('\n')
-      .filter(
-        (line) =>
-          !/^(Spawn|Isolation|You also receive)/.test(line) && line.trim(),
-      );
-    for (const line of shared.slice(0, 3))
-      assert.ok(
-        files.get(`.codex/agents/${PREFIX}${role}.toml`).includes(line),
-        `${role}: ${line.slice(0, 40)}`,
-      );
+  // Tool-only blocks aside, the two renderings of a source are the same text:
+  // every shared line of every role, workflow, and Markdown reference appears
+  // in both tools' output.
+  for (const [source, outputs] of sourcePairs()) {
+    const text = substitute(
+      readFileSync(new URL(`../${source}`, import.meta.url), 'utf8'),
+      policy,
+    );
+    const body = source.includes('/references/')
+      ? text
+      : parseSource(text).body;
+    for (const line of sharedLines(body))
+      for (const output of outputs)
+        assert.ok(
+          files.get(output).includes(line),
+          `${output}: ${line.slice(0, 60)}`,
+        );
   }
 });
+
+// Each canonical source with its Claude Code and Codex renderings.
+function sourcePairs() {
+  const pairs = [];
+  for (const role of Object.keys(policy.roles))
+    pairs.push([
+      `.agents/roles/${role}.md`,
+      [
+        `.claude/agents/${PREFIX}${role}.md`,
+        `.codex/agents/${PREFIX}${role}.toml`,
+      ],
+    ]);
+  for (const path of render().keys()) {
+    const match = path.match(
+      new RegExp(`^\\.claude/skills/${PREFIX}([^/]+)/(.+\\.md)$`),
+    );
+    if (!match) continue;
+    const [, skill, file] = match;
+    pairs.push([
+      file === 'SKILL.md'
+        ? `.agents/workflows/${skill}.md`
+        : `.agents/workflows/${skill}/${file}`,
+      [path, `.agents/skills/${PREFIX}${skill}/${file}`],
+    ]);
+  }
+  return pairs;
+}
+
+// The non-empty lines outside every tool-only block. Codex TOML keeps the
+// text verbatim, so the same lines must appear in both renderings.
+function sharedLines(body) {
+  return body
+    .replace(/<!-- (claude|codex)-only -->\n[\s\S]*?<!-- \/\1-only -->\n?/g, '')
+    .split('\n')
+    .filter((line) => line.trim());
+}
 
 // Report and relay wording that callers depend on. Each check matches a short
 // phrase on one rendered line, so rewording elsewhere does not break it.
@@ -567,12 +598,33 @@ test('every role reports its requested settings in both tools', () => {
       );
 });
 
-test('the implementer sends the reviewer its own resolved policy line', () => {
+// The leaf delivery procedure that the main thread and an isolated
+// implementer both follow, in each tool's package.
+const DELIVERY = [
+  `.claude/skills/${PREFIX}implement/references/delivery.md`,
+  `.agents/skills/${PREFIX}implement/references/delivery.md`,
+];
+const QUEUE = DELIVERY.map((path) => path.replace('delivery.md', 'queue.md'));
+const IMPLEMENT = [
+  `.claude/skills/${PREFIX}implement/SKILL.md`,
+  `.agents/skills/${PREFIX}implement/SKILL.md`,
+];
+const STACK = [
+  `.claude/skills/${PREFIX}stack/SKILL.md`,
+  `.agents/skills/${PREFIX}stack/SKILL.md`,
+];
+
+// The text under one `## ` heading of a rendered Markdown file.
+function section(content, heading) {
+  const start = content.indexOf(`\n## ${heading}\n`);
+  assert.notEqual(start, -1, `missing section ${heading}`);
+  const end = content.indexOf('\n## ', start + 1);
+  return content.slice(start, end === -1 ? undefined : end);
+}
+
+test('the delivery owner sends the reviewer its own resolved policy line', () => {
   const files = render();
-  for (const path of [
-    `.claude/agents/${PREFIX}implementer.md`,
-    `.codex/agents/${PREFIX}implementer.toml`,
-  ])
+  for (const path of DELIVERY)
     assert.ok(
       lineWith(
         files.get(path),
@@ -584,23 +636,23 @@ test('the implementer sends the reviewer its own resolved policy line', () => {
     );
 });
 
-test('the implementer never sets In review and reports the state as read', () => {
+test('the delivery owner never sets In review and reports the state as read', () => {
   const files = render();
-  for (const path of [
-    `.claude/agents/${PREFIX}implementer.md`,
-    `.codex/agents/${PREFIX}implementer.toml`,
-  ]) {
+  for (const path of DELIVERY) {
     const content = files.get(path);
     assert.ok(
       lineWith(content, /^Never:/, 'In review or Done'),
       `${path} must forbid setting In review or Done`,
     );
     assert.ok(
-      lineWith(content, /^Claim:/, 'only project status you ever set'),
+      lineWith(
+        section(content, 'Claim'),
+        'In progress is the only project status you ever set',
+      ),
       `${path} claim step must limit the agent to In progress`,
     );
     assert.ok(
-      lineWith(content, /^PR:/, "Leave the issue's status alone"),
+      lineWith(section(content, 'PR'), "Leave the issue's status alone"),
       `${path} PR step must leave In review to automation`,
     );
     assert.ok(
@@ -609,6 +661,382 @@ test('the implementer never sets In review and reports the state as read', () =>
     );
     assert.doesNotMatch(content, /Move the issue to In review/i, path);
   }
+});
+
+test('removed coordination roles cannot be selected through any entry point', () => {
+  assert.deepEqual(Object.keys(policy.roles).sort(), [
+    'code-reviewer',
+    'implementer',
+    'issue-triager',
+    'security-reviewer',
+  ]);
+  for (const capability of ['orchestration', 'stack-management'])
+    assert.equal(policy.capabilities[capability], undefined, capability);
+  for (const tool of TOOLS)
+    for (const role of ['orchestrator', 'stack-manager'])
+      assert.throws(
+        () => resolve(policy, { tool, role }),
+        /Unknown role/,
+        `${tool} ${role}`,
+      );
+  const files = render();
+  const agents = [...files.keys()].filter((path) =>
+    /^\.(claude|codex)\/agents\//.test(path),
+  );
+  assert.deepEqual(
+    agents.sort(),
+    Object.keys(policy.roles)
+      .flatMap((role) => [
+        `.claude/agents/${PREFIX}${role}.md`,
+        `.codex/agents/${PREFIX}${role}.toml`,
+      ])
+      .sort(),
+  );
+  for (const [path, content] of files)
+    assert.doesNotMatch(
+      content,
+      new RegExp(`${PREFIX}(orchestrator|stack-manager)\\b`),
+      path,
+    );
+  // The CLI refuses the removed roles as well.
+  for (const role of ['orchestrator', 'stack-manager']) {
+    const result = spawnSync(
+      process.execPath,
+      [
+        new URL('./agent-policy.mjs', import.meta.url).pathname,
+        'resolve',
+        '--tool',
+        'claude',
+        '--role',
+        role,
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.equal(result.status, 1, role);
+    assert.match(result.stderr, /Unknown role/, role);
+  }
+});
+
+test('the implement entry point delivers a leaf inline by default in both tools', () => {
+  const files = render();
+  for (const path of IMPLEMENT) {
+    const content = files.get(path);
+    assert.ok(
+      lineWith(content, 'You are the delivery owner', 'in this thread'),
+      `${path} must make the invoking thread the owner`,
+    );
+    assert.ok(
+      lineWith(
+        content,
+        /^\| Leaf issue \|/,
+        'inline in this thread',
+        'references/delivery.md',
+      ),
+      `${path} must route a leaf inline to the delivery procedure`,
+    );
+    assert.ok(
+      lineWith(
+        content,
+        /^\| PR rework \|/,
+        'inline in this thread',
+        'references/delivery.md',
+      ),
+      `${path} must route PR rework inline`,
+    );
+    assert.ok(
+      lineWith(
+        content,
+        /^\| Container or epic \|/,
+        'sequential dependency queue in this thread',
+        'references/queue.md',
+      ),
+      `${path} must route a container to the queue in this thread`,
+    );
+    // An implementer is spawned only from the exception section.
+    const exception = section(content, 'Isolated implementer exception');
+    for (const heading of ['Resolve the target', 'Pick the mode', 'Report'])
+      assert.doesNotMatch(
+        section(content, heading),
+        /subagent_type|spawn_agent/,
+        `${path} ${heading}`,
+      );
+    assert.match(exception, /By default you deliver the work yourself/);
+    assert.match(exception, /never spawns another implementer/);
+    // Inline skills cannot change the session model, and say so.
+    assert.ok(
+      lineWith(
+        section(content, 'Settings'),
+        'cannot change them',
+        'Advisory policy:',
+      ),
+      `${path} must report the main-thread policy as advisory`,
+    );
+    assert.doesNotMatch(content, /^model:/m, path);
+  }
+  const [claude, codex] = IMPLEMENT.map((path) =>
+    section(files.get(path), 'Isolated implementer exception'),
+  );
+  assert.match(claude, new RegExp(`subagent_type: ${PREFIX}implementer`));
+  assert.match(codex, /fork_turns: "none"/);
+  assert.doesNotMatch(claude, /spawn_agent/);
+  assert.doesNotMatch(codex, /subagent_type/);
+});
+
+test('a container runs as a dependency queue in the owning thread', () => {
+  const files = render();
+  for (const path of QUEUE) {
+    const content = files.get(path);
+    assert.ok(lineWith(content, 'No separate orchestrator agent'), path);
+    assert.ok(lineWith(content, 'Detect cycles in the blocked-by edges'), path);
+    assert.ok(lineWith(content, '`resume`', 'Reuse its pushed branch'), path);
+    assert.ok(lineWith(content, '`waiting`', 'blocker is unmet'), path);
+    assert.ok(
+      lineWith(
+        content,
+        'Delivery is sequential by default',
+        'record its result',
+        'before you start the next leaf',
+      ),
+      `${path} must deliver one leaf at a time and record each result`,
+    );
+    const parallel = section(content, 'Parallel exception');
+    assert.match(parallel, /explicitly asked for parallel delivery/);
+    assert.match(parallel, /different groups/);
+    assert.match(parallel, /no overlapping files or shared contracts/);
+    assert.match(parallel, /At most one leaf per group runs at a time/);
+    assert.match(parallel, /Never infer, form, extend, or merge groups/);
+    // Each concurrent implementer learns what the other running leaves own.
+    assert.ok(
+      lineWith(
+        parallel,
+        'carries an `Owned by other running leaves:` field',
+        'issue numbers of the other leaves',
+        'files and shared contracts',
+      ),
+      `${path} must hand each concurrent leaf the other leaves' ownership`,
+    );
+    // Resume checks out the existing branch instead of creating it.
+    assert.ok(
+      lineWith(content, '`resume`', 'git worktree add <path> <branch>'),
+      `${path} must check out the existing branch on resume`,
+    );
+    // A claim whose worktree is missing here is never taken over silently.
+    assert.ok(
+      lineWith(content, '`resume`', '`git worktree list`'),
+      `${path} must tie resume to a worktree in this checkout`,
+    );
+    assert.ok(
+      lineWith(content, 'whose worktree is missing here', 'Ask the person'),
+      `${path} must treat a missing worktree as owned elsewhere`,
+    );
+  }
+  // Concurrent leaves really run at the same time in each tool.
+  assert.match(
+    section(files.get(QUEUE[0]), 'Parallel exception'),
+    /sending their Agent calls together in one message/,
+  );
+  assert.match(
+    section(files.get(QUEUE[1]), 'Parallel exception'),
+    /`spawn_agent` returns at once/,
+  );
+  const creation = readFileSync(
+    new URL('../.agents/issue-creation.md', import.meta.url),
+    'utf8',
+  );
+  assert.ok(
+    lineWith(creation, `${PREFIX}implement\` reads only the lines`),
+    'issue-creation.md must name the queue as the record reader',
+  );
+});
+
+test('the delivery owner runs stack operations itself through the shared stack skill', () => {
+  const files = render();
+  for (const path of DELIVERY)
+    assert.ok(
+      lineWith(
+        section(files.get(path), 'Stack'),
+        `Run every stack operation yourself with the ${PREFIX}stack skill`,
+        'in the worktree you created',
+      ),
+      path,
+    );
+  assert.match(
+    section(files.get(DELIVERY[0]), 'Stack'),
+    new RegExp(`Skill tool \\(\`${PREFIX}stack\`\\)`),
+  );
+  assert.match(
+    section(files.get(DELIVERY[1]), 'Stack'),
+    new RegExp(`\\$${PREFIX}stack`),
+  );
+  for (const path of STACK) {
+    const content = files.get(path);
+    assert.ok(
+      lineWith(content, 'You run this skill yourself', 'worktree you created'),
+      path,
+    );
+    assert.match(content, /git worktree list --porcelain/, path);
+    const never = section(content, 'Never run');
+    for (const phrase of [
+      '`gh stack sync`',
+      '`gh stack rebase`',
+      '`--no-trunk`',
+      '`gh stack push`',
+      '`gh stack submit`',
+      'rebase.updateRefs=false',
+      'bare `git push --force`',
+    ])
+      assert.ok(never.includes(phrase), `${path} never runs: ${phrase}`);
+    assert.ok(
+      lineWith(never, '`gh stack push`', 'fetch', 'previously verified SHA'),
+      `${path} must explain why the stack push lease is unsafe`,
+    );
+    const operations = section(content, 'Operations');
+    assert.match(
+      operations,
+      /git -c rebase\.updateRefs=false rebase --onto/,
+      path,
+    );
+    assert.match(
+      operations,
+      /--force-with-lease=<branch>:<expected SHA>/,
+      path,
+    );
+    assert.match(operations, /gh stack link --base main <PR URL>/, path);
+    assert.match(operations, /Never adopt, rebase, or push the prerequisite/);
+    // Rework and resume of an earlier delivery's branch have working paths.
+    assert.ok(
+      lineWith(content, 'earlier delivery', 'head branch of the target PR'),
+      `${path} must define ownership for rework and resume`,
+    );
+    assert.match(
+      operations,
+      /rebase\.updateRefs=false rebase --onto <new parent head> <old parent head>`, then push with `git push --force-with-lease=<branch>:<verified remote head> origin HEAD:<branch>`/,
+      path,
+    );
+    assert.match(operations, /`git worktree add <path> <branch>`/, path);
+    assert.ok(
+      lineWith(content, 'Authority:', 'never covers merges'),
+      `${path} must not authorize merges`,
+    );
+  }
+});
+
+test('independent review stays a separate fresh-context gate on mandatory paths', () => {
+  const files = render();
+  for (const path of DELIVERY) {
+    const review = section(files.get(path), 'Pre-PR review');
+    for (const scope of [
+      '`.agents/`',
+      '`AGENTS.md`',
+      '`scripts/agent-policy*`',
+      '`infrastructure/`',
+      '`.terrateam/`',
+      '`.github/workflows/`',
+      'CDK account or environment checks',
+    ])
+      assert.ok(
+        lineWith(review, 'always required', scope),
+        `${path}: ${scope}`,
+      );
+    assert.match(review, new RegExp(`fresh ${PREFIX}code-reviewer`));
+    assert.match(review, /Leave out your self-assessment/);
+    assert.match(review, /exact base\/head pair/);
+    assert.match(review, /After two rejected rounds, return BLOCKED/);
+    assert.match(review, /Never self-approve/);
+    assert.ok(
+      lineWith(files.get(path), 'Once a PR exists, never invoke'),
+      `${path} must keep requested review separate from pre-PR review`,
+    );
+    assert.ok(
+      lineWith(files.get(path), /^Never:/, `${PREFIX}security-reviewer`),
+      `${path} must never start a security review`,
+    );
+  }
+  assert.match(
+    files.get(`.claude/skills/${PREFIX}review-security/SKILL.md`),
+    /^disable-model-invocation: true$/m,
+  );
+  assert.match(
+    files.get(`.agents/skills/${PREFIX}review-security/agents/openai.yaml`),
+    /allow_implicit_invocation: false/,
+  );
+});
+
+test('an isolated implementer follows the shared procedure and delegates nothing else', () => {
+  const files = render();
+  const claude = files.get(`.claude/agents/${PREFIX}implementer.md`);
+  const codex = files.get(`.codex/agents/${PREFIX}implementer.toml`);
+  assert.match(claude, /^isolation: worktree$/m);
+  assert.match(
+    claude,
+    new RegExp(
+      `git show origin/main:\\.claude/skills/${PREFIX}implement/references/delivery\\.md`,
+    ),
+  );
+  assert.match(
+    codex,
+    new RegExp(
+      `git show origin/main:\\.agents/skills/${PREFIX}implement/references/delivery\\.md`,
+    ),
+  );
+  for (const content of [claude, codex]) {
+    assert.ok(lineWith(content, 'Never spawn another implementer'));
+    assert.ok(lineWith(content, 'BLOCKED: container'));
+    assert.ok(
+      lineWith(content, '`Owned by other running leaves:`', 'return BLOCKED'),
+    );
+  }
+});
+
+test('issue filing classifies inline and reserves the triager for independent judgment', () => {
+  const files = render();
+  for (const path of [
+    `.claude/skills/${PREFIX}create-github-issue/SKILL.md`,
+    `.agents/skills/${PREFIX}create-github-issue/SKILL.md`,
+  ]) {
+    const triage = section(files.get(path), 'Triage');
+    assert.match(triage, /Classify inline by default/);
+    for (const reason of [
+      '- Classification:',
+      '- Decomposition:',
+      '- Dependency judgment:',
+    ])
+      assert.ok(triage.includes(reason), `${path}: ${reason}`);
+    assert.match(triage, /Only the triager forms independence groups/);
+  }
+});
+
+// Routing facts: the namespaced agents and skills a file names and the
+// references it links. Both tools' renderings of one source must agree.
+function routing(content) {
+  return [
+    ...new Set(
+      [
+        ...content.matchAll(
+          new RegExp(
+            `${PREFIX}[a-z]+(?:-[a-z]+)*|references/[a-z-]+\\.md`,
+            'g',
+          ),
+        ),
+      ].map((match) => match[0]),
+    ),
+  ].sort();
+}
+
+test('both tools route every source to the same agents, skills, and references', () => {
+  const files = render();
+  for (const [source, [claude, codex]] of sourcePairs())
+    assert.deepEqual(
+      routing(files.get(claude)),
+      routing(files.get(codex)),
+      source,
+    );
+  // The delivery result fields match word for word.
+  const [claudeResult, codexResult] = DELIVERY.map((path) =>
+    lineWith(files.get(path), /^Return READY FOR REVIEW or BLOCKED/),
+  );
+  assert.ok(claudeResult);
+  assert.equal(claudeResult, codexResult);
 });
 
 test('the README keeps the effective-model verification row', () => {
@@ -1028,11 +1456,8 @@ test('review publication runs only from a manual PR review', () => {
       `${path} must leave publication to the skill`,
     );
   }
-  // The implementer's pre-PR review relays its verdict and posts nothing.
-  for (const path of [
-    `.claude/agents/${PREFIX}implementer.md`,
-    `.codex/agents/${PREFIX}implementer.toml`,
-  ])
+  // The delivery owner's pre-PR review relays its verdict and posts nothing.
+  for (const path of DELIVERY)
     assert.ok(lineWith(files.get(path), 'review_mode=pre_pr'), path);
   for (const [path, content] of files)
     if (!path.includes(`/${PREFIX}review-code/`))
@@ -1123,4 +1548,165 @@ test('a role without a policy entry or source is rejected', () => {
     source.replace('name: sample', 'name: extra'),
   );
   assert.throws(() => render(base), /Role extra has no entry/);
+});
+
+test('review entry points share bounded packets and preserve independent coverage', () => {
+  const files = render();
+  const review = readFileSync(
+    new URL('../.agents/review.md', import.meta.url),
+    'utf8',
+  );
+  for (const path of [
+    ...DELIVERY,
+    `.claude/skills/${PREFIX}review-code/SKILL.md`,
+    `.agents/skills/${PREFIX}review-code/SKILL.md`,
+    `.claude/agents/${PREFIX}code-reviewer.md`,
+    `.codex/agents/${PREFIX}code-reviewer.toml`,
+  ]) {
+    const content = files.get(path);
+    assert.ok(content.includes('.agents/review.md'), path);
+    for (const field of [
+      'accepted decisions',
+      'changed-file summary',
+      'validation results',
+      'verified prerequisites',
+    ])
+      assert.ok(content.includes(field), `${path}: ${field}`);
+  }
+  for (const rule of [
+    'full in-scope base/head diff',
+    'relevant callers and contracts',
+    'Retrieve only missing or stale context',
+    'previous base/head SHAs',
+    'complete previous report',
+    'Expand review when subsequent changes affect additional behavior',
+    'including changes introduced by a moved base',
+    'missed earlier',
+    'exact reviewed base/head pair',
+    'otherwise perform a complete initial review',
+  ])
+    assert.ok(review.includes(rule), rule);
+  assert.doesNotMatch(review, /report only defects the fixes introduced/);
+});
+
+test('evidence reuse retains complete relevant output and meaningful validation', () => {
+  const evidence = readFileSync(
+    new URL('../.agents/evidence.md', import.meta.url),
+    'utf8',
+  );
+  for (const rule of [
+    'targeted `rg` searches',
+    'Read each unchanged file once',
+    'A new commit SHA alone does not invalidate',
+    'local temporary file outside tracked paths',
+    'Keep the file available',
+    'Never let a filter hide a failing exit status',
+    'retrieve the missing part',
+    'Never act on partial output',
+    'never wait for, poll, or rerun remote CI',
+  ])
+    assert.ok(evidence.includes(rule), rule);
+  const files = render();
+  for (const path of DELIVERY) {
+    const build = section(files.get(path), 'Build');
+    assert.match(build, /focused tests/);
+    assert.match(build, /every required scope-appropriate check/);
+    assert.match(build, /rerun affected checks and broaden validation/);
+    assert.match(
+      build,
+      /Meaningful behavioral tests and required checks remain mandatory/,
+    );
+    const claim = section(files.get(path), 'Claim');
+    assert.match(claim, /Reuse current metadata and verified prerequisites/);
+    assert.match(claim, /one useful claim comment/);
+    assert.match(claim, /Do not add status-only comments or repeat the claim/);
+  }
+});
+
+test('optional implementation delegation requires a benefit beyond task size', () => {
+  const files = render();
+  for (const path of IMPLEMENT) {
+    const exception = section(
+      files.get(path),
+      'Isolated implementer exception',
+    );
+    assert.match(exception, /request says `isolated`/);
+    assert.match(exception, /name a concrete benefit/);
+    assert.match(exception, /Task size alone does not justify delegation/);
+    assert.match(exception, /bounded assignment/);
+  }
+  for (const path of QUEUE) {
+    assert.match(
+      section(files.get(path), 'Deliver'),
+      /concrete-benefit delegation rule/,
+    );
+    const parallel = section(files.get(path), 'Parallel exception');
+    assert.match(parallel, /explicitly asked for parallel delivery/);
+    assert.match(parallel, /different groups/);
+  }
+});
+
+test('spec plans require offline validation, triage, confirmation and journaled resume in both tools', () => {
+  const files = render();
+  for (const tool of ['claude', 'codex']) {
+    const directory = tool === 'claude' ? '.claude/skills' : '.agents/skills';
+    const path = `${directory}/${PREFIX}spec-to-issues`;
+    const skill = files.get(`${path}/SKILL.md`);
+    for (const rule of [
+      'Before any GitHub write',
+      'scripts/spec-to-issues.mjs plan',
+      'duplicate Plan IDs or titles',
+      'dependency cycles',
+      'unknown labels',
+      'After pre-flight and before printing the tree',
+      'for the whole plan',
+      '--role issue-triager',
+      'as accepted decisions',
+      'never override them',
+      'Only the triager forms independence groups',
+      'Never form, extend, or merge groups yourself',
+      'only as context',
+      'Wait for explicit confirmation',
+      'plan or dry run makes no GitHub writes',
+      'phase epic or split-slice container whose direct leaf children',
+      'root container gets no record',
+      'reuses the saved triager verdict and groups without spawning the triager again',
+      'finish every missing independence record',
+      'spec change since the confirmed plan requires a new pre-flight, triage, and confirmation',
+      'Never edit labels, project settings, or project Status',
+      'Never touch an issue this run did not create',
+      'issue-triage.mjs --apply --issue N',
+      'issue-containers.mjs --apply --issue N',
+    ])
+      assert.ok(skill.includes(rule), `${path}: ${rule}`);
+    const state = files.get(`${path}/references/state.md`);
+    for (const rule of [
+      'outside the repository',
+      'Full triager report',
+      'Persist the groups',
+      'before sending the POST',
+      'at least one second',
+      'Never blindly retry a POST',
+      'exact marker',
+      'without another POST',
+      'without spawning the triager again',
+      'Resume must finish every record',
+      'voids confirmation',
+    ])
+      assert.ok(state.includes(rule), `${path}/state: ${rule}`);
+    const operations = files.get(`${path}/references/github-operations.md`);
+    for (const rule of [
+      'REST through `gh api`',
+      'sub_issue_id',
+      'dependencies/blocked_by',
+      'Never include Status',
+      'Never put a record on the root',
+    ])
+      assert.ok(operations.includes(rule), `${path}/operations: ${rule}`);
+  }
+  const role = readFileSync(
+    new URL('../.agents/roles/issue-triager.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(role, /spec-to-issues for a whole delivery plan/);
 });

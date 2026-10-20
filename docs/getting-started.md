@@ -127,7 +127,7 @@ From your own mail client, send that address a message with a PNG or JPEG screen
 
 ### Check the result
 
-Find your stack's workflow and its latest execution. Its status should be `SUCCEEDED`. A message with no processable screenshot fails its execution instead.
+Find your stack's workflow and its latest execution. Its status should be `SUCCEEDED`. A rejected message, such as one with no processable screenshot, also ends as `SUCCEEDED`, at the `Submission rejected` state, and runs no OCR.
 
 ```console
 state_machine=$(aws cloudformation describe-stacks --profile mcc-dev-admin --stack-name match-to-csv-e-<name> --query "Stacks[0].Outputs[?OutputKey=='StateMachineArn'].OutputValue" --output text)

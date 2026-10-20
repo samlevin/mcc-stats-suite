@@ -6,12 +6,17 @@ import {
   runExtraction,
   type ExtractTextDependencies,
 } from '../src/lambdas/extract-text';
-import type { CsvRow, RosterReference } from '@mcc/contracts';
+import type {
+  CsvRow,
+  ProcessingRunInput,
+  RosterReference,
+} from '@mcc/contracts';
 import { RosterIntegrityError } from '@mcc/roster';
 import type {
   RowColor,
   ScoreboardParseResult,
 } from '../src/lib/scoreboard-logic';
+import { captureLogLines } from './support/log-lines';
 
 const source = {
   screenshotId: 'screen-1',
@@ -145,6 +150,53 @@ test('runExtraction records a complete successful run', async () => {
     [0],
     'a response without a table publishes a zero-row extraction',
   );
+});
+
+/** A stored `source/metadata.json`, as a replay reads it back. */
+function storedSource(fields: Record<string, unknown> = {}) {
+  return JSON.parse(
+    JSON.stringify({
+      schemaVersion: 'source-screenshot/v1',
+      ...source,
+      fileSizeBytes: 5,
+      processingStatus: 'ACCEPTED',
+      rejectionCodes: [],
+      ...fields,
+    }),
+  ) as ProcessingRunInput['source'];
+}
+
+test('runExtraction replays a source written before receivedAt existed', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  const input: ProcessingRunInput = { source: storedSource() };
+  const result = await runExtraction(
+    input,
+    dependencies(writes, async () => ({ $metadata: {}, Blocks: [] })),
+  );
+
+  assert.equal(result.source.screenshotId, 'screen-1');
+  assert.ok(!('receivedAt' in result.source));
+  assert.ok(writes.some((write) => write.value.type === 'RUN_SUCCEEDED'));
+});
+
+test('runExtraction carries receivedAt on the source it returns', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  const receivedAt = '2026-05-02T18:30:00Z';
+  const result = await runExtraction(
+    {
+      source: storedSource({ receivedAt }),
+      trace: {
+        executionId:
+          'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev-replay:example',
+        retryCount: 1,
+        workflow: 'REPLAY',
+      },
+    },
+    dependencies(writes, async () => ({ $metadata: {}, Blocks: [] })),
+  );
+
+  assert.equal(result.source.receivedAt, receivedAt);
+  assert.ok(writes.some((write) => write.value.type === 'RUN_SUCCEEDED'));
 });
 
 test('runExtraction records provider failures and rethrows them', async () => {
@@ -349,8 +401,8 @@ test('runExtraction records no reason for a two-team board', async () => {
 test('runExtraction reads the roster before Textract and records its reference', async (t) => {
   const writes: Array<{ key: string; value: any }> = [];
   const calls: string[] = [];
-  const logLines: string[] = [];
-  t.mock.method(console, 'log', (line: string) => logLines.push(line));
+  const { lines: logLines, restore } = captureLogLines();
+  t.after(restore);
   const result = await runExtraction(
     { source },
     {

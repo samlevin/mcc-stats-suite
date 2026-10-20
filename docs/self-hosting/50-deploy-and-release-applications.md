@@ -90,7 +90,7 @@ After a `match-to-csv` change reaches dev, and before approving prod:
 3. In the evidence bucket, confirm the run contains the source image, metadata, run manifest, start and success events, Textract request and response, normalized observations, extracted table, CSV, and completion object.
 4. Compare the CSV with the screenshot. OCR differences are observations to label, not corruption.
 
-For a failure test, send an unsupported or undersized image. The submission records a rejection and the workflow does not report an empty success. For a provider failure, the run contains `RUN_STARTED`, `RUN_FAILED`, the provider request, and a failed completion object.
+For a rejection test, send only an unsupported or undersized image. The submission's `completion.json` has status `REJECTED` with `NO_PROCESSABLE_SCREENSHOTS`, and the execution ends as succeeded at the `Submission rejected` state without running OCR. For a provider failure, the run contains `RUN_STARTED`, `RUN_FAILED`, the provider request, and a failed completion object.
 
 Never commit test messages, recipient addresses, or domains.
 
