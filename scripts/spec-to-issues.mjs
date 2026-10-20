@@ -16,6 +16,7 @@ const inCheckout = (directory) => {
     if (dirname(path) === path) return false;
   }
 };
+const isBacklogPhase = (title) => title === 'Backlog (not filed with v1)';
 const idPattern = /\bP\d+\.\d+(?:\.\d+)*\b/g;
 const unique = (items) => [...new Set(items)];
 const hash = (text) => createHash('sha256').update(text).digest('hex');
@@ -162,7 +163,7 @@ export function buildPlan(text, { specPath, repository, labels }) {
         ]),
         goal: data.Goal,
         exit: data['Exit criteria'],
-        deferred: /\bBacklog\b/i.test(phaseMatch[2]),
+        deferred: isBacklogPhase(phaseMatch[2]),
       };
       slice = undefined;
       if (!phase.deferred) {
@@ -224,7 +225,8 @@ export function buildPlan(text, { specPath, repository, labels }) {
       fail(ref, 'Acceptance needs bullets');
     if (
       data['Blocked by'] &&
-      !/^(?:none|P\d+\.\d+(?:\.\d+)*(?:,\s*P\d+\.\d+(?:\.\d+)*)*)$/i.test(
+      !/^none$/i.test(data['Blocked by']) &&
+      !/^(?:P\d+\.\d+(?:\.\d+)*(?:,\s*P\d+\.\d+(?:\.\d+)*)*)$/.test(
         data['Blocked by'],
       )
     )
@@ -245,8 +247,8 @@ export function buildPlan(text, { specPath, repository, labels }) {
     nodes.push(node);
   }
   // Backlog table rows are deferred even when there are no detailed slices.
-  const backlog = planHeadings.find((h) =>
-    /^Phase \d+: .*Backlog/i.test(h.title),
+  const backlog = planHeadings.find(
+    (h) => h.level === 3 && isBacklogPhase(h.title.replace(/^Phase \d+: /, '')),
   );
   if (backlog)
     for (const id of contents(backlog).match(idPattern) || []) deferred.add(id);

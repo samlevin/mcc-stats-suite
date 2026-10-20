@@ -271,3 +271,53 @@ test('phase headings at incorrect levels cannot truncate the plan silently', () 
     );
   }
 });
+
+test('noncanonical lowercase blockers reject known, unknown and cyclic references', () => {
+  for (const blocker of ['p0.1', 'p9.9', 'p0.2.1', 'P0.1, p9.9']) {
+    const plan = parse(
+      conforming.replace(
+        '- **Blocked by:** P0.1',
+        `- **Blocked by:** ${blocker}`,
+      ),
+    );
+    assert.ok(
+      plan.errors.includes('P0.2: Blocked by must be none or Plan IDs'),
+      blocker,
+    );
+  }
+});
+
+test('active phase titles mentioning backlog retain their epic and slices', () => {
+  for (const title of ['Process the message backlog', 'Backlog processing']) {
+    const text = conforming
+      .replace('### Phase 0: Contracts', `### Phase 0: ${title}`)
+      .replace(
+        '### Phase 1: Backlog (not filed with v1)',
+        `### Phase 2: Operations
+
+**Goal:** Operators can verify storage.
+**Exit criteria:** Verification succeeds.
+
+#### P2.1 Verify storage (XS)
+
+- **Blocked by:** none
+- **Spec:** §3
+- **Files:** \`scripts/verify.mjs\`
+- **Provides:** Storage verification
+- **Acceptance:**
+  - Operators can verify storage.
+
+### Phase 1: Backlog (not filed with v1)`,
+      );
+    const plan = parse(text);
+    assert.deepEqual(plan.errors, []);
+    assert.equal(
+      plan.nodes.find((node) => node.ref === 'phase-0').title,
+      title,
+    );
+    assert.ok(plan.nodes.some((node) => node.ref === 'P0.1'));
+    assert.ok(plan.nodes.some((node) => node.ref === 'P2.1'));
+    assert.deepEqual(plan.deferred, ['P1.1']);
+    assert.ok(!plan.nodes.some((node) => node.ref === 'phase-1'));
+  }
+});
