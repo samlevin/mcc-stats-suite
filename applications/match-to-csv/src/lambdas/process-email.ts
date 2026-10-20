@@ -74,7 +74,11 @@ export interface SesVerdicts {
 }
 
 export interface SenderAllowlistDecision {
-  /** NOT_CONFIGURED when the deployment names no parameter or it does not exist. */
+  /**
+   * NOT_CONFIGURED when the deployment names no parameter, the parameter does
+   * not exist, or it lists no addresses. NOT_CONFIGURED and DENIED both reject
+   * the message with SENDER_NOT_ALLOWED.
+   */
   status: 'NOT_CONFIGURED' | 'ALLOWED' | 'DENIED';
   parameterName: string | null;
   fromAddresses: string[];
@@ -585,7 +589,7 @@ async function replyMatchDateInvalid(
   submissionId: string,
 ): Promise<void> {
   if (senderAllowlist.status !== 'ALLOWED') {
-    log('WARN', 'Match date reply not sent: no sender allowlist', {
+    log('WARN', 'Match date reply not sent: sender not allowlisted', {
       submissionId,
     });
     return;
@@ -639,11 +643,13 @@ async function readExpectedRecipient(
 
 /**
  * Decides whether a message may be processed at all. A FAIL spam or virus
- * verdict rejects it, and so does a configured allowlist that does not list
- * every `From` address. For an ephemeral stack, so does a message whose SES
- * recipients do not include the current `<alias>+<name>@<domain>`: undefined
- * `expectedRecipient` skips that check, and null denies every message. SPF
- * and DKIM verdicts are recorded, not enforced.
+ * verdict rejects it, and so does a sender allowlist that does not list every
+ * `From` address. A missing parameter (undefined `allowlist`), an allowlist
+ * with no addresses, or no parameter name rejects every message. For an
+ * ephemeral stack, so does a message whose SES recipients do not include the
+ * current `<alias>+<name>@<domain>`: undefined `expectedRecipient` skips that
+ * check, and null denies every message. SPF and DKIM verdicts are recorded,
+ * not enforced.
  */
 export function screenSubmission(
   email: Pick<ParsedEmail, 'headerLines' | 'fromAddresses'>,
@@ -659,16 +665,19 @@ export function screenSubmission(
   if (sesVerdicts.spam === 'FAIL') rejectionCodes.push('SPAM_VERDICT_FAILED');
   if (sesVerdicts.virus === 'FAIL') rejectionCodes.push('VIRUS_VERDICT_FAILED');
 
-  let status: SenderAllowlistDecision['status'] = 'NOT_CONFIGURED';
-  if (allowlist) {
-    const allowed = new Set(allowlist.map((entry) => entry.toLowerCase()));
-    status =
-      fromAddresses.length > 0 &&
-      fromAddresses.every((address) => allowed.has(address))
+  const allowed = new Set(
+    (allowlist ?? [])
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0),
+  );
+  const status: SenderAllowlistDecision['status'] =
+    allowlistParameter === null || allowed.size === 0
+      ? 'NOT_CONFIGURED'
+      : fromAddresses.length > 0 &&
+          fromAddresses.every((address) => allowed.has(address))
         ? 'ALLOWED'
         : 'DENIED';
-    if (status === 'DENIED') rejectionCodes.push('SENDER_NOT_ALLOWED');
-  }
+  if (status !== 'ALLOWED') rejectionCodes.push('SENDER_NOT_ALLOWED');
 
   const recipients = parseSesRecipients(email.headerLines ?? []);
   let recipientStatus: RecipientDecision['status'] = 'NOT_CONFIGURED';

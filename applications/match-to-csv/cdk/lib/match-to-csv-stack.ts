@@ -169,8 +169,9 @@ export class MatchToCsvStack extends Stack {
       ? `ephemeral/${deployment.ephemeral}`
       : 'stable';
 
-    // Operators create this optional parameter out of band; sender addresses
-    // never live in source or OpenTofu state.
+    // Required: process-email rejects every message while it is missing or
+    // empty. Administrators manage it with `npm run sender-allowlist`; sender
+    // addresses never live in source or OpenTofu state.
     const senderAllowlistParameter = `${prefix}/sender-allowlist`;
     // The foundation publishes the submission address's alias and domain.
     const emailAliasParameter = `${prefix}/email-alias`;

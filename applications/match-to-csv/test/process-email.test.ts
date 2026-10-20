@@ -28,12 +28,21 @@ afterEach(() => {
 /** A valid match date body, as a person would type it. */
 const MATCH_DATE = '5/2/2026';
 const REPLY_DOMAIN = 'mail.example.test';
+const ALLOWLIST_PARAMETER = '/mcc/dev/match-to-csv/sender-allowlist';
+const LISTED_SENDER = 'player@example.test';
 
 interface ScreeningCase {
   headerLines?: Array<{ key: string; line: string }>;
   fromAddresses?: string[];
-  /** Undefined leaves SENDER_ALLOWLIST_PARAMETER unset. */
+  /**
+   * Undefined leaves SENDER_ALLOWLIST_PARAMETER unset; absent uses
+   * ALLOWLIST_PARAMETER.
+   */
   allowlistParameter?: string;
+  /**
+   * The parameter's addresses. Undefined means the parameter is missing;
+   * absent lists LISTED_SENDER.
+   */
   allowlist?: string[];
   /**
    * Configures an ephemeral stack's recipient check: the stack name and the
@@ -61,9 +70,15 @@ const DOMAIN_PARAMETER = '/mcc/dev/match-to-csv/email-domain';
 /** Runs processEmail on one valid screenshot and records every side effect. */
 async function runScreening(options: ScreeningCase) {
   process.env.EVIDENCE_BUCKET = 'evidence-bucket';
-  if (options.allowlistParameter) {
-    process.env.SENDER_ALLOWLIST_PARAMETER = options.allowlistParameter;
+  const allowlistParameter =
+    'allowlistParameter' in options
+      ? options.allowlistParameter
+      : ALLOWLIST_PARAMETER;
+  if (allowlistParameter) {
+    process.env.SENDER_ALLOWLIST_PARAMETER = allowlistParameter;
   }
+  const allowlist =
+    'allowlist' in options ? options.allowlist : [LISTED_SENDER];
   if (options.ephemeral) {
     process.env.EMAIL_ALIAS_PARAMETER = ALIAS_PARAMETER;
     process.env.EMAIL_DOMAIN_PARAMETER = DOMAIN_PARAMETER;
@@ -107,7 +122,7 @@ async function runScreening(options: ScreeningCase) {
     },
     async getSenderAllowlist(parameterName) {
       allowlistReads.push(parameterName);
-      return options.allowlist;
+      return allowlist;
     },
     async getParameter(parameterName) {
       parameterReads.push(parameterName);
@@ -210,9 +225,12 @@ test('processEmail accepts a listed sender with passing verdicts and records the
   assert.deepEqual(run.event.detail.senderAllowlist, senderAllowlist);
 });
 
-test('processEmail keeps today behavior when no allowlist is configured', async () => {
-  const unset = await runScreening({ fromAddresses: ['a@example.test'] });
-  assert.equal(unset.error, undefined);
+test('processEmail rejects every sender when no allowlist parameter is named', async () => {
+  const unset = await runScreening({
+    fromAddresses: [LISTED_SENDER],
+    allowlistParameter: undefined,
+  });
+  assert.equal(unset.error?.name, 'SubmissionRejectedError');
   assert.deepEqual(
     unset.allowlistReads,
     [],
@@ -223,32 +241,62 @@ test('processEmail keeps today behavior when no allowlist is configured', async 
     [],
     'a stable stack checks no recipient',
   );
+  assert.deepEqual(unset.objectWrites, [], 'no screenshot is stored');
+  assert.equal(unset.inspections(), 0, 'no attachment is inspected');
   assert.deepEqual(unset.ingestion.recipientCheck, {
     status: 'NOT_CONFIGURED',
     recipients: [],
   });
-  assert.deepEqual(unset.ingestion.senderAllowlist, {
+  const senderAllowlist = {
     status: 'NOT_CONFIGURED',
     parameterName: null,
-    fromAddresses: ['a@example.test'],
-  });
+    fromAddresses: [LISTED_SENDER],
+  };
+  assert.deepEqual(unset.ingestion.senderAllowlist, senderAllowlist);
   assert.deepEqual(unset.ingestion.sesVerdicts, {
     spam: null,
     virus: null,
     spf: null,
     dkim: null,
   });
-
-  const absent = await runScreening({
-    fromAddresses: ['a@example.test'],
-    allowlistParameter: '/mcc/dev/match-to-csv/sender-allowlist',
-    allowlist: undefined,
-  });
-  assert.equal(absent.error, undefined);
-  assert.equal(absent.result?.screenshots.length, 1);
-  assert.equal(absent.ingestion.senderAllowlist.status, 'NOT_CONFIGURED');
-  assert.equal(absent.event.type, 'SUBMISSION_ACCEPTED');
+  assert.equal(unset.completion.status, 'REJECTED');
+  assert.deepEqual(unset.completion.rejectionCodes, ['SENDER_NOT_ALLOWED']);
+  assert.equal(unset.event.type, 'SUBMISSION_REJECTED');
+  assert.deepEqual(unset.event.detail.senderAllowlist, senderAllowlist);
 });
+
+for (const [label, allowlist] of [
+  ['a missing allowlist parameter', undefined],
+  ['an allowlist with no addresses', []],
+  ['an allowlist of blank entries', ['', ' ']],
+] as const) {
+  test(`processEmail rejects every sender for ${label} and records that no allowlist was configured`, async () => {
+    const run = await runScreening({
+      headerLines: sesHeaders('PASS', 'PASS'),
+      fromAddresses: [LISTED_SENDER],
+      allowlist: allowlist && [...allowlist],
+    });
+
+    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assert.equal(run.result, undefined);
+    assert.deepEqual(run.allowlistReads, [ALLOWLIST_PARAMETER]);
+    assert.deepEqual(run.objectWrites, [], 'no screenshot is stored');
+    assert.equal(run.inspections(), 0, 'no attachment is inspected');
+    const senderAllowlist = {
+      status: 'NOT_CONFIGURED',
+      parameterName: ALLOWLIST_PARAMETER,
+      fromAddresses: [LISTED_SENDER],
+    };
+    assert.deepEqual(run.ingestion.senderAllowlist, senderAllowlist);
+    assert.equal(run.completion.status, 'REJECTED');
+    assert.deepEqual(run.completion.rejectionCodes, ['SENDER_NOT_ALLOWED']);
+    assert.equal(run.completion.acceptedScreenshotCount, 0);
+    assert.equal(run.event.type, 'SUBMISSION_REJECTED');
+    assert.deepEqual(run.event.detail.rejectionCodes, ['SENDER_NOT_ALLOWED']);
+    assert.deepEqual(run.event.detail.senderAllowlist, senderAllowlist);
+    assert.deepEqual(run.sends, []);
+  });
+}
 
 for (const [spam, virus, codes] of [
   ['FAIL', 'PASS', ['SPAM_VERDICT_FAILED']],
@@ -637,6 +685,7 @@ test('the sender allowlist splits on commas and whitespace', () => {
 test('processEmail preserves images and returns every processable attachment', async () => {
   process.env.EVIDENCE_BUCKET = 'evidence-bucket';
   process.env.OBJECT_PREFIX = 'ephemeral/tester';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
 
   const jsonWrites: Array<{ key: string; value: any }> = [];
   const objectWrites: S3ObjectReference[] = [];
@@ -649,6 +698,7 @@ test('processEmail preserves images and returns every processable attachment', a
       return {
         messageId: 'message',
         subject: 'subject',
+        fromAddresses: [LISTED_SENDER],
         text: MATCH_DATE,
         attachments: [
           {
@@ -675,7 +725,7 @@ test('processEmail preserves images and returns every processable attachment', a
       };
     },
     async getSenderAllowlist() {
-      throw new Error('not called');
+      return [LISTED_SENDER];
     },
     async getParameter() {
       throw new Error('not called');
@@ -728,6 +778,7 @@ test('processEmail preserves images and returns every processable attachment', a
 
 test('processEmail records and rejects an email without a screenshot', async () => {
   process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
   const jsonWrites: Array<{ key: string; value: any }> = [];
   const dependencies: ProcessEmailDependencies = {
     async getRawEmail() {
@@ -735,6 +786,7 @@ test('processEmail records and rejects an email without a screenshot', async () 
     },
     async parseEmail() {
       return {
+        fromAddresses: [LISTED_SENDER],
         text: MATCH_DATE,
         attachments: [
           { contentType: 'text/plain', content: Buffer.from('notes') },
@@ -742,7 +794,7 @@ test('processEmail records and rejects an email without a screenshot', async () 
       };
     },
     async getSenderAllowlist() {
-      throw new Error('not called');
+      return [LISTED_SENDER];
     },
     async getParameter() {
       throw new Error('not called');
@@ -809,6 +861,7 @@ test('attachment validation uses the 10,000,000-byte Textract limit', () => {
 
 test('processEmail records a failed completion when evidence storage fails', async () => {
   process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
   const jsonWrites: Array<{ key: string; value: any }> = [];
   const dependencies: ProcessEmailDependencies = {
     async getRawEmail() {
@@ -816,6 +869,7 @@ test('processEmail records a failed completion when evidence storage fails', asy
     },
     async parseEmail() {
       return {
+        fromAddresses: [LISTED_SENDER],
         text: MATCH_DATE,
         attachments: [
           { contentType: 'image/png', content: Buffer.from('image') },
@@ -823,7 +877,7 @@ test('processEmail records a failed completion when evidence storage fails', asy
       };
     },
     async getSenderAllowlist() {
-      throw new Error('not called');
+      return [LISTED_SENDER];
     },
     async getParameter() {
       throw new Error('not called');
@@ -1147,6 +1201,7 @@ for (const [label, options, codes] of [
 
 test('processEmail sends no reply when no attachment is processable', async () => {
   process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
   process.env.REPLY_FROM_DOMAIN = REPLY_DOMAIN;
   const sends: ReplyMessage[] = [];
   const jsonWrites: Array<{ key: string; value: any }> = [];
@@ -1158,10 +1213,14 @@ test('processEmail sends no reply when no attachment is processable', async () =
           return Buffer.from('mime');
         },
         async parseEmail() {
-          return { text: MATCH_DATE, attachments: [] };
+          return {
+            fromAddresses: [LISTED_SENDER],
+            text: MATCH_DATE,
+            attachments: [],
+          };
         },
         async getSenderAllowlist() {
-          throw new Error('not called');
+          return [LISTED_SENDER];
         },
         async getParameter() {
           throw new Error('not called');
@@ -1217,25 +1276,21 @@ test('processEmail logs a failed reply without an address or email content and k
   }
 });
 
-test('processEmail replies only to an allowlisted sender', async () => {
-  const run = await runScreening({
-    ...listedSender,
-    allowlistParameter: undefined,
-    allowlist: undefined,
-    text: '',
-  });
+for (const [label, options] of [
+  ['no allowlist parameter name', { allowlistParameter: undefined }],
+  ['a missing allowlist parameter', { allowlist: undefined }],
+  ['an allowlist with no addresses', { allowlist: [] }],
+] as Array<[string, ScreeningCase]>) {
+  test(`processEmail sends no reply for ${label}, even without a match date`, async () => {
+    const run = await runScreening({ ...listedSender, ...options, text: '' });
 
-  assert.equal(run.ingestion.senderAllowlist.status, 'NOT_CONFIGURED');
-  assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
-  assert.deepEqual(run.sends, []);
-  assert.ok(
-    run.logs.some(
-      (line) =>
-        line.level === 'WARN' &&
-        line.message === 'Match date reply not sent: no sender allowlist',
-    ),
-  );
-});
+    assert.equal(run.ingestion.senderAllowlist.status, 'NOT_CONFIGURED');
+    assert.equal(run.ingestion.matchDate, null);
+    assert.deepEqual(run.completion.rejectionCodes, ['SENDER_NOT_ALLOWED']);
+    assert.deepEqual(run.objectWrites, []);
+    assert.deepEqual(run.sends, []);
+  });
+}
 
 test('processEmail sends no reply without a reply domain', async () => {
   const run = await runScreening({
