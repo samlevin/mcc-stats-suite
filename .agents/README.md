@@ -21,7 +21,7 @@ This directory holds the shared sources for the MCC delivery workflows that ship
 | `worktree-isolation.md` | Shared worktree ownership and setup rules, read before roles or skills use a worktree |
 | `review.md` | Shared reviewer packet, initial coverage, and re-review scope, loaded for code review |
 | `evidence.md` | Shared retrieval and waiting rules for delivery owners, isolated implementers, and code reviewers |
-| `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue`; owns the independence group definition and record format |
+| `issue-creation.md` | Tool-agnostic issue filing adapter, read by `mcc-create-github-issue` and `mcc-spec-to-issues`; owns the independence group definition and record format |
 
 Edit the sources, run `npm run agents:generate`, and commit the output; `/mcc-agents` (Claude Code) or `$mcc-agents` (Codex) does the whole loop, including picking the right source file and running the checks. `npm run agents:check` and the test in `scripts/agent-policy.test.mjs` fail when a generated file is stale, so the Claude and Codex versions cannot drift apart. CI runs that check for any change under `.agents/`, `.claude/agents/`, `.claude/skills/`, `.codex/agents/`, or `scripts/agent-policy*` (`scripts/ci-scope.mjs` puts those paths in the repository scope) and fails the pull request; it does not regenerate or commit on your behalf. Generated files carry a header saying so.
 
@@ -33,18 +33,18 @@ The role and workflow sources name no repository. They carry `{{placeholders}}` 
 
 Both tools support both packaging forms, and the repository uses both, each for what it does well.
 
-Skills carry the work that runs in the thread a person is talking to. `mcc-implement` makes that thread the delivery owner: it creates and owns the worktree, claims the issue, implements, validates, runs stack operations through the `mcc-stack` skill, and opens the PR, for a leaf, a PR rework, or a container's dependency queue. `mcc-create-github-issue` drafts, classifies, and files issues the same way. Neither needs a dispatcher, an orchestrator, or a stack manager, so none exists.
+Skills carry the work that runs in the thread a person is talking to. `mcc-implement` makes that thread the delivery owner: it creates and owns the worktree, claims the issue, implements, validates, runs stack operations through the `mcc-stack` skill, and opens the PR, for a leaf, a PR rework, or a container's dependency queue. `mcc-create-github-issue` drafts, classifies, and files issues the same way. `mcc-spec-to-issues` validates a spec delivery plan offline, gets independent triage for the whole tree, and files it after confirmation, with external state for resume. These skills need no dispatcher, orchestrator, or stack manager.
 
 Agents are for work that needs a fresh context or a hard boundary. An agent definition carries the role boundary (read-only reviewer, implementer that may write and push), an isolated context, a tool allowlist in Claude Code and a permission profile in Codex, and the slot where the model and effort policy applies. The repository defines four roles:
 
 - `mcc-code-reviewer`: the independent, read-only pre-PR gate and requested reviews. A reviewer must not share the implementer's context or self-assessment, so it is always a separate agent.
 - `mcc-security-reviewer`: explicitly requested read-only security review.
-- `mcc-issue-triager`: independent classification, decomposition, and dependency judgment, only when a filing batch needs it.
+- `mcc-issue-triager`: independent classification, decomposition, and dependency judgment, when an ad hoc filing batch needs it, and for every spec delivery plan.
 - `mcc-implementer`: an isolated delivery owner for one leaf, used for an explicit request or a stated concrete benefit, or for the queue's parallel exception. Size alone does not trigger delegation. It follows the same procedure as the main thread and never delegates to another implementer.
 
 Skills are also the entry points and the policy adapter. A skill is what a person invokes (`/mcc-implement`, `$mcc-implement`), it runs in the main thread where it can ask a question, and it is the only place that can apply the repository policy at spawn time. That last point decides the split for Codex: a Codex agent file that sets `model` or `model_reasoning_effort` takes precedence over every spawn-time value, so a pinned agent file would defeat prompt overrides. The generated Codex agents therefore carry neither field, and the skills pass the resolved values to `spawn_agent` on every dispatch. Codex also loads repository skills in an untrusted project but loads project agents only after trust, so a skill is the right place to tell the contributor that the agents are missing. In Claude Code the per-invocation `model` and `effort` parameters already override frontmatter, so the generated Claude agents pin the policy and the skills still pass the resolved values explicitly for the same reason: a dispatch must never depend on a session or contributor default.
 
-A skill cannot change the session model in either tool, so inline work runs at whatever model and effort the session has. `mcc-implement` reports the `implementation` policy as `Advisory policy:` and spawns no agent to enforce it. Claude Code skill frontmatter can pin a model for the turn that loads the skill; `mcc-create-github-issue` uses that for its one-turn filing flow, while `mcc-implement` does not, because a delivery spans many turns and both tools should behave alike.
+A skill cannot change the session model in either tool, so inline work runs at whatever model and effort the session has. `mcc-implement` reports the `implementation` policy as `Advisory policy:` and spawns no agent to enforce it. Claude Code skill frontmatter can pin a model for the turn that loads the skill; `mcc-create-github-issue` and `mcc-spec-to-issues` use that for their filing flows, while `mcc-implement` does not, because a delivery spans many turns and both tools should behave alike.
 
 ## Parity matrix
 
@@ -55,6 +55,7 @@ A skill cannot change the session model in either tool, so inline work runs at w
 | Isolated implementation (exception) | `mcc-implementer` (`isolation: worktree`), spawned through the Agent tool | `mcc-implementer` (creates `.codex/worktrees/<branch>`), spawned with `fork_turns: "none"` | same source; routing tests |
 | Stack operations | `/mcc-stack`, loaded by the worktree's creator with the Skill tool | `$mcc-stack`, loaded by the worktree's creator | same source; routing tests |
 | Issue creation | `.claude/skills/mcc-create-github-issue` (pins `sonnet`/`medium` for the turn) | `.agents/skills/mcc-create-github-issue` | same source; routing tests |
+| Spec delivery plan | `/mcc-spec-to-issues` | `$mcc-spec-to-issues` | same source; offline fixtures; confirmation and resume tests |
 | Issue triage (when filing needs it) | `.claude/agents/mcc-issue-triager.md` (`Read, Grep, Glob, Bash`) | `.codex/agents/mcc-issue-triager.toml` (`:read-only`) | same source |
 | Code review | `mcc-code-reviewer` (`Bash, Read, Grep, Glob`, `isolation: worktree`) | `mcc-code-reviewer` (`:read-only`) | same source; routing tests |
 | Security review | `mcc-security-reviewer` (adds `WebFetch, WebSearch`) | `mcc-security-reviewer` (`:read-only`) | same source; routing tests |
@@ -102,7 +103,7 @@ For example, an inline Codex delivery reports `Advisory policy: tool=codex capab
 | --- | --- | --- |
 | Where the policy is applied | agent frontmatter (`model`, `effort`) plus explicit Agent tool parameters | explicit `spawn_agent` parameters only; agent files omit both fields on purpose |
 | Precedence in the runtime | per-invocation parameter > frontmatter > `CLAUDE_CODE_SUBAGENT_MODEL` > session model; `CLAUDE_CODE_EFFORT_LEVEL` beats every effort source | agent file field > spawn value > `[agents].default_subagent_*` > parent |
-| Main-thread skill model | skill frontmatter can pin it for the turn that loads the skill (used by `mcc-create-github-issue` only); otherwise set the session with `/model` or `claude --model <model> --effort <effort>` | not possible; start the session with `codex -m <model> -c model_reasoning_effort=<effort>` |
+| Main-thread skill model | skill frontmatter can pin it for the turn that loads the skill (used by `mcc-create-github-issue` and `mcc-spec-to-issues`); otherwise set the session with `/model` or `claude --model <model> --effort <effort>` | not possible; start the session with `codex -m <model> -c model_reasoning_effort=<effort>` |
 | Built-in guidance | none against overrides | the `spawn_agent` description says not to set `model` unless the user asks; the skills override that because the repository policy is the user's standing request |
 | Effective-model verification (operator check) | the Agent tool call shows the parameters, and the subagent's system prompt names its model | the child cannot read its model reliably; verify with `sqlite3 ~/.codex/state_5.sqlite "select agent_role, model, reasoning_effort from threads order by rowid desc limit 5"` (Codex 0.162 schema) or the thread view |
 

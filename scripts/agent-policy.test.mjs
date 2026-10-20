@@ -472,6 +472,7 @@ test('every role and workflow renders for both tools with matching bodies', () =
     'agents',
     'implement',
     'create-github-issue',
+    'spec-to-issues',
     'review-code',
     'review-security',
     'plain-language',
@@ -1643,4 +1644,69 @@ test('optional implementation delegation requires a benefit beyond task size', (
     assert.match(parallel, /explicitly asked for parallel delivery/);
     assert.match(parallel, /different groups/);
   }
+});
+
+test('spec plans require offline validation, triage, confirmation and journaled resume in both tools', () => {
+  const files = render();
+  for (const tool of ['claude', 'codex']) {
+    const directory = tool === 'claude' ? '.claude/skills' : '.agents/skills';
+    const path = `${directory}/${PREFIX}spec-to-issues`;
+    const skill = files.get(`${path}/SKILL.md`);
+    for (const rule of [
+      'Before any GitHub write',
+      'scripts/spec-to-issues.mjs plan',
+      'duplicate Plan IDs or titles',
+      'dependency cycles',
+      'unknown labels',
+      'After pre-flight and before printing the tree',
+      'for the whole plan',
+      '--role issue-triager',
+      'as accepted decisions',
+      'never override them',
+      'Only the triager forms independence groups',
+      'Never form, extend, or merge groups yourself',
+      'only as context',
+      'Wait for explicit confirmation',
+      'plan or dry run makes no GitHub writes',
+      'phase epic or split-slice container whose direct leaf children',
+      'root container gets no record',
+      'reuses the saved triager verdict and groups without spawning the triager again',
+      'finish every missing independence record',
+      'spec change since the confirmed plan requires a new pre-flight, triage, and confirmation',
+      'Never edit labels, project settings, or project Status',
+      'Never touch an issue this run did not create',
+      'issue-triage.mjs --apply --issue N',
+      'issue-containers.mjs --apply --issue N',
+    ])
+      assert.ok(skill.includes(rule), `${path}: ${rule}`);
+    const state = files.get(`${path}/references/state.md`);
+    for (const rule of [
+      'outside the repository',
+      'Full triager report',
+      'Persist the groups',
+      'before sending the POST',
+      'at least one second',
+      'Never blindly retry a POST',
+      'exact marker',
+      'without another POST',
+      'without spawning the triager again',
+      'Resume must finish every record',
+      'voids confirmation',
+    ])
+      assert.ok(state.includes(rule), `${path}/state: ${rule}`);
+    const operations = files.get(`${path}/references/github-operations.md`);
+    for (const rule of [
+      'REST through `gh api`',
+      'sub_issue_id',
+      'dependencies/blocked_by',
+      'Never include Status',
+      'Never put a record on the root',
+    ])
+      assert.ok(operations.includes(rule), `${path}/operations: ${rule}`);
+  }
+  const role = readFileSync(
+    new URL('../.agents/roles/issue-triager.md', import.meta.url),
+    'utf8',
+  );
+  assert.match(role, /spec-to-issues for a whole delivery plan/);
 });

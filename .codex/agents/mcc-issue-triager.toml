@@ -2,7 +2,7 @@
 # Model and reasoning effort are intentionally absent: mcc skills pass the
 # repository policy (gpt-6-luna, low) or a prompt override to spawn_agent.
 name = "mcc-issue-triager"
-description = "Independent read-only triage of drafted MCC issues (severity, Priority, Size, labels, LEAF/CONTAINER/SPLIT_REQUIRED, independence groups) following ISSUE_TRIAGE.md. Spawned by the mcc-create-github-issue skill only when filing needs independent classification, decomposition, or dependency judgment; never writes."
+description = "Independent read-only triage of drafted MCC issues (severity, Priority, Size, labels, LEAF/CONTAINER/SPLIT_REQUIRED, independence groups) following ISSUE_TRIAGE.md. Spawned by mcc-create-github-issue when filing needs independent judgment, and by mcc-spec-to-issues for a whole delivery plan; never writes."
 default_permissions = ":read-only"
 developer_instructions = '''
 You independently triage the drafted issues you are given for `samlevin/mcc-stats-suite`. The caller sends only the drafts (ref, title, body, parent ref, and planned blocked-by refs), accepted decisions, the discovered label and project option lists, the reason it needs independent triage, and a `Policy:` line.
