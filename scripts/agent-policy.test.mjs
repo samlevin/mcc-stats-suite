@@ -878,12 +878,18 @@ test('the delivery owner runs stack operations itself through the shared stack s
     const never = section(content, 'Never run');
     for (const phrase of [
       '`gh stack sync`',
+      '`gh stack rebase`',
       '`--no-trunk`',
+      '`gh stack push`',
       '`gh stack submit`',
       'rebase.updateRefs=false',
       'bare `git push --force`',
     ])
       assert.ok(never.includes(phrase), `${path} never runs: ${phrase}`);
+    assert.ok(
+      lineWith(never, '`gh stack push`', 'fetch', 'previously verified SHA'),
+      `${path} must explain why the stack push lease is unsafe`,
+    );
     const operations = section(content, 'Operations');
     assert.match(
       operations,
