@@ -530,6 +530,22 @@ export class MatchToCsvStack extends Stack {
       },
     });
     processAttachments.itemProcessor(extractTextTask.next(writeCsvTask));
+    // A whole-submission rejection is a result, not an error, so its
+    // execution succeeds and the failure alarms fire only on real failures.
+    const submissionResult = new sfn.Choice(this, 'Rejected?')
+      .when(
+        sfn.Condition.stringEquals('$.status', 'REJECTED'),
+        new sfn.Succeed(this, 'Submission rejected'),
+      )
+      .otherwise(
+        processAttachments.next(
+          whenReceivedAt(
+            this,
+            'Email output has receivedAt',
+            ...writeGamertagCsvsTasks,
+          ),
+        ),
+      );
 
     const logGroup = this.logGroup(
       'WorkflowLogs',
@@ -546,14 +562,7 @@ export class MatchToCsvStack extends Stack {
       definitionBody: sfn.DefinitionBody.fromChainable(
         whenReceivedAt(this, 'Input has receivedAt', ...processEmailTasks)
           .afterwards()
-          .next(processAttachments)
-          .next(
-            whenReceivedAt(
-              this,
-              'Email output has receivedAt',
-              ...writeGamertagCsvsTasks,
-            ),
-          ),
+          .next(submissionResult),
       ),
       timeout: Duration.minutes(15),
       logs: {

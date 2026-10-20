@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import type { ProcessEmailInput, S3ObjectReference } from '@mcc/contracts';
+import type {
+  ProcessEmailInput,
+  S3ObjectReference,
+  SubmissionRejectionCode,
+} from '@mcc/contracts';
 import {
   attachmentRejectionCodes,
   createParameterReader,
@@ -175,6 +179,8 @@ async function runScreening(options: ScreeningCase) {
   };
   return {
     ...outcome,
+    accepted:
+      outcome.result?.status === 'ACCEPTED' ? outcome.result : undefined,
     ingestion: find('/ingestion.json'),
     completion: find('/completion.json'),
     event: find('/events/'),
@@ -188,6 +194,22 @@ async function runScreening(options: ScreeningCase) {
     logs,
     inspections: () => inspections,
   };
+}
+
+/**
+ * Asserts that a run returned the rejected result, without throwing, for the
+ * submission it recorded.
+ */
+function assertRejected(
+  run: Awaited<ReturnType<typeof runScreening>>,
+  rejectionCodes: readonly SubmissionRejectionCode[],
+): void {
+  assert.equal(run.error, undefined, 'a rejection is a result, not an error');
+  assert.deepEqual(run.result, {
+    status: 'REJECTED',
+    submissionId: run.ingestion.submissionId as string,
+    rejectionCodes,
+  });
 }
 
 const sesHeaders = (spam: string, virus: string) => [
@@ -206,8 +228,8 @@ test('processEmail accepts a listed sender with passing verdicts and records the
   });
 
   assert.equal(run.error, undefined);
-  assert.equal(run.result?.screenshots.length, 1);
-  assert.equal(run.result?.matchDate, '2026-05-02');
+  assert.equal(run.accepted?.screenshots.length, 1);
+  assert.equal(run.accepted?.matchDate, '2026-05-02');
   assert.equal(run.ingestion.matchDate, '2026-05-02');
   assert.deepEqual(run.sends, [], 'an accepted submission gets no reply');
   assert.deepEqual(run.allowlistReads, [
@@ -250,9 +272,9 @@ test('processEmail copies receivedAt into its output and every screenshot', asyn
 
   assert.equal(run.error, undefined);
   assert.equal(run.result?.status, 'ACCEPTED');
-  assert.equal(run.result?.receivedAt, RECEIVED_AT);
-  assert.equal(run.result?.screenshots.length, 2);
-  for (const screenshot of run.result?.screenshots ?? []) {
+  assert.equal(run.accepted?.receivedAt, RECEIVED_AT);
+  assert.equal(run.accepted?.screenshots.length, 2);
+  for (const screenshot of run.accepted?.screenshots ?? []) {
     assert.equal(screenshot.receivedAt, RECEIVED_AT);
   }
   assert.equal(run.sourceMetadata.length, 2);
@@ -274,9 +296,9 @@ test('processEmail omits receivedAt when the input has none', async () => {
 
   assert.equal(run.error, undefined);
   assert.equal(run.result?.status, 'ACCEPTED');
-  assert.ok(run.result && !('receivedAt' in run.result));
-  assert.equal(run.result?.screenshots.length, 2);
-  for (const screenshot of run.result?.screenshots ?? []) {
+  assert.ok(run.accepted && !('receivedAt' in run.accepted));
+  assert.equal(run.accepted?.screenshots.length, 2);
+  for (const screenshot of run.accepted?.screenshots ?? []) {
     assert.ok(!('receivedAt' in screenshot));
   }
   for (const metadata of run.sourceMetadata) {
@@ -295,9 +317,9 @@ test('processEmail drops a malformed receivedAt instead of rejecting the email',
       input: { receivedAt: receivedAt as string },
     });
     assert.equal(run.error, undefined);
-    assert.equal(run.result?.screenshots.length, 1);
-    assert.ok(run.result && !('receivedAt' in run.result));
-    assert.ok(!('receivedAt' in (run.result?.screenshots[0] ?? {})));
+    assert.equal(run.accepted?.screenshots.length, 1);
+    assert.ok(run.accepted && !('receivedAt' in run.accepted));
+    assert.ok(!('receivedAt' in (run.accepted?.screenshots[0] ?? {})));
     assert.ok(!('receivedAt' in run.sourceMetadata[0]));
   }
 });
@@ -334,7 +356,7 @@ test('processEmail rejects every sender when no allowlist parameter is named', a
     fromAddresses: [LISTED_SENDER],
     allowlistParameter: undefined,
   });
-  assert.equal(unset.error?.name, 'SubmissionRejectedError');
+  assertRejected(unset, ['SENDER_NOT_ALLOWED']);
   assert.deepEqual(
     unset.allowlistReads,
     [],
@@ -381,8 +403,8 @@ for (const [label, allowlist] of [
       allowlist: allowlist && [...allowlist],
     });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
-    assert.equal(run.result, undefined);
+    assertRejected(run, ['SENDER_NOT_ALLOWED']);
+    assert.equal(run.accepted, undefined);
     assert.deepEqual(run.allowlistReads, [ALLOWLIST_PARAMETER]);
     assert.deepEqual(run.objectWrites, [], 'no screenshot is stored');
     assert.equal(run.inspections(), 0, 'no attachment is inspected');
@@ -413,7 +435,7 @@ for (const [spam, virus, codes] of [
       fromAddresses: ['player@example.test'],
     });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assertRejected(run, codes);
     assert.deepEqual(run.objectWrites, [], 'no screenshot is stored');
     assert.equal(run.inspections(), 0, 'no attachment is inspected');
     assert.equal(run.ingestion.sesVerdicts.spam, spam);
@@ -440,7 +462,7 @@ for (const [label, fromAddresses] of [
       allowlist: ['player@example.test'],
     });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assertRejected(run, ['SENDER_NOT_ALLOWED']);
     assert.deepEqual(run.objectWrites, []);
     assert.equal(run.inspections(), 0);
     assert.equal(run.ingestion.senderAllowlist.status, 'DENIED');
@@ -462,6 +484,7 @@ test('processEmail records every screening rejection together', async () => {
     allowlistParameter: '/mcc/dev/match-to-csv/sender-allowlist',
     allowlist: [],
   });
+  assertRejected(run, ['SPAM_VERDICT_FAILED', 'SENDER_NOT_ALLOWED']);
   assert.deepEqual(run.completion.rejectionCodes, [
     'SPAM_VERDICT_FAILED',
     'SENDER_NOT_ALLOWED',
@@ -495,7 +518,7 @@ test('processEmail accepts an ephemeral message sent to the current alias and do
   });
 
   assert.equal(run.error, undefined);
-  assert.equal(run.result?.screenshots.length, 1);
+  assert.equal(run.accepted?.screenshots.length, 1);
   assert.deepEqual(run.parameterReads.sort(), [
     ALIAS_PARAMETER,
     DOMAIN_PARAMETER,
@@ -585,7 +608,7 @@ for (const [label, headerLines, ephemeral] of [
       ephemeral,
     });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assertRejected(run, ['RECIPIENT_NOT_ALLOWED']);
     assert.deepEqual(run.objectWrites, [], 'no screenshot is stored');
     assert.equal(run.inspections(), 0, 'no attachment is inspected');
     assert.equal(run.ingestion.recipientCheck.status, 'DENIED');
@@ -860,6 +883,7 @@ test('processEmail preserves images and returns every processable attachment', a
     dependencies,
   );
 
+  assert.ok(result.status === 'ACCEPTED');
   assert.equal(result.screenshots.length, 1);
   assert.equal(result.rejectedAttachments.length, 3);
   assert.deepEqual(
@@ -880,7 +904,7 @@ test('processEmail preserves images and returns every processable attachment', a
   );
 });
 
-test('processEmail records and rejects an email without a screenshot', async () => {
+test('processEmail records and returns the rejection of an email without a screenshot', async () => {
   process.env.EVIDENCE_BUCKET = 'evidence-bucket';
   process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
   const jsonWrites: Array<{ key: string; value: any }> = [];
@@ -920,15 +944,24 @@ test('processEmail records and rejects an email without a screenshot', async () 
     timestamp: () => '2026-01-01T00:00:00.000Z',
   };
 
-  await assert.rejects(
-    processEmail({ bucket: 'raw', key: 'incoming/message' }, dependencies),
-    { name: 'NoProcessableScreenshotsError' },
+  assert.deepEqual(
+    await processEmail(
+      { bucket: 'raw', key: 'incoming/message' },
+      dependencies,
+    ),
+    {
+      status: 'REJECTED',
+      submissionId: 'id',
+      rejectionCodes: ['NO_PROCESSABLE_SCREENSHOTS'],
+    },
   );
   assert.ok(
     jsonWrites.some(
       (write) =>
         write.key.endsWith('/completion.json') &&
-        write.value.status === 'REJECTED',
+        write.value.status === 'REJECTED' &&
+        (write.value.rejectionCodes as string[]).join() ===
+          'NO_PROCESSABLE_SCREENSHOTS',
     ),
   );
   assert.ok(
@@ -1019,6 +1052,58 @@ test('processEmail records a failed completion when evidence storage fails', asy
   );
 });
 
+test('processEmail throws and records a failure when it cannot record a rejection', async () => {
+  process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  const jsonWrites: Array<{ key: string; value: any }> = [];
+  const dependencies: ProcessEmailDependencies = {
+    async getRawEmail() {
+      return Buffer.from('mime');
+    },
+    async parseEmail() {
+      return { text: MATCH_DATE, attachments: [] };
+    },
+    async getSenderAllowlist() {
+      throw new Error('not called');
+    },
+    async getParameter() {
+      throw new Error('not called');
+    },
+    async inspectImage() {
+      throw new Error('not called');
+    },
+    async sendEmail() {
+      throw new Error('not called');
+    },
+    async putObject() {
+      throw new Error('not called');
+    },
+    async writeJson(bucket, key, value) {
+      if ((value as { type?: string }).type === 'SUBMISSION_REJECTED') {
+        throw new Error('event write failed');
+      }
+      jsonWrites.push({ key, value });
+      return { bucket, key };
+    },
+    id: () => 'id',
+    timestamp: () => '2026-01-01T00:00:00.000Z',
+  };
+
+  await assert.rejects(
+    processEmail({ bucket: 'raw', key: 'incoming/message' }, dependencies),
+    { message: 'event write failed' },
+  );
+  assert.ok(
+    jsonWrites.some(
+      (write) =>
+        write.key.endsWith('/completion.json') &&
+        write.value.status === 'FAILED',
+    ),
+  );
+  assert.ok(
+    jsonWrites.some((write) => write.value.type === 'SUBMISSION_FAILED'),
+  );
+});
+
 test('the match date is the first valid M/D/YYYY calendar date in reading order', () => {
   for (const [body, expected] of [
     ['5/2/2026', '2026-05-02'],
@@ -1090,8 +1175,8 @@ for (const [label, text] of [
   test(`processEmail rejects ${label} as MATCH_DATE_INVALID before storing any screenshot and replies`, async () => {
     const run = await runScreening({ ...listedSender, text });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
-    assert.equal(run.result, undefined, 'no screenshot reaches the Map');
+    assertRejected(run, ['MATCH_DATE_INVALID']);
+    assert.equal(run.accepted, undefined, 'no screenshot reaches the Map');
     assert.deepEqual(run.objectWrites, [], 'no screenshot is stored');
     assert.equal(run.inspections(), 0, 'no attachment is inspected');
     assert.equal(run.ingestion.matchDate, null);
@@ -1188,9 +1273,9 @@ for (const [label, body, expected] of [
     });
 
     assert.equal(run.error, undefined);
-    assert.equal(run.result?.matchDate, expected);
+    assert.equal(run.accepted?.matchDate, expected);
     assert.equal(run.ingestion.matchDate, expected);
-    assert.equal(run.result?.screenshots.length, 1);
+    assert.equal(run.accepted?.screenshots.length, 1);
     assert.equal(run.objectWrites.length, 1);
     assert.equal(run.completion.status, 'SUCCEEDED');
     assert.deepEqual(run.completion.rejectionCodes, []);
@@ -1213,7 +1298,7 @@ for (const [label, rawEmail] of [
   test(`processEmail rejects ${label} parsed from MIME as MATCH_DATE_INVALID and replies`, async () => {
     const run = await runScreening({ ...listedSender, rawEmail });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assertRejected(run, ['MATCH_DATE_INVALID']);
     assert.equal(run.ingestion.matchDate, null);
     assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
     assert.deepEqual(run.objectWrites, []);
@@ -1240,9 +1325,9 @@ test('processEmail accepts the text/plain date of a multipart/alternative body p
   });
 
   assert.equal(run.error, undefined);
-  assert.equal(run.result?.matchDate, '2026-05-02');
+  assert.equal(run.accepted?.matchDate, '2026-05-02');
   assert.equal(run.ingestion.matchDate, '2026-05-02');
-  assert.equal(run.result?.screenshots.length, 1);
+  assert.equal(run.accepted?.screenshots.length, 1);
   assert.deepEqual(run.sends, []);
 });
 
@@ -1273,11 +1358,11 @@ for (const [label, options, codes] of [
     },
     ['RECIPIENT_NOT_ALLOWED'],
   ],
-] as Array<[string, ScreeningCase, string[]]>) {
+] as Array<[string, ScreeningCase, SubmissionRejectionCode[]]>) {
   test(`processEmail sends no reply for ${label}, even without a match date`, async () => {
     const run = await runScreening({ ...listedSender, ...options, text: '' });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
+    assertRejected(run, codes);
     assert.deepEqual(run.completion.rejectionCodes, codes);
     assert.deepEqual(run.objectWrites, []);
     assert.deepEqual(run.sends, []);
@@ -1290,8 +1375,8 @@ for (const [label, options, codes] of [
       text: 'Match date: 10/18/2026\n--\nExample signature',
     });
 
-    assert.equal(run.error?.name, 'SubmissionRejectedError');
-    assert.equal(run.result, undefined);
+    assertRejected(run, codes);
+    assert.equal(run.accepted, undefined);
     assert.equal(run.ingestion.matchDate, '2026-10-18');
     assert.equal(run.completion.status, 'REJECTED');
     assert.deepEqual(run.completion.rejectionCodes, codes);
@@ -1309,45 +1394,47 @@ test('processEmail sends no reply when no attachment is processable', async () =
   process.env.REPLY_FROM_DOMAIN = REPLY_DOMAIN;
   const sends: ReplyMessage[] = [];
   const jsonWrites: Array<{ key: string; value: any }> = [];
-  await assert.rejects(
-    processEmail(
-      { bucket: 'raw', key: 'incoming/message' },
-      {
-        async getRawEmail() {
-          return Buffer.from('mime');
-        },
-        async parseEmail() {
-          return {
-            fromAddresses: [LISTED_SENDER],
-            text: MATCH_DATE,
-            attachments: [],
-          };
-        },
-        async getSenderAllowlist() {
-          return [LISTED_SENDER];
-        },
-        async getParameter() {
-          throw new Error('not called');
-        },
-        async inspectImage() {
-          throw new Error('not called');
-        },
-        async sendEmail(message) {
-          sends.push(message);
-        },
-        async putObject() {
-          throw new Error('not called');
-        },
-        async writeJson(bucket, key, value) {
-          jsonWrites.push({ key, value });
-          return { bucket, key };
-        },
-        id: () => 'id',
-        timestamp: () => '2026-01-01T00:00:00.000Z',
+  const result = await processEmail(
+    { bucket: 'raw', key: 'incoming/message' },
+    {
+      async getRawEmail() {
+        return Buffer.from('mime');
       },
-    ),
-    { name: 'NoProcessableScreenshotsError' },
+      async parseEmail() {
+        return {
+          fromAddresses: [LISTED_SENDER],
+          text: MATCH_DATE,
+          attachments: [],
+        };
+      },
+      async getSenderAllowlist() {
+        return [LISTED_SENDER];
+      },
+      async getParameter() {
+        throw new Error('not called');
+      },
+      async inspectImage() {
+        throw new Error('not called');
+      },
+      async sendEmail(message) {
+        sends.push(message);
+      },
+      async putObject() {
+        throw new Error('not called');
+      },
+      async writeJson(bucket, key, value) {
+        jsonWrites.push({ key, value });
+        return { bucket, key };
+      },
+      id: () => 'id',
+      timestamp: () => '2026-01-01T00:00:00.000Z',
+    },
   );
+  assert.deepEqual(result, {
+    status: 'REJECTED',
+    submissionId: 'id',
+    rejectionCodes: ['NO_PROCESSABLE_SCREENSHOTS'],
+  });
   assert.equal(
     jsonWrites.find((write) => write.key.endsWith('/ingestion.json'))?.value
       .matchDate,
@@ -1363,7 +1450,7 @@ test('processEmail logs a failed reply without an address or email content and k
   );
   const run = await runScreening({ ...listedSender, text: '', sendError });
 
-  assert.equal(run.error?.name, 'SubmissionRejectedError');
+  assertRejected(run, ['MATCH_DATE_INVALID']);
   assert.equal(run.sends.length, 1, 'the send was attempted');
   assert.equal(run.completion.status, 'REJECTED');
   assert.deepEqual(run.completion.rejectionCodes, ['MATCH_DATE_INVALID']);
