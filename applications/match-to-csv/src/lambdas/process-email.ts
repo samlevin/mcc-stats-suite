@@ -376,7 +376,7 @@ export async function processEmail(
         metadataError = error;
       }
 
-      const rejectionCodes = attachmentRejectionCodes(
+      const attachmentCodes = attachmentRejectionCodes(
         content,
         metadata,
         metadataError,
@@ -406,8 +406,8 @@ export async function processEmail(
           contentId: attachment.cid,
           uploadedAt: dependencies.timestamp(),
           processingStatus:
-            rejectionCodes.length === 0 ? 'ACCEPTED' : 'REJECTED',
-          rejectionCodes,
+            attachmentCodes.length === 0 ? 'ACCEPTED' : 'REJECTED',
+          rejectionCodes: attachmentCodes,
           metadata,
           metadataError: metadataError
             ? errorSummary(metadataError)
@@ -415,13 +415,13 @@ export async function processEmail(
         },
       );
 
-      if (rejectionCodes.length > 0) {
+      if (attachmentCodes.length > 0) {
         rejectedAttachments.push({
           attachmentIndex: index,
           attachmentName,
           contentType: attachment.contentType,
           fileSizeBytes: content.byteLength,
-          rejectionCodes,
+          rejectionCodes: attachmentCodes,
           source,
         });
       } else {
