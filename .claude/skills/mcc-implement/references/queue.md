@@ -6,7 +6,7 @@ The main thread running mcc-implement follows this file for a container, single 
 
 Run `node scripts/delivery-queue.mjs <issue>` and `--next`. The read-only script refetches recursive native sub-issues, blocked-by edges, project fields and items, PRs, `agent/*` branches, and claim comments over REST on every run. It caches field and option IDs only within that run. Detect cycles in the blocked-by edges and record inaccessible children as BLOCKED. Order blockers before dependents, with ties by issue number. A nested container has no delivery branch or PR; its leaves join the ledger.
 
-The script prints one ledger line per leaf with state, effort, rule, evidence, reason, branch/head, PR, project state, size, and claim. Its states follow these rules in order:
+The script prints one ledger line per leaf with state, effort, rule, evidence, reason, branch/head, PR, project state, size, and claim. Each line also has a `dispatch` JSON object: the exact base branch/SHA, dependency edges, prerequisite PR branches/SHAs and stacking eligibility, validated independence group, declared file/contract ownership, and compatible parallel candidates with their ownership. Use only those candidates for an explicitly requested parallel run; missing ownership notes or invalid groups keep delivery sequential. `Files:` uses backticked paths in Implementation notes; `Contracts:` or `Provides:` names comma-separated shared contracts, or `none`. A cross-repository child or blocker is explicitly BLOCKED before its number can be interpreted in this repository. Multiple unmerged prerequisite branches need a stacking decision. Its states follow these rules in order:
 
 - `done`: closed, or its closing PR merged.
 - `in review`: an open PR closes it. Record and skip it.
@@ -15,7 +15,7 @@ The script prints one ledger line per leaf with state, effort, rule, evidence, r
 - `waiting`: a blocker is unmet. Closed blockers count as met. An open blocker PR must be ready for review, pass checks, and carry exact-SHA pre-PR approval under [delivery.md](delivery.md#gate). Cycles and inaccessible dependencies stay BLOCKED.
 - `ready`: no unmet blocker. The implementer still runs [delivery.md](delivery.md)'s gate before claiming.
 
-`--next` selects a `resume` leaf before `ready` leaves. Claim records use `<!-- mcc-claim {"agent":"<delivery-agent>","branch":"<branch>","worktree":"<path>"} -->`; release uses the same agent with `"released":true`. Legacy claim comments are recognized too. Effort records follow the rubric and format in mcc-implement. Missing or nonqualifying decisions select medium; metadata never escalates effort. PRs record approval as `Pre-PR review: APPROVE; base=<full SHA>; head=<full SHA>`. Passing checks with an absent or stale approval do not permit stacking.
+`--next` selects a `resume` leaf before `ready` leaves. Claim records use `<!-- mcc-claim {"agent":"<delivery-agent>","branch":"<branch>","worktree":"<path>"} -->`; release uses the same agent with `"released":true`. Legacy claim comments are recognized too. Effort records follow the rubric and format in mcc-implement. Missing or nonqualifying decisions select medium; metadata never escalates effort. PRs record approval as `Pre-PR review: APPROVE; base=<full SHA>; head=<full SHA>`. Existing `Pre-PR review: APPROVE for base..head` records are also accepted, with optional Markdown around the pair. Passing checks with an absent or stale approval do not permit stacking.
 
 ## Deliver
 

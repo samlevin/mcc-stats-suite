@@ -31,8 +31,8 @@ const pull = (number, state = 'open') => ({
   number: number + 100,
   body: `Closes #${number}\nPre-PR review: APPROVE; base=${base}; head=${head}`,
   state,
-  base: { sha: base },
-  head: { sha: head },
+  base: { sha: base, ref: 'main' },
+  head: { sha: head, ref: `agent/${number}-prerequisite` },
   html_url: `pr-${number}`,
   merged_at: state === 'closed' ? 'today' : null,
 });
@@ -47,11 +47,14 @@ function fixture({
   branches = [],
   checks = [{ status: 'completed', conclusion: 'success' }],
   statuses = [],
+  bodies = {},
+  sizes = {},
 } = {}) {
   const calls = [];
   const api = {
     get(path) {
       calls.push(path);
+      if (path === `${repo}/commits/main`) return { sha: 'c'.repeat(40) };
       const match = /\/issues\/(\d+)$/.exec(path);
       if (match) {
         const n = Number(match[1]);
@@ -59,6 +62,7 @@ function fixture({
         return {
           number: n,
           title: `Issue ${n}`,
+          body: bodies[n] ?? '',
           state: closed.includes(n) ? 'closed' : 'open',
           labels: [{ name: 'severity: critical' }],
         };
@@ -75,9 +79,13 @@ function fixture({
       if (match) {
         const n = Number(match[1]);
         if (match[2] === 'sub_issues')
-          return (tree[n] ?? []).map((number) => ({ number }));
+          return (tree[n] ?? []).map((number) =>
+            typeof number === 'number' ? { number } : number,
+          );
         if (match[2] === 'comments') return comments[n] ?? [];
-        return (deps[n] ?? []).map((number) => ({ number }));
+        return (deps[n] ?? []).map((number) =>
+          typeof number === 'number' ? { number } : number,
+        );
       }
       if (path === `${project}/fields`)
         return [
@@ -86,21 +94,28 @@ function fixture({
             name: 'Status',
             options: [{ id: 'r', name: { raw: 'Ready' } }],
           },
-          { id: 2, name: 'Size', options: [{ id: 'l', name: { raw: 'L' } }] },
+          {
+            id: 2,
+            name: 'Size',
+            options: [
+              { id: 'l', name: { raw: 'L' } },
+              { id: 'm', name: { raw: 'M' } },
+            ],
+          },
         ];
       if (path === `${project}/items?fields=1,2`)
-        return [
-          {
+        return [...new Set([1, ...Object.keys(sizes).map(Number)])].map(
+          (n) => ({
             content: {
-              number: 1,
+              number: n,
               repository_url: `https://api.github.com/${repo}`,
             },
             fields: [
               { id: 1, value: { id: 'r', name: { raw: 'Ready' } } },
-              { id: 2, value: 'l' },
+              { id: 2, value: sizes[n] === 'M' ? 'm' : 'l' },
             ],
-          },
-        ];
+          }),
+        );
       if (path === `${repo}/pulls?state=all`) return pulls;
       if (path === `${repo}/branches`) return branches;
       if (path.endsWith('/check-runs')) {
@@ -401,4 +416,128 @@ test('an explicit medium constraint persists across later recorded high assessme
     claimRecord([comment('Agent `other` claimed #1 on `agent/1-one`.')]).agent,
     'other',
   );
+});
+
+test('external children and dependencies block before an MCC number collision is fetched', () => {
+  for (const options of [
+    {
+      tree: {
+        10: [
+          {
+            number: 123,
+            repository_url: 'https://api.github.com/repos/elsewhere/project',
+          },
+        ],
+      },
+    },
+    {
+      tree: { 10: [1] },
+      deps: {
+        1: [{ number: 123, repository: { full_name: 'elsewhere/project' } }],
+      },
+    },
+  ]) {
+    const { rows, errors, calls } = queue(options);
+    assert.match(
+      errors.join(' '),
+      /unsupported repository relationship: elsewhere\/project#123/,
+    );
+    assert.ok(rows.every((row) => row.state === 'waiting'));
+    assert.ok(!calls.includes(`${repo}/issues/123`));
+  }
+});
+
+test('existing exact-SHA approval wording remains valid and stale legacy approvals fail', () => {
+  const pr = pull(1);
+  pr.body = `Closes #1\nPre-PR review: APPROVE for \`${base}..${head}\`.`;
+  const checks = [{ status: 'completed', conclusion: 'success' }];
+  assert.equal(stackReady(pr, checks, []), true);
+  assert.equal(
+    stackReady({ ...pr, base: { sha: 'c'.repeat(40) } }, checks, []),
+    false,
+  );
+});
+
+test('ledger output alone supplies exact stacked prerequisite and implementation base', () => {
+  const { rows } = queue({ deps: { 1: [99] }, pulls: [pull(99)] });
+  const row = rows.find((row) => row.issue === 1);
+  const dispatch = JSON.parse(ledgerLine(row).split(' | dispatch=')[1]);
+  assert.deepEqual(dispatch.base, {
+    branch: 'agent/99-prerequisite',
+    sha: head,
+  });
+  assert.deepEqual(dispatch.dependencies, [99]);
+  assert.deepEqual(dispatch.prerequisites[0], {
+    issue: 99,
+    repository: policy.binding.repository,
+    met: false,
+    pr: 'pr-99',
+    branch: 'agent/99-prerequisite',
+    head,
+    base,
+    stackReady: true,
+  });
+  assert.equal(row.state, 'ready');
+});
+
+const groups =
+  '<!-- mcc-independence-groups -->\n- g1: #1\n- g2: #2\n<!-- /mcc-independence-groups -->';
+const notes = (file, contracts = 'none') =>
+  `### Implementation notes\n\nFiles: \`${file}\`\nContracts: ${contracts}\n`;
+
+test('ledger output validates parallel groups and supplies other-leaf ownership without source reads', () => {
+  const { rows } = queue({
+    tree: { 10: [1, 2] },
+    sizes: { 1: 'M', 2: 'M' },
+    bodies: {
+      10: groups,
+      1: notes('scripts/a.mjs'),
+      2: notes('scripts/b.mjs', 'contract-b'),
+    },
+  });
+  const packet = JSON.parse(ledgerLine(rows[0]).split(' | dispatch=')[1]);
+  assert.equal(packet.group, '10/g1');
+  assert.deepEqual(packet.parallelWith, [
+    {
+      issue: 2,
+      group: '10/g2',
+      files: ['scripts/b.mjs'],
+      contracts: ['contract-b'],
+    },
+  ]);
+  assert.equal(rows[1].parallelWith[0].issue, 1);
+});
+
+test('parallel dispatch is blocked for invalid groups, dependency chains, shared open blockers, missing notes, and overlapping ownership', () => {
+  const baseline = {
+    tree: { 10: [1, 2] },
+    sizes: { 1: 'M', 2: 'M' },
+    bodies: {
+      10: groups,
+      1: notes('scripts/a.mjs'),
+      2: notes('scripts/b.mjs'),
+    },
+  };
+  for (const change of [
+    { bodies: { ...baseline.bodies, 10: groups.replace('#2', '#99') } },
+    { bodies: { ...baseline.bodies, 10: groups.replace('#2', '#1') } },
+    { deps: { 1: [99], 99: [2] } },
+    { deps: { 1: [99], 2: [99] }, pulls: [pull(99)] },
+    { bodies: { ...baseline.bodies, 2: '' } },
+    { bodies: { ...baseline.bodies, 2: notes('scripts/a.mjs') } },
+    { bodies: { ...baseline.bodies, 1: notes('scripts/*.mjs') } },
+    {
+      bodies: {
+        ...baseline.bodies,
+        1: notes('scripts/a.mjs', 'same-contract'),
+        2: notes('scripts/b.mjs', 'same-contract'),
+      },
+    },
+    { sizes: { 1: 'L', 2: 'M' } },
+  ])
+    assert.ok(
+      queue({ ...baseline, ...change }).rows.every(
+        (row) => row.parallelWith.length === 0,
+      ),
+    );
 });

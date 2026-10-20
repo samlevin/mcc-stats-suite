@@ -168,10 +168,14 @@ export function orderLeaves(leaves, nodes) {
 export function stackReady(pr, checks, statuses) {
   if (!pr || pr.state !== 'open' || pr.draft) return false;
   const approval =
-    /Pre-PR review: APPROVE; base=([0-9a-f]{40}); head=([0-9a-f]{40})/.exec(
+    /Pre-PR review: APPROVE(?:; base=([0-9a-f]{40}); head=([0-9a-f]{40})| for [`*_]*([0-9a-f]{40})\.\.([0-9a-f]{40}))/.exec(
       pr.body ?? '',
     );
-  if (!approval || approval[1] !== pr.base.sha || approval[2] !== pr.head.sha)
+  if (
+    !approval ||
+    (approval[1] ?? approval[3]) !== pr.base.sha ||
+    (approval[2] ?? approval[4]) !== pr.head.sha
+  )
     return false;
   const all = [
     ...checks.map(
@@ -182,6 +186,140 @@ export function stackReady(pr, checks, statuses) {
     ...statuses.map((status) => status.state === 'success'),
   ];
   return all.length > 0 && all.every(Boolean);
+}
+
+function relationshipRepository(issue) {
+  return (
+    issue.repository?.full_name ??
+    /(?:api\.github\.com\/repos|github\.com)\/([^/]+\/[^/]+)(?:\/|$)/.exec(
+      issue.repository_url ?? issue.url ?? issue.html_url ?? '',
+    )?.[1]
+  );
+}
+
+export function ownershipNotes(body = '') {
+  const notes =
+    /### Implementation notes\s*\n([\s\S]*?)(?=\n### |$)/i.exec(body)?.[1] ??
+    '';
+  const files = /(?:^|\n)Files:\s*([^\n]+)/i.exec(notes)?.[1];
+  const contracts = /(?:^|\n)(?:Contracts|Provides):\s*([^\n]+)/i.exec(
+    notes,
+  )?.[1];
+  return {
+    files: files
+      ? [...files.matchAll(/`([^`]+)`/g)].map((match) => match[1])
+      : [],
+    contracts:
+      !contracts || /^none[. ]*$/i.test(contracts.trim())
+        ? []
+        : contracts.split(',').map((value) => value.replaceAll('`', '').trim()),
+    complete: Boolean(files && /`[^`]+`/.test(files) && contracts),
+  };
+}
+
+function parallelMetadata(nodes, rows, merged) {
+  const byNumber = new Map(rows.map((row) => [row.issue, row]));
+  const ancestors = (n, result = new Set()) => {
+    for (const dep of nodes.get(n)?.dependencies ?? [])
+      if (!result.has(dep.number)) {
+        result.add(dep.number);
+        ancestors(dep.number, result);
+      }
+    return result;
+  };
+  for (const [container, node] of nodes) {
+    const matches = [
+      ...(node.issue?.body ?? '').matchAll(
+        /<!-- mcc-independence-groups -->([\s\S]*?)<!-- \/mcc-independence-groups -->/g,
+      ),
+    ];
+    if (matches.length !== 1) continue;
+    const groups = new Map();
+    let valid = true;
+    for (const line of matches[0][1]
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)) {
+      const match = /^- (g\d+):((?: #\d+)+)$/.exec(line);
+      if (!match) {
+        valid = false;
+        break;
+      }
+      for (const number of match[2].matchAll(/#(\d+)/g)) {
+        const n = Number(number[1]);
+        if (
+          groups.has(n) ||
+          !node.children.some((child) => child.number === n) ||
+          nodes.get(n)?.children?.length ||
+          !byNumber.has(n)
+        )
+          valid = false;
+        groups.set(n, `${container}/${match[1]}`);
+      }
+    }
+    const entries = [...groups];
+    for (const [a, ga] of entries)
+      for (const [b, gb] of entries) {
+        if (a >= b || ga === gb) continue;
+        const aa = ancestors(a);
+        const bb = ancestors(b);
+        if (
+          aa.has(b) ||
+          bb.has(a) ||
+          [...aa].some(
+            (n) =>
+              bb.has(n) &&
+              nodes.get(n)?.issue?.state !== 'closed' &&
+              !merged(n),
+          )
+        )
+          valid = false;
+      }
+    if (!valid) continue;
+    for (const [n, group] of groups) byNumber.get(n).group = group;
+  }
+  const overlap = (a, b) =>
+    a.some((left) =>
+      b.some((right) => {
+        const l = left.split(/[?*{[]/)[0];
+        const r = right.split(/[?*{[]/)[0];
+        return l.startsWith(r) || r.startsWith(l);
+      }),
+    );
+  for (const row of rows) {
+    row.parallelWith = [];
+    if (
+      row.state !== 'ready' ||
+      row.size !== 'M' ||
+      !row.group ||
+      !row.ownership?.complete
+    )
+      continue;
+    for (const other of rows) {
+      if (
+        other.issue === row.issue ||
+        other.state !== 'ready' ||
+        other.size !== 'M' ||
+        !other.ownership?.complete ||
+        !other.group ||
+        row.group.split('/')[0] !== other.group.split('/')[0] ||
+        row.group === other.group
+      )
+        continue;
+      if (
+        !overlap(row.ownership.files, other.ownership.files) &&
+        !row.ownership.contracts.some((contract) =>
+          other.ownership.contracts.includes(contract),
+        )
+      )
+        row.parallelWith.push({
+          issue: other.issue,
+          group: other.group,
+          files: other.ownership.files,
+          contracts: other.ownership.contracts,
+        });
+    }
+  }
 }
 
 export function deliveryQueue(
@@ -208,6 +346,16 @@ export function deliveryQueue(
           `${repo}/issues/${n}/dependencies/blocked_by`,
         );
         const comments = api.list(`${repo}/issues/${n}/comments`);
+        for (const related of [...children, ...dependencies]) {
+          const relatedRepo = relationshipRepository(related);
+          if (
+            relatedRepo &&
+            relatedRepo.toLowerCase() !== repository.toLowerCase()
+          )
+            throw new Error(
+              `unsupported repository relationship: ${relatedRepo}#${related.number}`,
+            );
+        }
         node = { issue, children, dependencies, comments };
         nodes.set(n, node);
       } catch (error) {
@@ -228,6 +376,7 @@ export function deliveryQueue(
       if (!nodes.has(dep.number)) readIssue(dep.number);
   }
   readIssue(number, true);
+  const trunk = api.get(`${repo}/commits/main`);
   const fields = api.list(
     `users/${project.owner}/projectsV2/${project.number}/fields`,
   );
@@ -248,16 +397,17 @@ export function deliveryQueue(
   const checks = new Map();
   const qualifies = (pr) => {
     if (!pr || pr.draft) return false;
-    if (!checks.has(pr.head.sha))
+    const identity = `${pr.number}:${pr.base.sha}:${pr.head.sha}`;
+    if (!checks.has(identity))
       checks.set(
-        pr.head.sha,
+        identity,
         stackReady(
           pr,
           api.list(`${repo}/commits/${pr.head.sha}/check-runs`, 'check_runs'),
           api.get(`${repo}/commits/${pr.head.sha}/status`).statuses ?? [],
         ),
       );
-    return checks.get(pr.head.sha);
+    return checks.get(identity);
   };
   const { order, cycles } = orderLeaves(leaves, nodes);
   const rows = order.map((n) => {
@@ -293,6 +443,26 @@ export function deliveryQueue(
       priority: metadata.Priority ?? 'P2',
       claim,
       effort: effortRecord(node.comments, policy),
+      dependencies: node.dependencies.map((dep) => dep.number),
+      ownership: ownershipNotes(node.issue.body),
+      group: 'none',
+      base: { branch: 'main', sha: trunk.sha },
+      prerequisites: node.dependencies.map((dep) => {
+        const candidate = open(dep.number);
+        const met =
+          nodes.get(dep.number)?.issue?.state === 'closed' ||
+          Boolean(merged(dep.number));
+        return {
+          issue: dep.number,
+          repository,
+          met,
+          pr: candidate?.html_url,
+          branch: candidate?.head.ref,
+          head: candidate?.head.sha,
+          base: candidate?.base.sha,
+          stackReady: !met && qualifies(candidate),
+        };
+      }),
     };
     if (node.issue.state === 'closed' || merged(n)) row.state = 'done';
     else if (open(n)) row.state = 'in review';
@@ -317,12 +487,21 @@ export function deliveryQueue(
         row.blocker = `unmet blockers: ${unmet.map((dep) => `#${dep.number}`).join(', ')}`;
       }
     }
+    const openBases = row.prerequisites.filter((entry) => entry.stackReady);
+    if (openBases.length === 1)
+      row.base = { branch: openBases[0].branch, sha: openBases[0].head };
+    if (openBases.length > 1 && ['ready', 'resume'].includes(row.state)) {
+      row.state = 'waiting';
+      row.blocker =
+        'multiple unmerged prerequisite branches require a stacking decision';
+    }
     if (cycles.has(n)) {
       row.state = 'waiting';
       row.blocker = `BLOCKED: cycle ${cycles.get(n).join(' -> ')}`;
     }
     return row;
   });
+  parallelMetadata(nodes, rows, merged);
   return { rows, errors };
 }
 
@@ -334,7 +513,7 @@ export function nextLeaf(rows) {
 
 export function ledgerLine(row) {
   const decision = row.effort;
-  return `#${row.issue} | ${row.state} | effort=${decision.effort}; rule=${decision.rule}; evidence=${decision.evidence}; reason=${decision.reason} | branch=${row.branch ?? 'none'}; head=${row.head ?? 'none'}; PR=${row.pr ?? 'none'}; project=${row.projectState ?? 'unset'}; size=${row.size ?? 'infer'} | claim=${row.claim?.url ?? 'none'}${row.blocker ? ` | ${row.blocker}` : ''}`;
+  return `#${row.issue} | ${row.state} | effort=${decision.effort}; rule=${decision.rule}; evidence=${decision.evidence}; reason=${decision.reason} | branch=${row.branch ?? 'none'}; head=${row.head ?? 'none'}; PR=${row.pr ?? 'none'}; project=${row.projectState ?? 'unset'}; size=${row.size ?? 'infer'} | claim=${row.claim?.url ?? 'none'} | dispatch=${JSON.stringify({ base: row.base, dependencies: row.dependencies, prerequisites: row.prerequisites, group: row.group, ownership: row.ownership, parallelWith: row.parallelWith })}${row.blocker ? ` | ${row.blocker}` : ''}`;
 }
 
 const cli = defineCli(
