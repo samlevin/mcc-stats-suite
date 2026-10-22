@@ -208,6 +208,66 @@ for (const [environment, ephemeral, retention] of [
   });
 }
 
+for (const [environment, ephemeral] of [
+  ['dev', undefined],
+  ['prod', undefined],
+  ['dev', 'test'],
+] as const) {
+  test(`${environment} ${ephemeral ?? 'stable'} lambdas log JSON at INFO with build details and the metrics switch`, () => {
+    const template = synthesize(
+      { environment, ...(ephemeral ? { ephemeral } : {}) },
+      { GIT_SHA: 'abc123' },
+    );
+    const functions = Object.values(
+      template.findResources('AWS::Lambda::Function'),
+    );
+    assert.equal(functions.length, 6);
+    for (const fn of functions) {
+      const name = fn.Properties.FunctionName as string;
+      const loggingConfig = fn.Properties.LoggingConfig as Record<
+        string,
+        unknown
+      >;
+      assert.equal(loggingConfig.LogFormat, 'JSON', name);
+      assert.equal(loggingConfig.ApplicationLogLevel, 'INFO', name);
+      assert.equal(loggingConfig.SystemLogLevel, 'INFO', name);
+      const variables = fn.Properties.Environment.Variables as Record<
+        string,
+        unknown
+      >;
+      assert.equal(variables.GIT_SHA, 'abc123', name);
+      assert.equal(
+        variables.DEPLOYMENT_ENVIRONMENT,
+        environment.toUpperCase(),
+        name,
+      );
+      if (ephemeral) {
+        assert.equal(variables.EMF_METRICS_ENABLED, 'false', name);
+      } else {
+        assert.ok(!('EMF_METRICS_ENABLED' in variables), name);
+      }
+    }
+  });
+}
+
+test('the ingest workflow logs only errors and no execution data', () => {
+  for (const ephemeral of [undefined, 'test']) {
+    const template = synthesize({
+      environment: 'dev',
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    template.hasResourceProperties('AWS::StepFunctions::StateMachine', {
+      StateMachineName: ephemeral
+        ? `match-to-csv-e-${ephemeral}`
+        : 'match-to-csv-dev',
+      LoggingConfiguration: Match.objectLike({
+        Level: 'ERROR',
+        IncludeExecutionData: false,
+      }),
+    });
+  }
+});
+
 type AlarmResource = {
   Properties: {
     AlarmName: string;
