@@ -5,6 +5,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { SESv2Client, SendEmailCommand } from '@aws-sdk/client-sesv2';
 import { GetParameterCommand, SSMClient } from '@aws-sdk/client-ssm';
+import type { Context } from 'aws-lambda';
 import type {
   AttachmentRejectionCode,
   ProcessEmailInput,
@@ -20,6 +21,11 @@ import { bodyToBuffer, namespacedObjectKey, safeObjectName } from '../lib/s3';
 import { log } from '../lib/log';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 import { MAX_IMAGE_BYTES } from '../lib/image-limits';
+import {
+  publishStageEvent,
+  publishWithoutFailing,
+  type StageEvent,
+} from '../lib/metrics';
 import { readReceivedAt } from '../lib/received-at';
 import { REPLY_LOCAL_PART } from '../lib/reply-address';
 
@@ -156,6 +162,10 @@ export interface ProcessEmailDependencies {
   ): Promise<S3ObjectReference>;
   id(): string;
   timestamp(): string;
+  /** Writes the invocation's stage event. */
+  publishStageEvent(event: StageEvent): void;
+  /** The current time, in epoch milliseconds. */
+  now(): number;
 }
 
 /**
@@ -227,6 +237,8 @@ const defaultDependencies: ProcessEmailDependencies = {
   writeJson: putJson,
   id: evidenceId,
   timestamp: now,
+  publishStageEvent: (event) => publishStageEvent(event),
+  now: () => Date.now(),
 };
 
 /** How long a warm Lambda reuses a parameter value it has read. */
@@ -283,8 +295,17 @@ const readParameter = createParameterReader(async (parameterName) => {
 
 export async function handler(
   event: ProcessEmailInput,
+  context?: Pick<Context, 'awsRequestId'>,
 ): Promise<ProcessEmailResult> {
-  return (await processEmail(event, defaultDependencies)).result;
+  return (await processEmail(event, defaultDependencies, context?.awsRequestId))
+    .result;
+}
+
+/** What one invocation reached, read by its stage event. */
+interface SubmissionProgress {
+  submissionId?: string;
+  attachmentCount?: number;
+  rejectedAttachments: RejectedAttachment[];
 }
 
 /**
@@ -292,10 +313,101 @@ export async function handler(
  * result, not an error: its evidence is recorded and a `REJECTED` result is
  * returned, so the workflow ends as succeeded. It throws only when it cannot
  * finish its work.
+ *
+ * Every invocation writes one `process-email` stage event (spec 1.3 §3.1):
+ * `OK` or `REJECTED` with the result, or `ERROR` before the error is
+ * rethrown, including failures before a submission ID exists.
  */
 export async function processEmail(
   event: ProcessEmailInput,
   dependencies: ProcessEmailDependencies,
+  requestId?: string,
+): Promise<ProcessEmailOutcome> {
+  const startedAt = dependencies.now();
+  const progress: SubmissionProgress = { rejectedAttachments: [] };
+  let outcome: ProcessEmailOutcome;
+  try {
+    outcome = await storeAndScreen(event, dependencies, progress);
+  } catch (error) {
+    publishWithoutFailing(dependencies, {
+      stage: 'process-email',
+      outcome: 'ERROR',
+      durationMs: dependencies.now() - startedAt,
+      ids: { submissionId: progress.submissionId },
+      trace: event.trace,
+      requestId,
+      errorName: error instanceof Error ? error.name : undefined,
+      properties: {
+        ...(progress.attachmentCount === undefined
+          ? {}
+          : { attachmentCount: progress.attachmentCount }),
+        rejectedAttachmentCount: progress.rejectedAttachments.length,
+      },
+      metrics: {},
+    });
+    throw error;
+  }
+  publishWithoutFailing(
+    dependencies,
+    resultEvent(event, outcome, progress, {
+      durationMs: dependencies.now() - startedAt,
+      requestId,
+    }),
+  );
+  return outcome;
+}
+
+/** The `OK` or `REJECTED` stage event of a finished invocation. */
+function resultEvent(
+  event: ProcessEmailInput,
+  { result, matchDateReply }: ProcessEmailOutcome,
+  progress: SubmissionProgress,
+  timing: Pick<StageEvent, 'durationMs' | 'requestId'>,
+): StageEvent {
+  const accepted = result.status === 'ACCEPTED';
+  const attachmentRejectionReasons: Partial<
+    Record<AttachmentRejectionCode, number>
+  > = {};
+  for (const attachment of progress.rejectedAttachments) {
+    for (const code of new Set(attachment.rejectionCodes)) {
+      attachmentRejectionReasons[code] =
+        (attachmentRejectionReasons[code] ?? 0) + 1;
+    }
+  }
+  return {
+    stage: 'process-email',
+    outcome: accepted ? 'OK' : 'REJECTED',
+    ...timing,
+    ids: { submissionId: result.submissionId },
+    trace: event.trace,
+    properties: {
+      attachmentCount: progress.attachmentCount ?? 0,
+      rejectedAttachmentCount: progress.rejectedAttachments.length,
+      ...(accepted ? { screenshotCount: result.screenshots.length } : {}),
+      ...(matchDateReply === undefined ? {} : { matchDateReply }),
+    },
+    metrics: accepted
+      ? {
+          SubmissionsAccepted: 1,
+          ScreenshotsAccepted: result.screenshots.length,
+        }
+      : {
+          SubmissionsRejected: 1,
+          ...(matchDateReply === 'FAILED' ? { MatchDateReplyFailed: 1 } : {}),
+        },
+    breakdowns: {
+      ...(accepted
+        ? {}
+        : { submissionRejectionReasons: result.rejectionCodes }),
+      attachmentRejectionReasons,
+    },
+  };
+}
+
+async function storeAndScreen(
+  event: ProcessEmailInput,
+  dependencies: ProcessEmailDependencies,
+  progress: SubmissionProgress,
 ): Promise<ProcessEmailOutcome> {
   const evidenceBucket = requiredEnvironment('EVIDENCE_BUCKET');
   const receivedAt = readReceivedAt(event.receivedAt);
@@ -307,6 +419,7 @@ export async function processEmail(
   const parsed = await dependencies.parseEmail(
     await dependencies.getRawEmail(event),
   );
+  progress.attachmentCount = parsed.attachments.length;
   // Read every parameter before writing evidence, so a transient SSM error
   // fails the invocation cleanly and a retry starts from scratch.
   const allowlistParameter = process.env.SENDER_ALLOWLIST_PARAMETER || null;
@@ -332,9 +445,10 @@ export async function processEmail(
         ? ['MATCH_DATE_INVALID']
         : [];
   const submissionId = dependencies.id();
+  progress.submissionId = submissionId;
   const submissionPrefix = namespacedObjectKey(`submissions/${submissionId}`);
   const screenshots: SourceScreenshot[] = [];
-  const rejectedAttachments: RejectedAttachment[] = [];
+  const { rejectedAttachments } = progress;
   let rejectionCodes: SubmissionRejectionCode[];
   let replyResult: MatchDateReplyResult | undefined;
 

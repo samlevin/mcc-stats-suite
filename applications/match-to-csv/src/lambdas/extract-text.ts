@@ -5,6 +5,7 @@ import {
   type AnalyzeDocumentCommandOutput,
   type Block,
 } from '@aws-sdk/client-textract';
+import type { Context } from 'aws-lambda';
 import type {
   CsvRow,
   ExtractTextOutput,
@@ -24,7 +25,12 @@ import { bodyToBuffer, processingRunPrefix } from '../lib/s3';
 import { evidenceId, now, putJson, sha256 } from '../lib/evidence';
 import { MAX_IMAGE_BYTES } from '../lib/image-limits';
 import { log } from '../lib/log';
-import { publishExtractionMetrics } from '../lib/metrics';
+import {
+  publishExtractionMetrics,
+  publishStageEvent,
+  publishWithoutFailing,
+  type StageEvent,
+} from '../lib/metrics';
 import {
   DynamoRosterSource,
   dynamoRosterTable,
@@ -74,6 +80,8 @@ export interface ExtractTextDependencies {
   ): Promise<S3ObjectReference>;
   /** Publishes the extracted row count, which alarms on zero-row runs. */
   publishExtractionMetrics(rowCount: number): void;
+  /** Writes the invocation's stage event. */
+  publishStageEvent(event: StageEvent): void;
   /**
    * Reads this deployment's roster and makes sure its snapshot exists in the
    * evidence bucket (spec 1.2 §6.2 step 4).
@@ -104,6 +112,7 @@ const defaultDependencies: ExtractTextDependencies = {
   calculateRowColors: computeRowColors,
   writeJson: putJson,
   publishExtractionMetrics: (rowCount) => publishExtractionMetrics(rowCount),
+  publishStageEvent: (event) => publishStageEvent(event),
   readRoster: (bucket) => rosterSource().read(rosterNamespace(), bucket),
   id: evidenceId,
   timestamp: now,
@@ -144,32 +153,145 @@ function rosterNamespace(): string {
  * What one run measured. A field is absent until the step that measures it
  * has finished, so a failed run carries only what it reached.
  */
-export interface ExtractionMeasurements {
+interface ExtractionMeasurements {
+  runId?: string;
+  /** Size of the stored image read. */
+  imageBytes?: number;
+  widthPx?: number;
+  heightPx?: number;
   /** Time spent in the `AnalyzeDocument` call, set only when the call returned. */
   textractMs?: number;
   /** Mean Textract confidence of the normalized cells, absent when there are none. */
   meanConfidence?: number;
   /** Normalized cells whose validation has `deterministicReviewRequired`. */
   reviewRequiredCells?: number;
+  /** Rows parsed from the scoreboard. */
+  rowCount?: number;
+  /** Rows by `playerResolution` status. */
+  playerMatchCounts?: { exact: number; resolved: number; unmatched: number };
 }
 
 export async function handler(
   event: ProcessingRunInput,
+  context?: Pick<Context, 'awsRequestId'>,
 ): Promise<ExtractTextOutput> {
-  return runExtraction(event, defaultDependencies);
+  return runExtraction(event, defaultDependencies, context?.awsRequestId);
 }
 
 /**
- * Runs one extraction. `measurements` is filled in as the run proceeds and
- * stays readable after the run returns or throws.
+ * Runs one extraction and writes one `extract` stage event (spec 1.3 §3.1):
+ * `OK` when the run succeeds, or `ERROR` before the error is rethrown. The
+ * event carries what the run measured before it returned or failed.
  */
 export async function runExtraction(
   event: ProcessingRunInput,
   dependencies: ExtractTextDependencies,
-  measurements: ExtractionMeasurements = {},
+  requestId?: string,
+): Promise<ExtractTextOutput> {
+  const startedMs = dependencies.clockMs();
+  const measurements: ExtractionMeasurements = {};
+  let output: ExtractTextOutput;
+  try {
+    output = await extract(event, dependencies, measurements);
+  } catch (error) {
+    publishWithoutFailing(
+      dependencies,
+      stageEvent(event, measurements, {
+        outcome: 'ERROR',
+        durationMs: dependencies.clockMs() - startedMs,
+        errorName: error instanceof Error ? error.name : undefined,
+        requestId,
+      }),
+    );
+    throw error;
+  }
+  publishWithoutFailing(
+    dependencies,
+    stageEvent(event, measurements, {
+      outcome: 'OK',
+      durationMs: dependencies.clockMs() - startedMs,
+      requestId,
+    }),
+  );
+  return output;
+}
+
+/**
+ * The `extract` stage event. Match counts are reported only on `OK`, when
+ * every row has been resolved and recorded.
+ */
+function stageEvent(
+  event: ProcessingRunInput,
+  measurements: ExtractionMeasurements,
+  result: Pick<
+    StageEvent,
+    'outcome' | 'durationMs' | 'errorName' | 'requestId'
+  >,
+): StageEvent {
+  const { source } = event;
+  const counts =
+    result.outcome === 'OK' ? measurements.playerMatchCounts : undefined;
+  const optional = (values: Record<string, number | undefined>) =>
+    Object.fromEntries(
+      Object.entries(values).filter(([, value]) => value !== undefined),
+    ) as Record<string, number>;
+  return {
+    stage: 'extract',
+    ...result,
+    ids: {
+      submissionId: source?.submissionId,
+      screenshotId: source?.screenshotId,
+      runId: measurements.runId,
+    },
+    trace: event.trace,
+    properties: {
+      ...(source?.acquisitionType
+        ? { acquisitionType: source.acquisitionType }
+        : {}),
+      ...optional({
+        imageBytes: measurements.imageBytes,
+        widthPx: measurements.widthPx,
+        heightPx: measurements.heightPx,
+        rowCount: measurements.rowCount,
+        reviewRequiredCells: measurements.reviewRequiredCells,
+        meanConfidence: measurements.meanConfidence,
+        textractMs: measurements.textractMs,
+        exactRows: counts?.exact,
+        resolvedRows: counts?.resolved,
+        unmatchedRows: counts?.unmatched,
+      }),
+    },
+    metrics: optional({
+      TextractLatency: measurements.textractMs,
+      OcrMeanConfidence: measurements.meanConfidence,
+      ReviewRequiredCells: measurements.reviewRequiredCells,
+    }),
+    ...(counts
+      ? {
+          breakdowns: {
+            playerRows: {
+              EXACT: counts.exact,
+              RESOLVED: counts.resolved,
+              UNMATCHED: counts.unmatched,
+            },
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * Records one processing run. `measurements` is filled in as the run proceeds
+ * and stays readable after the run returns or throws.
+ */
+async function extract(
+  event: ProcessingRunInput,
+  dependencies: ExtractTextDependencies,
+  measurements: ExtractionMeasurements,
 ): Promise<ExtractTextOutput> {
   const { source } = event;
   const runId = dependencies.id();
+  measurements.runId = runId;
   const runPrefix = processingRunPrefix(source, runId);
   const startedAt = dependencies.timestamp();
   let request: S3ObjectReference | undefined;
@@ -195,6 +317,11 @@ export async function runExtraction(
   try {
     const image = await dependencies.getImage(source.bucket, source.key);
     const metadata = await dependencies.inspectImage(image);
+    Object.assign(measurements, {
+      imageBytes: image.byteLength,
+      widthPx: metadata.width,
+      heightPx: metadata.height,
+    });
     validateTextractImage(image, metadata, source.sha256);
     // The roster is read before Textract, so a roster failure never costs a
     // provider call.
@@ -241,6 +368,8 @@ export async function runExtraction(
       playerResolution: resolutions[index],
     }));
     const playerMatchCounts = countMatches(resolutions);
+    measurements.rowCount = rows.length;
+    measurements.playerMatchCounts = playerMatchCounts;
     const normalized = normalize(rawBlocks, source, runId);
     Object.assign(measurements, cellMeasurements(normalized.cells));
     const normalizedArtifact = await dependencies.writeJson(
