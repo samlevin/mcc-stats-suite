@@ -75,7 +75,7 @@ function observations(overrides: Record<string, unknown> = {}): unknown {
       roster,
       blocks: [],
       parser: {
-        version: 'scoreboard-parser-v5',
+        version: 'scoreboard-parser-v6',
         rows: [{ ...row, playerResolution: resolved }],
         rowColors: [],
       },
@@ -206,7 +206,7 @@ test('a run without resolutions renders an empty PlayerMatch', async () => {
       writes,
       observations({
         roster: undefined,
-        parser: { version: 'scoreboard-parser-v5', rows: [row], rowColors: [] },
+        parser: { version: 'scoreboard-parser-v6', rows: [row], rowColors: [] },
       }),
     ),
   );

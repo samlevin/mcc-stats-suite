@@ -47,16 +47,24 @@ export interface SourceScreenshot extends S3ObjectReference {
  * - `SPLIT_TRAILING_DIGITS`: the value ends in a digits-only word that follows
  *   a word ending in a letter, and Textract read one of the two with low
  *   confidence, so the space between them may be a misread.
+ * - `UNMAPPED_COLUMN`: the parser could not tell which column holds the stat,
+ *   so the value is empty.
  */
-export type RowReviewCode = 'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS';
+export type RowReviewCode =
+  'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS' | 'UNMAPPED_COLUMN';
 
 /** A deterministic review flag on one field of an extracted row. */
-export interface RowReviewFlag {
-  field: 'player';
-  code: RowReviewCode;
-  /** Lowest Textract WORD confidence, 0 to 100, among the words the rule read. */
-  wordConfidence: number;
-}
+export type RowReviewFlag =
+  | {
+      field: 'player';
+      code: 'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS';
+      /** Lowest Textract WORD confidence, 0 to 100, among the words the rule read. */
+      wordConfidence: number;
+    }
+  | {
+      field: 'score' | 'kills' | 'assists' | 'deaths';
+      code: 'UNMAPPED_COLUMN';
+    };
 
 /**
  * How an observed cell differs from what the screenshot shows (spec 2.3 §7.3).
