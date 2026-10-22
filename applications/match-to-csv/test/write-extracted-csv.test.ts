@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { afterEach, beforeEach, test } from 'node:test';
 import type {
   CsvRow,
   ExtractTextOutput,
@@ -10,6 +10,8 @@ import {
   writeExtractedCsv,
   type WriteExtractedCsvDependencies,
 } from '../src/lambdas/write-extracted-csv';
+import { publishStageEvent, type StageEvent } from '../src/lib/metrics';
+import { captureLogLines, withoutTimestamp } from './support/log-lines';
 
 const runPrefix = 'submissions/submission-1/screenshots/screen-1/runs/run-1';
 
@@ -65,6 +67,35 @@ const event: ExtractTextOutput = {
   roster,
 };
 
+const trace = {
+  executionId:
+    'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
+  retryCount: 1,
+  workflow: 'REPLAY',
+} as const;
+
+let stageEvents: StageEvent[] = [];
+
+/** A clock that advances 120 ms on each reading. */
+function clock(): () => number {
+  let next = 0;
+  return () => {
+    const current = next;
+    next += 120;
+    return current;
+  };
+}
+
+let logLines: string[] = [];
+let restoreStdout = () => {};
+beforeEach(() => {
+  ({ lines: logLines, restore: restoreStdout } = captureLogLines());
+  stageEvents = [];
+});
+afterEach(() => {
+  restoreStdout();
+});
+
 /** Normalized observations as `extract-text` writes them, round-tripped through JSON. */
 function observations(overrides: Record<string, unknown> = {}): unknown {
   return JSON.parse(
@@ -97,6 +128,10 @@ function dependencies(
     async putObject(_bucket, key, body) {
       writes.set(key, body);
     },
+    publishStageEvent(stageEvent) {
+      stageEvents.push(stageEvent);
+    },
+    now: clock(),
   };
 }
 
@@ -248,4 +283,160 @@ test('export does not hide storage failures', async () => {
     }),
     /storage unavailable/,
   );
+});
+
+test('a stored CSV writes one OK stage event', async () => {
+  await writeExtractedCsv(
+    { ...event, trace },
+    dependencies(new Map()),
+    'request-1',
+  );
+
+  assert.deepEqual(stageEvents, [
+    {
+      stage: 'write-csv',
+      outcome: 'OK',
+      durationMs: 120,
+      ids: {
+        submissionId: 'submission-1',
+        screenshotId: 'screen-1',
+        runId: 'run-1',
+      },
+      trace,
+      requestId: 'request-1',
+      properties: { rowCount: 1, exportedScreenshotId: 'screen-1' },
+      metrics: { CsvWritten: 1 },
+    },
+  ]);
+});
+
+test('a failure writes one ERROR stage event before the error is rethrown', async () => {
+  await assert.rejects(
+    writeExtractedCsv(
+      event,
+      dependencies(new Map(), observations({ runId: 'run-2' })),
+      'request-1',
+    ),
+    (error: Error) => {
+      // The event is already written when the error reaches the caller.
+      assert.equal(stageEvents.length, 1);
+      return error.name === 'NormalizedObservationsMismatchError';
+    },
+  );
+
+  assert.deepEqual(stageEvents, [
+    {
+      stage: 'write-csv',
+      outcome: 'ERROR',
+      durationMs: 120,
+      ids: {
+        submissionId: 'submission-1',
+        screenshotId: 'screen-1',
+        runId: 'run-1',
+      },
+      trace: undefined,
+      requestId: 'request-1',
+      errorName: 'NormalizedObservationsMismatchError',
+      properties: {},
+      metrics: {},
+    },
+  ]);
+});
+
+test('a publisher failure is logged and never fails the invocation', async () => {
+  const publisher = (): void => {
+    throw new TypeError('cannot write');
+  };
+  const result = await writeExtractedCsv(event, {
+    ...dependencies(new Map()),
+    publishStageEvent: publisher,
+  });
+  assert.equal(result.rowCount, 1);
+
+  await assert.rejects(
+    writeExtractedCsv(event, {
+      ...dependencies(new Map(), null),
+      publishStageEvent: publisher,
+    }),
+    { name: 'NormalizedObservationsMismatchError' },
+  );
+
+  const errors = logLines
+    .map((line) =>
+      withoutTimestamp(JSON.parse(line) as Record<string, unknown>),
+    )
+    .filter((record) => record.level === 'ERROR');
+  assert.deepEqual(errors, [
+    {
+      level: 'ERROR',
+      message: 'Stage event not written',
+      stage: 'write-csv',
+      errorName: 'TypeError',
+    },
+    {
+      level: 'ERROR',
+      message: 'Stage event not written',
+      stage: 'write-csv',
+      errorName: 'TypeError',
+    },
+  ]);
+});
+
+test('published write-csv events carry CsvWritten and never row content', async () => {
+  for (const environment of [{}, { EMF_METRICS_ENABLED: 'false' }]) {
+    const lines: string[] = [];
+    const publishing = (input: ExtractTextOutput, document?: unknown) =>
+      writeExtractedCsv(input, {
+        ...dependencies(new Map(), document),
+        publishStageEvent(stageEvent) {
+          publishStageEvent(
+            stageEvent,
+            (line) => lines.push(line),
+            environment,
+            0,
+          );
+        },
+      });
+    await publishing({ ...event, trace });
+    await assert.rejects(publishing(event, null));
+
+    const records = lines.map(
+      (line) => JSON.parse(line) as Record<string, unknown>,
+    );
+    assert.deepEqual(
+      records.map((record) => [record.Stage, record.outcome]),
+      [
+        ['write-csv', 'OK'],
+        ['write-csv', 'ERROR'],
+      ],
+    );
+    const [ok, failed] = records;
+    assert.equal(ok.exportedScreenshotId, 'screen-1');
+    assert.equal(ok.workflow, 'REPLAY');
+    assert.ok(!('exportedScreenshotId' in failed));
+    if (environment.EMF_METRICS_ENABLED === 'false') {
+      assert.ok(records.every((record) => !('_aws' in record)));
+      assert.ok(!('CsvWritten' in ok));
+    } else {
+      assert.deepEqual(
+        (ok._aws as { CloudWatchMetrics: unknown[] }).CloudWatchMetrics,
+        [
+          {
+            Namespace: 'MCC/MatchToCsv',
+            Dimensions: [['Stage']],
+            Metrics: [{ Name: 'CsvWritten', Unit: 'Count' }],
+          },
+        ],
+      );
+      assert.equal(ok.CsvWritten, 1);
+      assert.ok(!('CsvWritten' in failed));
+      assert.equal(failed.StageErrors, 1);
+      assert.equal(failed.ErrorClass, 'INTEGRITY');
+    }
+
+    const visible = lines.join('');
+    for (const content of ['PIayer05', 'Player05', 'entry-5', 'Red']) {
+      assert.ok(!visible.includes(content), content);
+    }
+  }
 });

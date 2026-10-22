@@ -13,7 +13,11 @@ import type {
 import { GAMERTAG_PATTERN } from '@mcc/roster';
 import { exportDate, rowsToGamertagCsv } from '../lib/csv';
 import { log } from '../lib/log';
-import { publishStageEvent, type StageEvent } from '../lib/metrics';
+import {
+  publishStageEvent,
+  publishWithoutFailing,
+  type StageEvent,
+} from '../lib/metrics';
 import { readReceivedAt } from '../lib/received-at';
 import { bodyToBuffer, namespacedObjectKey } from '../lib/s3';
 
@@ -120,7 +124,7 @@ export async function writeGamertagCsvs(
   try {
     output = await writeFiles(event, dependencies, counts);
   } catch (error) {
-    publish(dependencies, {
+    publishWithoutFailing(dependencies, {
       ...base,
       outcome: 'ERROR',
       durationMs: dependencies.now() - startedAt,
@@ -135,7 +139,7 @@ export async function writeGamertagCsvs(
   const receivedAt = readReceivedAt(event.receivedAt);
   const endToEndMs =
     receivedAt === undefined ? undefined : finishedAt - Date.parse(receivedAt);
-  publish(dependencies, {
+  publishWithoutFailing(dependencies, {
     ...base,
     outcome: 'OK',
     durationMs: finishedAt - startedAt,
@@ -151,24 +155,6 @@ export async function writeGamertagCsvs(
     },
   });
   return output;
-}
-
-/**
- * Writes the stage event. A failure to build or write it is logged and never
- * fails the invocation.
- */
-function publish(
-  dependencies: WriteGamertagCsvsDependencies,
-  event: StageEvent,
-): void {
-  try {
-    dependencies.publishStageEvent(event);
-  } catch (error) {
-    log('ERROR', 'Stage event not written', {
-      stage: event.stage,
-      errorName: error instanceof Error ? error.name : 'Error',
-    });
-  }
 }
 
 async function writeFiles(
