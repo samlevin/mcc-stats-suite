@@ -373,7 +373,7 @@ test('runExtraction succeeds with no rows and records why for a board that is no
   assert.equal(completion.metrics.extractedRowCount, 0);
   assert.deepEqual(result.rows, []);
   assert.deepEqual(publishedRowCounts, [0]);
-  assert.equal(parser.version, 'scoreboard-parser-v5');
+  assert.equal(parser.version, 'scoreboard-parser-v6');
   assert.deepEqual(parser.rows, []);
   assert.deepEqual(parser.noRowsReason, {
     code: 'UNSUPPORTED_TEAM_LAYOUT',
