@@ -29,7 +29,7 @@ export function eligible(item) {
     item.content?.__typename === 'Issue' &&
     item.content.repository.nameWithOwner === REPOSITORY &&
     item.content.state === 'OPEN' &&
-    item.fields.Status === 'Inbox' &&
+    (item.fields.Status === undefined || item.fields.Status === 'Inbox') &&
     PRIORITIES.includes(item.fields.Priority) &&
     severity.length === 1 &&
     SEVERITIES.includes(severity[0]) &&
@@ -449,7 +449,7 @@ export async function reconcile({
       continue;
     candidates++;
     log(
-      `${dryRun ? 'DRY_RUN would move' : 'Moving'} issue #${fresh.content.number} Inbox -> Ready`,
+      `${dryRun ? 'DRY_RUN would move' : 'Moving'} issue #${fresh.content.number} ${fresh.fields.Status ?? 'empty Status'} -> Ready`,
     );
     if (dryRun) continue;
     await updateProjectStatus(api, context, fresh.id, 'Ready');
