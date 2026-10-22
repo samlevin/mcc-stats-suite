@@ -234,7 +234,7 @@ for (const [environment, ephemeral] of [
     const functions = Object.values(
       template.findResources('AWS::Lambda::Function'),
     );
-    assert.equal(functions.length, 6);
+    assert.equal(functions.length, 7);
     for (const fn of functions) {
       const name = fn.Properties.FunctionName as string;
       const loggingConfig = fn.Properties.LoggingConfig as Record<
