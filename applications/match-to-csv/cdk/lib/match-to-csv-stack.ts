@@ -361,10 +361,15 @@ export class MatchToCsvStack extends Stack {
     // recipient's verified identity, so a grant on the domain identity alone
     // gets AccessDenied. The grant therefore names every identity in this
     // account and Region, and allows only the noreply@<domain> From address.
-    for (const sender of [processEmail, emailGamertagCsvs]) {
+    // SES authorizes a Content.Simple send as ses:SendEmail and a Content.Raw
+    // send, which the CSV attachments need, as ses:SendRawEmail.
+    for (const [sender, action] of [
+      [processEmail, 'ses:SendEmail'],
+      [emailGamertagCsvs, 'ses:SendRawEmail'],
+    ] as const) {
       sender.addToRolePolicy(
         new iam.PolicyStatement({
-          actions: ['ses:SendEmail'],
+          actions: [action],
           resources: [
             this.formatArn({
               service: 'ses',

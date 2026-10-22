@@ -129,8 +129,14 @@ test('process email may send only from noreply at its environment email domain',
       ['ProcessEmail', 'EmailGamertagCsvs'],
       label,
     );
+    // The match date reply sends Content.Simple; the results email sends
+    // Content.Raw for its attachments, which SES authorizes separately.
+    assert.deepEqual(
+      sesStatements.map((statement) => statement.Action),
+      ['ses:SendEmail', 'ses:SendRawEmail'],
+      label,
+    );
     for (const statement of sesStatements) {
-      assert.equal(statement.Action, 'ses:SendEmail', label);
       // In the SES sandbox, SES also authorizes the send against the
       // recipient's identity, so the grant names every identity in the
       // stack's account and Region and limits the From address instead.
