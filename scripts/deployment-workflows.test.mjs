@@ -139,7 +139,8 @@ function runPrerequisites(stub) {
     `/mcc/${environment}/match-to-csv/receipt-rule-set-name`,
     `/mcc/${environment}/match-to-csv/email-domain`,
     `/mcc/${environment}/roster/table-name`,
-  ].slice(0, stub.parameterCount ?? 7);
+    `/mcc/${environment}/recipients/table-name`,
+  ].slice(0, stub.parameterCount ?? 8);
   const values = {
     [`/mcc/${environment}/match-to-csv/receipt-rule-set-name`]: `mcc-match-to-csv-${environment}`,
     [`/mcc/${environment}/match-to-csv/email-domain`]: 'mail.example.com',
@@ -200,7 +201,8 @@ const prerequisiteCalls = (environment) => [
     `/mcc/${environment}/match-to-csv/data-key-arn ` +
     `/mcc/${environment}/match-to-csv/receipt-rule-set-name ` +
     `/mcc/${environment}/match-to-csv/email-domain ` +
-    `/mcc/${environment}/roster/table-name --output json`,
+    `/mcc/${environment}/roster/table-name ` +
+    `/mcc/${environment}/recipients/table-name --output json`,
   'aws ses describe-active-receipt-rule-set --query Metadata.Name --output text',
   'aws ses get-identity-verification-attributes --identities mail.example.com ' +
     '--query VerificationAttributes.*.VerificationStatus | [0] --output text',
@@ -274,6 +276,11 @@ for (const [name, stub, message] of [
   [
     'the roster table parameter is missing',
     { parameterCount: 6 },
+    'parameters are missing',
+  ],
+  [
+    'the recipient table parameter is missing',
+    { parameterCount: 7 },
     'parameters are missing',
   ],
   [

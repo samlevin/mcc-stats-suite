@@ -89,6 +89,7 @@ After a `match-to-csv` change reaches dev, and before approving prod:
 2. Open the new `match-to-csv-dev` Step Functions execution and confirm every state succeeds.
 3. In the evidence bucket, confirm the run contains the source image, metadata, run manifest, start and success events, Textract request and response, normalized observations, extracted table, CSV, and completion object.
 4. Compare the CSV with the screenshot. OCR differences are observations to label, not corruption.
+5. With a loaded roster and a verified test address on the dev recipient list, confirm one email arrives with one CSV per roster player on the screenshots, and that the submission's `export/csv-email.json` has status `SENT`.
 
 For a rejection test, send only an unsupported or undersized image. The submission's `completion.json` has status `REJECTED` with `NO_PROCESSABLE_SCREENSHOTS`, and the execution ends as succeeded at the `Submission rejected` state without running OCR. For a provider failure, the run contains `RUN_STARTED`, `RUN_FAILED`, the provider request, and a failed completion object.
 
@@ -159,7 +160,7 @@ Gamertags are typed as arguments and printed only to your terminal. The script r
 
 ## Maintain the CSV recipient list
 
-Each environment's recipient table holds the addresses that receive each submission's per-gamertag CSVs ([spec 1.1 §4.5](../../specs/1.1-mcc-analytics-engine.md#45-csv-recipient-list)). No application reads it yet. Administrators maintain it with `scripts/recipients.mjs`, which writes the table directly with their own AWS credentials. Only administrators change the list. The script needs DynamoDB, KMS, and SSM rights that the `mcc-<environment>-admin` profiles from [prerequisites](00-prerequisites.md#sso-profiles) already have, and no narrower operator policy exists. The recipient table must be applied in that environment's foundation first. The script also needs the AWS CLI and a repository checkout with dependencies installed.
+Each environment's recipient table holds the addresses that receive each submission's per-gamertag CSVs ([spec 1.1 §4.5](../../specs/1.1-mcc-analytics-engine.md#45-csv-recipient-list)). Each `match-to-csv` stack emails the CSVs to the active entries of its own namespace ([results email](../../applications/match-to-csv/README.md#results-email)). In the SES sandbox, every recipient must also be a verified SES identity; production recipients receive mail only after SES production access is granted in the prod account. Administrators maintain it with `scripts/recipients.mjs`, which writes the table directly with their own AWS credentials. Only administrators change the list. The script needs DynamoDB, KMS, and SSM rights that the `mcc-<environment>-admin` profiles from [prerequisites](00-prerequisites.md#sso-profiles) already have, and no narrower operator policy exists. The recipient table must be applied in that environment's foundation first. The script also needs the AWS CLI and a repository checkout with dependencies installed.
 
 ```console
 export AWS_PROFILE=mcc-dev-admin
