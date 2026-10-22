@@ -14,7 +14,7 @@ The issue owns the problem, scope, decisions, acceptance criteria, dependencies,
 
 | Status | Meaning |
 | --- | --- |
-| Inbox | Needs triage. Don't implement it. |
+| Empty or Inbox | Needs triage. Don't implement it. |
 | Ready | Metadata triaged. Set automatically once Priority, one severity, and Size are valid. |
 | In progress | One owner has claimed it and started. |
 | In review | A PR links the issue. |

@@ -116,41 +116,60 @@ test('process email may send only from noreply at its environment email domain',
     const sesStatements = statements.filter((statement) =>
       [statement.Action].flat().some((action) => action.startsWith('ses:')),
     );
-    assert.equal(sesStatements.length, 1, label);
-    assert.equal(sesStatements[0].Action, 'ses:SendEmail', label);
-    assert.ok(sesStatements[0].roles.includes('ProcessEmail'), label);
-    // In the SES sandbox, SES also authorizes the send against the
-    // recipient's identity, so the grant names every identity in the stack's
-    // account and Region and limits the From address instead.
+    // One grant each for the match date reply and the results email.
+    assert.equal(sesStatements.length, 2, label);
     assert.deepEqual(
-      sesStatements[0].Resource,
-      {
-        'Fn::Join': [
-          '',
-          [
-            'arn:',
-            { Ref: 'AWS::Partition' },
-            ':ses:',
-            { Ref: 'AWS::Region' },
-            ':',
-            { Ref: 'AWS::AccountId' },
-            ':identity/*',
-          ],
-        ],
-      },
+      sesStatements.map((statement) =>
+        statement.roles.includes('ProcessEmail')
+          ? 'ProcessEmail'
+          : statement.roles.includes('EmailGamertagCsvs')
+            ? 'EmailGamertagCsvs'
+            : statement.roles,
+      ),
+      ['ProcessEmail', 'EmailGamertagCsvs'],
       label,
     );
+    // The match date reply sends Content.Simple; the results email sends
+    // Content.Raw for its attachments, which SES authorizes separately.
     assert.deepEqual(
-      sesStatements[0].Condition,
-      {
-        StringEquals: {
-          'ses:FromAddress': {
-            'Fn::Join': ['', ['noreply@', { Ref: domain.Ref }]],
+      sesStatements.map((statement) => statement.Action),
+      ['ses:SendEmail', 'ses:SendRawEmail'],
+      label,
+    );
+    for (const statement of sesStatements) {
+      // In the SES sandbox, SES also authorizes the send against the
+      // recipient's identity, so the grant names every identity in the
+      // stack's account and Region and limits the From address instead.
+      assert.deepEqual(
+        statement.Resource,
+        {
+          'Fn::Join': [
+            '',
+            [
+              'arn:',
+              { Ref: 'AWS::Partition' },
+              ':ses:',
+              { Ref: 'AWS::Region' },
+              ':',
+              { Ref: 'AWS::AccountId' },
+              ':identity/*',
+            ],
+          ],
+        },
+        label,
+      );
+      assert.deepEqual(
+        statement.Condition,
+        {
+          StringEquals: {
+            'ses:FromAddress': {
+              'Fn::Join': ['', ['noreply@', { Ref: domain.Ref }]],
+            },
           },
         },
-      },
-      label,
-    );
+        label,
+      );
+    }
   }
 });
 
@@ -174,7 +193,7 @@ for (const [environment, ephemeral, retention] of [
       }
     >;
     const logGroups = template.findResources('AWS::Logs::LogGroup');
-    assert.equal(Object.keys(logGroups).length, 7);
+    assert.equal(Object.keys(logGroups).length, 8);
     for (const group of Object.values(logGroups)) {
       assert.equal(group.Properties.RetentionInDays, retention);
       assert.equal(
@@ -184,7 +203,7 @@ for (const [environment, ephemeral, retention] of [
       assert.equal(group.UpdateReplacePolicy, ephemeral ? 'Delete' : 'Retain');
     }
     const functions = template.findResources('AWS::Lambda::Function');
-    assert.equal(Object.keys(functions).length, 6);
+    assert.equal(Object.keys(functions).length, 7);
     const prefix = `match-to-csv-${ephemeral ? `e-${ephemeral}` : environment}-`;
     const functionNames = new Set<string>();
     for (const fn of Object.values(functions)) {
@@ -198,7 +217,7 @@ for (const [environment, ephemeral, retention] of [
         `/aws/lambda/${functionName}`,
       );
     }
-    assert.equal(functionNames.size, 6);
+    assert.equal(functionNames.size, 7);
     if (ephemeral) {
       for (const resource of Object.values(resources)) {
         assert.notEqual(resource.DeletionPolicy, 'Retain');
@@ -207,6 +226,66 @@ for (const [environment, ephemeral, retention] of [
     }
   });
 }
+
+for (const [environment, ephemeral] of [
+  ['dev', undefined],
+  ['prod', undefined],
+  ['dev', 'test'],
+] as const) {
+  test(`${environment} ${ephemeral ?? 'stable'} lambdas log JSON at INFO with build details and the metrics switch`, () => {
+    const template = synthesize(
+      { environment, ...(ephemeral ? { ephemeral } : {}) },
+      { GIT_SHA: 'abc123' },
+    );
+    const functions = Object.values(
+      template.findResources('AWS::Lambda::Function'),
+    );
+    assert.equal(functions.length, 7);
+    for (const fn of functions) {
+      const name = fn.Properties.FunctionName as string;
+      const loggingConfig = fn.Properties.LoggingConfig as Record<
+        string,
+        unknown
+      >;
+      assert.equal(loggingConfig.LogFormat, 'JSON', name);
+      assert.equal(loggingConfig.ApplicationLogLevel, 'INFO', name);
+      assert.equal(loggingConfig.SystemLogLevel, 'INFO', name);
+      const variables = fn.Properties.Environment.Variables as Record<
+        string,
+        unknown
+      >;
+      assert.equal(variables.GIT_SHA, 'abc123', name);
+      assert.equal(
+        variables.DEPLOYMENT_ENVIRONMENT,
+        environment.toUpperCase(),
+        name,
+      );
+      if (ephemeral) {
+        assert.equal(variables.EMF_METRICS_ENABLED, 'false', name);
+      } else {
+        assert.ok(!('EMF_METRICS_ENABLED' in variables), name);
+      }
+    }
+  });
+}
+
+test('the ingest workflow logs only errors and no execution data', () => {
+  for (const ephemeral of [undefined, 'test']) {
+    const template = synthesize({
+      environment: 'dev',
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    template.hasResourceProperties('AWS::StepFunctions::StateMachine', {
+      StateMachineName: ephemeral
+        ? `match-to-csv-e-${ephemeral}`
+        : 'match-to-csv-dev',
+      LoggingConfiguration: Match.objectLike({
+        Level: 'ERROR',
+        IncludeExecutionData: false,
+      }),
+    });
+  }
+});
 
 type AlarmResource = {
   Properties: {
@@ -222,7 +301,8 @@ type AlarmResource = {
   };
 };
 
-for (const environment of ['dev', 'prod'] as const) {
+// Only prod has alarms.
+for (const environment of ['prod'] as const) {
   test(`${environment} alarms publish failures to the stack topic`, () => {
     const template = synthesize({ environment });
     const prefix = `match-to-csv-${environment}`;
@@ -248,6 +328,7 @@ for (const environment of ['dev', 'prod'] as const) {
       ['ExtractTextErrors', 'AWS/Lambda', 'Errors'],
       ['WriteExtractedCsvErrors', 'AWS/Lambda', 'Errors'],
       ['WriteGamertagCsvsErrors', 'AWS/Lambda', 'Errors'],
+      ['EmailGamertagCsvsErrors', 'AWS/Lambda', 'Errors'],
       ['CompareRunsErrors', 'AWS/Lambda', 'Errors'],
       ['MaterializeTrainingDataErrors', 'AWS/Lambda', 'Errors'],
       ['ZeroRowExtractions', 'MCC/MatchToCsv', 'ZeroRowExtractions'],
@@ -329,111 +410,135 @@ for (const environment of ['dev', 'prod'] as const) {
   });
 }
 
-test('ephemeral stacks create no alarms, topic, or subscription', () => {
-  const template = synthesize(
-    { environment: 'dev', ephemeral: 'test' },
-    { MCC_ALARM_EMAIL_PARAMETER: '/mcc/dev/match-to-csv/alarm-email' },
-  );
-  template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
-  template.resourceCountIs('AWS::SNS::Topic', 0);
-  template.resourceCountIs('AWS::SNS::Subscription', 0);
-});
+for (const ephemeral of [undefined, 'test'] as const) {
+  test(`dev ${ephemeral ? 'ephemeral' : 'stable'} stacks create no alarms, topic, or subscription`, () => {
+    const template = synthesize(
+      { environment: 'dev', ...(ephemeral ? { ephemeral } : {}) },
+      { MCC_ALARM_EMAIL_PARAMETER: '/mcc/dev/match-to-csv/alarm-email' },
+    );
+    template.resourceCountIs('AWS::CloudWatch::Alarm', 0);
+    template.resourceCountIs('AWS::SNS::Topic', 0);
+    template.resourceCountIs('AWS::SNS::Subscription', 0);
+  });
+}
 
-test('extract text reads only its own roster partition of the foundation roster table', () => {
-  for (const [environment, ephemeral, namespace] of [
-    ['dev', undefined, 'stable'],
-    ['prod', undefined, 'stable'],
-    ['dev', 'test', 'ephemeral/test'],
-  ] as const) {
-    const label = `${environment} ${ephemeral ?? 'stable'}`;
-    const template = synthesize({
-      environment,
-      ...(ephemeral ? { ephemeral } : {}),
-    });
-    const parameters = template.toJSON().Parameters as Record<
-      string,
-      { Type: string; Default?: string }
-    >;
-    const [fn] = Object.values(
-      template.findResources('AWS::Lambda::Function', {
-        Properties: { FunctionName: Match.stringLikeRegexp('-ExtractText$') },
-      }),
-    );
-    const variables = fn.Properties.Environment.Variables as Record<
-      string,
-      unknown
-    >;
-    assert.equal(variables.ROSTER_NAMESPACE, namespace, label);
-    // The table name resolves from the foundation's parameter at deploy time.
-    const tableName = variables.ROSTER_TABLE as { Ref: string };
-    assert.deepEqual(
-      parameters[tableName.Ref],
-      {
-        Type: 'AWS::SSM::Parameter::Value<String>',
-        Default: `/mcc/${environment}/roster/table-name`,
-      },
-      label,
-    );
-
-    const statements = Object.values(
-      template.findResources('AWS::IAM::Policy'),
-    ).flatMap((policy) =>
-      (
-        policy.Properties.PolicyDocument.Statement as Array<{
-          Action: string | string[];
-          Resource: unknown;
-          Condition?: unknown;
-        }>
-      ).map((statement) => ({
-        ...statement,
-        roles: JSON.stringify(policy.Properties.Roles),
-      })),
-    );
-    // One read-only statement, on ExtractText only.
-    const dynamoStatements = statements.filter((statement) =>
-      [statement.Action]
-        .flat()
-        .some((action) => action.startsWith('dynamodb:')),
-    );
-    assert.equal(dynamoStatements.length, 1, label);
-    const [statement] = dynamoStatements;
-    assert.ok(statement.roles.includes('ExtractText'), label);
-    assert.deepEqual(
-      statement.Action,
-      ['dynamodb:GetItem', 'dynamodb:Query'],
-      label,
-    );
-    assert.deepEqual(
-      statement.Resource,
-      {
-        'Fn::Join': [
-          '',
-          [
-            'arn:',
-            { Ref: 'AWS::Partition' },
-            ':dynamodb:',
-            { Ref: 'AWS::Region' },
-            ':',
-            { Ref: 'AWS::AccountId' },
-            ':table/',
-            { Ref: tableName.Ref },
-          ],
-        ],
-      },
-      label,
-    );
-    assert.deepEqual(
-      statement.Condition,
-      {
-        'ForAllValues:StringEquals': {
-          'dynamodb:LeadingKeys': `ROSTER#${namespace}`,
+for (const table of [
+  {
+    reader: 'ExtractText',
+    tableVariable: 'ROSTER_TABLE',
+    namespaceVariable: 'ROSTER_NAMESPACE',
+    parameter: 'roster/table-name',
+    partition: 'ROSTER#',
+  },
+  {
+    reader: 'EmailGamertagCsvs',
+    tableVariable: 'RECIPIENTS_TABLE',
+    namespaceVariable: 'RECIPIENTS_NAMESPACE',
+    parameter: 'recipients/table-name',
+    partition: 'RECIPIENTS#',
+  },
+] as const) {
+  test(`${table.reader} reads only its own partition of the ${table.parameter} table`, () => {
+    for (const [environment, ephemeral, namespace] of [
+      ['dev', undefined, 'stable'],
+      ['prod', undefined, 'stable'],
+      ['dev', 'test', 'ephemeral/test'],
+    ] as const) {
+      const label = `${environment} ${ephemeral ?? 'stable'}`;
+      const template = synthesize({
+        environment,
+        ...(ephemeral ? { ephemeral } : {}),
+      });
+      const parameters = template.toJSON().Parameters as Record<
+        string,
+        { Type: string; Default?: string }
+      >;
+      const [fn] = Object.values(
+        template.findResources('AWS::Lambda::Function', {
+          Properties: {
+            FunctionName: Match.stringLikeRegexp(`-${table.reader}$`),
+          },
+        }),
+      );
+      const variables = fn.Properties.Environment.Variables as Record<
+        string,
+        unknown
+      >;
+      assert.equal(variables[table.namespaceVariable], namespace, label);
+      // The table name resolves from the foundation's parameter at deploy time.
+      const tableName = variables[table.tableVariable] as { Ref: string };
+      assert.deepEqual(
+        parameters[tableName.Ref],
+        {
+          Type: 'AWS::SSM::Parameter::Value<String>',
+          Default: `/mcc/${environment}/${table.parameter}`,
         },
-        Null: { 'dynamodb:LeadingKeys': 'false' },
-      },
-      label,
-    );
-  }
-});
+        label,
+      );
+
+      const statements = Object.values(
+        template.findResources('AWS::IAM::Policy'),
+      ).flatMap((policy) =>
+        (
+          policy.Properties.PolicyDocument.Statement as Array<{
+            Action: string | string[];
+            Resource: unknown;
+            Condition?: unknown;
+          }>
+        ).map((statement) => ({
+          ...statement,
+          roles: JSON.stringify(policy.Properties.Roles),
+        })),
+      );
+      // One read-only statement per table, each on its reader only.
+      const dynamoStatements = statements.filter((statement) =>
+        [statement.Action]
+          .flat()
+          .some((action) => action.startsWith('dynamodb:')),
+      );
+      assert.equal(dynamoStatements.length, 2, label);
+      const own = dynamoStatements.filter((statement) =>
+        statement.roles.includes(table.reader),
+      );
+      assert.equal(own.length, 1, label);
+      const [statement] = own;
+      assert.deepEqual(
+        statement.Action,
+        ['dynamodb:GetItem', 'dynamodb:Query'],
+        label,
+      );
+      assert.deepEqual(
+        statement.Resource,
+        {
+          'Fn::Join': [
+            '',
+            [
+              'arn:',
+              { Ref: 'AWS::Partition' },
+              ':dynamodb:',
+              { Ref: 'AWS::Region' },
+              ':',
+              { Ref: 'AWS::AccountId' },
+              ':table/',
+              { Ref: tableName.Ref },
+            ],
+          ],
+        },
+        label,
+      );
+      assert.deepEqual(
+        statement.Condition,
+        {
+          'ForAllValues:StringEquals': {
+            'dynamodb:LeadingKeys': `${table.partition}${namespace}`,
+          },
+          Null: { 'dynamodb:LeadingKeys': 'false' },
+        },
+        label,
+      );
+    }
+  });
+}
 
 test('write extracted CSV reads only run normalized observations from the evidence bucket', () => {
   for (const [environment, ephemeral, namespace] of [
@@ -587,7 +692,7 @@ test('every main workflow task payload carries INGEST trace context', () => {
     ...Object.values(definition.States),
     ...Object.values(item),
   ].filter((state) => state.Type === 'Task');
-  assert.equal(tasks.length, 6);
+  assert.equal(tasks.length, 7);
   for (const task of tasks) {
     assert.deepEqual(
       (task.Parameters as { trace: unknown }).trace,
@@ -747,18 +852,36 @@ test('the main workflow writes gamertag CSVs only after the attachments Map', ()
   ] as const) {
     const step = definition.States[name];
     assert.equal(step.Type, 'Task', name);
-    assert.equal(step.End, true, name);
+    assert.equal(step.Next, 'Email gamertag CSVs', name);
     assert.equal(step.Catch, undefined, name);
     assert.match(step.Resource as string, /^token:WriteGamertagCsvs/, name);
     assert.deepEqual(step.Parameters, expected, name);
     assert.equal(step.ResultPath, '$.gamertagCsvs', name);
   }
 
+  // The results email runs last, after every gamertag file exists. Only the
+  // gamertag step's output, the match date, the screenshot count and trace
+  // context enter it, never an address or a gamertag.
+  const email = definition.States['Email gamertag CSVs'];
+  assert.equal(email.Type, 'Task');
+  assert.equal(email.End, true);
+  assert.equal(email.Catch, undefined);
+  assert.match(email.Resource as string, /^token:EmailGamertagCsvs/);
+  assert.deepEqual(email.Parameters, {
+    'submissionId.$': '$.submissionId',
+    'matchDate.$': '$.matchDate',
+    'screenshotCount.$': 'States.ArrayLength($.screenshots)',
+    'gamertagCsvs.$': '$.gamertagCsvs',
+    trace: trace('INGEST'),
+  });
+  assert.equal(email.ResultPath, '$.csvEmail');
+
   const step = definition.States['Write gamertag CSVs'];
   for (const name of [
     'Process email and attachments',
     'Process email and attachments without receivedAt',
     'Write gamertag CSVs without receivedAt',
+    'Email gamertag CSVs',
   ]) {
     assert.deepEqual(definition.States[name].Retry, step.Retry, name);
   }
@@ -790,6 +913,7 @@ test('the main workflow writes gamertag CSVs only after the attachments Map', ()
     'Replay write extracted CSV',
   ]);
   assert.ok(!JSON.stringify(replay).includes('WriteGamertagCsvs'));
+  assert.ok(!JSON.stringify(replay).includes('EmailGamertagCsvs'));
 });
 
 test('the main workflow ends a rejected submission as succeeded and sends an accepted one to the Map', () => {
@@ -903,6 +1027,92 @@ test('write gamertag CSVs reads run tables and writes only submission gamertag e
           .some((action) =>
             /^(s3:Delete|s3:\*|dynamodb:|ses:|textract:)/.test(action),
           ),
+      ),
+      label,
+    );
+  }
+});
+
+test('email gamertag CSVs reads, lists and records only its submission exports', () => {
+  for (const [environment, ephemeral, namespace] of [
+    ['dev', undefined, ''],
+    ['prod', undefined, ''],
+    ['dev', 'test', 'ephemeral/test/'],
+  ] as const) {
+    const label = `${environment} ${ephemeral ?? 'stable'}`;
+    const template = synthesize({
+      environment,
+      ...(ephemeral ? { ephemeral } : {}),
+    });
+    const [fn] = Object.values(
+      template.findResources('AWS::Lambda::Function', {
+        Properties: {
+          FunctionName: Match.stringLikeRegexp('-EmailGamertagCsvs$'),
+        },
+      }),
+    );
+    const variables = fn.Properties.Environment.Variables as Record<
+      string,
+      unknown
+    >;
+    // The domain and bucket resolve from foundation parameters at deploy time.
+    assert.deepEqual(Object.keys(variables.EMAIL_FROM_DOMAIN as object), [
+      'Ref',
+    ]);
+    assert.deepEqual(Object.keys(variables.EVIDENCE_BUCKET as object), ['Ref']);
+
+    const statements = Object.values(template.findResources('AWS::IAM::Policy'))
+      .filter((policy) =>
+        JSON.stringify(policy.Properties.Roles).includes('EmailGamertagCsvs'),
+      )
+      .flatMap(
+        (policy) =>
+          policy.Properties.PolicyDocument.Statement as Array<{
+            Action: string | string[];
+            Resource: unknown;
+            Condition?: unknown;
+          }>,
+      );
+    const s3Statements = statements.filter((statement) =>
+      [statement.Action].flat().some((action) => action.startsWith('s3:')),
+    );
+    assert.deepEqual(
+      s3Statements.map((statement) => statement.Action).sort(),
+      ['s3:GetObject', 's3:ListBucket', 's3:PutObject'],
+      label,
+    );
+    const find = (action: string) =>
+      s3Statements.find((statement) => statement.Action === action);
+    const suffixes = (action: string) =>
+      [find(action)?.Resource]
+        .flat()
+        .map((resource) =>
+          (resource as { 'Fn::Join': [string, unknown[]] })['Fn::Join'][1]
+            .slice(4)
+            .join(''),
+        );
+    const record = `${namespace}submissions/*/export/csv-email.json`;
+    assert.deepEqual(
+      suffixes('s3:GetObject'),
+      [`/${namespace}submissions/*/export/gamertags/*`, `/${record}`],
+      label,
+    );
+    assert.deepEqual(suffixes('s3:PutObject'), [`/${record}`], label);
+    assert.deepEqual(suffixes('s3:ListBucket'), [''], label);
+    assert.deepEqual(
+      find('s3:ListBucket')?.Condition,
+      {
+        StringLike: {
+          's3:prefix': [`${namespace}submissions/*/export/gamertags/`, record],
+        },
+      },
+      label,
+    );
+    assert.ok(
+      !statements.some((statement) =>
+        [statement.Action]
+          .flat()
+          .some((action) => /^(s3:Delete|s3:\*|textract:|ssm:)/.test(action)),
       ),
       label,
     );

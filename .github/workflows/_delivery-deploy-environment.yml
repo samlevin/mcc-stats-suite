@@ -294,9 +294,10 @@ jobs:
               "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/receipt-rule-set-name" \
               "/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/email-domain" \
               "/mcc/${DEPLOYMENT_ENVIRONMENT}/roster/table-name" \
+              "/mcc/${DEPLOYMENT_ENVIRONMENT}/recipients/table-name" \
             --output json)"
-          if [ "$(jq '.Parameters | length' <<<"${PARAMETERS}")" != "7" ]; then
-            echo "::error::CDK bootstrap, match-to-csv foundation or roster table parameters are missing"
+          if [ "$(jq '.Parameters | length' <<<"${PARAMETERS}")" != "8" ]; then
+            echo "::error::CDK bootstrap, match-to-csv foundation, roster table or recipient table parameters are missing"
             exit 1
           fi
           parameter() {
@@ -327,17 +328,20 @@ jobs:
             echo "::error::The MX record for the published domain does not target SES inbound receiving in the deployment region"
             exit 1
           fi
-          # The alarm email is optional. CloudFormation resolves it from SSM, so
-          # the address never reaches the template or these logs.
-          ALARM_EMAIL_PARAMETER="/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/alarm-email"
-          ALARM_EMAIL_COUNT="$(aws ssm get-parameters \
-            --names "${ALARM_EMAIL_PARAMETER}" \
-            --query 'length(Parameters)' \
-            --output text)"
-          if [ "${ALARM_EMAIL_COUNT}" = "1" ]; then
-            echo "MCC_ALARM_EMAIL_PARAMETER=${ALARM_EMAIL_PARAMETER}" >> "${GITHUB_ENV}"
-          else
-            echo "::notice::${ALARM_EMAIL_PARAMETER} is not set; alarms publish to the stack topic without an email subscription"
+          # Only the prod stack has alarms, so only a prod deploy looks for the
+          # optional alarm email. CloudFormation resolves it from SSM, so the
+          # address never reaches the template or these logs.
+          if [ "${DEPLOYMENT_ENVIRONMENT}" = "prod" ]; then
+            ALARM_EMAIL_PARAMETER="/mcc/${DEPLOYMENT_ENVIRONMENT}/match-to-csv/alarm-email"
+            ALARM_EMAIL_COUNT="$(aws ssm get-parameters \
+              --names "${ALARM_EMAIL_PARAMETER}" \
+              --query 'length(Parameters)' \
+              --output text)"
+            if [ "${ALARM_EMAIL_COUNT}" = "1" ]; then
+              echo "MCC_ALARM_EMAIL_PARAMETER=${ALARM_EMAIL_PARAMETER}" >> "${GITHUB_ENV}"
+            else
+              echo "::notice::${ALARM_EMAIL_PARAMETER} is not set; alarms publish to the stack topic without an email subscription"
+            fi
           fi
       - name: Synthesize CDK app
         if: steps.version-guard.outputs.deploy == 'true'

@@ -29,7 +29,7 @@ export function eligible(item) {
     item.content?.__typename === 'Issue' &&
     item.content.repository.nameWithOwner === REPOSITORY &&
     item.content.state === 'OPEN' &&
-    item.fields.Status === 'Inbox' &&
+    (item.fields.Status === undefined || item.fields.Status === 'Inbox') &&
     PRIORITIES.includes(item.fields.Priority) &&
     severity.length === 1 &&
     SEVERITIES.includes(severity[0]) &&
@@ -312,14 +312,23 @@ export async function discover(
   return { projectId, fields: selected };
 }
 
-// Every project item, each with the first page of its field values and labels.
+// Statuses that eligible() never moves. The sweep filter excludes them by
+// name, so an empty Status, Inbox, and any status added later still reach
+// eligible(), which checks every condition again.
+export const SETTLED_STATUSES = ['Ready', 'In progress', 'In review', 'Done'];
+export const SWEEP_FILTER = `is:issue is:open -status:${SETTLED_STATUSES.map(
+  (status) => (status.includes(' ') ? `"${status}"` : status),
+).join(',')}`;
+
+// The open issue items that can qualify for Ready, each with the first page of
+// its field values and labels.
 export async function listItems(api, projectId) {
   return paginate(async (cursor) => {
     const data = await api(
-      `query($id: ID!, $cursor: String) { node(id: $id) { ... on ProjectV2 {
-        items(first: 100, after: $cursor) { nodes { ${ITEM} } ${PAGE} }
+      `query($id: ID!, $cursor: String, $filter: String!) { node(id: $id) { ... on ProjectV2 {
+        items(first: 100, after: $cursor, query: $filter) { nodes { ${ITEM} } ${PAGE} }
       } } }`,
-      { id: projectId, cursor },
+      { id: projectId, cursor, filter: SWEEP_FILTER },
     );
     return data.node?.items;
   });
@@ -449,7 +458,7 @@ export async function reconcile({
       continue;
     candidates++;
     log(
-      `${dryRun ? 'DRY_RUN would move' : 'Moving'} issue #${fresh.content.number} Inbox -> Ready`,
+      `${dryRun ? 'DRY_RUN would move' : 'Moving'} issue #${fresh.content.number} ${fresh.fields.Status ?? 'empty Status'} -> Ready`,
     );
     if (dryRun) continue;
     await updateProjectStatus(api, context, fresh.id, 'Ready');

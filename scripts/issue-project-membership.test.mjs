@@ -17,10 +17,14 @@ function github({
       assert.match(query, /addProjectV2ItemById/);
       writes.push(variables);
       assert.equal(variables.project, project.id);
+      assert.match(query, /item \{ id fullDatabaseId \}/);
       if (!items.has(variables.content))
-        items.set(variables.content, `item-${items.size + 1}`);
+        items.set(variables.content, String(100 + items.size + 1));
+      const item = items.get(variables.content);
       return {
-        addProjectV2ItemById: { item: { id: items.get(variables.content) } },
+        addProjectV2ItemById: {
+          item: { id: `PVTI_${item}`, fullDatabaseId: item },
+        },
       };
     }
     reads.push({ query, variables });
@@ -41,13 +45,21 @@ function github({
   return { api, reads, writes, items, log: () => {} };
 }
 
-test('adds a new issue to the project', async () => {
+test('adds a new issue to the project and prints its REST item ID', async () => {
   const f = github();
+  const logs = [];
   assert.equal(
-    await addToProject({ ...f, kind: 'issue', number: 7, dryRun: false }),
-    'item-1',
+    await addToProject({
+      ...f,
+      kind: 'issue',
+      number: 7,
+      dryRun: false,
+      log: (line) => logs.push(line),
+    }),
+    '101',
   );
   assert.deepEqual(f.writes, [{ project: 'P_1', content: 'I_7' }]);
+  assert.deepEqual(logs, ['Issue #7: in MCC delivery as item 101.']);
 });
 
 test('pull request input fails before any API call, including dry runs', async () => {
@@ -63,11 +75,11 @@ test('pull request input fails before any API call, including dry runs', async (
 });
 
 test('an item already in the project is returned without a duplicate', async () => {
-  const f = github({ items: new Map([['I_7', 'existing']]) });
+  const f = github({ items: new Map([['I_7', '276979720']]) });
   for (let run = 0; run < 2; run++)
     assert.equal(
       await addToProject({ ...f, kind: 'issue', number: 7, dryRun: false }),
-      'existing',
+      '276979720',
     );
   assert.equal(f.items.size, 1);
 });
@@ -106,16 +118,21 @@ test('invalid input, missing content, and an unavailable project fail before wri
   }
 });
 
-test('a mutation without an item fails', async () => {
-  const f = github();
-  const api = async (query, variables) =>
-    query.startsWith('mutation')
-      ? { addProjectV2ItemById: null }
-      : f.api(query, variables);
-  await assert.rejects(
-    addToProject({ ...f, api, kind: 'issue', number: 7, dryRun: false }),
-    /no project item/,
-  );
+test('a mutation without a REST item ID fails', async () => {
+  for (const response of [
+    { addProjectV2ItemById: null },
+    { addProjectV2ItemById: { item: { id: 'PVTI_1' } } },
+    { addProjectV2ItemById: { item: { id: 'PVTI_1', fullDatabaseId: 'x1' } } },
+  ]) {
+    const f = github();
+    const api = async (query, variables) =>
+      query.startsWith('mutation') ? response : f.api(query, variables);
+    await assert.rejects(
+      addToProject({ ...f, api, kind: 'issue', number: 7, dryRun: false }),
+      /no project item/,
+      JSON.stringify(response),
+    );
+  }
 });
 
 // A mocked GitHub for sweeps: `open` lists open issues as [number, projects],
@@ -137,7 +154,11 @@ function repository({
       if (failing.has(number))
         throw new Error(`Issue #${number} could not be added`);
       writes.push(number);
-      return { addProjectV2ItemById: { item: { id: `item-${number}` } } };
+      return {
+        addProjectV2ItemById: {
+          item: { id: `PVTI_${number}`, fullDatabaseId: String(number) },
+        },
+      };
     }
     if (query.includes('issue(number: $number)')) {
       calls.push(['read', variables.number]);
@@ -290,20 +311,15 @@ const expression = (value, context) =>
   });
 const DEFAULT_BRANCH = { repository: { default_branch: 'main' } };
 
-test('the workflow adds opened issues and sweeps on a schedule or by hand', () => {
+// The hourly membership sweep runs in tracker-issue-states.yml.
+test('the workflow adds opened issues and sweeps by hand', () => {
   const definition = workflow('tracker-project-membership');
-  const { issues, schedule, workflow_dispatch: dispatch } = definition.on;
+  const { issues, workflow_dispatch: dispatch } = definition.on;
   assert.deepEqual(Object.keys(definition.on).sort(), [
     'issues',
-    'schedule',
     'workflow_dispatch',
   ]);
   assert.deepEqual(issues, { types: ['opened'] });
-  assert.deepEqual(schedule, [{ cron: '2 * * * *' }]);
-  const minutes = (cron) => cron.split(' ')[0].split(',').map(Number);
-  const states = workflow('tracker-issue-states').on.schedule[0].cron;
-  for (const minute of minutes(schedule[0].cron))
-    assert.ok(!minutes(states).includes(minute), `minute ${minute} collides`);
   assert.equal(dispatch.inputs.dry_run.type, 'boolean');
   assert.equal(dispatch.inputs.dry_run.default, true);
   assert.equal(definition.name, 'Tracker: add issues to the project');
@@ -320,7 +336,8 @@ test('the workflow adds opened issues and sweeps on a schedule or by hand', () =
     expression(definition.concurrency.group, { github: opened }),
     'project-membership-issue-7',
   );
-  for (const event_name of ['schedule', 'workflow_dispatch']) {
+  {
+    const event_name = 'workflow_dispatch';
     const github = { event_name, event: DEFAULT_BRANCH };
     assert.equal(
       expression(definition['run-name'], { github }),
@@ -346,19 +363,40 @@ test('the workflow adds opened issues and sweeps on a schedule or by hand', () =
       'sparse-checkout': 'scripts',
     });
     const runs = job.steps.filter((step) => step.run);
-    assert.equal(runs.length, 1);
     assert.equal(runs[0].run, 'node scripts/issue-project-membership.mjs');
-    assert.equal(
-      runs[0].env.MCC_PROJECT_TOKEN,
-      '${{ secrets.MCC_PROJECT_TOKEN }}',
-    );
+    for (const run of runs)
+      assert.equal(
+        run.env.MCC_PROJECT_TOKEN,
+        '${{ secrets.MCC_PROJECT_TOKEN }}',
+      );
   }
+  assert.equal(
+    definition.jobs['add-missing-issues'].steps.filter((step) => step.run)
+      .length,
+    1,
+  );
 });
 
-test('opened issues run the single-issue job unchanged', () => {
+test('opened issues are added to the project, then triaged once', () => {
   const job = workflow('tracker-project-membership').jobs['add-to-project'];
   assert.equal(job.name, 'Add the new issue to MCC delivery');
-  const run = job.steps.find((step) => step.run);
+  const [run, triage, ...rest] = job.steps.filter((step) => step.run);
+  assert.deepEqual(rest, []);
+  assert.equal(triage.name, 'Triage the new issue');
+  assert.equal(
+    triage.run,
+    'node scripts/issue-triage.mjs --apply --issue "$ISSUE_NUMBER"',
+  );
+  assert.deepEqual(Object.keys(triage.env).sort(), [
+    'ISSUE_NUMBER',
+    'MCC_PROJECT_TOKEN',
+  ]);
+  assert.equal(
+    expression(triage.env.ISSUE_NUMBER, {
+      github: { event: { issue: { number: 7 } } },
+    }),
+    7,
+  );
   assert.deepEqual(Object.keys(run.env).sort(), [
     'CONTENT_NUMBER',
     'CONTENT_TYPE',
@@ -392,20 +430,19 @@ test('each event runs one job, and the sweep runs only from the default branch',
   assert.deepEqual(runs(github('issues', { ref: 'refs/heads/feature' })), [
     'add-to-project',
   ]);
-  assert.deepEqual(runs(github('schedule')), ['add-missing-issues']);
   assert.deepEqual(runs(github('workflow_dispatch')), ['add-missing-issues']);
   assert.deepEqual(
     runs(github('workflow_dispatch', { ref: 'refs/heads/feature' })),
     [],
   );
-  for (const event_name of ['issues', 'schedule', 'workflow_dispatch'])
+  for (const event_name of ['issues', 'workflow_dispatch'])
     assert.deepEqual(
       runs(github(event_name, { repository: 'someone/fork' })),
       [],
     );
 });
 
-test('the sweep writes on a schedule and a manual run follows its dry_run input', () => {
+test('a manual sweep follows its dry_run input', () => {
   const job = workflow('tracker-project-membership').jobs['add-missing-issues'];
   assert.equal(job.name, 'Add missing open issues to MCC delivery');
   const run = job.steps.find((step) => step.run);
@@ -417,7 +454,6 @@ test('the sweep writes on a schedule and a manual run follows its dry_run input'
   assert.equal(run.env.SWEEP, 'true');
   const dryRun = (event_name, inputs = {}) =>
     expression(run.env.DRY_RUN, { github: { event_name }, inputs });
-  assert.equal(dryRun('schedule'), 'false');
   assert.equal(dryRun('workflow_dispatch', { dry_run: true }), 'true');
   assert.equal(dryRun('workflow_dispatch', { dry_run: false }), 'false');
 });

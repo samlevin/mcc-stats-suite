@@ -5,11 +5,9 @@ on:
   issues:
     types: [opened]
   # GitHub sometimes creates no run for an `opened` event, which never fires
-  # again for that issue, so an hourly sweep adds every open issue still
-  # missing. It runs five minutes before the hourly tracker-issue-states.yml
-  # sweep, which then triages the issues it added.
-  schedule:
-    - cron: '2 * * * *'
+  # again for that issue, so the hourly tracker-issue-states.yml sweep adds
+  # every open issue still missing before it triages. A manual run here sweeps
+  # project membership alone.
   workflow_dispatch:
     inputs:
       dry_run:
@@ -49,6 +47,12 @@ jobs:
           CONTENT_NUMBER: ${{ github.event.issue.number }}
           DRY_RUN: 'false'
         run: node scripts/issue-project-membership.mjs
+      # The item exists now, so this is the issue's first triage run.
+      - name: Triage the new issue
+        env:
+          MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: node scripts/issue-triage.mjs --apply --issue "$ISSUE_NUMBER"
 
   add-missing-issues:
     name: Add missing open issues to MCC delivery

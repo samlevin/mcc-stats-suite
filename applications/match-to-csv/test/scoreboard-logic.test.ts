@@ -14,6 +14,8 @@
 //   3) Filtering of non-player rows (e.g. mis-detected header, blank rows),
 //      and ignoring header and non-player row colors when assigning teams.
 //   4) Header fallback logic when Textract can't read headers clearly.
+//   5) Stat headers Textract misread: the stat takes the column between its
+//      neighbors, never one another field holds, or stays empty and flagged.
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
@@ -426,8 +428,9 @@ test('processScoreboardImage: header and non-player row colors do not create tea
  * Header fallback logic.
  *
  * - We simulate a situation where Textract mis-reads header texts (e.g. "P1", "P2").
- * - In that case, processScoreboardImage falls back to assuming:
- *     col 1 => Player, col 2 => Score, col 3 => Kills, col 4 => Assists, col 5 => Deaths.
+ * - In that case, player takes the first column, and the four stats take
+ *   the four integer columns after it, in order:
+ *     col 2 => Score, col 3 => Kills, col 4 => Assists, col 5 => Deaths.
  * - We verify that stats still go into the correct fields.
  */
 test('processScoreboardImage: header fallback when headers are not clearly recognized', () => {
@@ -634,6 +637,16 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
       ['Player', 60],
       ['06', 95],
     ],
+    // Punctuation after the letter does not hide a low-confidence split.
+    [
+      ['Player:', 59],
+      ['19', 89],
+    ],
+    // A high-confidence split after punctuation is left alone.
+    [
+      ['Agent.', 99],
+      ['47', 99],
+    ],
     // Both rules can apply to one name.
     [
       ['Lone', 40],
@@ -649,6 +662,14 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
     cell('flag-score-header', 1, 2, 'flag-score-header-word'),
   ];
   const cellIds = ['flag-player-header', 'flag-score-header'];
+  const statHeaders = ['KILLS', 'ASSISTS', 'DEATHS'];
+  statHeaders.forEach((header, index) => {
+    blocks.push(
+      word(`flag-h-${header}-word`, header),
+      cell(`flag-h-${header}`, 1, index + 3, `flag-h-${header}-word`),
+    );
+    cellIds.push(`flag-h-${header}`);
+  });
   players.forEach((words, index) => {
     const rowIndex = index + 2;
     const wordIds = words.map(([text, confidence], position) => {
@@ -673,6 +694,14 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
       ),
     );
     cellIds.push(`flag-${rowIndex}-player`, `flag-${rowIndex}-score`);
+    statHeaders.forEach((header, column) => {
+      const id = `flag-${rowIndex}-${header}`;
+      blocks.push(
+        word(`${id}-word`, '5'),
+        cell(id, rowIndex, column + 3, `${id}-word`),
+      );
+      cellIds.push(id);
+    });
   });
   blocks.push(table('flag-table', cellIds));
 
@@ -697,9 +726,117 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
       ['PIayer05', [low(39)]],
       ['Agent 47', undefined],
       ['Player 06', [split(60)]],
+      ['Player: 19', [split(59)]],
+      ['Agent. 47', undefined],
       ['Lone 7', [low(40), split(40)]],
       ['NoConfidence', undefined],
     ],
   );
   assert.ok(!('reviewFlags' in rows[0]), 'an unflagged row has no flag list');
+});
+
+/**
+ * A board from a grid of cell text: the first row is the header, an empty
+ * string is a cell without words, and every row after the header is a
+ * player row.
+ */
+function gridBoard(prefix: string, grid: string[][]): TextractBlockLite[] {
+  const blocks: TextractBlockLite[] = [];
+  const cellIds: string[] = [];
+  grid.forEach((columns, rowPosition) => {
+    columns.forEach((text, columnPosition) => {
+      const id = `${prefix}-${rowPosition + 1}-${columnPosition + 1}`;
+      const cellBlock: TextractBlockLite = {
+        Id: id,
+        BlockType: 'CELL',
+        RowIndex: rowPosition + 1,
+        ColumnIndex: columnPosition + 1,
+      };
+      if (text) {
+        blocks.push(word(`${id}-word`, text));
+        cellBlock.Relationships = [{ Type: 'CHILD', Ids: [`${id}-word`] }];
+      }
+      blocks.push(cellBlock);
+      cellIds.push(id);
+    });
+  });
+  blocks.push(table(`${prefix}-tbl`, cellIds));
+  return blocks;
+}
+
+function stats(rows: CsvRow[]) {
+  return rows.map((row) => [row.score, row.kills, row.assists, row.deaths]);
+}
+
+/**
+ * The Halo 3 two-team layout from real captures: Textract adds an empty
+ * column after PLAYERS, where chat bubbles sit, and one after DEATHS, and
+ * reads the faint ASSISTS header as a truncation or not at all.
+ */
+for (const assistsHeader of ['', 'ASS', 'ASSIST']) {
+  test(`processScoreboardImage maps assists between kills and deaths with the ASSISTS header read as "${assistsHeader}"`, () => {
+    const blocks = gridBoard('h3', [
+      ['PLAYERS', '', 'SCORE', 'KILLS', assistsHeader, 'DEATHS', ''],
+      ['Player01', '', '14', '14', '12', '19', ''],
+      ['Player02', '...', '9', '10', '3', '7', 'A'],
+    ]);
+    const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
+    assert.deepEqual(stats(rows), [
+      ['14', '14', '12', '19'],
+      ['9', '10', '3', '7'],
+    ]);
+    assert.ok(rows.every((row) => !('reviewFlags' in row)));
+  });
+}
+
+test('processScoreboardImage leaves a stat it cannot place empty and flags every row', () => {
+  // Two integer columns between KILLS and DEATHS, so either could be
+  // assists.
+  const blocks = gridBoard('amb', [
+    ['PLAYERS', 'SCORE', 'KILLS', '', '', 'DEATHS'],
+    ['Player01', '14', '14', '12', '2', '19'],
+    ['Player02', '9', '10', '3', '1', '7'],
+  ]);
+  const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
+  assert.deepEqual(stats(rows), [
+    ['14', '14', '', '19'],
+    ['9', '10', '', '7'],
+  ]);
+  assert.deepEqual(
+    rows.map((row) => row.reviewFlags),
+    [1, 2].map(() => [{ field: 'assists', code: 'UNMAPPED_COLUMN' }]),
+  );
+});
+
+test('processScoreboardImage never maps one column to two fields', () => {
+  // Score and assists have no header, and only one column is left between
+  // PLAYERS and KILLS, so score takes it and assists has none.
+  const blocks = gridBoard('dup', [
+    ['PLAYERS', '', 'KILLS', 'DEATHS'],
+    ['Player01', '14', '12', '19'],
+    ['Player02', '9', '3', '7'],
+  ]);
+  const { rows } = processScoreboardImage(blocks, twoTeamColors([2, 3]));
+  assert.deepEqual(stats(rows), [
+    ['14', '12', '', '19'],
+    ['9', '3', '', '7'],
+  ]);
+  assert.deepEqual(rows[0].reviewFlags, [
+    { field: 'assists', code: 'UNMAPPED_COLUMN' },
+  ]);
+});
+
+test('processScoreboardImage flags stats the board has no column for', () => {
+  const { rows } = processScoreboardImage(
+    simpleBoard('missing', ['Player01', 'Player02']),
+    twoTeamColors([2, 3]),
+  );
+  assert.deepEqual(stats(rows), [
+    ['20', '', '', ''],
+    ['19', '', '', ''],
+  ]);
+  assert.deepEqual(
+    rows[0].reviewFlags?.map((flag) => flag.field),
+    ['kills', 'assists', 'deaths'],
+  );
 });

@@ -11,6 +11,7 @@ import {
   writeGamertagCsvs,
   type WriteGamertagCsvsDependencies,
 } from '../src/lambdas/write-gamertag-csvs';
+import { publishStageEvent, type StageEvent } from '../src/lib/metrics';
 import { captureLogLines, withoutTimestamp } from './support/log-lines';
 
 const submissionPrefix = 'submissions/submission-1';
@@ -114,6 +115,18 @@ const event: WriteGamertagCsvsInput = {
   exports: [first, second],
 };
 
+const trace = {
+  executionId:
+    'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
+  retryCount: 0,
+  workflow: 'INGEST',
+} as const;
+
+/** The first reading of the test clock. Each later reading is 400 ms on. */
+const CLOCK_START = Date.parse('2026-03-07T21:05:00Z');
+
+let stageEvents: StageEvent[] = [];
+
 function dependencies(
   writes: Map<string, string>,
   documents: Map<string, unknown> = new Map(
@@ -128,6 +141,19 @@ function dependencies(
       assert.equal(contentType, 'text/csv');
       writes.set(key, body);
     },
+    publishStageEvent(stageEvent) {
+      stageEvents.push(stageEvent);
+    },
+    now: clock(),
+  };
+}
+
+function clock(): () => number {
+  let next = CLOCK_START;
+  return () => {
+    const current = next;
+    next += 400;
+    return current;
   };
 }
 
@@ -146,6 +172,7 @@ let logLines: string[] = [];
 let restoreStdout = () => {};
 beforeEach(() => {
   ({ lines: logLines, restore: restoreStdout } = captureLogLines());
+  stageEvents = [];
   delete process.env.OBJECT_PREFIX;
 });
 afterEach(() => {
@@ -178,12 +205,7 @@ test('trace context and receivedAt do not change the export', async () => {
     {
       ...event,
       receivedAt: '2026-03-07T21:00:00Z',
-      trace: {
-        executionId:
-          'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
-        retryCount: 0,
-        workflow: 'INGEST',
-      },
+      trace,
     },
     dependencies(traced),
   );
@@ -379,6 +401,14 @@ test('a retried step treats existing files as already written', async () => {
   assert.equal(attempted.length, 3);
   assert.equal(result.fileCount, 3);
   assert.equal(result.rowCount, 5);
+  assert.equal(stageEvents.length, 1);
+  assert.equal(stageEvents[0].outcome, 'OK');
+  assert.deepEqual(stageEvents[0].properties, {
+    fileCount: 3,
+    rowCount: 5,
+    exportCount: 2,
+    completedSubmissionId: 'submission-1',
+  });
 });
 
 test('storage failures surface under their name without the key', async () => {
@@ -555,4 +585,230 @@ test('no gamertag or file name reaches the output or the log', async () => {
     assert.ok(!visible.includes(gamertagObjectName(gamertag)), gamertag);
   }
   assert.ok(!visible.includes('.csv'));
+});
+
+test('a completed export writes one OK stage event with its counts', async () => {
+  const result = await writeGamertagCsvs(
+    event,
+    dependencies(new Map()),
+    'request-1',
+  );
+
+  assert.deepEqual(stageEvents, [
+    {
+      stage: 'write-gamertag-csvs',
+      outcome: 'OK',
+      durationMs: 400,
+      ids: { submissionId: 'submission-1' },
+      trace: undefined,
+      requestId: 'request-1',
+      properties: {
+        fileCount: result.fileCount,
+        rowCount: result.rowCount,
+        exportCount: 2,
+        completedSubmissionId: 'submission-1',
+      },
+      metrics: { GamertagCsvsWritten: 3, SubmissionsCompleted: 1 },
+    },
+  ]);
+});
+
+test('an OK event measures end-to-end latency from receivedAt', async () => {
+  await writeGamertagCsvs(
+    { ...event, receivedAt: '2026-03-07T21:00:00Z', trace },
+    dependencies(new Map()),
+  );
+
+  assert.equal(stageEvents.length, 1);
+  const [stageEvent] = stageEvents;
+  assert.deepEqual(stageEvent.trace, trace);
+  assert.equal(stageEvent.properties.endToEndMs, 300_400);
+  assert.deepEqual(stageEvent.metrics, {
+    GamertagCsvsWritten: 3,
+    SubmissionsCompleted: 1,
+    EndToEndLatency: 300_400,
+  });
+});
+
+test('a missing or malformed receivedAt leaves out end-to-end latency', async () => {
+  for (const receivedAt of [
+    undefined,
+    '',
+    'yesterday',
+    '2026-02-30T00:00:00Z',
+  ]) {
+    stageEvents = [];
+    await writeGamertagCsvs({ ...event, receivedAt }, dependencies(new Map()));
+    assert.equal(stageEvents.length, 1);
+    assert.ok(!('endToEndMs' in stageEvents[0].properties), receivedAt);
+    assert.ok(!('EndToEndLatency' in stageEvents[0].metrics), receivedAt);
+  }
+});
+
+test('a failure writes one ERROR stage event before the error is rethrown', async () => {
+  let failed = false;
+  await assert.rejects(
+    writeGamertagCsvs(
+      // A valid receivedAt still adds no end-to-end latency to an ERROR event.
+      { ...event, receivedAt: '2026-03-07T21:00:00Z', trace },
+      {
+        ...dependencies(new Map()),
+        async putObject(_bucket, key) {
+          // The first file is stored; the other two fail.
+          if (!key.endsWith('Player01.csv')) {
+            failed = true;
+            throw Object.assign(new Error('denied'), { name: 'AccessDenied' });
+          }
+        },
+      },
+      'request-1',
+    ),
+    (error: Error) => {
+      // The event is already written when the error reaches the caller.
+      assert.equal(stageEvents.length, 1);
+      return error.name === 'AccessDenied';
+    },
+  );
+
+  assert.ok(failed);
+  assert.deepEqual(stageEvents, [
+    {
+      stage: 'write-gamertag-csvs',
+      outcome: 'ERROR',
+      durationMs: 400,
+      ids: { submissionId: 'submission-1' },
+      trace,
+      requestId: 'request-1',
+      errorName: 'AccessDenied',
+      properties: { fileCount: 1, rowCount: 2, exportCount: 2 },
+      metrics: {},
+    },
+  ]);
+});
+
+test('an input failure writes an ERROR event with zero files', async () => {
+  for (const [input, ids] of [
+    [{ ...event, matchDate: '3/7/2026' }, { submissionId: 'submission-1' }],
+    [{ ...event, submissionId: '../submission-1' }, {}],
+  ] as const) {
+    stageEvents = [];
+    await assert.rejects(writeGamertagCsvs(input, dependencies(new Map())));
+    assert.equal(stageEvents.length, 1);
+    assert.equal(stageEvents[0].outcome, 'ERROR');
+    assert.deepEqual(stageEvents[0].ids, ids);
+    assert.deepEqual(stageEvents[0].properties, {
+      fileCount: 0,
+      rowCount: 0,
+      exportCount: 2,
+    });
+  }
+});
+
+test('a publisher failure is logged and never fails the invocation', async () => {
+  const publisher = (): void => {
+    throw new TypeError('cannot write');
+  };
+  const result = await writeGamertagCsvs(event, {
+    ...dependencies(new Map()),
+    publishStageEvent: publisher,
+  });
+  assert.equal(result.fileCount, 3);
+
+  await assert.rejects(
+    writeGamertagCsvs(
+      { ...event, matchDate: '3/7/2026' },
+      { ...dependencies(new Map()), publishStageEvent: publisher },
+    ),
+    /Match date is not YYYY-MM-DD/,
+  );
+
+  const errors = logLines
+    .map((line) =>
+      withoutTimestamp(JSON.parse(line) as Record<string, unknown>),
+    )
+    .filter((record) => record.level === 'ERROR');
+  assert.deepEqual(errors, [
+    {
+      level: 'ERROR',
+      message: 'Stage event not written',
+      stage: 'write-gamertag-csvs',
+      errorName: 'TypeError',
+    },
+    {
+      level: 'ERROR',
+      message: 'Stage event not written',
+      stage: 'write-gamertag-csvs',
+      errorName: 'TypeError',
+    },
+  ]);
+});
+
+test('published stage events carry the metrics and never a gamertag or file name', async () => {
+  for (const environment of [{}, { EMF_METRICS_ENABLED: 'false' }]) {
+    const lines: string[] = [];
+    const publishing = (input: WriteGamertagCsvsInput) =>
+      writeGamertagCsvs(input, {
+        ...dependencies(new Map()),
+        publishStageEvent(stageEvent) {
+          publishStageEvent(
+            stageEvent,
+            (line) => lines.push(line),
+            environment,
+            CLOCK_START,
+          );
+        },
+      });
+    await publishing({ ...event, receivedAt: '2026-03-07T21:00:00Z', trace });
+    await assert.rejects(
+      publishing({
+        ...event,
+        exports: [first, { ...second, runId: 'Player01' }],
+      }),
+    );
+
+    const records = lines.map(
+      (line) => JSON.parse(line) as Record<string, unknown>,
+    );
+    assert.deepEqual(
+      records.map((record) => [record.Stage, record.outcome]),
+      [
+        ['write-gamertag-csvs', 'OK'],
+        ['write-gamertag-csvs', 'ERROR'],
+      ],
+    );
+    const [ok, failed] = records;
+    assert.equal(ok.completedSubmissionId, 'submission-1');
+    assert.ok(!('completedSubmissionId' in failed));
+    if (environment.EMF_METRICS_ENABLED === 'false') {
+      assert.ok(records.every((record) => !('_aws' in record)));
+      assert.ok(!('GamertagCsvsWritten' in ok));
+    } else {
+      assert.deepEqual(
+        (ok._aws as { CloudWatchMetrics: unknown[] }).CloudWatchMetrics,
+        [
+          {
+            Namespace: 'MCC/MatchToCsv',
+            Dimensions: [['Stage']],
+            Metrics: [
+              { Name: 'GamertagCsvsWritten', Unit: 'Count' },
+              { Name: 'SubmissionsCompleted', Unit: 'Count' },
+              { Name: 'EndToEndLatency', Unit: 'Milliseconds' },
+            ],
+          },
+        ],
+      );
+      assert.equal(ok.GamertagCsvsWritten, 3);
+      assert.equal(ok.SubmissionsCompleted, 1);
+      assert.equal(ok.EndToEndLatency, 300_400);
+      assert.equal(failed.StageErrors, 1);
+    }
+
+    const visible = lines.join('');
+    for (const gamertag of ['Player 02', 'Player03#7']) {
+      assert.ok(!visible.includes(gamertag), gamertag);
+      assert.ok(!visible.includes(gamertagObjectName(gamertag)), gamertag);
+    }
+    assert.ok(!visible.includes('Player01.csv'));
+    assert.ok(!visible.includes('.csv'));
+  }
 });

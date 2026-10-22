@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.0](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.2.1...contracts-v1.3.0) (2026-10-22)
+
+
+### Features
+
+* **contracts:** add trace context and receivedAt to the contracts ([#337](https://github.com/samlevin/mcc-stats-suite/issues/337)) ([f5156a4](https://github.com/samlevin/mcc-stats-suite/commit/f5156a4b3086ff86941fe9f2c731b498b8cf0c8f)), closes [#328](https://github.com/samlevin/mcc-stats-suite/issues/328)
+* **match-to-csv:** email each submission's gamertag CSVs to the recipient list ([#388](https://github.com/samlevin/mcc-stats-suite/issues/388)) ([67bcaa8](https://github.com/samlevin/mcc-stats-suite/commit/67bcaa81541c902fbdefe13e45cd818d95dd0d44))
+
 ## [1.2.1](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.2.0...contracts-v1.2.1) (2026-10-19)
 
 

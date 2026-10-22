@@ -1,5 +1,33 @@
 # Changelog
 
+## [3.3.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.2.1...match-to-csv-v3.3.0) (2026-10-22)
+
+
+### Features
+
+* **contracts:** add trace context and receivedAt to the contracts ([#337](https://github.com/samlevin/mcc-stats-suite/issues/337)) ([f5156a4](https://github.com/samlevin/mcc-stats-suite/commit/f5156a4b3086ff86941fe9f2c731b498b8cf0c8f)), closes [#328](https://github.com/samlevin/mcc-stats-suite/issues/328)
+* **match-to-csv:** build and publish stage events ([#348](https://github.com/samlevin/mcc-stats-suite/issues/348)) ([2945a5a](https://github.com/samlevin/mcc-stats-suite/commit/2945a5ae2aa7faa3816cb84f38143eabc80c1e9a)), closes [#330](https://github.com/samlevin/mcc-stats-suite/issues/330)
+* **match-to-csv:** create alarms only in prod ([#361](https://github.com/samlevin/mcc-stats-suite/issues/361)) ([cf3cc3c](https://github.com/samlevin/mcc-stats-suite/commit/cf3cc3c2eea1e33783419bf57ecd96c8854ea857)), closes [#359](https://github.com/samlevin/mcc-stats-suite/issues/359)
+* **match-to-csv:** email each submission's gamertag CSVs to the recipient list ([#388](https://github.com/samlevin/mcc-stats-suite/issues/388)) ([67bcaa8](https://github.com/samlevin/mcc-stats-suite/commit/67bcaa81541c902fbdefe13e45cd818d95dd0d44))
+* **match-to-csv:** end rejected submissions as succeeded ([#353](https://github.com/samlevin/mcc-stats-suite/issues/353)) ([bb8a7aa](https://github.com/samlevin/mcc-stats-suite/commit/bb8a7aa975dadd59bcbdc19bfa244209d6855174))
+* **match-to-csv:** pass trace context through the workflows ([#352](https://github.com/samlevin/mcc-stats-suite/issues/352)) ([0e8c199](https://github.com/samlevin/mcc-stats-suite/commit/0e8c199c5f97cf4460d3fa2e727658622b717889)), closes [#331](https://github.com/samlevin/mcc-stats-suite/issues/331)
+* **match-to-csv:** return the match date reply result from process-email ([#355](https://github.com/samlevin/mcc-stats-suite/issues/355)) ([b6d3a6a](https://github.com/samlevin/mcc-stats-suite/commit/b6d3a6a4d8b3cf9227fd13d84158963ab6a3426d)), closes [#340](https://github.com/samlevin/mcc-stats-suite/issues/340)
+
+
+### Bug Fixes
+
+* **match-to-csv:** keep log records queryable under the JSON log format ([#354](https://github.com/samlevin/mcc-stats-suite/issues/354)) ([4d0fd20](https://github.com/samlevin/mcc-stats-suite/commit/4d0fd209ed47c048c14363677184e79582a25e6c)), closes [#339](https://github.com/samlevin/mcc-stats-suite/issues/339)
+* **match-to-csv:** process only allowlisted senders ([#351](https://github.com/samlevin/mcc-stats-suite/issues/351)) ([9565f46](https://github.com/samlevin/mcc-stats-suite/commit/9565f4649c6a4e375d57bd3bcf6f3d185fecb1c9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @mcc/contracts bumped from 1.2.1 to 1.3.0
+    * @mcc/recipients bumped from 1.1.1 to 1.1.2
+    * @mcc/roster bumped from 1.1.2 to 1.1.3
+
 ## [3.2.1](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.2.0...match-to-csv-v3.2.1) (2026-10-19)
 
 
