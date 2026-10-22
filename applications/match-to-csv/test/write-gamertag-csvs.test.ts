@@ -649,7 +649,8 @@ test('a failure writes one ERROR stage event before the error is rethrown', asyn
   let failed = false;
   await assert.rejects(
     writeGamertagCsvs(
-      { ...event, trace },
+      // A valid receivedAt still adds no end-to-end latency to an ERROR event.
+      { ...event, receivedAt: '2026-03-07T21:00:00Z', trace },
       {
         ...dependencies(new Map()),
         async putObject(_bucket, key) {
