@@ -83,7 +83,7 @@ Repo `samlevin/mcc-stats-suite`, trunk `main`, project [MCC delivery](https://gi
 - PR titles use Conventional Commits with a component scope, e.g. `fix(contracts): ...`. Body: `Closes #N`, plus `Parent issue or epic: #P` when one exists.
 - Issue states: claim and move to `In progress` before coding. That is the only status an agent sets during delivery. When several agents share one GitHub identity, the claim comment names the agent. `tracker-pr-issue-status.yml` moves the closing issue to `In review` when the PR opens, and only a person marks an issue `Done`. Agents never set `In review` or `Done`, even when that workflow skips or fails: the handoff reports the issue's project state as read, and the agent leaves the status alone.
 - Every request needs an issue before work starts. Search for an existing one first; if none exists, file it with `mcc-create-github-issue` (`$mcc-create-github-issue` in Codex), then claim it and do the work.
-- Issue titles are plain, with no `[Type]:` prefix. For issue filing, follow `.agents/issue-creation.md`.
+- Issue titles follow `ISSUE_TRIAGE.md`. For issue filing, follow `.agents/issue-creation.md`.
 
 ## Branch names
 
