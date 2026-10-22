@@ -22,6 +22,7 @@
     "@aws-sdk/client-textract": "^3.992.0",
     "@mcc/cdk-config": "2.0.0",
     "@mcc/contracts": "1.2.1",
+    "@mcc/recipients": "1.1.1",
     "@mcc/roster": "1.1.2",
     "mailparser": "^3.9.3",
     "sharp": "^0.35.3"

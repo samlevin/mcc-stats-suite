@@ -311,6 +311,61 @@ export interface WriteGamertagCsvsOutput {
   rowCount: number;
 }
 
+/**
+ * Input of the main workflow's results email step, which runs after the
+ * per-gamertag export step.
+ */
+export interface EmailGamertagCsvsInput {
+  submissionId: string;
+  /** `ProcessEmailOutput.matchDate`, as `YYYY-MM-DD`. */
+  matchDate: string;
+  /** The number of `ProcessEmailOutput.screenshots`. */
+  screenshotCount: number;
+  gamertagCsvs: WriteGamertagCsvsOutput;
+  trace?: TraceContext;
+}
+
+/**
+ * What the results email step did. `SENT`: SES accepted one email to every
+ * active recipient. `NOT_CONFIGURED`: the recipient list has no active
+ * entry. `NO_FILES`: the submission has no per-gamertag CSV.
+ */
+export type CsvEmailDeliveryStatus = 'SENT' | 'NOT_CONFIGURED' | 'NO_FILES';
+
+/**
+ * The submission's `export/csv-email.json`, written once. It names the
+ * attachments but never an address.
+ */
+export interface CsvEmailDelivery {
+  schemaVersion: 'csv-email-delivery/v1';
+  submissionId: string;
+  status: CsvEmailDeliveryStatus;
+  /** The SES message ID; null unless `SENT`. */
+  sesMessageId: string | null;
+  recipientsVersion: number;
+  /** Active recipients at `recipientsVersion`. */
+  recipientCount: number;
+  screenshotCount: number;
+  /** The per-gamertag CSV file names, sorted. */
+  attachments: string[];
+  recordedAt: string;
+}
+
+/**
+ * Output of the results email step. Attachment names name gamertags, so the
+ * output carries counts only.
+ */
+export interface EmailGamertagCsvsOutput {
+  submissionId: string;
+  status: CsvEmailDeliveryStatus;
+  sesMessageId: string | null;
+  recipientsVersion: number;
+  recipientCount: number;
+  attachmentCount: number;
+  /** The delivery record, `[ephemeral/<name>/]submissions/{submissionId}/export/csv-email.json`. */
+  key: string;
+}
+
 export type DatasetSplit = 'TRAIN' | 'VALIDATION' | 'TEST';
 
 export interface MaterializeTrainingDataInput {
