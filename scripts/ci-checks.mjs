@@ -20,6 +20,7 @@ export const automationTests = [
   'scripts/issue-project-membership.test.mjs',
   'scripts/branch-name.test.mjs',
   'scripts/agent-policy.test.mjs',
+  'scripts/delivery-queue.test.mjs',
 ];
 
 const automationLintTargets = [
@@ -33,6 +34,7 @@ const automationLintTargets = [
   'scripts/issue-project-membership.mjs',
   'scripts/branch-name.mjs',
   'scripts/agent-policy.mjs',
+  'scripts/delivery-queue.mjs',
   ...automationTests,
 ];
 
