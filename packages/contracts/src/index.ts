@@ -45,8 +45,9 @@ export interface SourceScreenshot extends S3ObjectReference {
  * - `LOW_WORD_CONFIDENCE`: a word of the value has a very low Textract WORD
  *   confidence.
  * - `SPLIT_TRAILING_DIGITS`: the value ends in a digits-only word that follows
- *   a word ending in a letter, and Textract read one of the two with low
- *   confidence, so the space between them may be a misread.
+ *   a word ending in a letter, or in a letter followed by punctuation, and
+ *   Textract read one of the two with low confidence, so the space and any
+ *   punctuation between them may be a misread.
  * - `UNMAPPED_COLUMN`: the parser could not tell which column holds the stat,
  *   so the value is empty.
  */
