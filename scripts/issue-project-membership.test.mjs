@@ -17,10 +17,14 @@ function github({
       assert.match(query, /addProjectV2ItemById/);
       writes.push(variables);
       assert.equal(variables.project, project.id);
+      assert.match(query, /item \{ id fullDatabaseId \}/);
       if (!items.has(variables.content))
-        items.set(variables.content, `item-${items.size + 1}`);
+        items.set(variables.content, String(100 + items.size + 1));
+      const item = items.get(variables.content);
       return {
-        addProjectV2ItemById: { item: { id: items.get(variables.content) } },
+        addProjectV2ItemById: {
+          item: { id: `PVTI_${item}`, fullDatabaseId: item },
+        },
       };
     }
     reads.push({ query, variables });
@@ -41,13 +45,21 @@ function github({
   return { api, reads, writes, items, log: () => {} };
 }
 
-test('adds a new issue to the project', async () => {
+test('adds a new issue to the project and prints its REST item ID', async () => {
   const f = github();
+  const logs = [];
   assert.equal(
-    await addToProject({ ...f, kind: 'issue', number: 7, dryRun: false }),
-    'item-1',
+    await addToProject({
+      ...f,
+      kind: 'issue',
+      number: 7,
+      dryRun: false,
+      log: (line) => logs.push(line),
+    }),
+    '101',
   );
   assert.deepEqual(f.writes, [{ project: 'P_1', content: 'I_7' }]);
+  assert.deepEqual(logs, ['Issue #7: in MCC delivery as item 101.']);
 });
 
 test('pull request input fails before any API call, including dry runs', async () => {
@@ -63,11 +75,11 @@ test('pull request input fails before any API call, including dry runs', async (
 });
 
 test('an item already in the project is returned without a duplicate', async () => {
-  const f = github({ items: new Map([['I_7', 'existing']]) });
+  const f = github({ items: new Map([['I_7', '276979720']]) });
   for (let run = 0; run < 2; run++)
     assert.equal(
       await addToProject({ ...f, kind: 'issue', number: 7, dryRun: false }),
-      'existing',
+      '276979720',
     );
   assert.equal(f.items.size, 1);
 });
@@ -106,16 +118,21 @@ test('invalid input, missing content, and an unavailable project fail before wri
   }
 });
 
-test('a mutation without an item fails', async () => {
-  const f = github();
-  const api = async (query, variables) =>
-    query.startsWith('mutation')
-      ? { addProjectV2ItemById: null }
-      : f.api(query, variables);
-  await assert.rejects(
-    addToProject({ ...f, api, kind: 'issue', number: 7, dryRun: false }),
-    /no project item/,
-  );
+test('a mutation without a REST item ID fails', async () => {
+  for (const response of [
+    { addProjectV2ItemById: null },
+    { addProjectV2ItemById: { item: { id: 'PVTI_1' } } },
+    { addProjectV2ItemById: { item: { id: 'PVTI_1', fullDatabaseId: 'x1' } } },
+  ]) {
+    const f = github();
+    const api = async (query, variables) =>
+      query.startsWith('mutation') ? response : f.api(query, variables);
+    await assert.rejects(
+      addToProject({ ...f, api, kind: 'issue', number: 7, dryRun: false }),
+      /no project item/,
+      JSON.stringify(response),
+    );
+  }
 });
 
 // A mocked GitHub for sweeps: `open` lists open issues as [number, projects],
@@ -137,7 +154,11 @@ function repository({
       if (failing.has(number))
         throw new Error(`Issue #${number} could not be added`);
       writes.push(number);
-      return { addProjectV2ItemById: { item: { id: `item-${number}` } } };
+      return {
+        addProjectV2ItemById: {
+          item: { id: `PVTI_${number}`, fullDatabaseId: String(number) },
+        },
+      };
     }
     if (query.includes('issue(number: $number)')) {
       calls.push(['read', variables.number]);
