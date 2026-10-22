@@ -1,7 +1,7 @@
 # Generated from .agents/workflows/implement.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`.
 interface:
   display_name: 'MCC: Implement'
-  short_description: Deliver an MCC issue or rework a PR in this thread
+  short_description: Dispatch an isolated issue delivery or PR rework
   default_prompt: Use $mcc-implement to deliver this MCC issue.
 policy:
   allow_implicit_invocation: true

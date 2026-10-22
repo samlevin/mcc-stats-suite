@@ -1,12 +1,12 @@
 # {{label}} leaf delivery
 
-This file is the one source for delivering a leaf issue or reworking one of its PRs in `{{repository}}`. The delivery owner follows it: the main thread running {{prefix}}implement by default, or an isolated {{prefix}}implementer when the owner delegated the leaf. The owner creates and owns the worktree, claims the issue, implements it, runs the checks, gets the pre-PR review, runs stack operations, and opens the ready-for-review PR. No other agent does any of that for it. Run autonomously within the assignment; ask only for a material missing decision or authority.
+This file is the one source for delivering a leaf issue or reworking one of its PRs in `{{repository}}`. The delivery owner follows it: an isolated {{prefix}}implementer by default, or the main thread for an explicit `inline` small leaf or rework. The owner creates and owns the worktree, claims the issue, implements it, runs the checks, gets the pre-PR review, runs stack operations, and opens the ready-for-review PR. No other agent does any of that for it. Run autonomously within the assignment; ask only for a material missing decision or authority.
 
 Read `.agents/evidence.md` and `.agents/worktree-isolation.md` once before you start, and follow them throughout.
 
 ## Inputs
 
-You start from the target (issue URL, or PR URL for rework), trunk `main`, and a fresh `origin/main` SHA. A request or handoff may also supply acceptance criteria, accepted decisions, verified prerequisites with their SHAs, the base to build on, validation requirements, and `reviewer` overrides. Reuse what was supplied. Retrieve only what is missing or may be stale, and stop with BLOCKED when you cannot establish the issue or its acceptance criteria.
+You start from the issue number and target (issue URL, or PR URL for rework), trunk `main`, a fresh `origin/main` SHA, actual base branch and SHA, the leaf ledger line, ownership exclusions, and the dispatched effort decision with explicit constraints. In your first progress message confirm the dispatched effort and the same rule/reason. Read your own issue for acceptance criteria and accepted decisions. A request or handoff may also supply acceptance criteria, accepted decisions, verified prerequisites with their SHAs, the base to build on, validation requirements, and `reviewer` overrides. Reuse what was supplied. Retrieve only what is missing or may be stale, and stop with BLOCKED when you cannot establish the issue or its acceptance criteria.
 
 ## Read
 
@@ -34,13 +34,17 @@ Run `npm ci` inside the worktree when the checks need Node dependencies. For rew
 
 ## Claim
 
-Reuse current metadata and verified prerequisites from issue intake or the queue. For a small fix, the issue criteria, a brief approach, and planned checks are enough; do not create a separate planning packet. Check for existing claims, PRs, and branches once before claiming. An existing claim owned by this delivery stands on resume or rework. Post one useful claim comment (agent, branch, worktree, approach, likely files, planned checks) with `gh api repos/{{repository}}/issues/<N>/comments -F body=@<file>`. Do not add status-only comments or repeat the claim. Move the project item to In progress once, reusing discovered item, field, and option IDs where current. Through REST: discover the Status field and option IDs with `gh api users/{{project.owner}}/projectsV2/{{project.number}}/fields`, find the item ID by paging `gh api -X GET users/{{project.owner}}/projectsV2/{{project.number}}/items -f per_page=100 --paginate` for the item whose `content.number` is the issue and whose `content.repository_url` ends in `/repos/{{repository}}`, then run `gh api -X PATCH users/{{project.owner}}/projectsV2/{{project.number}}/items/<item> --input <file>` with `{"fields":[{"id":<field>,"value":"<option>"}]}` in the file. In progress is the only project status you ever set.
+Reuse current metadata and verified prerequisites from issue intake or the queue. For a small fix, the issue criteria, a brief approach, and planned checks are enough; do not create a separate planning packet. Check for existing claims, PRs, and branches once before claiming. An existing claim owned by this delivery stands on resume or rework. Post one useful claim comment (agent, branch, worktree, approach, likely files, planned checks, effort/rule/evidence/reason, and the machine-readable `mcc-claim` and `mcc-effort` records in [queue.md](queue.md)) with `gh api repos/{{repository}}/issues/<N>/comments -F body=@<file>`. Do not add status-only comments or repeat the claim. Move the project item to In progress once, reusing discovered item, field, and option IDs where current. Through REST: discover the Status field and option IDs with `gh api users/{{project.owner}}/projectsV2/{{project.number}}/fields`, find the item ID by paging `gh api -X GET users/{{project.owner}}/projectsV2/{{project.number}}/items -f per_page=100 --paginate` for the item whose `content.number` is the issue and whose `content.repository_url` ends in `/repos/{{repository}}`, then run `gh api -X PATCH users/{{project.owner}}/projectsV2/{{project.number}}/items/<item> --input <file>` with `{"fields":[{"id":<field>,"value":"<option>"}]}` in the file. In progress is the only project status you ever set.
 
 ## Build
 
 Write code plus meaningful tests for changed behavior, and update the nearest docs for contract or operator changes. Docs and code comments describe the current state, never what changed or how a problem was fixed; that history goes in the PR body and commit message. A comment may keep prior context only to explain an established regression the code must not reintroduce.
 
 While editing, run focused tests for changed behavior. Before the first push, run every required scope-appropriate check from `AGENTS.md` and fix failures. After fixes, rerun affected checks and broaden validation when changed scope, dependencies, configuration, or new evidence warrants it. Meaningful behavioral tests and required checks remain mandatory. Reuse successful checks with unchanged relevant inputs as `.agents/evidence.md` describes, and inspect edits before each push under its rules. Never skip required validation or weaken assertions; report pre-existing failures as such. If the same command or blocker fails twice without new evidence, stop and return BLOCKED. Keep a terse record of commands, results, and tested revision or input scope for the review packet and final PR.
+
+## Escalation
+
+When a medium attempt exposes a qualifying unresolved correctness problem, stop implementation and send the parent a compact escalation request: stable rubric rule, evidence, why medium with the written plan is insufficient, branch/head, completed checks, and open work. Do not silently increase effort. Explicit medium prevents automatic escalation. The parent validates and announces the decision, then posts exactly one later-escalation record with `later:true`, `question`, and matching `criteria` under [queue.md](queue.md#effort-records) before applying explicit runtime settings. This meaningful decision comment is exempt from the no-repeat-claim rule and is reused on recovery; allow at most one automatic medium-to-high transition per leaf. You never spawn another implementer. Ordinary corrections and recovery retain the existing effort, and escalation adds no retries or review rounds.
 
 ## Stack
 
@@ -68,11 +72,11 @@ Spawn with the Agent tool: `subagent_type` from the resolver's `spawn.subagent_t
 Spawn with `spawn_agent`: `agent_type`, `model`, and `reasoning_effort` from the resolver's `spawn` object, and `fork_turns: "none"`. Always pass `model` and `reasoning_effort`, even when they equal the policy; the agent file carries neither, so an omitted value would fall back to the contributor's `[agents]` defaults. An unknown `agent_type` means the project is not trusted in Codex yet; say so and stop.
 <!-- /codex-only -->
 
-You need APPROVE for that exact base/head pair. On REQUEST CHANGES: fix, rerun the affected gates, push, and re-review. The re-review packet adds the previous round's base and head SHAs and its complete report copied unedited, plus updated change and validation summaries under `.agents/review.md`. The reviewer checks prior findings and subsequent changes and expands scope when behavior or evidence changes. After two rejected rounds, return BLOCKED with the open findings instead of looping. Any base/head change before the PR opens invalidates the approval. Never self-approve, and never review your own diff in place of the reviewer.
+If Codex refuses nested reviewer depth, send the packet path to the main thread for the review-depth fallback in {{prefix}}implement. It passes the complete report as a local file path; you handle all findings. This changes only who starts the reviewer. You need APPROVE for that exact base/head pair. On REQUEST CHANGES: fix, rerun the affected gates, push, and re-review. The re-review packet adds the previous round's base and head SHAs and its complete report copied unedited, plus updated change and validation summaries under `.agents/review.md`. The reviewer checks prior findings and subsequent changes and expands scope when behavior or evidence changes. After two rejected rounds, return BLOCKED with the open findings instead of looping. Any base/head change before the PR opens invalidates the approval. Never self-approve, and never review your own diff in place of the reviewer.
 
 ## PR
 
-Only the delivery owner opens PRs. Load the {{prefix}}plain-language skill, write the body to a file, and open the PR through REST: `gh api repos/{{repository}}/pulls -f title='<title>' -f head=<branch> -f base=<base branch> -F body=@<file>`. Give it a Conventional Commits title that has a component scope, the repository template, the immediate base, `Closes #N` on the final layer only, `Parent issue or epic: #P` when one exists, and validation evidence including the pre-PR approval base/head SHAs and the settings lines from your result. Open it ready for review, then link stacked PRs bottom-to-top with the {{prefix}}stack skill. Leave the issue's status alone: repository automation moves it to In review when the PR opens, and if that automation skips or fails, you report the state you read instead of correcting it. Once a PR exists, never invoke {{prefix}}code-reviewer for that branch again; rework goes through your checks plus formal review. Replies to review comments go on the PR.
+Only the delivery owner opens PRs. Load the {{prefix}}plain-language skill, write the body to a file, and open the PR through REST: `gh api repos/{{repository}}/pulls -f title='<title>' -f head=<branch> -f base=<base branch> -F body=@<file>`. Give it a Conventional Commits title that has a component scope, the repository template, the immediate base, `Closes #N` on the final layer only, `Parent issue or epic: #P` when one exists, and validation evidence including `Pre-PR review: APPROVE; base=<full SHA>; head=<full SHA>` and the settings lines from your result. Retain selected effort, rule, evidence, and reason, including explicit constraints. Record usage actually exposed by the tool for parent, implementer, and reviewer separately: input, cached input, output, and reasoning tokens, naming unavailable metrics. Claim no savings and make no inline comparison. Open it ready for review, then link stacked PRs bottom-to-top with the {{prefix}}stack skill. Leave the issue's status alone: repository automation moves it to In review when the PR opens, and if that automation skips or fails, you report the state you read instead of correcting it. Once a PR exists, never invoke {{prefix}}code-reviewer for that branch again; rework goes through your checks plus formal review. Replies to review comments go on the PR.
 
 ## Rework
 
@@ -84,4 +88,24 @@ Never: merge, enable auto-merge, set an issue's status to In review or Done, dep
 
 ## Result
 
-Return READY FOR REVIEW or BLOCKED: issue, branch, worktree, base and head SHAs, PR URL(s), stack id, check results, approval base/head SHAs (mark historical if rework moved the head), the issue's project state as read (not as corrected), your own settings line (`Advisory policy: ...` in the main thread, `Requested settings: Policy: <as dispatched>` in an isolated implementer), then one `Requested settings: Policy: <as sent>` line per {{prefix}}code-reviewer spawn in spawn order, blocker. No narrative.
+Return READY FOR REVIEW or BLOCKED with these fixed fields and no narrative. Details go in the PR body. Include the project state as read, never corrected, and retain every requested settings line in spawn order.
+
+```text
+Status: READY FOR REVIEW | BLOCKED | ESCALATION REQUEST
+Issue: #N
+PR: <URL or none>
+Branch: <name>
+Worktree: <path>
+Base: <branch> <SHA>
+Head: <SHA>
+Stack: <id or none>
+Effort: <level>; rule=<default|user override|stable rule ID>; evidence=<reference>; reason=<reason>
+Check: <command> | <PASS|FAIL|not run>  (one line per check)
+Review: <APPROVE|REQUEST CHANGES|BLOCKED|skipped|historical>; base=<SHA>; head=<SHA>
+Project: <state as read>
+Blocker: <none or concrete blocker; escalation also names open work>
+Requested settings: Policy: <as dispatched, including decision provenance>
+Requested settings: Policy: <as sent to each reviewer, in spawn order>
+```
+
+Inline delivery substitutes its `Advisory policy:` line for its own requested settings. A review-depth fallback retains the main thread's reviewer settings too. An escalation request includes completed checks and open work before ownership ends; no overlapping replacement work is allowed.

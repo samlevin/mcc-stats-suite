@@ -52,6 +52,8 @@ const definitions = {
     description: 'Preview without writing',
   },
   apply: { type: 'boolean', description: 'Apply tracker changes' },
+  next: { type: 'boolean', description: 'Print the next delivery leaf' },
+  resume: { type: 'string', description: 'Explicitly resume this issue' },
   tool: {
     type: 'string',
     alias: 't',

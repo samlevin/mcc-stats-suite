@@ -15,7 +15,7 @@ Keep the packet factual and bounded. Reference repository procedures by path ins
 
 ## Initial review
 
-Make one complete pass over the full in-scope base/head diff, every acceptance criterion, relevant callers and contracts, and tests added, changed, or exercising changed behavior. Read tests for what they assert and what they miss. Follow relevant history when needed to establish behavior. Check correctness and edge cases, compatibility, security basics, performance regressions, maintainability, and meaningful test coverage. Early stack layers need only meet their supplied layer criteria.
+Read `git diff --stat` first, then per-file diffs. Inspect generated changes, lockfile changes, snapshots, and fixtures when correctness depends on them. Make one complete pass over the full in-scope base/head diff, every acceptance criterion, relevant callers and contracts, and tests added, changed, or exercising changed behavior. Read tests for what they assert and what they miss. Follow relevant history when needed to establish behavior. Check correctness and edge cases, compatibility, security basics, performance regressions, maintainability, and meaningful test coverage. Early stack layers need only meet their supplied layer criteria.
 
 Docs and comments describe the current state. Report change-history prose unless a comment explains an established regression that must not recur. Report every concrete, evidenced defect and consequential coverage gap in the first round, with severity, location, problem, and fix. Permitted style is not a blocker. Never invent product decisions.
 
