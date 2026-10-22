@@ -191,12 +191,13 @@ export class MatchToCsvStack extends Stack {
       Tags.of(this).add('Ephemeral', deployment.ephemeral);
     }
     const prefix = `/mcc/${deployment.environment}/match-to-csv`;
+    // Ephemeral stacks publish no EMF metrics. Dev and prod leave the switch
+    // unset, so metrics stay on wherever it is missing.
     const lambdaEnvironment = {
       OBJECT_PREFIX: deployment.objectPrefix,
-    };
-    const buildEnvironment = {
       GIT_SHA: gitSha,
       DEPLOYMENT_ENVIRONMENT: deployment.environment.toUpperCase(),
+      ...(deployment.ephemeral ? { EMF_METRICS_ENABLED: 'false' } : {}),
     };
     const rawEmailBucket = s3.Bucket.fromBucketName(
       this,
@@ -288,7 +289,6 @@ export class MatchToCsvStack extends Stack {
       'extract-text.ts',
       {
         ...lambdaEnvironment,
-        ...buildEnvironment,
         ROSTER_TABLE: rosterTableName,
         ROSTER_NAMESPACE: rosterNamespace,
       },
@@ -672,10 +672,12 @@ export class MatchToCsvStack extends Stack {
           .next(submissionResult),
       ),
       timeout: Duration.minutes(15),
+      // ERROR still records failed, timed-out and aborted executions. Execution
+      // data stays out of the logs because it holds every extracted row.
       logs: {
         destination: logGroup,
-        level: sfn.LogLevel.ALL,
-        includeExecutionData: true,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
       },
       tracingEnabled: true,
     });
@@ -965,6 +967,9 @@ export class MatchToCsvStack extends Stack {
       architecture: lambda.Architecture.ARM_64,
       memorySize,
       logGroup,
+      loggingFormat: lambda.LoggingFormat.JSON,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.INFO,
+      systemLogLevelV2: lambda.SystemLogLevel.INFO,
       timeout,
       tracing: lambda.Tracing.ACTIVE,
       environment,
