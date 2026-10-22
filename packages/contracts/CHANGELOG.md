@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.3.0...contracts-v1.3.1) (2026-10-22)
+
+
+### Bug Fixes
+
+* **match-to-csv:** flag split trailing digits after punctuation ([#395](https://github.com/samlevin/mcc-stats-suite/issues/395)) ([6b513b1](https://github.com/samlevin/mcc-stats-suite/commit/6b513b1aa0c1631646801fef957eaa3518892e3f))
+* **match-to-csv:** stop copying Kills into Assists when the ASSISTS header is misread ([#394](https://github.com/samlevin/mcc-stats-suite/issues/394)) ([46660ac](https://github.com/samlevin/mcc-stats-suite/commit/46660ac88899521183f3c7cba64091627abfaddd))
+
 ## [1.3.0](https://github.com/samlevin/mcc-stats-suite/compare/contracts-v1.2.1...contracts-v1.3.0) (2026-10-22)
 
 

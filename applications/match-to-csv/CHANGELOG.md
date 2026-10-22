@@ -1,5 +1,32 @@
 # Changelog
 
+## [3.4.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.3.0...match-to-csv-v3.4.0) (2026-10-22)
+
+
+### Features
+
+* **match-to-csv:** add alarms, saved queries and the dashboard ([#402](https://github.com/samlevin/mcc-stats-suite/issues/402)) ([ef8b260](https://github.com/samlevin/mcc-stats-suite/commit/ef8b260c12605f2915d9561244315182dd6f93cd)), closes [#336](https://github.com/samlevin/mcc-stats-suite/issues/336)
+* **match-to-csv:** emit stage events from process-email, extract-text and write-extracted-csv ([#401](https://github.com/samlevin/mcc-stats-suite/issues/401)) ([980ca5a](https://github.com/samlevin/mcc-stats-suite/commit/980ca5a2691d77eccec300965aa38743b4e6320b)), closes [#334](https://github.com/samlevin/mcc-stats-suite/issues/334)
+* **match-to-csv:** emit stage events from write-gamertag-csvs ([#397](https://github.com/samlevin/mcc-stats-suite/issues/397)) ([f0a8742](https://github.com/samlevin/mcc-stats-suite/commit/f0a874210be01c0ab5ff3524408e6fa0e311c56a)), closes [#335](https://github.com/samlevin/mcc-stats-suite/issues/335)
+* **match-to-csv:** measure Textract time and cell confidence in extract-text ([#356](https://github.com/samlevin/mcc-stats-suite/issues/356)) ([d6b52da](https://github.com/samlevin/mcc-stats-suite/commit/d6b52dab57b6dd176336a0cabe577e15f9904bc3)), closes [#341](https://github.com/samlevin/mcc-stats-suite/issues/341)
+* **match-to-csv:** set logging levels and the metrics switch in the stack ([#387](https://github.com/samlevin/mcc-stats-suite/issues/387)) ([feeeb59](https://github.com/samlevin/mcc-stats-suite/commit/feeeb596873810f0fe5c856939f85203612ef047))
+
+
+### Bug Fixes
+
+* **match-to-csv:** flag split trailing digits after punctuation ([#395](https://github.com/samlevin/mcc-stats-suite/issues/395)) ([6b513b1](https://github.com/samlevin/mcc-stats-suite/commit/6b513b1aa0c1631646801fef957eaa3518892e3f))
+* **match-to-csv:** grant ses:SendRawEmail to the gamertag CSV email Lambda ([#391](https://github.com/samlevin/mcc-stats-suite/issues/391)) ([54d2263](https://github.com/samlevin/mcc-stats-suite/commit/54d2263a05573ebf25a48d8136961ae0a203890e)), closes [#389](https://github.com/samlevin/mcc-stats-suite/issues/389)
+* **match-to-csv:** stop copying Kills into Assists when the ASSISTS header is misread ([#394](https://github.com/samlevin/mcc-stats-suite/issues/394)) ([46660ac](https://github.com/samlevin/mcc-stats-suite/commit/46660ac88899521183f3c7cba64091627abfaddd))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @mcc/contracts bumped from 1.3.0 to 1.3.1
+    * @mcc/recipients bumped from 1.1.2 to 1.1.3
+    * @mcc/roster bumped from 1.1.3 to 1.1.4
+
 ## [3.3.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.2.1...match-to-csv-v3.3.0) (2026-10-22)
 
 
