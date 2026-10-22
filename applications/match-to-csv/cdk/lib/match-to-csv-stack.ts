@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@mcc/cdk-config';
 import type {
+  EmailGamertagCsvsInput,
   ExtractTextOutput,
   ProcessEmailInput,
   ProcessingRunInput,
@@ -232,6 +233,13 @@ export class MatchToCsvStack extends Stack {
     const rosterNamespace = deployment.ephemeral
       ? `ephemeral/${deployment.ephemeral}`
       : 'stable';
+    // The foundation also owns the CSV recipient table (spec 1.1 §4.5), with
+    // the same namespaces.
+    const recipientsTableName = ssm.StringParameter.valueForStringParameter(
+      this,
+      `/mcc/${deployment.environment}/recipients/table-name`,
+    );
+    const recipientsNamespace = rosterNamespace;
 
     // Required: process-email rejects every message while it is missing or
     // empty. Administrators manage it with `npm run sender-allowlist`; sender
@@ -303,6 +311,20 @@ export class MatchToCsvStack extends Stack {
       lambdaEnvironment,
       1024,
     );
+    const emailGamertagCsvs = this.nodeFunction(
+      'EmailGamertagCsvs',
+      'CSV export',
+      'Email per-gamertag CSV exports to the CSV recipient list',
+      'email-gamertag-csvs.ts',
+      {
+        ...lambdaEnvironment,
+        EVIDENCE_BUCKET: evidenceBucket.bucketName,
+        EMAIL_FROM_DOMAIN: emailDomain,
+        RECIPIENTS_TABLE: recipientsTableName,
+        RECIPIENTS_NAMESPACE: recipientsNamespace,
+      },
+      1024,
+    );
     const compareRuns = this.nodeFunction(
       'CompareRuns',
       'Replay/evidence tools',
@@ -339,23 +361,25 @@ export class MatchToCsvStack extends Stack {
     // recipient's verified identity, so a grant on the domain identity alone
     // gets AccessDenied. The grant therefore names every identity in this
     // account and Region, and allows only the noreply@<domain> From address.
-    processEmail.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['ses:SendEmail'],
-        resources: [
-          this.formatArn({
-            service: 'ses',
-            resource: 'identity',
-            resourceName: '*',
-          }),
-        ],
-        conditions: {
-          StringEquals: {
-            'ses:FromAddress': `${REPLY_LOCAL_PART}@${emailDomain}`,
+    for (const sender of [processEmail, emailGamertagCsvs]) {
+      sender.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ['ses:SendEmail'],
+          resources: [
+            this.formatArn({
+              service: 'ses',
+              resource: 'identity',
+              resourceName: '*',
+            }),
+          ],
+          conditions: {
+            StringEquals: {
+              'ses:FromAddress': `${REPLY_LOCAL_PART}@${emailDomain}`,
+            },
           },
-        },
-      }),
-    );
+        }),
+      );
+    }
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
     this.grantEvidenceAccess(evidenceBucket, extractText, true);
     this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
@@ -390,12 +414,45 @@ export class MatchToCsvStack extends Stack {
         ],
       }),
     );
+    // The results email reads the submission's gamertag CSVs and its delivery
+    // record, lists only those keys, and may create only the record.
+    const deliveryRecord = `${objectNamespace}submissions/*/export/csv-email.json`;
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject'],
+        resources: [
+          `${evidenceBucket.bucketArn}/${objectNamespace}submissions/*/export/gamertags/*`,
+          `${evidenceBucket.bucketArn}/${deliveryRecord}`,
+        ],
+      }),
+    );
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:ListBucket'],
+        resources: [evidenceBucket.bucketArn],
+        conditions: {
+          StringLike: {
+            's3:prefix': [
+              `${objectNamespace}submissions/*/export/gamertags/`,
+              deliveryRecord,
+            ],
+          },
+        },
+      }),
+    );
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:PutObject'],
+        resources: [`${evidenceBucket.bucketArn}/${deliveryRecord}`],
+      }),
+    );
     this.grantEvidenceAccess(evidenceBucket, compareRuns, true);
     this.grantEvidenceAccess(evidenceBucket, materializeTrainingData, true);
     dataKey.grantEncryptDecrypt(processEmail);
     dataKey.grantEncryptDecrypt(extractText);
     dataKey.grantEncryptDecrypt(writeExtractedCsv);
     dataKey.grantEncryptDecrypt(writeGamertagCsvs);
+    dataKey.grantEncryptDecrypt(emailGamertagCsvs);
     dataKey.grantEncryptDecrypt(compareRuns);
     dataKey.grantEncryptDecrypt(materializeTrainingData);
     extractText.addToRolePolicy(
@@ -420,6 +477,25 @@ export class MatchToCsvStack extends Stack {
         conditions: {
           'ForAllValues:StringEquals': {
             'dynamodb:LeadingKeys': `ROSTER#${rosterNamespace}`,
+          },
+          Null: { 'dynamodb:LeadingKeys': 'false' },
+        },
+      }),
+    );
+    // The same read-only, own-partition access to the recipient table.
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+        resources: [
+          this.formatArn({
+            service: 'dynamodb',
+            resource: 'table',
+            resourceName: recipientsTableName,
+          }),
+        ],
+        conditions: {
+          'ForAllValues:StringEquals': {
+            'dynamodb:LeadingKeys': `RECIPIENTS#${recipientsNamespace}`,
           },
           Null: { 'dynamodb:LeadingKeys': 'false' },
         },
@@ -493,6 +569,28 @@ export class MatchToCsvStack extends Stack {
         writeGamertagCsvsPayload,
       ),
     ] as const;
+    // Runs after the gamertag files exist. Its input holds the gamertag
+    // step's output, the match date, the screenshot count and trace context,
+    // so no address or gamertag enters the state.
+    const emailGamertagCsvsTask = new tasks.LambdaInvoke(
+      this,
+      'Email gamertag CSVs',
+      {
+        lambdaFunction: emailGamertagCsvs,
+        payloadResponseOnly: true,
+        payload: sfn.TaskInput.fromObject({
+          submissionId: sfn.JsonPath.stringAt('$.submissionId'),
+          matchDate: sfn.JsonPath.stringAt('$.matchDate'),
+          screenshotCount: sfn.JsonPath.arrayLength(
+            sfn.JsonPath.listAt('$.screenshots'),
+          ),
+          gamertagCsvs: sfn.JsonPath.objectAt('$.gamertagCsvs'),
+          trace: traceContext('INGEST'),
+        } satisfies Record<keyof EmailGamertagCsvsInput, unknown>),
+        resultPath: '$.csvEmail',
+        retryOnServiceExceptions: false,
+      },
+    );
 
     const transientErrors = [
       'Lambda.ClientExecutionTimeoutException',
@@ -518,6 +616,7 @@ export class MatchToCsvStack extends Stack {
       extractTextTask,
       writeCsvTask,
       ...writeGamertagCsvsTasks,
+      emailGamertagCsvsTask,
     ]) {
       task.addRetry(retry);
     }
@@ -544,7 +643,9 @@ export class MatchToCsvStack extends Stack {
             this,
             'Email output has receivedAt',
             ...writeGamertagCsvsTasks,
-          ),
+          )
+            .afterwards()
+            .next(emailGamertagCsvsTask),
         ),
       );
 
@@ -668,6 +769,7 @@ export class MatchToCsvStack extends Stack {
           ExtractText: extractText,
           WriteExtractedCsv: writeExtractedCsv,
           WriteGamertagCsvs: writeGamertagCsvs,
+          EmailGamertagCsvs: emailGamertagCsvs,
           CompareRuns: compareRuns,
           MaterializeTrainingData: materializeTrainingData,
         },

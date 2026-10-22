@@ -25,7 +25,7 @@ Local stacks are named `match-to-csv-e-<name>`. Stable `match-to-csv-dev` and `m
 These are separate settings:
 
 - The [gamertag roster](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-gamertag-roster) resolves OCR player names and determines which rows enter per-gamertag CSVs. Each run records the roster version it used. An empty roster permits processing but produces no per-gamertag files.
-- The [CSV recipient list](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-csv-recipient-list) stores intended export recipients. No application reads it yet. CSVs remain in S3 for manual retrieval. Automatic email delivery is tracked in [#207](https://github.com/samlevin/mcc-stats-suite/issues/207).
+- The [CSV recipient list](../../docs/self-hosting/50-deploy-and-release-applications.md#maintain-the-csv-recipient-list) holds the addresses that receive each submission's per-gamertag CSVs by email (see [Results email](#results-email)). Each stack reads only its own namespace. An empty list sends nothing, and the CSVs stay in S3 either way.
 - The required [sender allowlist](../../docs/self-hosting/50-deploy-and-release-applications.md#manage-the-sender-allowlist) controls who may submit email. It is an SSM parameter shared by all dev stacks, including ephemeral ones, and administrators change it with `npm run sender-allowlist`. Adding a CSV recipient does not allow that address to submit.
 
 Roster and recipient commands require administrator credentials such as `mcc-dev-admin`, with DynamoDB, KMS, and SSM permissions. The local `mcc-dev` deploy profile is insufficient, and no narrower roster/recipient operator policy exists. Sign in with the administrator profile, then list and add entries:
@@ -92,6 +92,10 @@ The bucket name is `/mcc/<environment>/match-to-csv/evidence-bucket-name` in SSM
 - `export/gamertags/` holds one file per roster gamertag with an `EXACT` or `RESOLVED` row, after every screenshot succeeds. These files have no header and use `Date,Kills,Assists,Deaths,Win,Loss` order for pasting into a player's spreadsheet. Unmatched rows are excluded. Replay writes no per-gamertag files. See the [export format](../../specs/1.1-mcc-analytics-engine.md#861-per-gamertag-export).
 
 Download with `aws s3 cp` and compare CSV rows against the screenshot. A successful run can contain zero rows for an unsupported layout. Inspect `parser.noRowsReason` in `normalized/observations.json`. Raw MIME, original images, provider responses, and runs are immutable. Events are append-only, and replay creates a new run.
+
+### Results email
+
+After the per-gamertag files are written, the workflow's last step, `Email gamertag CSVs`, sends one email from `noreply@<domain>` to every active entry of the stack's CSV recipient list. Its subject names the match date as `M/D/YYYY`, its body counts the files and screenshots, and each per-gamertag CSV is its own `text/csv` attachment. The submission's `export/csv-email.json` records the outcome: `SENT` with the SES message ID, `NOT_CONFIGURED` when the list has no active entry, or `NO_FILES` when the submission has no per-gamertag CSV. It also records the recipient list version, recipient count, and attachment names, never an address. SES throttling and server errors are retried; any other send failure fails the execution, and the CSVs stay in S3. In the SES sandbox, every recipient must be a verified SES identity. See [results delivery](../../specs/1.1-mcc-analytics-engine.md#862-results-email).
 
 ## Operations
 

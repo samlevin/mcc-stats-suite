@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.2](https://github.com/samlevin/mcc-stats-suite/compare/recipients-v1.1.1...recipients-v1.1.2) (2026-10-22)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @mcc/contracts bumped from 1.2.1 to 1.3.0
+
 ## [1.1.1](https://github.com/samlevin/mcc-stats-suite/compare/recipients-v1.1.0...recipients-v1.1.1) (2026-10-19)
 
 

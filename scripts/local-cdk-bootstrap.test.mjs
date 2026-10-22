@@ -2030,6 +2030,6 @@ test('every match-to-csv ephemeral resource falls under the local execution poli
       default:
     }
   }
-  assert.equal(logGroupsChecked, 7);
+  assert.equal(logGroupsChecked, 8);
   assert.ok(checked > 10, `checked ${checked} resources`);
 });
