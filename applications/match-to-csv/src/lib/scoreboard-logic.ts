@@ -173,10 +173,12 @@ const COLOR_CLUSTER_THRESHOLD = 40;
 const LOW_WORD_CONFIDENCE_BELOW = 50;
 
 /**
- * A gamertag that ends in a digits-only word after a word ending in a letter
- * is flagged `SPLIT_TRAILING_DIGITS` when either word's confidence is below
- * this. Gamertags may contain spaces, so the split alone is no evidence of a
- * misread, but a real capture read `Player06` as `Player 06` at 55 and 88.
+ * A gamertag that ends in a digits-only word after a word ending in a letter,
+ * or in a letter followed by punctuation, is flagged `SPLIT_TRAILING_DIGITS`
+ * when either word's confidence is below this. Gamertags may contain spaces,
+ * so the split alone is no evidence of a misread, but real captures read
+ * `Player06` as `Player 06` at 55 and 88, and `Player19` as `Player: 19` at
+ * 59 and 89.
  */
 const SPLIT_TRAILING_DIGITS_BELOW = 90;
 
@@ -538,7 +540,7 @@ function playerReviewFlags(
   if (
     nameWords.length >= 2 &&
     /^\d+$/.test(last.text) &&
-    /\p{L}$/u.test(before.text)
+    /\p{L}[^\p{L}\p{N}]*$/u.test(before.text)
   ) {
     const split = lowestConfidence([before, last]);
     if (split !== undefined && split < SPLIT_TRAILING_DIGITS_BELOW) {

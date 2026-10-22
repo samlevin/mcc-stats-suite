@@ -637,6 +637,16 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
       ['Player', 60],
       ['06', 95],
     ],
+    // Punctuation after the letter does not hide a low-confidence split.
+    [
+      ['Player:', 59],
+      ['19', 89],
+    ],
+    // A high-confidence split after punctuation is left alone.
+    [
+      ['Agent.', 99],
+      ['47', 99],
+    ],
     // Both rules can apply to one name.
     [
       ['Lone', 40],
@@ -716,6 +726,8 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
       ['PIayer05', [low(39)]],
       ['Agent 47', undefined],
       ['Player 06', [split(60)]],
+      ['Player: 19', [split(59)]],
+      ['Agent. 47', undefined],
       ['Lone 7', [low(40), split(40)]],
       ['NoConfidence', undefined],
     ],
