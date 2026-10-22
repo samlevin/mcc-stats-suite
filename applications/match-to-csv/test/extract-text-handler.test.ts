@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import type { Block } from '@aws-sdk/client-textract';
 import {
   runExtraction,
+  type ExtractionMeasurements,
   type ExtractTextDependencies,
 } from '../src/lambdas/extract-text';
 import type {
@@ -98,6 +99,7 @@ function dependencies(
     },
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
+    clockMs: () => 0,
     build: { gitSha: 'commit-sha', environment: 'TEST' },
   };
 }
@@ -297,8 +299,13 @@ test('runExtraction enforces the 10,000,000-byte Textract limit', async () => {
   );
 });
 
-/** Textract blocks for a PLAYERS/SCORE table with two player rows. */
-function scoreboardBlocks(): Block[] {
+/**
+ * Textract blocks for a PLAYERS/SCORE table with two player rows. Each cell
+ * carries the confidence `confidence` returns for its row and column.
+ */
+function scoreboardBlocks(
+  confidence?: (row: number, column: number) => number,
+): Block[] {
   const rows = [
     ['PLAYERS', 'SCORE'],
     ['PlayerOne', '15'],
@@ -321,6 +328,7 @@ function scoreboardBlocks(): Block[] {
         BlockType: 'CELL',
         RowIndex: row,
         ColumnIndex: column,
+        Confidence: confidence?.(row, column),
         Relationships: [{ Type: 'CHILD', Ids: [`word-${row}-${column}`] }],
       },
       { Id: `word-${row}-${column}`, BlockType: 'WORD', Text: text },
@@ -539,4 +547,135 @@ test('runExtraction checks the source hash before reading the roster', async () 
     { name: 'SourceHashMismatchError' },
   );
   assert.deepEqual(calls, []);
+});
+
+/**
+ * Dependencies whose clock moves forward on every step, so a measured duration
+ * shows which steps it spans. `AnalyzeDocument` takes 1830 ms.
+ */
+function timedDependencies(
+  writes: Array<{ key: string; value: any }>,
+  analyze: ExtractTextDependencies['analyze'],
+): ExtractTextDependencies {
+  let clock = 1_000;
+  const base = dependencies(writes, analyze);
+  return {
+    ...base,
+    clockMs: () => clock,
+    async getImage(bucket, key) {
+      clock += 11;
+      return base.getImage(bucket, key);
+    },
+    async readRoster(bucket) {
+      clock += 13;
+      return base.readRoster(bucket);
+    },
+    async analyze(image) {
+      clock += 1830;
+      return base.analyze(image);
+    },
+    async writeJson(bucket, key, value) {
+      clock += 17;
+      return base.writeJson(bucket, key, value);
+    },
+  };
+}
+
+test('runExtraction measures the Textract call and the cell confidence of a table', async () => {
+  const writes: Array<{ key: string; value: any }> = [];
+  const publishedRowCounts: number[] = [];
+  const measurements: ExtractionMeasurements = {};
+  // Header cells read at 99, PlayerOne's row at 97 and PlayerTwo's row at 90.
+  const confidences = [99, 97, 90];
+  const result = await runExtraction(
+    { source },
+    {
+      ...timedDependencies(writes, async () => ({
+        $metadata: {},
+        Blocks: scoreboardBlocks((row) => confidences[row - 1]),
+      })),
+      publishExtractionMetrics(rowCount) {
+        publishedRowCounts.push(rowCount);
+      },
+      async calculateRowColors() {
+        return [
+          { rowIndex: 2, r: 230, g: 20, b: 20 },
+          { rowIndex: 3, r: 20, g: 20, b: 230 },
+        ];
+      },
+    },
+    measurements,
+  );
+
+  assert.deepEqual(measurements, {
+    textractMs: 1830,
+    meanConfidence: (99 * 2 + 97 * 2 + 90 * 2) / 6,
+    reviewRequiredCells: 2,
+  });
+  const observations = writes.find((write) =>
+    write.key.endsWith('/normalized/observations.json'),
+  )?.value as {
+    cells: Array<{ validation: { deterministicReviewRequired: boolean } }>;
+  };
+  assert.equal(
+    observations.cells.filter(
+      (cell) => cell.validation.deterministicReviewRequired,
+    ).length,
+    measurements.reviewRequiredCells,
+    'the count matches the review flags in the normalized artifact',
+  );
+  assert.equal(result.rows.length, 2);
+  assert.deepEqual(publishedRowCounts, [2]);
+});
+
+test('runExtraction measures no confidence for a table without cells', async () => {
+  const measurements: ExtractionMeasurements = {};
+  await runExtraction(
+    { source },
+    timedDependencies([], async () => ({
+      $metadata: {},
+      Blocks: [{ Id: 'table', BlockType: 'TABLE', Confidence: 98 }],
+    })),
+    measurements,
+  );
+
+  assert.deepEqual(measurements, { textractMs: 1830, reviewRequiredCells: 0 });
+  assert.ok(!('meanConfidence' in measurements));
+});
+
+test('runExtraction measures nothing when the Textract call fails', async () => {
+  const measurements: ExtractionMeasurements = {};
+  const providerError = new Error('try again');
+  providerError.name = 'Textract.ThrottlingException';
+  await assert.rejects(
+    runExtraction(
+      { source },
+      timedDependencies([], async () => {
+        throw providerError;
+      }),
+      measurements,
+    ),
+    { name: 'Textract.ThrottlingException' },
+  );
+
+  assert.deepEqual(measurements, {});
+});
+
+test('runExtraction keeps the Textract time when a later step fails', async () => {
+  const measurements: ExtractionMeasurements = {};
+  await assert.rejects(
+    runExtraction(
+      { source },
+      {
+        ...timedDependencies([], async () => ({ $metadata: {}, Blocks: [] })),
+        async calculateRowColors() {
+          throw new Error('unreadable image');
+        },
+      },
+      measurements,
+    ),
+    { message: 'unreadable image' },
+  );
+
+  assert.deepEqual(measurements, { textractMs: 1830 });
 });

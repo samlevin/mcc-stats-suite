@@ -81,6 +81,8 @@ export interface ExtractTextDependencies {
   readRoster(bucket: string): Promise<LoadedRoster>;
   id(): string;
   timestamp(): string;
+  /** Milliseconds on a monotonic clock, read only to measure durations. */
+  clockMs(): number;
   build: { gitSha: string; environment: string };
 }
 
@@ -105,6 +107,7 @@ const defaultDependencies: ExtractTextDependencies = {
   readRoster: (bucket) => rosterSource().read(rosterNamespace(), bucket),
   id: evidenceId,
   timestamp: now,
+  clockMs: () => performance.now(),
   build: {
     gitSha: process.env.GIT_SHA ?? 'local',
     environment: process.env.DEPLOYMENT_ENVIRONMENT ?? 'LOCAL',
@@ -137,15 +140,33 @@ function rosterNamespace(): string {
   return namespace;
 }
 
+/**
+ * What one run measured. A field is absent until the step that measures it
+ * has finished, so a failed run carries only what it reached.
+ */
+export interface ExtractionMeasurements {
+  /** Time spent in the `AnalyzeDocument` call, set only when the call returned. */
+  textractMs?: number;
+  /** Mean Textract confidence of the normalized cells, absent when there are none. */
+  meanConfidence?: number;
+  /** Normalized cells whose validation has `deterministicReviewRequired`. */
+  reviewRequiredCells?: number;
+}
+
 export async function handler(
   event: ProcessingRunInput,
 ): Promise<ExtractTextOutput> {
   return runExtraction(event, defaultDependencies);
 }
 
+/**
+ * Runs one extraction. `measurements` is filled in as the run proceeds and
+ * stays readable after the run returns or throws.
+ */
 export async function runExtraction(
   event: ProcessingRunInput,
   dependencies: ExtractTextDependencies,
+  measurements: ExtractionMeasurements = {},
 ): Promise<ExtractTextOutput> {
   const { source } = event;
   const runId = dependencies.id();
@@ -194,7 +215,9 @@ export async function runExtraction(
       },
     );
 
+    const textractStartedMs = dependencies.clockMs();
     const result = await dependencies.analyze(image);
+    measurements.textractMs = dependencies.clockMs() - textractStartedMs;
     const rawResponse = await dependencies.writeJson(
       source.bucket,
       `${runPrefix}/textract/raw-response.json`,
@@ -219,6 +242,7 @@ export async function runExtraction(
     }));
     const playerMatchCounts = countMatches(resolutions);
     const normalized = normalize(rawBlocks, source, runId);
+    Object.assign(measurements, cellMeasurements(normalized.cells));
     const normalizedArtifact = await dependencies.writeJson(
       source.bucket,
       `${runPrefix}/normalized/observations.json`,
@@ -325,6 +349,21 @@ function countMatches(resolutions: readonly PlayerResolution[]): {
     resolved: count('RESOLVED'),
     unmatched: count('UNMATCHED'),
   };
+}
+
+/** Mean confidence and review count of a run's normalized cells. */
+function cellMeasurements(
+  cells: ReadonlyArray<{
+    confidence: number;
+    validation: { deterministicReviewRequired: boolean };
+  }>,
+): Pick<ExtractionMeasurements, 'meanConfidence' | 'reviewRequiredCells'> {
+  const reviewRequiredCells = cells.filter(
+    (cell) => cell.validation.deterministicReviewRequired,
+  ).length;
+  if (cells.length === 0) return { reviewRequiredCells };
+  const total = cells.reduce((sum, cell) => sum + cell.confidence, 0);
+  return { meanConfidence: total / cells.length, reviewRequiredCells };
 }
 
 function validateTextractImage(
