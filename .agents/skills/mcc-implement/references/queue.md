@@ -29,7 +29,7 @@ Leaves run at the same time only when all of these hold:
 - The person explicitly asked for parallel delivery.
 - Each leaf is `ready` and passes the gate.
 - Each leaf is a substantial task, sized M, not a narrow edit.
-- The container records independence groups, the record is valid under the rules in `.agents/issue-creation.md`, and the leaves sit in different groups. Never infer, form, extend, or merge groups yourself.
+- The container records independence groups, the record is valid under the rules in `.agents/independence-groups.md`, and the leaves sit in different groups. Never infer, form, extend, or merge groups yourself.
 - The leaves' implementation notes name no overlapping files or shared contracts.
 
 Then each concurrent leaf goes to its own isolated mcc-implementer, in its own worktree and branch, based on trunk or its own prerequisite and never on a leaf from another group. Each concurrent assignment carries an `Owned by other running leaves:` field: the issue numbers of the other leaves running at the same time, and the files and shared contracts their implementation notes name. At most one leaf per group runs at a time, and you deliver no other leaf yourself while they run. A leaf that no group names, including every leaf under a container without a valid record, runs alone. An implementer that finds it must change a file or shared contract that another running leaf owns returns BLOCKED, and you deliver that leaf after the other leaf's PR opens. When any condition fails, deliver sequentially and say why.
