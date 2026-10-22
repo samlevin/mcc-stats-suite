@@ -146,7 +146,7 @@ test('sends one email with every gamertag CSV to every recipient and records it'
   assert.match(headers, /^From: noreply@mail\.example\.test\r\n/);
   assert.match(
     headers,
-    /\r\nTo: person1@example\.test, person2@example\.test\r\n/,
+    /\r\nTo: person1@example\.test,\r\n person2@example\.test\r\n/,
   );
   assert.match(headers, /\r\nSubject: MCC match 3\/7\/2026: gamertag CSVs\r\n/);
   assert.match(headers, /\r\nContent-Type: multipart\/mixed; boundary=/);
@@ -473,6 +473,30 @@ test('an ephemeral stack lists and records only under its namespace', async () =
     'recipients',
     `put ephemeral/test/${recordKey}`,
   ]);
+});
+
+test('a long recipient list keeps every header line within 998 characters', () => {
+  const to = Array.from(
+    { length: 20 },
+    (_, index) => `${'p'.repeat(230)}${index}@example.test`,
+  );
+  const email = csvEmail({
+    from: 'noreply@mail.example.test',
+    to,
+    submissionId: 'submission-1',
+    matchDate: '2026-03-07',
+    screenshotCount: 1,
+    attachments: [{ fileName: 'Player01.csv', content: Buffer.from('x\n') }],
+  });
+  const lines = email.raw.toString('utf8').split('\r\n');
+  assert.ok(lines.every((line) => line.length <= 998));
+  const header = lines.slice(
+    lines.findIndex((line) => line.startsWith('To: ')),
+  );
+  assert.equal(
+    header.slice(0, 20).join('').replace(/^To: /, ''),
+    to.join(', '),
+  );
 });
 
 test('the email counts one file and one screenshot in the singular', () => {

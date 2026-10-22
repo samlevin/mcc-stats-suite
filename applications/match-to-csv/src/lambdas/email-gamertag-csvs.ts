@@ -302,7 +302,9 @@ export function csvEmail(message: {
   ];
   const lines = [
     `From: ${message.from}`,
-    `To: ${message.to.join(', ')}`,
+    // One address per folded line keeps every line under the 998-character
+    // limit of RFC 5322 §2.1.1, since an address has at most 254.
+    `To: ${message.to.join(',\r\n ')}`,
     `Subject: MCC match ${date}: gamertag CSVs`,
     'MIME-Version: 1.0',
     `Content-Type: multipart/mixed; boundary="${boundary}"`,
