@@ -840,12 +840,12 @@ test('a container runs as a dependency queue in the owning thread', () => {
     /`spawn_agent` returns at once/,
   );
   const creation = readFileSync(
-    new URL('../.agents/issue-creation.md', import.meta.url),
+    new URL('../.agents/independence-groups.md', import.meta.url),
     'utf8',
   );
   assert.ok(
     lineWith(creation, `${PREFIX}implement\` reads only the lines`),
-    'issue-creation.md must name the queue as the record reader',
+    'independence-groups.md must name the queue as the record reader',
   );
 });
 

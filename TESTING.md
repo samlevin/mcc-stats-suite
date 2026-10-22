@@ -32,7 +32,7 @@ The AWS-free issue automation tests cover triage eligibility, pagination, idempo
 node --test scripts/issue-*.test.mjs
 ```
 
-These tests use metadata mocks and never call GitHub. [Automation](ISSUE_TRIAGE.md#automation) describes what the tracker workflows do and which credentials they use.
+These tests use metadata mocks and never call GitHub. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
 
 Preview the tracker workflows with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs`, `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`, `CONTENT_TYPE=issue CONTENT_NUMBER=<number> node scripts/issue-project-membership.mjs`, or `SWEEP=true node scripts/issue-project-membership.mjs`; all of them default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`.
 
