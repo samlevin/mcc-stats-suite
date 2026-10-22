@@ -312,14 +312,23 @@ export async function discover(
   return { projectId, fields: selected };
 }
 
-// Every project item, each with the first page of its field values and labels.
+// Statuses that eligible() never moves. The sweep filter excludes them by
+// name, so an empty Status, Inbox, and any status added later still reach
+// eligible(), which checks every condition again.
+export const SETTLED_STATUSES = ['Ready', 'In progress', 'In review', 'Done'];
+export const SWEEP_FILTER = `is:issue is:open -status:${SETTLED_STATUSES.map(
+  (status) => (status.includes(' ') ? `"${status}"` : status),
+).join(',')}`;
+
+// The open issue items that can qualify for Ready, each with the first page of
+// its field values and labels.
 export async function listItems(api, projectId) {
   return paginate(async (cursor) => {
     const data = await api(
-      `query($id: ID!, $cursor: String) { node(id: $id) { ... on ProjectV2 {
-        items(first: 100, after: $cursor) { nodes { ${ITEM} } ${PAGE} }
+      `query($id: ID!, $cursor: String, $filter: String!) { node(id: $id) { ... on ProjectV2 {
+        items(first: 100, after: $cursor, query: $filter) { nodes { ${ITEM} } ${PAGE} }
       } } }`,
-      { id: projectId, cursor },
+      { id: projectId, cursor, filter: SWEEP_FILTER },
     );
     return data.node?.items;
   });
