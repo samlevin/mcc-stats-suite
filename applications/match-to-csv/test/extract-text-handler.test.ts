@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { beforeEach, test } from 'node:test';
 import { createHash } from 'node:crypto';
 import type { Block } from '@aws-sdk/client-textract';
 import {
   runExtraction,
-  type ExtractionMeasurements,
   type ExtractTextDependencies,
 } from '../src/lambdas/extract-text';
+import { publishStageEvent, type StageEvent } from '../src/lib/metrics';
 import type {
   CsvRow,
   ProcessingRunInput,
@@ -17,7 +17,19 @@ import type {
   RowColor,
   ScoreboardParseResult,
 } from '../src/lib/scoreboard-logic';
-import { captureLogLines } from './support/log-lines';
+import { captureLogLines, withoutTimestamp } from './support/log-lines';
+
+let stageEvents: StageEvent[] = [];
+beforeEach(() => {
+  stageEvents = [];
+});
+
+const trace = {
+  executionId:
+    'arn:aws:states:us-east-1:000000000000:execution:match-to-csv-dev:example',
+  retryCount: 2,
+  workflow: 'INGEST',
+} as const;
 
 const source = {
   screenshotId: 'screen-1',
@@ -96,6 +108,9 @@ function dependencies(
     },
     publishExtractionMetrics(rowCount) {
       publishedRowCounts.push(rowCount);
+    },
+    publishStageEvent(stageEvent) {
+      stageEvents.push(stageEvent);
     },
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
@@ -581,14 +596,13 @@ function timedDependencies(
   };
 }
 
-test('runExtraction measures the Textract call and the cell confidence of a table', async () => {
+test('runExtraction reports the Textract call, cell confidence and matches in one OK event', async () => {
   const writes: Array<{ key: string; value: any }> = [];
   const publishedRowCounts: number[] = [];
-  const measurements: ExtractionMeasurements = {};
   // Header cells read at 99, PlayerOne's row at 97 and PlayerTwo's row at 90.
   const confidences = [99, 97, 90];
   const result = await runExtraction(
-    { source },
+    { source, trace },
     {
       ...timedDependencies(writes, async () => ({
         $metadata: {},
@@ -604,14 +618,58 @@ test('runExtraction measures the Textract call and the cell confidence of a tabl
         ];
       },
     },
-    measurements,
+    'request-1',
   );
 
-  assert.deepEqual(measurements, {
-    textractMs: 1830,
-    meanConfidence: (99 * 2 + 97 * 2 + 90 * 2) / 6,
-    reviewRequiredCells: 2,
+  assert.equal(stageEvents.length, 1);
+  const [stageEvent] = stageEvents;
+  const meanConfidence = (99 * 2 + 97 * 2 + 90 * 2) / 6;
+  const completion = writes.find((write) =>
+    write.key.endsWith('/completion.json'),
+  )?.value as RecordedDocument;
+  const counts = completion.metrics?.playerMatchCounts ?? {};
+  assert.equal(counts.exact + counts.resolved + counts.unmatched, 2);
+  assert.deepEqual(stageEvent, {
+    stage: 'extract',
+    outcome: 'OK',
+    durationMs: stageEvent.durationMs,
+    requestId: 'request-1',
+    ids: {
+      submissionId: 'submission-1',
+      screenshotId: 'screen-1',
+      runId: result.runId,
+    },
+    trace,
+    properties: {
+      acquisitionType: 'SCREENSHOT',
+      imageBytes: 5,
+      widthPx: 1920,
+      heightPx: 1080,
+      rowCount: 2,
+      reviewRequiredCells: 2,
+      meanConfidence,
+      textractMs: 1830,
+      exactRows: counts.exact,
+      resolvedRows: counts.resolved,
+      unmatchedRows: counts.unmatched,
+    },
+    metrics: {
+      TextractLatency: 1830,
+      OcrMeanConfidence: meanConfidence,
+      ReviewRequiredCells: 2,
+    },
+    breakdowns: {
+      playerRows: {
+        EXACT: counts.exact,
+        RESOLVED: counts.resolved,
+        UNMATCHED: counts.unmatched,
+      },
+    },
   });
+  assert.ok(
+    stageEvent.durationMs >= 11 + 13 + 1830,
+    'the duration spans the whole run',
+  );
   const observations = writes.find((write) =>
     write.key.endsWith('/normalized/observations.json'),
   )?.value as {
@@ -621,7 +679,7 @@ test('runExtraction measures the Textract call and the cell confidence of a tabl
     observations.cells.filter(
       (cell) => cell.validation.deterministicReviewRequired,
     ).length,
-    measurements.reviewRequiredCells,
+    stageEvent.metrics.ReviewRequiredCells,
     'the count matches the review flags in the normalized artifact',
   );
   assert.equal(result.rows.length, 2);
@@ -629,40 +687,68 @@ test('runExtraction measures the Textract call and the cell confidence of a tabl
 });
 
 test('runExtraction measures no confidence for a table without cells', async () => {
-  const measurements: ExtractionMeasurements = {};
   await runExtraction(
     { source },
     timedDependencies([], async () => ({
       $metadata: {},
       Blocks: [{ Id: 'table', BlockType: 'TABLE', Confidence: 98 }],
     })),
-    measurements,
   );
 
-  assert.deepEqual(measurements, { textractMs: 1830, reviewRequiredCells: 0 });
-  assert.ok(!('meanConfidence' in measurements));
+  assert.equal(stageEvents.length, 1);
+  assert.deepEqual(stageEvents[0].metrics, {
+    TextractLatency: 1830,
+    ReviewRequiredCells: 0,
+  });
+  assert.ok(!('meanConfidence' in stageEvents[0].properties));
+  assert.deepEqual(stageEvents[0].breakdowns, {
+    playerRows: { EXACT: 0, RESOLVED: 0, UNMATCHED: 0 },
+  });
 });
 
-test('runExtraction measures nothing when the Textract call fails', async () => {
-  const measurements: ExtractionMeasurements = {};
+test('a failed Textract call writes one ERROR event with no measurements', async () => {
   const providerError = new Error('try again');
-  providerError.name = 'Textract.ThrottlingException';
+  providerError.name = 'ThrottlingException';
   await assert.rejects(
     runExtraction(
-      { source },
+      { source, trace },
       timedDependencies([], async () => {
         throw providerError;
       }),
-      measurements,
+      'request-1',
     ),
-    { name: 'Textract.ThrottlingException' },
+    (error: Error) => {
+      // The event is already written when the error reaches the caller.
+      assert.equal(stageEvents.length, 1);
+      return error.name === 'ThrottlingException';
+    },
   );
 
-  assert.deepEqual(measurements, {});
+  assert.deepEqual(stageEvents, [
+    {
+      stage: 'extract',
+      outcome: 'ERROR',
+      durationMs: 17 * 3 + 11 + 13 + 1830 + 17 * 2,
+      errorName: 'ThrottlingException',
+      requestId: 'request-1',
+      ids: {
+        submissionId: 'submission-1',
+        screenshotId: 'screen-1',
+        runId: 'id-1',
+      },
+      trace,
+      properties: {
+        acquisitionType: 'SCREENSHOT',
+        imageBytes: 5,
+        widthPx: 1920,
+        heightPx: 1080,
+      },
+      metrics: {},
+    },
+  ]);
 });
 
-test('runExtraction keeps the Textract time when a later step fails', async () => {
-  const measurements: ExtractionMeasurements = {};
+test('an ERROR event keeps the Textract time when a later step fails', async () => {
   await assert.rejects(
     runExtraction(
       { source },
@@ -672,10 +758,175 @@ test('runExtraction keeps the Textract time when a later step fails', async () =
           throw new Error('unreadable image');
         },
       },
-      measurements,
     ),
     { message: 'unreadable image' },
   );
 
-  assert.deepEqual(measurements, { textractMs: 1830 });
+  assert.equal(stageEvents.length, 1);
+  assert.equal(stageEvents[0].outcome, 'ERROR');
+  assert.equal(stageEvents[0].errorName, 'Error');
+  assert.deepEqual(stageEvents[0].metrics, { TextractLatency: 1830 });
+  assert.equal(stageEvents[0].properties.textractMs, 1830);
+  assert.ok(!('exactRows' in stageEvents[0].properties));
+  assert.equal(stageEvents[0].breakdowns, undefined);
+});
+
+test('a failure before the run starts still writes one ERROR event', async () => {
+  await assert.rejects(
+    runExtraction(
+      { source },
+      {
+        ...dependencies([], async () => ({ $metadata: {}, Blocks: [] })),
+        async writeJson() {
+          throw Object.assign(new Error('denied'), { name: 'AccessDenied' });
+        },
+      },
+    ),
+    { name: 'AccessDenied' },
+  );
+
+  assert.equal(stageEvents.length, 1);
+  assert.equal(stageEvents[0].outcome, 'ERROR');
+  assert.equal(stageEvents[0].errorName, 'AccessDenied');
+  assert.deepEqual(stageEvents[0].ids, {
+    submissionId: 'submission-1',
+    screenshotId: 'screen-1',
+    runId: 'id-1',
+  });
+  assert.deepEqual(stageEvents[0].properties, {
+    acquisitionType: 'SCREENSHOT',
+  });
+});
+
+test('a publisher failure is logged and never fails the extraction', async () => {
+  const captured = captureLogLines();
+  const publisher = (): void => {
+    throw new TypeError('cannot write');
+  };
+  try {
+    const result = await runExtraction(
+      { source },
+      {
+        ...dependencies([], async () => ({ $metadata: {}, Blocks: [] })),
+        publishStageEvent: publisher,
+      },
+    );
+    assert.equal(result.rows.length, 0);
+    await assert.rejects(
+      runExtraction(
+        { source: { ...source, sha256: 'different' } },
+        {
+          ...dependencies([], async () => ({ $metadata: {}, Blocks: [] })),
+          publishStageEvent: publisher,
+        },
+      ),
+      { name: 'SourceHashMismatchError' },
+    );
+  } finally {
+    captured.restore();
+  }
+
+  const errors = captured.lines
+    .map((line) =>
+      withoutTimestamp(JSON.parse(line) as Record<string, unknown>),
+    )
+    .filter((record) => record.message === 'Stage event not written');
+  assert.deepEqual(errors, [
+    {
+      level: 'ERROR',
+      message: 'Stage event not written',
+      stage: 'extract',
+      errorName: 'TypeError',
+    },
+    {
+      level: 'ERROR',
+      message: 'Stage event not written',
+      stage: 'extract',
+      errorName: 'TypeError',
+    },
+  ]);
+});
+
+test('published extract events carry their metrics and never a gamertag or OCR text', async () => {
+  for (const environment of [{}, { EMF_METRICS_ENABLED: 'false' }]) {
+    const lines: string[] = [];
+    const extractionLines: string[] = [];
+    await runExtraction(
+      { source, trace },
+      {
+        ...timedDependencies([], async () => ({
+          $metadata: {},
+          Blocks: scoreboardBlocks(() => 97),
+        })),
+        publishStageEvent(stageEvent) {
+          publishStageEvent(
+            stageEvent,
+            (line) => lines.push(line),
+            environment,
+            0,
+          );
+        },
+        publishExtractionMetrics(rowCount) {
+          extractionLines.push(String(rowCount));
+        },
+        async calculateRowColors() {
+          return [
+            { rowIndex: 2, r: 230, g: 20, b: 20 },
+            { rowIndex: 3, r: 20, g: 20, b: 230 },
+          ];
+        },
+      },
+    );
+
+    const records = lines.map(
+      (line) => JSON.parse(line) as Record<string, unknown>,
+    );
+    const [event, ...breakdowns] = records;
+    assert.equal(event.Stage, 'extract');
+    assert.equal(event.outcome, 'OK');
+    assert.deepEqual(extractionLines, ['2'], 'ExtractedRows is still called');
+    if (environment.EMF_METRICS_ENABLED === 'false') {
+      assert.deepEqual(breakdowns, []);
+      assert.ok(!('_aws' in event));
+      assert.ok(!('TextractLatency' in event));
+    } else {
+      assert.deepEqual(
+        (event._aws as { CloudWatchMetrics: unknown[] }).CloudWatchMetrics,
+        [
+          {
+            Namespace: 'MCC/MatchToCsv',
+            Dimensions: [['Stage']],
+            Metrics: [
+              { Name: 'TextractLatency', Unit: 'Milliseconds' },
+              { Name: 'OcrMeanConfidence', Unit: 'Percent' },
+              { Name: 'ReviewRequiredCells', Unit: 'Count' },
+            ],
+          },
+        ],
+      );
+      assert.ok(breakdowns.length > 0);
+      for (const breakdown of breakdowns) {
+        assert.equal(breakdown.event, 'metric.breakdown');
+        assert.equal(breakdown.Stage, 'extract');
+        assert.ok(
+          ['EXACT', 'RESOLVED', 'UNMATCHED'].includes(
+            breakdown.MatchStatus as string,
+          ),
+        );
+        assert.ok((breakdown.PlayerRows as number) > 0);
+      }
+      assert.equal(
+        breakdowns.reduce(
+          (sum, breakdown) => sum + (breakdown.PlayerRows as number),
+          0,
+        ),
+        event.rowCount,
+      );
+    }
+
+    const visible = lines.join('');
+    for (const content of ['PlayerOne', 'PlayerTwo', 'entry-1', 'SCORE']) {
+      assert.ok(!visible.includes(content), content);
+    }
+  }
 });

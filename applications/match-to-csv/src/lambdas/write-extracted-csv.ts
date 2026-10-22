@@ -4,12 +4,18 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import type { Context } from 'aws-lambda';
 import type {
   CsvRow,
   ExtractTextOutput,
   WriteExtractedCsvOutput,
 } from '@mcc/contracts';
 import { rowsToCsv } from '../lib/csv';
+import {
+  publishStageEvent,
+  publishWithoutFailing,
+  type StageEvent,
+} from '../lib/metrics';
 import { bodyToBuffer, processingRunPrefix } from '../lib/s3';
 
 const s3 = new S3Client({});
@@ -23,6 +29,10 @@ export interface WriteExtractedCsvDependencies {
     body: string,
     contentType: string,
   ): Promise<void>;
+  /** Writes the invocation's stage event. */
+  publishStageEvent(event: StageEvent): void;
+  /** The current time, in epoch milliseconds. */
+  now(): number;
 }
 
 const defaultDependencies: WriteExtractedCsvDependencies = {
@@ -45,20 +55,73 @@ const defaultDependencies: WriteExtractedCsvDependencies = {
       }),
     );
   },
+  publishStageEvent(event) {
+    publishStageEvent(event);
+  },
+  now: () => Date.now(),
 };
 
 export async function handler(
   event: ExtractTextOutput,
+  context?: Pick<Context, 'awsRequestId'>,
 ): Promise<WriteExtractedCsvOutput> {
-  return writeExtractedCsv(event, defaultDependencies);
+  return writeExtractedCsv(event, defaultDependencies, context?.awsRequestId);
 }
 
 /**
  * Writes the run's CSV and structured table. The rows come from `parser.rows`
  * of the run's normalized observations, which carry each row's
  * `playerResolution`; `ExtractTextOutput` rows never do (spec 1.2 §6.2).
+ *
+ * Every invocation writes one `write-csv` stage event (spec 1.3 §3.1): `OK`
+ * once both files are stored, or `ERROR` before the error is rethrown.
  */
 export async function writeExtractedCsv(
+  event: ExtractTextOutput,
+  dependencies: WriteExtractedCsvDependencies,
+  requestId?: string,
+): Promise<WriteExtractedCsvOutput> {
+  const startedAt = dependencies.now();
+  const base = {
+    stage: 'write-csv',
+    ids: {
+      submissionId: event.source?.submissionId,
+      screenshotId: event.source?.screenshotId,
+      runId: event.runId,
+    },
+    trace: event.trace,
+    requestId,
+  } as const;
+
+  let output: WriteExtractedCsvOutput;
+  try {
+    output = await writeFiles(event, dependencies);
+  } catch (error) {
+    publishWithoutFailing(dependencies, {
+      ...base,
+      outcome: 'ERROR',
+      durationMs: dependencies.now() - startedAt,
+      errorName: error instanceof Error ? error.name : undefined,
+      properties: {},
+      metrics: {},
+    });
+    throw error;
+  }
+
+  publishWithoutFailing(dependencies, {
+    ...base,
+    outcome: 'OK',
+    durationMs: dependencies.now() - startedAt,
+    properties: {
+      rowCount: output.rowCount,
+      exportedScreenshotId: event.source.screenshotId,
+    },
+    metrics: { CsvWritten: 1 },
+  });
+  return output;
+}
+
+async function writeFiles(
   event: ExtractTextOutput,
   dependencies: WriteExtractedCsvDependencies,
 ): Promise<WriteExtractedCsvOutput> {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { afterEach, test } from 'node:test';
+import { afterEach, beforeEach, test } from 'node:test';
 import type {
   ProcessEmailInput,
   S3ObjectReference,
@@ -18,8 +18,29 @@ import {
   type ProcessEmailDependencies,
   type ReplyMessage,
 } from '../src/lambdas/process-email';
+import { publishStageEvent, type StageEvent } from '../src/lib/metrics';
 import { readReceivedAt } from '../src/lib/received-at';
 import { captureLogLines } from './support/log-lines';
+
+let stageEvents: StageEvent[] = [];
+
+function recordStageEvent(stageEvent: StageEvent): void {
+  stageEvents.push(stageEvent);
+}
+
+/** A clock that advances 250 ms on each reading. */
+function clock(): () => number {
+  let next = 0;
+  return () => {
+    const current = next;
+    next += 250;
+    return current;
+  };
+}
+
+beforeEach(() => {
+  stageEvents = [];
+});
 
 afterEach(() => {
   delete process.env.EVIDENCE_BUCKET;
@@ -156,11 +177,15 @@ async function runScreening(options: ScreeningCase) {
     },
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
+    publishStageEvent: recordStageEvent,
+    now: clock(),
   };
   const captured = captureLogLines();
+  stageEvents = [];
   const outcome = await processEmail(
     { bucket: 'raw', key: 'incoming/message', ...options.input },
     dependencies,
+    'request-1',
   )
     .then(
       ({ result, matchDateReply }) => ({
@@ -200,6 +225,7 @@ async function runScreening(options: ScreeningCase) {
     parameterReads,
     sends,
     logs,
+    stageEvents: [...stageEvents],
     inspections: () => inspections,
   };
 }
@@ -666,6 +692,8 @@ test('processEmail refuses a partial recipient configuration before writing evid
         },
         id: () => 'id',
         timestamp: () => '2026-01-01T00:00:00.000Z',
+        publishStageEvent: recordStageEvent,
+        now: clock(),
       },
     ),
     /must be set together/,
@@ -786,6 +814,8 @@ test('processEmail writes no evidence when the allowlist read fails', async () =
         },
         id: () => 'id',
         timestamp: () => '2026-01-01T00:00:00.000Z',
+        publishStageEvent: recordStageEvent,
+        now: clock(),
       },
     ),
     { name: 'ThrottlingException' },
@@ -884,6 +914,8 @@ test('processEmail preserves images and returns every processable attachment', a
     },
     id: () => `id-${++id}`,
     timestamp: () => '2026-01-01T00:00:00.000Z',
+    publishStageEvent: recordStageEvent,
+    now: clock(),
   };
 
   const { result } = await processEmail(
@@ -950,6 +982,8 @@ test('processEmail records and returns the rejection of an email without a scree
     },
     id: () => 'id',
     timestamp: () => '2026-01-01T00:00:00.000Z',
+    publishStageEvent: recordStageEvent,
+    now: clock(),
   };
 
   assert.deepEqual(
@@ -1044,6 +1078,8 @@ test('processEmail records a failed completion when evidence storage fails', asy
     },
     id: () => 'id',
     timestamp: () => '2026-01-01T00:00:00.000Z',
+    publishStageEvent: recordStageEvent,
+    now: clock(),
   };
 
   await assert.rejects(
@@ -1096,6 +1132,8 @@ test('processEmail throws and records a failure when it cannot record a rejectio
     },
     id: () => 'id',
     timestamp: () => '2026-01-01T00:00:00.000Z',
+    publishStageEvent: recordStageEvent,
+    now: clock(),
   };
 
   await assert.rejects(
@@ -1445,6 +1483,8 @@ test('processEmail sends no reply when no attachment is processable', async () =
       },
       id: () => 'id',
       timestamp: () => '2026-01-01T00:00:00.000Z',
+      publishStageEvent: recordStageEvent,
+      now: clock(),
     },
   );
   assert.deepEqual(result, {
@@ -1557,4 +1597,444 @@ test('the match date reply threads only under a well-formed message ID', () => {
     );
   }
   assert.equal(matchDateReply({}, to, REPLY_DOMAIN).subject, 'Re:');
+});
+
+/** Dependencies for a listed sender's email with these attachments. */
+function attachmentDependencies(
+  attachments: Array<{ filename: string; contentType: string; body: string }>,
+  inspections: Record<
+    string,
+    { format: string; width: number; height: number }
+  >,
+): ProcessEmailDependencies {
+  let id = 0;
+  return {
+    async getRawEmail() {
+      return Buffer.from('mime');
+    },
+    async parseEmail() {
+      return {
+        messageId: '<original-id@example.test>',
+        subject: 'Tonight',
+        headerLines: sesHeaders('PASS', 'PASS'),
+        fromAddresses: [LISTED_SENDER],
+        text: MATCH_DATE,
+        attachments: attachments.map(({ filename, contentType, body }) => ({
+          filename,
+          contentType,
+          content: Buffer.from(body),
+        })),
+      };
+    },
+    async getSenderAllowlist() {
+      return [LISTED_SENDER];
+    },
+    async getParameter() {
+      throw new Error('not called');
+    },
+    async inspectImage(content) {
+      return (
+        inspections[content.toString()] ?? {
+          format: 'png',
+          width: 1920,
+          height: 1080,
+        }
+      );
+    },
+    async sendEmail() {},
+    async putObject() {},
+    async writeJson(bucket, key) {
+      return { bucket, key };
+    },
+    id: () => `id-${++id}`,
+    timestamp: () => '2026-01-01T00:00:00.000Z',
+    publishStageEvent: recordStageEvent,
+    now: clock(),
+  };
+}
+
+test('an accepted submission writes one OK stage event', async () => {
+  const run = await runScreening({
+    ...listedSender,
+    input: { receivedAt: RECEIVED_AT, trace },
+    screenshotCount: 2,
+  });
+
+  assert.equal(run.result?.status, 'ACCEPTED');
+  assert.deepEqual(run.stageEvents, [
+    {
+      stage: 'process-email',
+      outcome: 'OK',
+      durationMs: 250,
+      requestId: 'request-1',
+      ids: { submissionId: run.ingestion.submissionId as string },
+      trace,
+      properties: {
+        attachmentCount: 2,
+        rejectedAttachmentCount: 0,
+        screenshotCount: 2,
+      },
+      metrics: { SubmissionsAccepted: 1, ScreenshotsAccepted: 2 },
+      breakdowns: { attachmentRejectionReasons: {} },
+    },
+  ]);
+});
+
+test('an accepted submission counts every code of its rejected attachments', async () => {
+  process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
+  const { result } = await processEmail(
+    { bucket: 'raw', key: 'incoming/message' },
+    attachmentDependencies(
+      [
+        { filename: 'scoreboard.png', contentType: 'image/png', body: 'png' },
+        { filename: 'notes.txt', contentType: 'text/plain', body: 'text' },
+        { filename: 'photo.webp', contentType: 'image/webp', body: 'webp' },
+        { filename: 'logo.jpg', contentType: 'image/jpeg', body: 'small' },
+      ],
+      {
+        webp: { format: 'webp', width: 200, height: 100 },
+        small: { format: 'jpeg', width: 200, height: 100 },
+      },
+    ),
+  );
+
+  assert.equal(result.status, 'ACCEPTED');
+  assert.equal(stageEvents.length, 1);
+  const [stageEvent] = stageEvents;
+  assert.equal(stageEvent.outcome, 'OK');
+  assert.deepEqual(stageEvent.properties, {
+    attachmentCount: 4,
+    rejectedAttachmentCount: 3,
+    screenshotCount: 1,
+  });
+  assert.deepEqual(stageEvent.breakdowns, {
+    attachmentRejectionReasons: {
+      NOT_AN_IMAGE: 1,
+      UNSUPPORTED_IMAGE_FORMAT: 1,
+      IMAGE_TOO_SMALL: 2,
+    },
+  });
+
+  const lines: string[] = [];
+  publishStageEvent(stageEvent, (line) => lines.push(line), {}, 0);
+  const records = lines.map(
+    (line) => JSON.parse(line) as Record<string, unknown>,
+  );
+  assert.equal(
+    records[0].attachmentRejectionCodes,
+    'IMAGE_TOO_SMALL,NOT_AN_IMAGE,UNSUPPORTED_IMAGE_FORMAT',
+  );
+  assert.deepEqual(
+    records
+      .slice(1)
+      .map((record) => [record.Reason, record.AttachmentsRejected]),
+    [
+      ['IMAGE_TOO_SMALL', 2],
+      ['NOT_AN_IMAGE', 1],
+      ['UNSUPPORTED_IMAGE_FORMAT', 1],
+    ],
+  );
+});
+
+test('a rejected submission writes one REJECTED event with every rejection code', async () => {
+  const run = await runScreening({
+    headerLines: sesHeaders('FAIL', 'PASS'),
+    fromAddresses: ['stranger@example.test'],
+    input: { trace },
+  });
+
+  assertRejected(run, ['SPAM_VERDICT_FAILED', 'SENDER_NOT_ALLOWED']);
+  assert.deepEqual(run.stageEvents, [
+    {
+      stage: 'process-email',
+      outcome: 'REJECTED',
+      durationMs: 250,
+      requestId: 'request-1',
+      ids: { submissionId: run.ingestion.submissionId as string },
+      trace,
+      properties: { attachmentCount: 1, rejectedAttachmentCount: 0 },
+      metrics: { SubmissionsRejected: 1 },
+      breakdowns: {
+        submissionRejectionReasons: [
+          'SPAM_VERDICT_FAILED',
+          'SENDER_NOT_ALLOWED',
+        ],
+        attachmentRejectionReasons: {},
+      },
+    },
+  ]);
+
+  const lines: string[] = [];
+  publishStageEvent(run.stageEvents[0], (line) => lines.push(line), {}, 0);
+  const records = lines.map(
+    (line) => JSON.parse(line) as Record<string, unknown>,
+  );
+  assert.equal(
+    records[0].rejectionCodes,
+    'SENDER_NOT_ALLOWED,SPAM_VERDICT_FAILED',
+  );
+  assert.deepEqual(
+    records
+      .slice(1)
+      .map((record) => [record.Reason, record.SubmissionsRejected]),
+    [
+      ['SENDER_NOT_ALLOWED', 1],
+      ['SPAM_VERDICT_FAILED', 1],
+    ],
+  );
+});
+
+test('a submission without a processable screenshot counts its attachment rejections', async () => {
+  process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
+  const { result } = await processEmail(
+    { bucket: 'raw', key: 'incoming/message' },
+    attachmentDependencies(
+      [{ filename: 'notes.txt', contentType: 'text/plain', body: 'text' }],
+      {},
+    ),
+  );
+
+  assert.equal(result.status, 'REJECTED');
+  assert.equal(stageEvents.length, 1);
+  assert.equal(stageEvents[0].outcome, 'REJECTED');
+  assert.deepEqual(stageEvents[0].breakdowns, {
+    submissionRejectionReasons: ['NO_PROCESSABLE_SCREENSHOTS'],
+    attachmentRejectionReasons: { NOT_AN_IMAGE: 1 },
+  });
+});
+
+for (const [label, options, matchDateReply, metrics] of [
+  ['sent', {}, 'SENT', { SubmissionsRejected: 1 }],
+  [
+    'failed',
+    { sendError: Object.assign(new Error('no'), { name: 'MessageRejected' }) },
+    'FAILED',
+    { SubmissionsRejected: 1, MatchDateReplyFailed: 1 },
+  ],
+  [
+    'skipped',
+    { replyDomain: undefined },
+    'SKIPPED',
+    { SubmissionsRejected: 1 },
+  ],
+] as Array<[string, ScreeningCase, string, Record<string, number>]>) {
+  test(`the REJECTED event records a ${label} match date reply`, async () => {
+    const run = await runScreening({ ...listedSender, ...options, text: '' });
+
+    assert.equal(run.matchDateReply, matchDateReply);
+    assert.equal(run.stageEvents.length, 1);
+    assert.equal(run.stageEvents[0].outcome, 'REJECTED');
+    assert.equal(run.stageEvents[0].properties.matchDateReply, matchDateReply);
+    assert.deepEqual(run.stageEvents[0].metrics, metrics);
+  });
+}
+
+test('an event without a match date reply leaves matchDateReply out', async () => {
+  const run = await runScreening({
+    ...listedSender,
+    fromAddresses: ['stranger@example.test'],
+    text: '',
+  });
+
+  assert.equal(run.stageEvents.length, 1);
+  assert.ok(!('matchDateReply' in run.stageEvents[0].properties));
+  assert.ok(!('MatchDateReplyFailed' in run.stageEvents[0].metrics));
+});
+
+for (const [label, override, errorName] of [
+  [
+    'the raw email read',
+    {
+      async getRawEmail() {
+        throw Object.assign(new Error('gone'), { name: 'NoSuchKey' });
+      },
+    },
+    'NoSuchKey',
+  ],
+  [
+    'the MIME parse',
+    {
+      async parseEmail() {
+        throw new TypeError('bad MIME');
+      },
+    },
+    'TypeError',
+  ],
+  [
+    'the SSM read',
+    {
+      async getSenderAllowlist() {
+        throw Object.assign(new Error('denied'), {
+          name: 'AccessDeniedException',
+        });
+      },
+    },
+    'AccessDeniedException',
+  ],
+] as Array<[string, Partial<ProcessEmailDependencies>, string]>) {
+  test(`a failure in ${label} writes an ERROR event without a submission ID`, async () => {
+    process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+    process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
+    await assert.rejects(
+      processEmail(
+        { bucket: 'raw', key: 'incoming/message', trace },
+        { ...attachmentDependencies([], {}), ...override },
+        'request-1',
+      ),
+      (error: Error) => {
+        // The event is already written when the error reaches the caller.
+        assert.equal(stageEvents.length, 1);
+        return error.name === errorName;
+      },
+    );
+
+    assert.deepEqual(stageEvents, [
+      {
+        stage: 'process-email',
+        outcome: 'ERROR',
+        durationMs: 250,
+        ids: { submissionId: undefined },
+        trace,
+        requestId: 'request-1',
+        errorName,
+        properties: {
+          ...(label === 'the SSM read' ? { attachmentCount: 0 } : {}),
+          rejectedAttachmentCount: 0,
+        },
+        metrics: {},
+      },
+    ]);
+    const lines: string[] = [];
+    publishStageEvent(stageEvents[0], (line) => lines.push(line), {}, 0);
+    const record = JSON.parse(lines[0]) as Record<string, unknown>;
+    assert.equal(record.executionId, trace.executionId);
+    assert.ok(!('submissionId' in record));
+  });
+}
+
+test('a failure after the submission ID exists writes an ERROR event with it', async () => {
+  process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
+  await assert.rejects(
+    processEmail(
+      { bucket: 'raw', key: 'incoming/message' },
+      {
+        ...attachmentDependencies(
+          [{ filename: 'scoreboard.png', contentType: 'image/png', body: 'p' }],
+          {},
+        ),
+        async putObject() {
+          throw Object.assign(new Error('denied'), { name: 'AccessDenied' });
+        },
+      },
+    ),
+    { name: 'AccessDenied' },
+  );
+
+  assert.equal(stageEvents.length, 1);
+  assert.equal(stageEvents[0].outcome, 'ERROR');
+  assert.equal(stageEvents[0].errorName, 'AccessDenied');
+  assert.deepEqual(stageEvents[0].ids, { submissionId: 'id-1' });
+  assert.equal(stageEvents[0].breakdowns, undefined);
+});
+
+test('a publisher failure is logged and never fails processEmail', async () => {
+  const publisher = (): void => {
+    throw new TypeError('cannot write');
+  };
+  process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+  process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
+  const captured = captureLogLines();
+  try {
+    const { result } = await processEmail(
+      { bucket: 'raw', key: 'incoming/message' },
+      {
+        ...attachmentDependencies(
+          [{ filename: 'scoreboard.png', contentType: 'image/png', body: 'p' }],
+          {},
+        ),
+        publishStageEvent: publisher,
+      },
+    );
+    assert.equal(result.status, 'ACCEPTED');
+    await assert.rejects(
+      processEmail(
+        { bucket: 'raw', key: 'incoming/message' },
+        {
+          ...attachmentDependencies([], {}),
+          async getRawEmail() {
+            throw Object.assign(new Error('gone'), { name: 'NoSuchKey' });
+          },
+          publishStageEvent: publisher,
+        },
+      ),
+      { name: 'NoSuchKey' },
+    );
+  } finally {
+    captured.restore();
+  }
+
+  const errors = captured.lines
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((record) => record.message === 'Stage event not written');
+  assert.equal(errors.length, 2);
+  for (const record of errors) {
+    assert.equal(record.stage, 'process-email');
+    assert.equal(record.errorName, 'TypeError');
+  }
+});
+
+test('published process-email events hold no subject, address or body', async () => {
+  for (const environment of [{}, { EMF_METRICS_ENABLED: 'false' }]) {
+    const lines: string[] = [];
+    process.env.EVIDENCE_BUCKET = 'evidence-bucket';
+    process.env.SENDER_ALLOWLIST_PARAMETER = ALLOWLIST_PARAMETER;
+    await processEmail(
+      { bucket: 'raw', key: 'incoming/message', trace },
+      {
+        ...attachmentDependencies(
+          [
+            { filename: 'scoreboard.png', contentType: 'image/png', body: 'p' },
+            { filename: 'notes.txt', contentType: 'text/plain', body: 't' },
+          ],
+          {},
+        ),
+        publishStageEvent(stageEvent) {
+          publishStageEvent(
+            stageEvent,
+            (line) => lines.push(line),
+            environment,
+            0,
+          );
+        },
+      },
+    );
+
+    const records = lines.map(
+      (line) => JSON.parse(line) as Record<string, unknown>,
+    );
+    assert.equal(records[0].Stage, 'process-email');
+    if (environment.EMF_METRICS_ENABLED === 'false') {
+      assert.equal(records.length, 1, 'no breakdown records');
+      assert.ok(!('_aws' in records[0]));
+    } else {
+      assert.equal(records[0].SubmissionsAccepted, 1);
+      assert.equal(records[0].ScreenshotsAccepted, 1);
+      assert.equal(records.length, 2);
+      assert.equal(records[1].AttachmentsRejected, 1);
+    }
+    const visible = lines.join('');
+    for (const fragment of [
+      '@example.test',
+      'Tonight',
+      'original-id',
+      MATCH_DATE,
+      'notes.txt',
+      'scoreboard.png',
+    ]) {
+      assert.ok(!visible.includes(fragment), fragment);
+    }
+  }
 });

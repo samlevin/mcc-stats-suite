@@ -4,6 +4,7 @@ import type {
   SubmissionRejectionCode,
   TraceContext,
 } from '@mcc/contracts';
+import { log } from './log';
 
 /** CloudWatch namespace for the metrics the match-to-csv Lambdas publish. */
 export const METRIC_NAMESPACE = 'MCC/MatchToCsv';
@@ -435,6 +436,24 @@ export function publishStageEvent(
     ...(metricsEnabled(environment) ? breakdownRecords(event, timestamp) : []),
   ];
   for (const record of records) write(`${JSON.stringify(record)}\n`);
+}
+
+/**
+ * Hands the event to the handler's injected publisher. A failure to build or
+ * write it is logged and never fails the invocation (spec 1.3 §3.1).
+ */
+export function publishWithoutFailing(
+  dependencies: { publishStageEvent(event: StageEvent): void },
+  event: StageEvent,
+): void {
+  try {
+    dependencies.publishStageEvent(event);
+  } catch (error) {
+    log('ERROR', 'Stage event not written', {
+      stage: event.stage,
+      errorName: error instanceof Error ? error.name : 'Error',
+    });
+  }
 }
 
 /**
