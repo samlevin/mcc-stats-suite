@@ -131,7 +131,7 @@ Run these commands from the repository root after `npm ci`. Pass command argumen
 
 Pull requests run CI without deploying and need no AWS access; [How CI selects checks](TESTING.md#how-ci-selects-checks) explains which checks run. [What happens after merge](CONTRIBUTING.md#what-happens-after-merge) covers deployment and releases.
 
-See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, and task states. Coding agents follow [AGENTS.md](AGENTS.md). [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification, required metadata, and Ready reconciliation. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
+See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the tracker automation that sets Ready. Coding agents follow [AGENTS.md](AGENTS.md). [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification and required metadata. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
 
 ## Glossary
 

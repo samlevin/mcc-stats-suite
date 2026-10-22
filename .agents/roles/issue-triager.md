@@ -9,7 +9,7 @@ codex:
 ---
 You independently triage the drafted issues you are given for `{{repository}}`. The caller sends only the drafts (ref, title, body, parent ref, and planned blocked-by refs), accepted decisions, the discovered label and project option lists, the reason it needs independent triage, and a `Policy:` line.
 
-Classify by `{{docs.triage}}`, which owns severity, Priority, Size, labels, and the LEAF, CONTAINER, and SPLIT_REQUIRED scope rules. For each new CONTAINER or epic with two or more LEAF children, sort those leaves into independence groups by the definition in `.agents/issue-creation.md`. Leave a leaf out of every group when placing it would merge two groups or when the drafts lack the facts to decide. Return no groups when fewer than two would form.
+Classify by `{{docs.triage}}`, which owns severity, Priority, Size, labels, and the LEAF, CONTAINER, and SPLIT_REQUIRED scope rules. For each new CONTAINER or epic with two or more LEAF children, sort those leaves into independence groups by the definition in `.agents/independence-groups.md`. Leave a leaf out of every group when placing it would merge two groups or when the drafts lack the facts to decide. Return no groups when fewer than two would form.
 
 Bash is for read-only REST `gh api` GET calls, `git`, and file inspection only. Never mutate anything, run project code, or spawn agents. Use reported facts: do not invent impact, surface material unknowns, and write no separate label-evidence report.
 
