@@ -428,8 +428,9 @@ test('processScoreboardImage: header and non-player row colors do not create tea
  * Header fallback logic.
  *
  * - We simulate a situation where Textract mis-reads header texts (e.g. "P1", "P2").
- * - In that case, processScoreboardImage falls back to assuming:
- *     col 1 => Player, col 2 => Score, col 3 => Kills, col 4 => Assists, col 5 => Deaths.
+ * - In that case, player takes the first column, and the four stats take
+ *   the four integer columns after it, in order:
+ *     col 2 => Score, col 3 => Kills, col 4 => Assists, col 5 => Deaths.
  * - We verify that stats still go into the correct fields.
  */
 test('processScoreboardImage: header fallback when headers are not clearly recognized', () => {

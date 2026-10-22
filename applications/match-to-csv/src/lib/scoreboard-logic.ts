@@ -19,6 +19,8 @@
 //   - MCC official team colors (Red/Blue/Green/Orange/Gold/Purple/Brown/Pink)
 //   - Review flags on player names Textract may have misread. Names always
 //     stay as read; a flag only marks the row for a person to check.
+//   - Stat columns whose header Textract misread. A stat the parser cannot
+//     place stays empty, and every row is flagged `UNMAPPED_COLUMN` for it.
 
 //////////////////////
 // Public Interfaces //
