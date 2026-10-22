@@ -3,6 +3,7 @@ import type { DeploymentConfig } from '@mcc/cdk-config';
 import type {
   EmailGamertagCsvsInput,
   ExtractTextOutput,
+  PlayerMatchStatus,
   ProcessEmailInput,
   ProcessingRunInput,
   TraceContext,
@@ -45,11 +46,19 @@ import {
   localEsbuildVersion,
 } from './bundling';
 import {
+  ERROR_CLASS_DIMENSION,
   FUNCTION_NAME_DIMENSION,
+  MATCH_STATUS_DIMENSION,
   METRIC_NAMESPACE,
+  REASON_DIMENSION,
+  STAGE_DIMENSION,
+  STAGE_ERRORS_METRIC,
   ZERO_ROW_EXTRACTIONS_METRIC,
+  type Stage,
+  type StageMetricName,
 } from '../../src/lib/metrics';
 import { REPLY_LOCAL_PART } from '../../src/lib/reply-address';
+import { QUERIES, query, type QueryLogGroups } from './queries';
 
 /**
  * The Step Functions context each Lambda task payload carries (spec 1.3
@@ -85,6 +94,51 @@ function writeExtractedCsvPayload(workflow: WorkflowKind): sfn.TaskInput {
     roster: sfn.JsonPath.objectAt('$.roster'),
     trace: traceContext(workflow),
   } satisfies Record<keyof ExtractTextOutput, unknown>);
+}
+
+/** A spec 1.3 §7.2 metric with its `Stage` and any breakdown dimension. */
+function stageMetric(
+  metricName: StageMetricName | 'PlayerRows',
+  stage: Stage,
+  statistic: string,
+  period: Duration = Duration.hours(1),
+  dimensionsMap: Record<string, string> = {},
+): cloudwatch.Metric {
+  return new cloudwatch.Metric({
+    namespace: METRIC_NAMESPACE,
+    metricName,
+    dimensionsMap: { [STAGE_DIMENSION]: stage, ...dimensionsMap },
+    statistic,
+    period,
+  });
+}
+
+/** An account-wide Textract `AnalyzeDocument` metric (spec 1.3 §7.5). */
+function textractMetric(metricName: string): cloudwatch.Metric {
+  return new cloudwatch.Metric({
+    namespace: 'AWS/Textract',
+    metricName,
+    dimensionsMap: { Operation: 'AnalyzeDocument' },
+    statistic: cloudwatch.Stats.SUM,
+    period: Duration.hours(1),
+  });
+}
+
+/**
+ * Hourly sums of a metric for every `Stage` and breakdown dimension value.
+ * `SEARCH` finds values that first appear after deploy, so the dashboard
+ * needs no change for them.
+ */
+function breakdownSearch(
+  metricName: string,
+  dimension: string,
+): cloudwatch.MathExpression {
+  return new cloudwatch.MathExpression({
+    expression: `SEARCH('{${METRIC_NAMESPACE},${STAGE_DIMENSION},${dimension}} MetricName="${metricName}"', 'Sum', 3600)`,
+    usingMetrics: {},
+    period: Duration.hours(1),
+    label: '',
+  });
 }
 
 /**
@@ -791,6 +845,46 @@ export class MatchToCsvStack extends Stack {
       });
     }
 
+    // Ephemeral stacks publish no metrics, so they get no saved queries or
+    // dashboard either.
+    if (!deployment.ephemeral) {
+      const logGroupNames = (functions: lambda.Function[]) =>
+        functions.map((fn) => fn.logGroup.logGroupName);
+      const stageLogGroups = logGroupNames([
+        processEmail,
+        extractText,
+        writeExtractedCsv,
+        writeGamertagCsvs,
+      ]);
+      this.addOperatorViews({
+        logGroups: {
+          stages: stageLogGroups,
+          stagesAndWorkflow: [...stageLogGroups, logGroup.logGroupName],
+          functions: logGroupNames([
+            processEmail,
+            extractText,
+            writeExtractedCsv,
+            writeGamertagCsvs,
+            emailGamertagCsvs,
+            compareRuns,
+            materializeTrainingData,
+          ]),
+        },
+        workflow,
+        replayWorkflow,
+        deadLetterQueue: workflowDlq,
+        zeroRowExtractions: new cloudwatch.Metric({
+          namespace: METRIC_NAMESPACE,
+          metricName: ZERO_ROW_EXTRACTIONS_METRIC,
+          dimensionsMap: {
+            [FUNCTION_NAME_DIMENSION]: extractText.functionName,
+          },
+          statistic: cloudwatch.Stats.SUM,
+          period: Duration.hours(1),
+        }),
+      });
+    }
+
     // The foundation owns the receipt rule set, its activation, and the shared
     // <alias>@<domain> rule. An ephemeral stack adds only its own
     // plus-addressed rule.
@@ -851,7 +945,8 @@ export class MatchToCsvStack extends Stack {
   }
 
   /**
-   * Every alarm fires on a single occurrence in a five-minute period and
+   * Every failure alarm fires on a single occurrence in a five-minute period;
+   * the spec 1.3 §9.1 alarms set their own period and threshold. Every alarm
    * treats missing data as healthy, because an idle pipeline emits nothing.
    */
   private addAlarms(sources: {
@@ -885,15 +980,17 @@ export class MatchToCsvStack extends Stack {
       id: string,
       metric: cloudwatch.IMetric,
       description: string,
+      threshold = 1,
+      comparisonOperator = cloudwatch.ComparisonOperator
+        .GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
     ): void => {
       const resource = new cloudwatch.Alarm(this, `${id}Alarm`, {
         alarmName: `${prefix}-${id}`,
         alarmDescription: description,
         metric,
-        threshold: 1,
+        threshold,
         evaluationPeriods: 1,
-        comparisonOperator:
-          cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+        comparisonOperator,
         treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
       });
       resource.addAlarmAction(action);
@@ -926,6 +1023,260 @@ export class MatchToCsvStack extends Stack {
       'ZeroRowExtractions',
       sources.zeroRowExtractions,
       'A screenshot extraction succeeded without extracting any rows.',
+    );
+
+    const above = cloudwatch.ComparisonOperator.GREATER_THAN_THRESHOLD;
+    alarm(
+      'EndToEndLatency',
+      stageMetric(
+        'EndToEndLatency',
+        'write-gamertag-csvs',
+        cloudwatch.Stats.p(95),
+      ),
+      'The 95th percentile time from receiving an email to storing its gamertag CSVs was over 5 minutes in an hour.',
+      300_000,
+      above,
+    );
+    alarm(
+      'OcrMeanConfidence',
+      stageMetric(
+        'OcrMeanConfidence',
+        'extract',
+        cloudwatch.Stats.AVERAGE,
+        Duration.hours(6),
+      ),
+      'The mean OCR cell confidence was under 90 percent over 6 hours, so most screenshots need review.',
+      90,
+      cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
+    );
+    alarm(
+      'TextractThrottled',
+      textractMetric('ThrottledCount'),
+      'Textract throttled an AnalyzeDocument call in the last hour.',
+      0,
+      above,
+    );
+    // A status with no rows writes no breakdown record, and metric math has no
+    // value when any series is missing, so every term is zero-filled.
+    const playerRows = (status: PlayerMatchStatus) =>
+      stageMetric(
+        'PlayerRows',
+        'extract',
+        cloudwatch.Stats.SUM,
+        Duration.hours(6),
+        { [MATCH_STATUS_DIMENSION]: status },
+      );
+    alarm(
+      'UnmatchedPlayerRate',
+      new cloudwatch.MathExpression({
+        expression:
+          'FILL(unmatched, 0) / (FILL(exact, 0) + FILL(resolved, 0) + FILL(unmatched, 0))',
+        usingMetrics: {
+          exact: playerRows('EXACT'),
+          resolved: playerRows('RESOLVED'),
+          unmatched: playerRows('UNMATCHED'),
+        },
+        period: Duration.hours(6),
+        label: 'Unmatched player rate',
+      }),
+      'More than 20 percent of extracted player rows matched no roster player over 6 hours.',
+      0.2,
+      above,
+    );
+    alarm(
+      'MatchDateReplyFailed',
+      stageMetric(
+        'MatchDateReplyFailed',
+        'process-email',
+        cloudwatch.Stats.SUM,
+      ),
+      'An allowed sender sent an invalid match date and was not told.',
+      0,
+      above,
+    );
+  }
+
+  /**
+   * The spec 1.3 §8 saved queries and the §9.2 dashboard. Metric widgets use
+   * a 1-hour period. Log widgets have no time range of their own, so they
+   * follow the dashboard's, which defaults to the 7 days Q7 covers; Q2 lists
+   * the newest executions first.
+   */
+  private addOperatorViews(sources: {
+    logGroups: Record<QueryLogGroups, string[]>;
+    workflow: sfn.StateMachine;
+    replayWorkflow: sfn.StateMachine;
+    deadLetterQueue: sqs.IQueue;
+    zeroRowExtractions: cloudwatch.IMetric;
+  }): void {
+    const prefix = this.deployment.resourcePrefix;
+    for (const { id, purpose, logGroups, queryString } of QUERIES) {
+      const definition = new logs.CfnQueryDefinition(this, `${id}Query`, {
+        name: `${prefix}/${id}`,
+        queryString,
+        logGroupNames: sources.logGroups[logGroups],
+      });
+      this.describe(definition, 'Operational support', purpose);
+    }
+
+    const hourly = { period: Duration.hours(1) };
+    const sum = cloudwatch.Stats.SUM;
+    const graph = (
+      title: string,
+      left: cloudwatch.IMetric[],
+      options: Partial<cloudwatch.GraphWidgetProps> = {},
+    ) =>
+      new cloudwatch.GraphWidget({
+        title,
+        left,
+        width: 8,
+        height: 6,
+        ...hourly,
+        ...options,
+      });
+    // CloudWatch has no time-series bar chart, so breakdowns stack per hour.
+    const breakdown = (title: string, metricName: string, dimension: string) =>
+      graph(title, [breakdownSearch(metricName, dimension)], { stacked: true });
+    const logTable = (id: 'Q2' | 'Q7', title: string) =>
+      new cloudwatch.LogQueryWidget({
+        title,
+        logGroupNames: sources.logGroups[query(id).logGroups],
+        queryString: query(id).queryString,
+        view: cloudwatch.LogQueryVisualizationType.TABLE,
+        width: 9,
+        height: 8,
+      });
+    const endToEnd = (statistic: string) =>
+      stageMetric('EndToEndLatency', 'write-gamertag-csvs', statistic);
+
+    const dashboard = new cloudwatch.Dashboard(this, 'Dashboard', {
+      dashboardName: prefix,
+      defaultInterval: Duration.days(7),
+      widgets: [
+        [
+          graph('Intake', [
+            sources.workflow.metricStarted({
+              ...hourly,
+              statistic: sum,
+              label: 'Emails received',
+            }),
+            stageMetric('SubmissionsAccepted', 'process-email', sum),
+            stageMetric('SubmissionsRejected', 'process-email', sum),
+            stageMetric('SubmissionsCompleted', 'write-gamertag-csvs', sum),
+          ]),
+          breakdown(
+            'Submissions rejected by reason',
+            'SubmissionsRejected',
+            REASON_DIMENSION,
+          ),
+          breakdown(
+            'Attachments rejected by reason',
+            'AttachmentsRejected',
+            REASON_DIMENSION,
+          ),
+        ],
+        [
+          graph('Work', [
+            stageMetric('ScreenshotsAccepted', 'process-email', sum),
+            stageMetric('CsvWritten', 'write-csv', sum),
+            stageMetric('GamertagCsvsWritten', 'write-gamertag-csvs', sum),
+          ]),
+          graph('Textract calls', [textractMetric('SuccessfulRequestCount')]),
+          graph(
+            'Textract errors',
+            [
+              textractMetric('ThrottledCount'),
+              textractMetric('UserErrorCount'),
+              textractMetric('ServerErrorCount'),
+            ],
+            { stacked: true },
+          ),
+        ],
+        [
+          graph('OCR mean confidence', [
+            stageMetric(
+              'OcrMeanConfidence',
+              'extract',
+              cloudwatch.Stats.AVERAGE,
+            ),
+          ]),
+          graph('Cells to review and zero-row extractions', [
+            stageMetric('ReviewRequiredCells', 'extract', sum),
+            sources.zeroRowExtractions,
+          ]),
+          breakdown(
+            'Player rows by match status',
+            'PlayerRows',
+            MATCH_STATUS_DIMENSION,
+          ),
+        ],
+        [
+          graph(
+            'End-to-end latency',
+            [
+              endToEnd(cloudwatch.Stats.p(50)),
+              endToEnd(cloudwatch.Stats.p(95)),
+            ],
+            { width: 12 },
+          ),
+          graph(
+            'Textract latency',
+            [stageMetric('TextractLatency', 'extract', cloudwatch.Stats.p(95))],
+            { width: 12 },
+          ),
+        ],
+        [
+          breakdown(
+            'Stage errors by class',
+            STAGE_ERRORS_METRIC,
+            ERROR_CLASS_DIMENSION,
+          ),
+          graph('Workflow failures', [
+            sources.workflow.metricFailed({
+              ...hourly,
+              label: 'Ingest failed',
+            }),
+            sources.workflow.metricTimedOut({
+              ...hourly,
+              label: 'Ingest timed out',
+            }),
+            sources.replayWorkflow.metricFailed({
+              ...hourly,
+              label: 'Replay failed',
+            }),
+            sources.replayWorkflow.metricTimedOut({
+              ...hourly,
+              label: 'Replay timed out',
+            }),
+          ]),
+          graph('Workflow dead letters', [
+            sources.deadLetterQueue.metricApproximateNumberOfMessagesVisible({
+              ...hourly,
+              statistic: cloudwatch.Stats.MAXIMUM,
+            }),
+          ]),
+        ],
+        [
+          logTable('Q2', 'Ingest executions (Q2)'),
+          logTable('Q7', 'Errors per hour (Q7)'),
+          new cloudwatch.TextWidget({
+            markdown: [
+              '### Saved queries',
+              '',
+              ...QUERIES.map(
+                ({ id, purpose }) => `- \`${prefix}/${id}\`: ${purpose}`,
+              ),
+            ].join('\n'),
+            width: 6,
+            height: 8,
+          }),
+        ],
+      ],
+    });
+    this.describe(
+      dashboard,
+      'Operational support',
+      'Show pipeline intake, work, quality, speed, failures and jobs',
     );
   }
 

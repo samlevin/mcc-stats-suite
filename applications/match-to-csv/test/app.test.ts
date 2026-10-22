@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Match } from 'aws-cdk-lib/assertions';
+import { QUERIES, query } from '../cdk/lib/queries';
 import { buildStack, synthesize } from './support/app';
 
 test('stable stacks have termination protection', () => {
@@ -301,6 +302,15 @@ type AlarmResource = {
   };
 };
 
+// The spec 1.3 §9.1 alarms, which set their own period and threshold.
+const OBSERVABILITY_ALARMS = [
+  'EndToEndLatency',
+  'OcrMeanConfidence',
+  'TextractThrottled',
+  'UnmatchedPlayerRate',
+  'MatchDateReplyFailed',
+] as const;
+
 // Only prod has alarms.
 for (const environment of ['prod'] as const) {
   test(`${environment} alarms publish failures to the stack topic`, () => {
@@ -333,7 +343,7 @@ for (const environment of ['prod'] as const) {
       ['MaterializeTrainingDataErrors', 'AWS/Lambda', 'Errors'],
       ['ZeroRowExtractions', 'MCC/MatchToCsv', 'ZeroRowExtractions'],
     ];
-    assert.equal(alarms.length, expected.length);
+    assert.equal(alarms.length, expected.length + OBSERVABILITY_ALARMS.length);
     for (const [id, namespace, metricName] of expected) {
       const alarm = byName.get(`${prefix}-${id}`);
       if (!alarm) {
@@ -421,6 +431,333 @@ for (const ephemeral of [undefined, 'test'] as const) {
     template.resourceCountIs('AWS::SNS::Subscription', 0);
   });
 }
+
+test('prod observability alarms read their metrics at the spec thresholds', () => {
+  const template = synthesize({ environment: 'prod' });
+  const prefix = 'match-to-csv-prod';
+  const [topicId] = Object.keys(template.findResources('AWS::SNS::Topic'));
+  const byName = new Map(
+    (
+      Object.values(template.findResources('AWS::CloudWatch::Alarm')) as {
+        Properties: Record<string, unknown>;
+      }[]
+    ).map((alarm) => [alarm.Properties.AlarmName, alarm.Properties]),
+  );
+  const single: [
+    string,
+    string,
+    string,
+    Record<string, string>,
+    string,
+    number,
+    string,
+    number,
+  ][] = [
+    [
+      'EndToEndLatency',
+      'MCC/MatchToCsv',
+      'EndToEndLatency',
+      { Stage: 'write-gamertag-csvs' },
+      'p95',
+      3600,
+      'GreaterThanThreshold',
+      300_000,
+    ],
+    [
+      'OcrMeanConfidence',
+      'MCC/MatchToCsv',
+      'OcrMeanConfidence',
+      { Stage: 'extract' },
+      'Average',
+      21_600,
+      'LessThanThreshold',
+      90,
+    ],
+    [
+      'TextractThrottled',
+      'AWS/Textract',
+      'ThrottledCount',
+      { Operation: 'AnalyzeDocument' },
+      'Sum',
+      3600,
+      'GreaterThanThreshold',
+      0,
+    ],
+    [
+      'MatchDateReplyFailed',
+      'MCC/MatchToCsv',
+      'MatchDateReplyFailed',
+      { Stage: 'process-email' },
+      'Sum',
+      3600,
+      'GreaterThanThreshold',
+      0,
+    ],
+  ];
+  for (const [
+    id,
+    namespace,
+    metricName,
+    dimensions,
+    statistic,
+    period,
+    comparison,
+    threshold,
+  ] of single) {
+    const alarm = byName.get(`${prefix}-${id}`);
+    assert.ok(alarm, `missing alarm ${prefix}-${id}`);
+    assert.equal(alarm.Namespace, namespace, id);
+    assert.equal(alarm.MetricName, metricName, id);
+    assert.deepEqual(
+      Object.fromEntries(
+        (alarm.Dimensions as { Name: string; Value: string }[]).map(
+          ({ Name, Value }) => [Name, Value],
+        ),
+      ),
+      dimensions,
+      id,
+    );
+    assert.equal(alarm.ExtendedStatistic ?? alarm.Statistic, statistic, id);
+    assert.equal(alarm.Period, period, id);
+    assert.equal(alarm.EvaluationPeriods, 1, id);
+    assert.equal(alarm.ComparisonOperator, comparison, id);
+    assert.equal(alarm.Threshold, threshold, id);
+    assert.equal(alarm.TreatMissingData, 'notBreaching', id);
+    assert.deepEqual(alarm.AlarmActions, [{ Ref: topicId }], id);
+  }
+
+  const rate = byName.get(`${prefix}-UnmatchedPlayerRate`);
+  assert.ok(rate, 'missing alarm UnmatchedPlayerRate');
+  assert.equal(rate.ComparisonOperator, 'GreaterThanThreshold');
+  assert.equal(rate.Threshold, 0.2);
+  assert.equal(rate.EvaluationPeriods, 1);
+  assert.equal(rate.TreatMissingData, 'notBreaching');
+  assert.deepEqual(rate.AlarmActions, [{ Ref: topicId }]);
+  const metrics = rate.Metrics as {
+    Id: string;
+    Expression?: string;
+    MetricStat?: {
+      Metric: {
+        Namespace: string;
+        MetricName: string;
+        Dimensions: { Name: string; Value: string }[];
+      };
+      Period: number;
+      Stat: string;
+    };
+  }[];
+  const [expression] = metrics.filter((metric) => metric.Expression);
+  // Every term is zero-filled, so a status with no rows still yields a rate.
+  assert.equal(
+    expression.Expression,
+    'FILL(unmatched, 0) / (FILL(exact, 0) + FILL(resolved, 0) + FILL(unmatched, 0))',
+  );
+  for (const term of ['exact', 'resolved', 'unmatched']) {
+    const metric = metrics.find((candidate) => candidate.Id === term);
+    assert.ok(metric?.MetricStat, term);
+    assert.equal(metric.MetricStat.Metric.Namespace, 'MCC/MatchToCsv');
+    assert.equal(metric.MetricStat.Metric.MetricName, 'PlayerRows');
+    assert.deepEqual(
+      Object.fromEntries(
+        metric.MetricStat.Metric.Dimensions.map(({ Name, Value }) => [
+          Name,
+          Value,
+        ]),
+      ),
+      { Stage: 'extract', MatchStatus: term.toUpperCase() },
+    );
+    assert.equal(metric.MetricStat.Period, 21_600);
+    assert.equal(metric.MetricStat.Stat, 'Sum');
+  }
+  for (const id of OBSERVABILITY_ALARMS) {
+    assert.ok(byName.has(`${prefix}-${id}`), id);
+  }
+});
+
+for (const environment of ['dev', 'prod'] as const) {
+  test(`${environment} saves the seven queries over the log groups each reads`, () => {
+    const template = synthesize({ environment });
+    const prefix = `match-to-csv-${environment}`;
+    const definitions = (
+      Object.values(template.findResources('AWS::Logs::QueryDefinition')) as {
+        Properties: {
+          Name: string;
+          QueryString: string;
+          LogGroupNames: { Ref: string }[];
+        };
+      }[]
+    ).map((resource) => resource.Properties);
+    assert.deepEqual(
+      definitions.map(({ Name }) => Name).sort(),
+      QUERIES.map(({ id }) => `${prefix}/${id}`).sort(),
+    );
+    const resources = template.toJSON().Resources as Record<
+      string,
+      { Properties: { LogGroupName: string } }
+    >;
+    const names = (refs: { Ref: string }[]) =>
+      refs.map(({ Ref }) => resources[Ref].Properties.LogGroupName).sort();
+    const stages = [
+      'ProcessEmail',
+      'ExtractText',
+      'WriteExtractedCsv',
+      'WriteGamertagCsvs',
+    ].map((id) => `/aws/lambda/${prefix}-${id}`);
+    const expected = {
+      stages,
+      stagesAndWorkflow: [...stages, `/aws/vendedlogs/states/${prefix}`],
+      functions: [
+        ...stages,
+        `/aws/lambda/${prefix}-EmailGamertagCsvs`,
+        `/aws/lambda/${prefix}-CompareRuns`,
+        `/aws/lambda/${prefix}-MaterializeTrainingData`,
+      ],
+    };
+    for (const { id, logGroups, queryString } of QUERIES) {
+      const definition = definitions.find(
+        ({ Name }) => Name === `${prefix}/${id}`,
+      )!;
+      assert.equal(definition.QueryString, queryString, id);
+      assert.deepEqual(
+        names(definition.LogGroupNames),
+        [...expected[logGroups]].sort(),
+        id,
+      );
+    }
+    assert.equal(query('Q2').logGroups, 'stagesAndWorkflow');
+    assert.equal(query('Q6').logGroups, 'functions');
+  });
+
+  test(`${environment} dashboard has every spec row, SEARCH breakdowns, and the Q2 and Q7 tables`, () => {
+    const template = synthesize({ environment });
+    const prefix = `match-to-csv-${environment}`;
+    const dashboards = Object.values(
+      template.findResources('AWS::CloudWatch::Dashboard'),
+    );
+    assert.equal(dashboards.length, 1);
+    const [{ Properties }] = dashboards;
+    assert.equal(Properties.DashboardName, prefix);
+    // The body joins JSON text with references; references become strings.
+    const body = JSON.parse(
+      (Properties.DashboardBody['Fn::Join'][1] as (string | object)[])
+        .map((part) => (typeof part === 'string' ? part : 'REF'))
+        .join(''),
+    ) as {
+      start: string;
+      widgets: {
+        type: string;
+        properties: {
+          title?: string;
+          view?: string;
+          stacked?: boolean;
+          query?: string;
+          markdown?: string;
+          period?: number;
+          metrics?: unknown[][];
+        };
+      }[];
+    };
+    assert.equal(body.start, '-P7D');
+    const titled = new Map(
+      body.widgets
+        .filter((widget) => widget.properties.title)
+        .map((widget) => [widget.properties.title!, widget]),
+    );
+    const metricNames = (title: string) =>
+      (titled.get(title)?.properties.metrics ?? []).map((metric) =>
+        metric
+          .filter((part): part is string => typeof part === 'string')
+          .join(' '),
+      );
+    assert.deepEqual(metricNames('Intake'), [
+      'AWS/States ExecutionsStarted StateMachineArn REF',
+      'MCC/MatchToCsv SubmissionsAccepted Stage process-email',
+      'MCC/MatchToCsv SubmissionsRejected Stage process-email',
+      'MCC/MatchToCsv SubmissionsCompleted Stage write-gamertag-csvs',
+    ]);
+    assert.deepEqual(metricNames('Work'), [
+      'MCC/MatchToCsv ScreenshotsAccepted Stage process-email',
+      'MCC/MatchToCsv CsvWritten Stage write-csv',
+      'MCC/MatchToCsv GamertagCsvsWritten Stage write-gamertag-csvs',
+    ]);
+    assert.deepEqual(metricNames('Textract calls'), [
+      'AWS/Textract SuccessfulRequestCount Operation AnalyzeDocument',
+    ]);
+    assert.deepEqual(metricNames('Textract errors'), [
+      'AWS/Textract ThrottledCount Operation AnalyzeDocument',
+      'AWS/Textract UserErrorCount Operation AnalyzeDocument',
+      'AWS/Textract ServerErrorCount Operation AnalyzeDocument',
+    ]);
+    assert.deepEqual(metricNames('OCR mean confidence'), [
+      'MCC/MatchToCsv OcrMeanConfidence Stage extract',
+    ]);
+    assert.deepEqual(metricNames('Cells to review and zero-row extractions'), [
+      'MCC/MatchToCsv ReviewRequiredCells Stage extract',
+      'MCC/MatchToCsv ZeroRowExtractions FunctionName REF',
+    ]);
+    assert.deepEqual(metricNames('End-to-end latency'), [
+      'MCC/MatchToCsv EndToEndLatency Stage write-gamertag-csvs',
+      'MCC/MatchToCsv EndToEndLatency Stage write-gamertag-csvs',
+    ]);
+    assert.deepEqual(metricNames('Textract latency'), [
+      'MCC/MatchToCsv TextractLatency Stage extract',
+    ]);
+    assert.deepEqual(metricNames('Workflow failures'), [
+      'AWS/States ExecutionsFailed StateMachineArn REF',
+      'AWS/States ExecutionsTimedOut StateMachineArn REF',
+      'AWS/States ExecutionsFailed StateMachineArn REF',
+      'AWS/States ExecutionsTimedOut StateMachineArn REF',
+    ]);
+    assert.deepEqual(metricNames('Workflow dead letters'), [
+      'AWS/SQS ApproximateNumberOfMessagesVisible QueueName REF',
+    ]);
+
+    for (const [title, metricName, dimension] of [
+      ['Submissions rejected by reason', 'SubmissionsRejected', 'Reason'],
+      ['Attachments rejected by reason', 'AttachmentsRejected', 'Reason'],
+      ['Player rows by match status', 'PlayerRows', 'MatchStatus'],
+      ['Stage errors by class', 'StageErrors', 'ErrorClass'],
+    ] as const) {
+      const widget = titled.get(title);
+      assert.ok(widget, title);
+      assert.equal(widget.properties.stacked, true, title);
+      assert.deepEqual(
+        widget.properties.metrics,
+        [
+          [
+            {
+              expression: `SEARCH('{MCC/MatchToCsv,Stage,${dimension}} MetricName="${metricName}"', 'Sum', 3600)`,
+              period: 3600,
+            },
+          ],
+        ],
+        title,
+      );
+    }
+    for (const widget of body.widgets.filter(({ type }) => type === 'metric')) {
+      assert.equal(widget.properties.period, 3600, widget.properties.title);
+    }
+
+    const logWidgets = body.widgets.filter(({ type }) => type === 'log');
+    assert.equal(logWidgets.length, 2);
+    for (const [index, id] of (['Q2', 'Q7'] as const).entries()) {
+      const { properties } = logWidgets[index];
+      assert.equal(properties.view, 'table', id);
+      // SOURCE names each log group as a reference, then the query follows.
+      assert.ok(properties.query?.endsWith(` | ${query(id).queryString}`), id);
+    }
+    const [text] = body.widgets.filter(({ type }) => type === 'text');
+    for (const { id } of QUERIES) {
+      assert.ok(text.properties.markdown?.includes(`${prefix}/${id}`), id);
+    }
+  });
+}
+
+test('ephemeral stacks save no queries and create no dashboard', () => {
+  const template = synthesize({ environment: 'dev', ephemeral: 'test' });
+  template.resourceCountIs('AWS::Logs::QueryDefinition', 0);
+  template.resourceCountIs('AWS::CloudWatch::Dashboard', 0);
+});
 
 for (const table of [
   {
