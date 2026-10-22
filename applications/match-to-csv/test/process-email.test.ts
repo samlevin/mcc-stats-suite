@@ -15,10 +15,10 @@ import {
   parseSesRecipients,
   parseSesVerdicts,
   processEmail,
-  readReceivedAt,
   type ProcessEmailDependencies,
   type ReplyMessage,
 } from '../src/lambdas/process-email';
+import { readReceivedAt } from '../src/lib/received-at';
 import { captureLogLines } from './support/log-lines';
 
 afterEach(() => {
