@@ -311,20 +311,15 @@ const expression = (value, context) =>
   });
 const DEFAULT_BRANCH = { repository: { default_branch: 'main' } };
 
-test('the workflow adds opened issues and sweeps on a schedule or by hand', () => {
+// The hourly membership sweep runs in tracker-issue-states.yml.
+test('the workflow adds opened issues and sweeps by hand', () => {
   const definition = workflow('tracker-project-membership');
-  const { issues, schedule, workflow_dispatch: dispatch } = definition.on;
+  const { issues, workflow_dispatch: dispatch } = definition.on;
   assert.deepEqual(Object.keys(definition.on).sort(), [
     'issues',
-    'schedule',
     'workflow_dispatch',
   ]);
   assert.deepEqual(issues, { types: ['opened'] });
-  assert.deepEqual(schedule, [{ cron: '2 * * * *' }]);
-  const minutes = (cron) => cron.split(' ')[0].split(',').map(Number);
-  const states = workflow('tracker-issue-states').on.schedule[0].cron;
-  for (const minute of minutes(schedule[0].cron))
-    assert.ok(!minutes(states).includes(minute), `minute ${minute} collides`);
   assert.equal(dispatch.inputs.dry_run.type, 'boolean');
   assert.equal(dispatch.inputs.dry_run.default, true);
   assert.equal(definition.name, 'Tracker: add issues to the project');
@@ -341,7 +336,8 @@ test('the workflow adds opened issues and sweeps on a schedule or by hand', () =
     expression(definition.concurrency.group, { github: opened }),
     'project-membership-issue-7',
   );
-  for (const event_name of ['schedule', 'workflow_dispatch']) {
+  {
+    const event_name = 'workflow_dispatch';
     const github = { event_name, event: DEFAULT_BRANCH };
     assert.equal(
       expression(definition['run-name'], { github }),
@@ -434,20 +430,19 @@ test('each event runs one job, and the sweep runs only from the default branch',
   assert.deepEqual(runs(github('issues', { ref: 'refs/heads/feature' })), [
     'add-to-project',
   ]);
-  assert.deepEqual(runs(github('schedule')), ['add-missing-issues']);
   assert.deepEqual(runs(github('workflow_dispatch')), ['add-missing-issues']);
   assert.deepEqual(
     runs(github('workflow_dispatch', { ref: 'refs/heads/feature' })),
     [],
   );
-  for (const event_name of ['issues', 'schedule', 'workflow_dispatch'])
+  for (const event_name of ['issues', 'workflow_dispatch'])
     assert.deepEqual(
       runs(github(event_name, { repository: 'someone/fork' })),
       [],
     );
 });
 
-test('the sweep writes on a schedule and a manual run follows its dry_run input', () => {
+test('a manual sweep follows its dry_run input', () => {
   const job = workflow('tracker-project-membership').jobs['add-missing-issues'];
   assert.equal(job.name, 'Add missing open issues to MCC delivery');
   const run = job.steps.find((step) => step.run);
@@ -459,7 +454,6 @@ test('the sweep writes on a schedule and a manual run follows its dry_run input'
   assert.equal(run.env.SWEEP, 'true');
   const dryRun = (event_name, inputs = {}) =>
     expression(run.env.DRY_RUN, { github: { event_name }, inputs });
-  assert.equal(dryRun('schedule'), 'false');
   assert.equal(dryRun('workflow_dispatch', { dry_run: true }), 'true');
   assert.equal(dryRun('workflow_dispatch', { dry_run: false }), 'false');
 });
