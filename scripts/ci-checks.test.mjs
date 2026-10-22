@@ -274,7 +274,7 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   const bundleTasks = dryRun('bundle');
   for (const [tasks, expected] of [
     [staticTasks, 18],
-    [bundleTasks, 9],
+    [bundleTasks, 10],
   ]) {
     assert.equal(
       [...tasks.values()].filter((task) => task.command !== '<NONEXISTENT>')
@@ -317,17 +317,20 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
       .get('@mcc/match-to-csv#ci:synth')
       .dependencies.includes('@mcc/contracts#build'),
   );
-  // match-to-csv tests and bundles load @mcc/roster from its dist.
-  assert.ok(
-    staticTasks
-      .get('@mcc/match-to-csv#ci:test')
-      .dependencies.includes('@mcc/roster#build'),
-  );
-  assert.ok(
-    bundleTasks
-      .get('@mcc/match-to-csv#ci:synth')
-      .dependencies.includes('@mcc/roster#build'),
-  );
+  // match-to-csv tests and bundles load @mcc/roster and @mcc/recipients from
+  // their dist.
+  for (const dependency of ['@mcc/roster#build', '@mcc/recipients#build']) {
+    assert.ok(
+      staticTasks
+        .get('@mcc/match-to-csv#ci:test')
+        .dependencies.includes(dependency),
+    );
+    assert.ok(
+      bundleTasks
+        .get('@mcc/match-to-csv#ci:synth')
+        .dependencies.includes(dependency),
+    );
+  }
   assert.deepEqual(
     bundleTasks.get('@mcc/match-to-csv#verify:bundle').dependencies,
     ['@mcc/match-to-csv#ci:synth'],

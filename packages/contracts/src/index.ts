@@ -45,18 +45,27 @@ export interface SourceScreenshot extends S3ObjectReference {
  * - `LOW_WORD_CONFIDENCE`: a word of the value has a very low Textract WORD
  *   confidence.
  * - `SPLIT_TRAILING_DIGITS`: the value ends in a digits-only word that follows
- *   a word ending in a letter, and Textract read one of the two with low
- *   confidence, so the space between them may be a misread.
+ *   a word ending in a letter, or in a letter followed by punctuation, and
+ *   Textract read one of the two with low confidence, so the space and any
+ *   punctuation between them may be a misread.
+ * - `UNMAPPED_COLUMN`: the parser could not tell which column holds the stat,
+ *   so the value is empty.
  */
-export type RowReviewCode = 'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS';
+export type RowReviewCode =
+  'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS' | 'UNMAPPED_COLUMN';
 
 /** A deterministic review flag on one field of an extracted row. */
-export interface RowReviewFlag {
-  field: 'player';
-  code: RowReviewCode;
-  /** Lowest Textract WORD confidence, 0 to 100, among the words the rule read. */
-  wordConfidence: number;
-}
+export type RowReviewFlag =
+  | {
+      field: 'player';
+      code: 'LOW_WORD_CONFIDENCE' | 'SPLIT_TRAILING_DIGITS';
+      /** Lowest Textract WORD confidence, 0 to 100, among the words the rule read. */
+      wordConfidence: number;
+    }
+  | {
+      field: 'score' | 'kills' | 'assists' | 'deaths';
+      code: 'UNMAPPED_COLUMN';
+    };
 
 /**
  * How an observed cell differs from what the screenshot shows (spec 2.3 §7.3).
@@ -309,6 +318,61 @@ export interface WriteGamertagCsvsOutput {
   fileCount: number;
   /** Lines across those files, one per `EXACT` or `RESOLVED` row. */
   rowCount: number;
+}
+
+/**
+ * Input of the main workflow's results email step, which runs after the
+ * per-gamertag export step.
+ */
+export interface EmailGamertagCsvsInput {
+  submissionId: string;
+  /** `ProcessEmailOutput.matchDate`, as `YYYY-MM-DD`. */
+  matchDate: string;
+  /** The number of `ProcessEmailOutput.screenshots`. */
+  screenshotCount: number;
+  gamertagCsvs: WriteGamertagCsvsOutput;
+  trace?: TraceContext;
+}
+
+/**
+ * What the results email step did. `SENT`: SES accepted one email to every
+ * active recipient. `NOT_CONFIGURED`: the recipient list has no active
+ * entry. `NO_FILES`: the submission has no per-gamertag CSV.
+ */
+export type CsvEmailDeliveryStatus = 'SENT' | 'NOT_CONFIGURED' | 'NO_FILES';
+
+/**
+ * The submission's `export/csv-email.json`, written once. It names the
+ * attachments but never an address.
+ */
+export interface CsvEmailDelivery {
+  schemaVersion: 'csv-email-delivery/v1';
+  submissionId: string;
+  status: CsvEmailDeliveryStatus;
+  /** The SES message ID; null unless `SENT`. */
+  sesMessageId: string | null;
+  recipientsVersion: number;
+  /** Active recipients at `recipientsVersion`. */
+  recipientCount: number;
+  screenshotCount: number;
+  /** The per-gamertag CSV file names, sorted. */
+  attachments: string[];
+  recordedAt: string;
+}
+
+/**
+ * Output of the results email step. Attachment names name gamertags, so the
+ * output carries counts only.
+ */
+export interface EmailGamertagCsvsOutput {
+  submissionId: string;
+  status: CsvEmailDeliveryStatus;
+  sesMessageId: string | null;
+  recipientsVersion: number;
+  recipientCount: number;
+  attachmentCount: number;
+  /** The delivery record, `[ephemeral/<name>/]submissions/{submissionId}/export/csv-email.json`. */
+  key: string;
 }
 
 export type DatasetSplit = 'TRAIN' | 'VALIDATION' | 'TEST';

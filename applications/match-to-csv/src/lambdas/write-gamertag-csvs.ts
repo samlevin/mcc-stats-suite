@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import type { Context } from 'aws-lambda';
 import type {
   CsvRow,
   WriteExtractedCsvOutput,
@@ -12,6 +13,8 @@ import type {
 import { GAMERTAG_PATTERN } from '@mcc/roster';
 import { exportDate, rowsToGamertagCsv } from '../lib/csv';
 import { log } from '../lib/log';
+import { publishStageEvent, type StageEvent } from '../lib/metrics';
+import { readReceivedAt } from '../lib/received-at';
 import { bodyToBuffer, namespacedObjectKey } from '../lib/s3';
 
 const s3 = new S3Client({});
@@ -26,6 +29,10 @@ export interface WriteGamertagCsvsDependencies {
     body: string,
     contentType: string,
   ): Promise<void>;
+  /** Writes the invocation's stage event. */
+  publishStageEvent(event: StageEvent): void;
+  /** The current time, in epoch milliseconds. */
+  now(): number;
 }
 
 const defaultDependencies: WriteGamertagCsvsDependencies = {
@@ -48,30 +55,128 @@ const defaultDependencies: WriteGamertagCsvsDependencies = {
       }),
     );
   },
+  publishStageEvent(event) {
+    publishStageEvent(event);
+  },
+  now: () => Date.now(),
 };
 
 export async function handler(
   event: WriteGamertagCsvsInput,
+  context?: Pick<Context, 'awsRequestId'>,
 ): Promise<WriteGamertagCsvsOutput> {
-  return writeGamertagCsvs(event, defaultDependencies);
+  return writeGamertagCsvs(event, defaultDependencies, context?.awsRequestId);
 }
 
 const CSV_SUFFIX = '/export/extracted.csv';
 const TABLE_SUFFIX = '/export/extracted-table.json';
+const SUBMISSION_ID = /^[A-Za-z0-9-]+$/;
+
+/** Counts of one invocation, as far as it got. */
+interface ExportCounts {
+  /** Gamertag CSVs stored, including files an earlier attempt wrote. */
+  fileCount: number;
+  /** Lines across the stored files. */
+  rowCount: number;
+  /** Run exports in the input. */
+  exportCount: number;
+}
 
 /**
  * Writes one legacy-spreadsheet CSV per roster gamertag of a submission (spec
  * 1.1 §8.6.1) under `submissions/{submissionId}/export/gamertags/`. It reads
  * each run's `extracted-table.json`, in the order of `event.exports`, and
  * keeps the rows whose `playerResolution` is `EXACT` or `RESOLVED`. Gamertags
- * appear only in the files it writes: errors, logs and the output carry run
- * IDs, row positions and counts.
+ * appear only in the files it writes: errors, logs, the stage event and the
+ * output carry run IDs, row positions and counts.
+ *
+ * Every invocation writes one `write-gamertag-csvs` stage event (spec 1.3
+ * §3.1): `OK` once every file is stored, or `ERROR` before the error is
+ * rethrown.
  */
 export async function writeGamertagCsvs(
   event: WriteGamertagCsvsInput,
   dependencies: WriteGamertagCsvsDependencies,
+  requestId?: string,
 ): Promise<WriteGamertagCsvsOutput> {
-  if (!/^[A-Za-z0-9-]+$/.test(event.submissionId)) {
+  const startedAt = dependencies.now();
+  const counts: ExportCounts = {
+    fileCount: 0,
+    rowCount: 0,
+    exportCount: Array.isArray(event.exports) ? event.exports.length : 0,
+  };
+  const base = {
+    stage: 'write-gamertag-csvs',
+    ids:
+      typeof event.submissionId === 'string' &&
+      SUBMISSION_ID.test(event.submissionId)
+        ? { submissionId: event.submissionId }
+        : {},
+    trace: event.trace,
+    requestId,
+  } as const;
+
+  let output: WriteGamertagCsvsOutput;
+  try {
+    output = await writeFiles(event, dependencies, counts);
+  } catch (error) {
+    publish(dependencies, {
+      ...base,
+      outcome: 'ERROR',
+      durationMs: dependencies.now() - startedAt,
+      errorName: error instanceof Error ? error.name : undefined,
+      properties: { ...counts },
+      metrics: {},
+    });
+    throw error;
+  }
+
+  const finishedAt = dependencies.now();
+  const receivedAt = readReceivedAt(event.receivedAt);
+  const endToEndMs =
+    receivedAt === undefined ? undefined : finishedAt - Date.parse(receivedAt);
+  publish(dependencies, {
+    ...base,
+    outcome: 'OK',
+    durationMs: finishedAt - startedAt,
+    properties: {
+      ...counts,
+      completedSubmissionId: output.submissionId,
+      ...(endToEndMs === undefined ? {} : { endToEndMs }),
+    },
+    metrics: {
+      GamertagCsvsWritten: output.fileCount,
+      SubmissionsCompleted: 1,
+      ...(endToEndMs === undefined ? {} : { EndToEndLatency: endToEndMs }),
+    },
+  });
+  return output;
+}
+
+/**
+ * Writes the stage event. A failure to build or write it is logged and never
+ * fails the invocation.
+ */
+function publish(
+  dependencies: WriteGamertagCsvsDependencies,
+  event: StageEvent,
+): void {
+  try {
+    dependencies.publishStageEvent(event);
+  } catch (error) {
+    log('ERROR', 'Stage event not written', {
+      stage: event.stage,
+      errorName: error instanceof Error ? error.name : 'Error',
+    });
+  }
+}
+
+async function writeFiles(
+  event: WriteGamertagCsvsInput,
+  dependencies: WriteGamertagCsvsDependencies,
+  counts: ExportCounts,
+): Promise<WriteGamertagCsvsOutput> {
+  if (!SUBMISSION_ID.test(event.submissionId)) {
     throw invalidInput('Submission ID has an unexpected form');
   }
   exportDate(event.matchDate);
@@ -110,12 +215,20 @@ export async function writeGamertagCsvs(
     return {
       key: `${prefix}${gamertagObjectName(gamertag)}`,
       body: rowsToGamertagCsv(event.matchDate, rows),
+      rowCount: rows.length,
     };
   });
   await Promise.all(
-    files.map((file, index) =>
-      putOnce(dependencies, bucket, file, `${index + 1} of ${files.length}`),
-    ),
+    files.map(async (file, index) => {
+      await putOnce(
+        dependencies,
+        bucket,
+        file,
+        `${index + 1} of ${files.length}`,
+      );
+      counts.fileCount += 1;
+      counts.rowCount += file.rowCount;
+    }),
   );
 
   const output: WriteGamertagCsvsOutput = {

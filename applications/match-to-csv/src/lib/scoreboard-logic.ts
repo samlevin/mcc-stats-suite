@@ -19,6 +19,8 @@
 //   - MCC official team colors (Red/Blue/Green/Orange/Gold/Purple/Brown/Pink)
 //   - Review flags on player names Textract may have misread. Names always
 //     stay as read; a flag only marks the row for a person to check.
+//   - Stat columns whose header Textract misread. A stat the parser cannot
+//     place stays empty, and every row is flagged `UNMAPPED_COLUMN` for it.
 
 //////////////////////
 // Public Interfaces //
@@ -96,13 +98,32 @@ export interface ScoreboardParseResult {
 // Internal Structures //
 /////////////////////////
 
-interface ColumnMapping {
-  player?: number;
-  score?: number;
-  kills?: number;
-  assists?: number;
-  deaths?: number;
-}
+type StatField = 'score' | 'kills' | 'assists' | 'deaths';
+type ColumnField = 'player' | StatField;
+
+/** The Textract ColumnIndex of each field. No two fields share a column. */
+type ColumnMapping = Partial<Record<ColumnField, number>>;
+
+/** The stat columns in the order a Halo 3 scoreboard shows them. */
+const STAT_FIELDS: readonly StatField[] = [
+  'score',
+  'kills',
+  'assists',
+  'deaths',
+];
+
+const STAT_HEADERS: Record<StatField, string> = {
+  score: 'SCORE',
+  kills: 'KILLS',
+  assists: 'ASSISTS',
+  deaths: 'DEATHS',
+};
+
+/**
+ * A stat header read as at least this many leading letters of its name, such
+ * as `ASS` for a faint `ASSISTS`, still names that stat.
+ */
+const MIN_HEADER_PREFIX = 3;
 
 /**
  * Intermediate representation of a player row before we add team and win/loss.
@@ -152,10 +173,12 @@ const COLOR_CLUSTER_THRESHOLD = 40;
 const LOW_WORD_CONFIDENCE_BELOW = 50;
 
 /**
- * A gamertag that ends in a digits-only word after a word ending in a letter
- * is flagged `SPLIT_TRAILING_DIGITS` when either word's confidence is below
- * this. Gamertags may contain spaces, so the split alone is no evidence of a
- * misread, but a real capture read `Player06` as `Player 06` at 55 and 88.
+ * A gamertag that ends in a digits-only word after a word ending in a letter,
+ * or in a letter followed by punctuation, is flagged `SPLIT_TRAILING_DIGITS`
+ * when either word's confidence is below this. Gamertags may contain spaces,
+ * so the split alone is no evidence of a misread, but real captures read
+ * `Player06` as `Player 06` at 55 and 88, and `Player19` as `Player: 19` at
+ * 59 and 89.
  */
 const SPLIT_TRAILING_DIGITS_BELOW = 90;
 
@@ -232,28 +255,13 @@ export function processScoreboardImage(
   const headerRowIndex = rowIndices[0];
   const headerRow = tableByRow.get(headerRowIndex)!;
 
-  const colMapping: ColumnMapping = {};
-  for (const [col, headerText] of headerRow.entries()) {
-    const norm = headerText.trim().toUpperCase();
-    if (norm.includes('PLAYER')) colMapping.player = col;
-    else if (norm === 'SCORE') colMapping.score = col;
-    else if (norm === 'KILLS') colMapping.kills = col;
-    else if (norm === 'ASSISTS') colMapping.assists = col;
-    else if (norm === 'DEATHS') colMapping.deaths = col;
-  }
-
-  // If Textract mis-reads headers, fall back to the standard column order.
-  const headerCols = Array.from(headerRow.keys()).sort((a, b) => a - b);
-  if (!colMapping.player && headerCols.length >= 1)
-    colMapping.player = headerCols[0];
-  if (!colMapping.score && headerCols.length >= 2)
-    colMapping.score = headerCols[1];
-  if (!colMapping.kills && headerCols.length >= 3)
-    colMapping.kills = headerCols[2];
-  if (!colMapping.assists && headerCols.length >= 4)
-    colMapping.assists = headerCols[3];
-  if (!colMapping.deaths && headerCols.length >= 5)
-    colMapping.deaths = headerCols[4];
+  const colMapping = mapColumns(
+    headerRow,
+    rowIndices.slice(1).map((r) => tableByRow.get(r)!),
+  );
+  const unmappedStats = STAT_FIELDS.filter(
+    (field) => colMapping[field] === undefined,
+  );
 
   // 5) Build a list of PlayerRow entries (skip header row).
   const players: PlayerRow[] = [];
@@ -274,7 +282,13 @@ export function processScoreboardImage(
     const pr: PlayerRow = {
       rowIndex: r,
       player,
-      reviewFlags: playerReviewFlags(player, playerWords),
+      reviewFlags: [
+        ...playerReviewFlags(player, playerWords),
+        ...unmappedStats.map((field): RowReviewFlag => ({
+          field,
+          code: 'UNMAPPED_COLUMN',
+        })),
+      ],
     };
 
     if (colMapping.score) pr.score = row.get(colMapping.score) ?? '';
@@ -381,6 +395,76 @@ function getCellText(
   return joinWords(getCellWords(cell, blockMap));
 }
 
+/**
+ * Map the header row's columns to fields.
+ *
+ * 1. A header containing `PLAYER` maps to player. A stat header maps to its
+ *    stat when it reads as the stat's name or its first three or more
+ *    letters. Each field takes the first column that names it, and each
+ *    column maps to at most one field.
+ * 2. Without a player header, player takes the first column.
+ * 3. Each run of consecutive stats without a header takes the unmapped
+ *    columns between the mapped columns on either side of the run that hold
+ *    an integer in some data row, in order, but only when there are exactly
+ *    as many such columns as stats in the run. Otherwise those stats stay
+ *    unmapped.
+ */
+function mapColumns(
+  headerRow: Map<number, string>,
+  dataRows: Map<number, string>[],
+): ColumnMapping {
+  const mapping: ColumnMapping = {};
+  const columns = [
+    ...new Set([headerRow, ...dataRows].flatMap((row) => [...row.keys()])),
+  ].sort((a, b) => a - b);
+  const used = new Set<number>();
+  const assign = (field: ColumnField, col: number) => {
+    mapping[field] = col;
+    used.add(col);
+  };
+
+  for (const col of columns) {
+    const field = headerField(headerRow.get(col) ?? '');
+    if (field && mapping[field] === undefined) assign(field, col);
+  }
+
+  if (mapping.player === undefined) {
+    const first = columns.find((col) => !used.has(col));
+    if (first !== undefined) assign('player', first);
+  }
+
+  const order: ColumnField[] = ['player', ...STAT_FIELDS];
+  for (let start = 1; start < order.length; start++) {
+    if (mapping[order[start]] !== undefined) continue;
+    let end = start;
+    while (end < order.length && mapping[order[end]] === undefined) end++;
+    const run = order.slice(start, end);
+    const after = end < order.length ? mapping[order[end]]! : Infinity;
+    const before = mapping[order[start - 1]] ?? -Infinity;
+    const candidates = columns.filter(
+      (col) =>
+        col > before &&
+        col < after &&
+        !used.has(col) &&
+        dataRows.some((row) => isProbablyNumeric(row.get(col))),
+    );
+    if (candidates.length === run.length) {
+      run.forEach((field, index) => assign(field, candidates[index]));
+    }
+    start = end;
+  }
+
+  return mapping;
+}
+
+/** The field a header cell names, if any. */
+function headerField(text: string): ColumnField | undefined {
+  const norm = text.toUpperCase().replace(/[^A-Z]/g, '');
+  if (norm.includes('PLAYER')) return 'player';
+  if (norm.length < MIN_HEADER_PREFIX) return undefined;
+  return STAT_FIELDS.find((field) => STAT_HEADERS[field].startsWith(norm));
+}
+
 function tableHeaderScore(
   table: TextractBlockLite,
   blockMap: Map<string, TextractBlockLite>,
@@ -456,7 +540,7 @@ function playerReviewFlags(
   if (
     nameWords.length >= 2 &&
     /^\d+$/.test(last.text) &&
-    /\p{L}$/u.test(before.text)
+    /\p{L}[^\p{L}\p{N}]*$/u.test(before.text)
   ) {
     const split = lowestConfidence([before, last]);
     if (split !== undefined && split < SPLIT_TRAILING_DIGITS_BELOW) {

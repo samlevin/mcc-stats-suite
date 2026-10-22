@@ -27,6 +27,34 @@
       "Effect": "Allow",
       "Action": "ssm:GetParameter",
       "Resource": "arn:aws:ssm:AWS_REGION:DEV_ACCOUNT_ID:parameter/cdk-bootstrap/mcclocal1/version"
+    },
+    {
+      "Sid": "ReadEphemeralMatchToCsvLogs",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams",
+        "logs:FilterLogEvents",
+        "logs:GetLogEvents",
+        "logs:GetLogGroupFields",
+        "logs:GetQueryResults",
+        "logs:StartLiveTail",
+        "logs:StartQuery"
+      ],
+      "Resource": [
+        "arn:aws:logs:AWS_REGION:DEV_ACCOUNT_ID:log-group:/aws/lambda/match-to-csv-e-*",
+        "arn:aws:logs:AWS_REGION:DEV_ACCOUNT_ID:log-group:/aws/lambda/match-to-csv-e-*:*",
+        "arn:aws:logs:AWS_REGION:DEV_ACCOUNT_ID:log-group:/aws/vendedlogs/states/match-to-csv-e-*",
+        "arn:aws:logs:AWS_REGION:DEV_ACCOUNT_ID:log-group:/aws/vendedlogs/states/match-to-csv-e-*:*"
+      ]
+    },
+    {
+      "Sid": "ListLogGroupsAndStopQueries",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:StopQuery"
+      ],
+      "Resource": "*"
     }
   ]
 }

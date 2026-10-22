@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { DeploymentConfig } from '@mcc/cdk-config';
 import type {
+  EmailGamertagCsvsInput,
   ExtractTextOutput,
   ProcessEmailInput,
   ProcessingRunInput,
@@ -111,7 +112,8 @@ interface MatchToCsvStackProps extends StackProps {
   /**
    * SSM parameter that holds the email address subscribed to alarms. The
    * address resolves at deploy time, so it never appears in source or in the
-   * synthesized template. Without it, alarms still publish to the topic.
+   * synthesized template. Without it, alarms still publish to the topic. Only
+   * prod has alarms, so other stacks ignore it.
    */
   alarmEmailParameter?: string;
 }
@@ -189,12 +191,13 @@ export class MatchToCsvStack extends Stack {
       Tags.of(this).add('Ephemeral', deployment.ephemeral);
     }
     const prefix = `/mcc/${deployment.environment}/match-to-csv`;
+    // Ephemeral stacks publish no EMF metrics. Dev and prod leave the switch
+    // unset, so metrics stay on wherever it is missing.
     const lambdaEnvironment = {
       OBJECT_PREFIX: deployment.objectPrefix,
-    };
-    const buildEnvironment = {
       GIT_SHA: gitSha,
       DEPLOYMENT_ENVIRONMENT: deployment.environment.toUpperCase(),
+      ...(deployment.ephemeral ? { EMF_METRICS_ENABLED: 'false' } : {}),
     };
     const rawEmailBucket = s3.Bucket.fromBucketName(
       this,
@@ -230,6 +233,13 @@ export class MatchToCsvStack extends Stack {
     const rosterNamespace = deployment.ephemeral
       ? `ephemeral/${deployment.ephemeral}`
       : 'stable';
+    // The foundation also owns the CSV recipient table (spec 1.1 §4.5), with
+    // the same namespaces.
+    const recipientsTableName = ssm.StringParameter.valueForStringParameter(
+      this,
+      `/mcc/${deployment.environment}/recipients/table-name`,
+    );
+    const recipientsNamespace = rosterNamespace;
 
     // Required: process-email rejects every message while it is missing or
     // empty. Administrators manage it with `npm run sender-allowlist`; sender
@@ -279,7 +289,6 @@ export class MatchToCsvStack extends Stack {
       'extract-text.ts',
       {
         ...lambdaEnvironment,
-        ...buildEnvironment,
         ROSTER_TABLE: rosterTableName,
         ROSTER_NAMESPACE: rosterNamespace,
       },
@@ -300,6 +309,20 @@ export class MatchToCsvStack extends Stack {
       'Write per-gamertag CSV exports after every screenshot succeeds',
       'write-gamertag-csvs.ts',
       lambdaEnvironment,
+      1024,
+    );
+    const emailGamertagCsvs = this.nodeFunction(
+      'EmailGamertagCsvs',
+      'CSV export',
+      'Email per-gamertag CSV exports to the CSV recipient list',
+      'email-gamertag-csvs.ts',
+      {
+        ...lambdaEnvironment,
+        EVIDENCE_BUCKET: evidenceBucket.bucketName,
+        EMAIL_FROM_DOMAIN: emailDomain,
+        RECIPIENTS_TABLE: recipientsTableName,
+        RECIPIENTS_NAMESPACE: recipientsNamespace,
+      },
       1024,
     );
     const compareRuns = this.nodeFunction(
@@ -338,23 +361,30 @@ export class MatchToCsvStack extends Stack {
     // recipient's verified identity, so a grant on the domain identity alone
     // gets AccessDenied. The grant therefore names every identity in this
     // account and Region, and allows only the noreply@<domain> From address.
-    processEmail.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['ses:SendEmail'],
-        resources: [
-          this.formatArn({
-            service: 'ses',
-            resource: 'identity',
-            resourceName: '*',
-          }),
-        ],
-        conditions: {
-          StringEquals: {
-            'ses:FromAddress': `${REPLY_LOCAL_PART}@${emailDomain}`,
+    // SES authorizes a Content.Simple send as ses:SendEmail and a Content.Raw
+    // send, which the CSV attachments need, as ses:SendRawEmail.
+    for (const [sender, action] of [
+      [processEmail, 'ses:SendEmail'],
+      [emailGamertagCsvs, 'ses:SendRawEmail'],
+    ] as const) {
+      sender.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: [action],
+          resources: [
+            this.formatArn({
+              service: 'ses',
+              resource: 'identity',
+              resourceName: '*',
+            }),
+          ],
+          conditions: {
+            StringEquals: {
+              'ses:FromAddress': `${REPLY_LOCAL_PART}@${emailDomain}`,
+            },
           },
-        },
-      }),
-    );
+        }),
+      );
+    }
     this.grantEvidenceAccess(evidenceBucket, processEmail, false);
     this.grantEvidenceAccess(evidenceBucket, extractText, true);
     this.grantEvidenceAccess(evidenceBucket, writeExtractedCsv, false);
@@ -389,12 +419,45 @@ export class MatchToCsvStack extends Stack {
         ],
       }),
     );
+    // The results email reads the submission's gamertag CSVs and its delivery
+    // record, lists only those keys, and may create only the record.
+    const deliveryRecord = `${objectNamespace}submissions/*/export/csv-email.json`;
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:GetObject'],
+        resources: [
+          `${evidenceBucket.bucketArn}/${objectNamespace}submissions/*/export/gamertags/*`,
+          `${evidenceBucket.bucketArn}/${deliveryRecord}`,
+        ],
+      }),
+    );
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:ListBucket'],
+        resources: [evidenceBucket.bucketArn],
+        conditions: {
+          StringLike: {
+            's3:prefix': [
+              `${objectNamespace}submissions/*/export/gamertags/`,
+              deliveryRecord,
+            ],
+          },
+        },
+      }),
+    );
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:PutObject'],
+        resources: [`${evidenceBucket.bucketArn}/${deliveryRecord}`],
+      }),
+    );
     this.grantEvidenceAccess(evidenceBucket, compareRuns, true);
     this.grantEvidenceAccess(evidenceBucket, materializeTrainingData, true);
     dataKey.grantEncryptDecrypt(processEmail);
     dataKey.grantEncryptDecrypt(extractText);
     dataKey.grantEncryptDecrypt(writeExtractedCsv);
     dataKey.grantEncryptDecrypt(writeGamertagCsvs);
+    dataKey.grantEncryptDecrypt(emailGamertagCsvs);
     dataKey.grantEncryptDecrypt(compareRuns);
     dataKey.grantEncryptDecrypt(materializeTrainingData);
     extractText.addToRolePolicy(
@@ -419,6 +482,25 @@ export class MatchToCsvStack extends Stack {
         conditions: {
           'ForAllValues:StringEquals': {
             'dynamodb:LeadingKeys': `ROSTER#${rosterNamespace}`,
+          },
+          Null: { 'dynamodb:LeadingKeys': 'false' },
+        },
+      }),
+    );
+    // The same read-only, own-partition access to the recipient table.
+    emailGamertagCsvs.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['dynamodb:GetItem', 'dynamodb:Query'],
+        resources: [
+          this.formatArn({
+            service: 'dynamodb',
+            resource: 'table',
+            resourceName: recipientsTableName,
+          }),
+        ],
+        conditions: {
+          'ForAllValues:StringEquals': {
+            'dynamodb:LeadingKeys': `RECIPIENTS#${recipientsNamespace}`,
           },
           Null: { 'dynamodb:LeadingKeys': 'false' },
         },
@@ -492,6 +574,28 @@ export class MatchToCsvStack extends Stack {
         writeGamertagCsvsPayload,
       ),
     ] as const;
+    // Runs after the gamertag files exist. Its input holds the gamertag
+    // step's output, the match date, the screenshot count and trace context,
+    // so no address or gamertag enters the state.
+    const emailGamertagCsvsTask = new tasks.LambdaInvoke(
+      this,
+      'Email gamertag CSVs',
+      {
+        lambdaFunction: emailGamertagCsvs,
+        payloadResponseOnly: true,
+        payload: sfn.TaskInput.fromObject({
+          submissionId: sfn.JsonPath.stringAt('$.submissionId'),
+          matchDate: sfn.JsonPath.stringAt('$.matchDate'),
+          screenshotCount: sfn.JsonPath.arrayLength(
+            sfn.JsonPath.listAt('$.screenshots'),
+          ),
+          gamertagCsvs: sfn.JsonPath.objectAt('$.gamertagCsvs'),
+          trace: traceContext('INGEST'),
+        } satisfies Record<keyof EmailGamertagCsvsInput, unknown>),
+        resultPath: '$.csvEmail',
+        retryOnServiceExceptions: false,
+      },
+    );
 
     const transientErrors = [
       'Lambda.ClientExecutionTimeoutException',
@@ -517,6 +621,7 @@ export class MatchToCsvStack extends Stack {
       extractTextTask,
       writeCsvTask,
       ...writeGamertagCsvsTasks,
+      emailGamertagCsvsTask,
     ]) {
       task.addRetry(retry);
     }
@@ -543,7 +648,9 @@ export class MatchToCsvStack extends Stack {
             this,
             'Email output has receivedAt',
             ...writeGamertagCsvsTasks,
-          ),
+          )
+            .afterwards()
+            .next(emailGamertagCsvsTask),
         ),
       );
 
@@ -565,10 +672,12 @@ export class MatchToCsvStack extends Stack {
           .next(submissionResult),
       ),
       timeout: Duration.minutes(15),
+      // ERROR still records failed, timed-out and aborted executions. Execution
+      // data stays out of the logs because it holds every extracted row.
       logs: {
         destination: logGroup,
-        level: sfn.LogLevel.ALL,
-        includeExecutionData: true,
+        level: sfn.LogLevel.ERROR,
+        includeExecutionData: false,
       },
       tracingEnabled: true,
     });
@@ -654,9 +763,9 @@ export class MatchToCsvStack extends Stack {
       'Start the workflow for stored-message events under the stack inbound prefix',
     );
 
-    // Ephemeral stacks run under the local workload boundary, which grants no
-    // CloudWatch alarm or SNS administration, and nobody watches them.
-    if (!deployment.isEphemeral) {
+    // Only prod has alarms. Nobody watches dev or ephemeral stacks, and the
+    // local workload boundary grants no CloudWatch alarm or SNS administration.
+    if (deployment.environment === 'prod') {
       this.addAlarms({
         alarmEmailParameter,
         stateMachines: { Workflow: workflow, ReplayWorkflow: replayWorkflow },
@@ -665,6 +774,7 @@ export class MatchToCsvStack extends Stack {
           ExtractText: extractText,
           WriteExtractedCsv: writeExtractedCsv,
           WriteGamertagCsvs: writeGamertagCsvs,
+          EmailGamertagCsvs: emailGamertagCsvs,
           CompareRuns: compareRuns,
           MaterializeTrainingData: materializeTrainingData,
         },
@@ -857,6 +967,9 @@ export class MatchToCsvStack extends Stack {
       architecture: lambda.Architecture.ARM_64,
       memorySize,
       logGroup,
+      loggingFormat: lambda.LoggingFormat.JSON,
+      applicationLogLevelV2: lambda.ApplicationLogLevel.INFO,
+      systemLogLevelV2: lambda.SystemLogLevel.INFO,
       timeout,
       tracing: lambda.Tracing.ACTIVE,
       environment,

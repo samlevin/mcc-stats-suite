@@ -65,7 +65,7 @@ Developers deploy ephemeral stacks to dev from their own shells. Production depl
 
 1. In IAM Identity Center, create a group named `MccStatsSuiteLocalCdkDeployers`.
 2. Create a custom permission set named `MccStatsSuiteLocalCdkDeploy` with a four-hour session. Do not attach `AdministratorAccess` or `PowerUserAccess`.
-3. Copy [the policy template](policies/local-cdk-deployer-dev.json.template), replace every `DEV_ACCOUNT_ID` and `AWS_REGION` placeholder, and paste it as the permission set's inline policy. It allows assuming only the four `mcclocal1` CDK bootstrap roles and reading bootstrap metadata.
+3. Copy [the policy template](policies/local-cdk-deployer-dev.json.template), replace every `DEV_ACCOUNT_ID` and `AWS_REGION` placeholder, and paste it as the permission set's inline policy. It allows assuming only the four `mcclocal1` CDK bootstrap roles, reading bootstrap metadata, and reading ephemeral match-to-csv logs. The log access covers live tail, log events, and Logs Insights queries and their results, only on `match-to-csv-e-*` Lambda and Step Functions log groups, so it never reaches stable dev logs. It also lists log group names and stops queries, because those actions cannot be limited to a log group. It does not allow `logs:DescribeQueries`, which would list every query in the account, so the console's query history is unavailable.
 4. Assign the group and permission set to the dev account only. Never assign them to prod or to management accounts.
 5. Add developers to the group, then point the `mcc-dev` SSO profile at this permission set.
 
@@ -75,6 +75,12 @@ Verify with an ephemeral stack:
 aws sso login --profile mcc-dev
 aws sts get-caller-identity --profile mcc-dev
 npm run app:diff -- match-to-csv --environment dev --ephemeral <name>
+```
+
+After the ephemeral stack is deployed, check log access:
+
+```console
+aws logs tail /aws/lambda/match-to-csv-e-<name>-ExtractText --profile mcc-dev
 ```
 
 If CDK reports `sts:AssumeRole` denied, check that the role names in the policy match the `CDKToolkitLocal` account, Region, and `mcclocal1` qualifier. Do not fix the error with a broad AWS managed policy.
