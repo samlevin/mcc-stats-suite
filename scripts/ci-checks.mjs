@@ -66,6 +66,10 @@ export function workspaceArguments(mode, job = 'static') {
     ...jobTasks[job],
     '--concurrency=4',
     '--summarize',
+    // In GitHub Actions Turbo prints its own `::group::` per task by default.
+    // Groups do not nest, so stream prefixed lines and keep the whole Turbo
+    // output inside the one group `runChecks` opens for this command.
+    '--log-order=stream',
     ...(mode === 'affected' ? ['--affected'] : []),
   ];
 }
@@ -109,24 +113,68 @@ export function checks({ full, repository, mode, job = 'static' }) {
   return commands;
 }
 
-export async function runChecks(commands, run = runCommand) {
-  // Await every result so a failure cannot leave a successful deployment gate.
-  const results = await Promise.all(
-    commands.map(([command, args]) => run(command, args)),
-  );
-  if (results.some((code) => code !== 0))
-    throw new Error('One or more CI checks failed');
+// Every Turbo run under `runChecks` inherits these, including the one inside
+// `npm run build:shared`. Streamed output keeps Turbo from opening its own
+// `::group::` per task inside the check's group.
+export function turboEnvironment(base, head) {
+  return {
+    TURBO_SCM_BASE: base,
+    TURBO_SCM_HEAD: head,
+    TURBO_LOG_ORDER: 'stream',
+  };
 }
 
+function commandLine(command, args) {
+  return [command, ...args].join(' ');
+}
+
+// Checks run in parallel, so each one's output is buffered and printed in its
+// own log group when that check ends. Every check settles before the gate
+// fails, so a failure cannot leave a successful deployment gate, and the error
+// names each failed command with its exit code.
+export async function runChecks(
+  commands,
+  run = runCommand,
+  write = (text) => process.stdout.write(text),
+) {
+  const results = await Promise.all(
+    commands.map(async ([command, args]) => {
+      const line = commandLine(command, args);
+      const { code, output } = await run(command, args);
+      write(`::group::${line}\n`);
+      if (output) write(output.endsWith('\n') ? output : `${output}\n`);
+      write('::endgroup::\n');
+      return { line, code };
+    }),
+  );
+  const failed = results.filter(({ code }) => code !== 0);
+  if (failed.length > 0)
+    throw new Error(
+      [
+        `${failed.length} of ${results.length} CI checks failed:`,
+        ...failed.map(({ line, code }) => `  ${line} (exit code ${code})`),
+      ].join('\n'),
+    );
+}
+
+// Collects stdout and stderr together in the order they arrive.
 function runCommand(command, args) {
-  console.log(`Starting ${command} ${args.join(' ')}`);
   return new Promise((resolve) => {
-    const child = spawn(command, args, { stdio: 'inherit' });
+    const chunks = [];
+    let settled = false;
+    const finish = (code) => {
+      if (settled) return;
+      settled = true;
+      resolve({ code, output: Buffer.concat(chunks).toString() });
+    };
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    child.stdout.on('data', (chunk) => chunks.push(chunk));
+    child.stderr.on('data', (chunk) => chunks.push(chunk));
     child.on('error', (error) => {
-      console.error(error);
-      resolve(1);
+      chunks.push(Buffer.from(`${error.stack ?? error}\n`));
+      finish(1);
     });
-    child.on('exit', (code) => resolve(code ?? 1));
+    child.on('close', (code) => finish(code ?? 1));
   });
 }
 
@@ -146,15 +194,13 @@ async function main() {
   const mode = process.env.CI_MODE;
   if (!['affected', 'all'].includes(mode))
     throw new Error('Expected an explicit workspace mode');
-  process.env.TURBO_SCM_BASE = base;
-  process.env.TURBO_SCM_HEAD = head;
+  Object.assign(process.env, turboEnvironment(base, head));
   const job = process.env.CI_JOB ?? 'static';
   if (!(job in jobTasks)) throw new Error('Expected a known CI job');
   console.log(`Workspace validation (${job}): ${full ? mode : 'none'}`);
   if (full && job === 'static') {
     // Lint reads shared declarations. Build them once before concurrent readers.
-    if ((await runCommand('npm', ['run', 'build:shared'])) !== 0)
-      throw new Error('Shared build failed');
+    await runChecks([['npm', ['run', 'build:shared']]]);
   }
   await runChecks(checks({ full, repository, mode, job }));
   if (process.env.GITHUB_STEP_SUMMARY)
@@ -165,4 +211,10 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  await main();
+  try {
+    await main();
+  } catch (error) {
+    // End the log with the failure summary instead of a stack trace.
+    console.error(error.message);
+    process.exitCode = 1;
+  }

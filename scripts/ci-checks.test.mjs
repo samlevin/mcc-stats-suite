@@ -27,6 +27,7 @@ import {
   buildTests,
   checks,
   runChecks,
+  turboEnvironment,
   workspaceArguments,
 } from './ci-checks.mjs';
 
@@ -146,6 +147,18 @@ test('full gate contains repository checks and the dependency-aware workspace ga
   assert.ok(!JSON.stringify(commands).includes('tofu'));
   assert.ok(!workspaceArguments('all').includes('--affected'));
   assert.ok(workspaceArguments('affected').includes('--affected'));
+});
+
+test('Turbo streams prefixed lines instead of its own log groups', () => {
+  for (const job of ['static', 'bundle'])
+    for (const mode of ['all', 'affected'])
+      assert.ok(workspaceArguments(mode, job).includes('--log-order=stream'));
+  // Covers Turbo runs started through npm scripts, such as build:shared.
+  assert.deepEqual(turboEnvironment('a'.repeat(40), 'b'.repeat(40)), {
+    TURBO_SCM_BASE: 'a'.repeat(40),
+    TURBO_SCM_HEAD: 'b'.repeat(40),
+    TURBO_LOG_ORDER: 'stream',
+  });
 });
 
 test('automation script tests run only in the repository scope', () => {
@@ -311,6 +324,7 @@ test('every scope that selects a setup-node workflow runs the Node version test'
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {
   const started = [];
   const pending = [];
+  let settled = false;
   const result = runChecks(
     [
       ['first', []],
@@ -320,11 +334,124 @@ test('checks overlap and any failing check rejects the gate after all checks set
       started.push(command);
       return new Promise((resolve) => pending.push(resolve));
     },
-  );
+    () => {},
+  ).finally(() => {
+    settled = true;
+  });
   assert.deepEqual(started, ['first', 'second']);
-  pending[0](1);
-  pending[1](0);
+  pending[0]({ code: 1, output: '' });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  pending[1]({ code: 0, output: '' });
   await assert.rejects(result, /CI checks failed/);
+});
+
+// Settles each fake check in the given order and records what the gate writes.
+async function runFakeChecks(commands, results, order) {
+  const pending = new Map();
+  const log = [];
+  const result = runChecks(
+    commands,
+    (command) => new Promise((resolve) => pending.set(command, resolve)),
+    (text) => log.push(text),
+  ).then(
+    () => undefined,
+    (error) => error,
+  );
+  for (const command of order) {
+    pending.get(command)(results[command]);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  return { log: log.join(''), error: await result };
+}
+
+const fakeCommands = [
+  ['format', ['run', 'format:check']],
+  ['lint', ['.', '--max-warnings', '0']],
+  ['test', ['--test', 'a.test.mjs']],
+];
+
+test('each check prints its buffered output in one group named after its command, in completion order', async () => {
+  const { log, error } = await runFakeChecks(
+    fakeCommands,
+    {
+      format: { code: 0, output: 'format line 1\nformat line 2\n' },
+      lint: { code: 0, output: 'lint output' },
+      test: { code: 0, output: '' },
+    },
+    ['test', 'format', 'lint'],
+  );
+  assert.equal(error, undefined);
+  assert.equal(
+    log,
+    [
+      '::group::test --test a.test.mjs',
+      '::endgroup::',
+      '::group::format run format:check',
+      'format line 1',
+      'format line 2',
+      '::endgroup::',
+      '::group::lint . --max-warnings 0',
+      'lint output',
+      '::endgroup::',
+      '',
+    ].join('\n'),
+  );
+});
+
+test('one failing check is named with its exit code after every check runs', async () => {
+  const { log, error } = await runFakeChecks(
+    fakeCommands,
+    {
+      format: { code: 0, output: 'formatted\n' },
+      lint: { code: 1, output: 'lint error\n' },
+      test: { code: 0, output: 'tests passed\n' },
+    },
+    ['lint', 'format', 'test'],
+  );
+  assert.equal(
+    error?.message,
+    '1 of 3 CI checks failed:\n  lint . --max-warnings 0 (exit code 1)',
+  );
+  for (const output of ['formatted', 'lint error', 'tests passed'])
+    assert.match(log, new RegExp(output));
+});
+
+test('two failing checks are both named with their exit codes in command order', async () => {
+  const { error } = await runFakeChecks(
+    fakeCommands,
+    {
+      format: { code: 2, output: '' },
+      lint: { code: 0, output: '' },
+      test: { code: 1, output: '' },
+    },
+    ['test', 'lint', 'format'],
+  );
+  assert.equal(
+    error?.message,
+    [
+      '2 of 3 CI checks failed:',
+      '  format run format:check (exit code 2)',
+      '  test --test a.test.mjs (exit code 1)',
+    ].join('\n'),
+  );
+});
+
+test('the default runner buffers stdout and stderr and reports a failed exit code', async () => {
+  const log = [];
+  const script =
+    "process.stdout.write('out\\n'); process.stderr.write('err\\n'); process.exit(3)";
+  await assert.rejects(
+    runChecks([[process.execPath, ['-e', script]]], undefined, (text) =>
+      log.push(text),
+    ),
+    (error) => error.message.endsWith('(exit code 3)'),
+  );
+  const output = log.join('');
+  assert.match(output, /^::group::.+ -e /);
+  assert.match(output, /out\n/);
+  assert.match(output, /err\n/);
+  assert.match(output, /::endgroup::\n$/);
 });
 
 test('Turbo dependency graph orders shared/own builds, synthesis, and native verification', () => {
