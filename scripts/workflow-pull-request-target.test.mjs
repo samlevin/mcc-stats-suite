@@ -19,9 +19,9 @@ const triggers = (definition) => {
 const isPullRequestTarget = (definition) =>
   triggers(definition).includes('pull_request_target');
 
-// Expressions that name the pull request's head commit, branch, or ref.
+// Expressions that name the pull request's head or merge commit, branch, or ref.
 const PR_HEAD =
-  /github\.event\.pull_request\.head\.|github\.head_ref|refs\/pull\/|pull\/[^/\n]*\/(?:head|merge)\b/;
+  /github\.event\.pull_request\.(?:head\.|merge_commit_sha)|github\.head_ref|refs\/pull\/|pull\/[^/\n]*\/(?:head|merge)\b/;
 // Expressions that name the base repository.
 const BASE_REPOSITORY = new Set([
   'github.repository',
@@ -31,7 +31,12 @@ const BASE_REPOSITORY = new Set([
 const isBaseRepository = (value) =>
   value === 'samlevin/mcc-stats-suite' ||
   BASE_REPOSITORY.has(expression(value));
-const FETCH = /\bgit\s+(?:[\w.-]+\s+)*?fetch\b|\bgh\s+pr\s+checkout\b/;
+// A `git` command with `fetch` among its arguments, after joining
+// backslash-continued lines.
+const FETCH = /\bgit\b[^\n;&|]*?\sfetch\b/;
+// `gh pr checkout` always checks out a pull request head.
+const PR_CHECKOUT = /\bgh\s+pr\s+checkout\b/;
+const joinLines = (script) => script.replace(/\\\r?\n/g, ' ');
 
 const expression = (value) =>
   /^\$\{\{\s*([^}]*?)\s*\}\}$/.exec(String(value).trim())?.[1];
@@ -48,9 +53,12 @@ const untrustedCode = (definition) => {
   for (const [id, job] of Object.entries(definition.jobs ?? {})) {
     (job?.steps ?? []).forEach((step, index) => {
       const label = `${id} step ${index + 1} (${step.name ?? step.uses ?? 'run'})`;
+      const env = envText(definition.env, job.env, step.env);
       if (isCheckout(step)) {
         const { ref, repository } = step.with ?? {};
-        if (ref !== undefined && PR_HEAD.test(String(ref))) {
+        // A ref read from `env` is checked against the env values in scope.
+        const refText = /\benv\./.test(String(ref)) ? `${ref}\n${env}` : ref;
+        if (ref !== undefined && PR_HEAD.test(String(refText))) {
           problems.push(`${label} checks out the pull request head: ${ref}`);
         }
         if (repository !== undefined && !isBaseRepository(repository)) {
@@ -59,9 +67,11 @@ const untrustedCode = (definition) => {
           );
         }
       }
-      if (typeof step.run === 'string' && FETCH.test(step.run)) {
-        const context = `${step.run}\n${envText(definition.env, job.env, step.env)}`;
-        if (PR_HEAD.test(context)) {
+      if (typeof step.run === 'string') {
+        const script = joinLines(step.run);
+        if (PR_CHECKOUT.test(script)) {
+          problems.push(`${label} checks out the pull request with gh`);
+        } else if (FETCH.test(script) && PR_HEAD.test(`${script}\n${env}`)) {
           problems.push(`${label} fetches the pull request head`);
         }
       }
@@ -112,6 +122,7 @@ test('a checkout of the pull request head fails', () => {
     '${{ github.event.pull_request.head.sha }}',
     '${{ github.event.pull_request.head.ref }}',
     '${{ github.head_ref }}',
+    '${{ github.event.pull_request.merge_commit_sha }}',
     'refs/pull/${{ github.event.pull_request.number }}/merge',
   ]) {
     assert.deepEqual(
@@ -120,6 +131,28 @@ test('a checkout of the pull request head fails', () => {
       ref,
     );
   }
+});
+
+test('a checkout ref read from env that names the pull request head fails', () => {
+  const ref = '${{ env.PR_SHA }}';
+  assert.deepEqual(
+    untrustedCode(
+      target(
+        checkout(`          ref: ${ref}\n`),
+        'env:\n  PR_SHA: ${{ github.event.pull_request.head.sha }}\n',
+      ),
+    ),
+    [`build step 1 (Check out) checks out the pull request head: ${ref}`],
+  );
+  assert.deepEqual(
+    untrustedCode(
+      target(
+        checkout(`          ref: ${ref}\n`),
+        'env:\n  PR_SHA: ${{ github.sha }}\n',
+      ),
+    ),
+    [],
+  );
 });
 
 test('a checkout of another repository fails', () => {
@@ -164,6 +197,9 @@ test('a run step that fetches the pull request head fails', () => {
     run('git fetch origin pull/${{ github.event.pull_request.number }}/head'),
     run('git fetch origin ${{ github.event.pull_request.head.sha }}'),
     run('git -C repo fetch origin refs/pull/1/head'),
+    run('git -c protocol.version=2 fetch origin pull/1/head'),
+    run('git -C "$DIR" fetch origin ${{ github.event.pull_request.head.sha }}'),
+    run('|\n          git \\\n            fetch origin pull/1/head'),
     run(
       'git fetch origin "$HEAD_SHA"',
       '        env:\n          HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n',
@@ -176,6 +212,25 @@ test('a run step that fetches the pull request head fails', () => {
     );
   }
   assert.deepEqual(untrustedCode(target(run('git fetch origin main'))), []);
+  assert.deepEqual(
+    untrustedCode(target(run('git -C "$DIR" fetch origin main'))),
+    [],
+  );
+});
+
+test('a run step that checks out the pull request with gh fails', () => {
+  for (const script of [
+    'gh pr checkout ${{ github.event.pull_request.number }}',
+    'gh pr checkout "$PR"',
+  ]) {
+    assert.deepEqual(
+      untrustedCode(
+        target(`      - name: Check out PR\n        run: ${script}\n`),
+      ),
+      ['build step 1 (Check out PR) checks out the pull request with gh'],
+      script,
+    );
+  }
 });
 
 test('the same steps pass outside pull_request_target', () => {
