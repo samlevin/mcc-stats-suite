@@ -168,6 +168,7 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 1
+          persist-credentials: false
       - name: Verify checked-out revision
         env:
           TARGET_SHA: ${{ inputs.sha }}

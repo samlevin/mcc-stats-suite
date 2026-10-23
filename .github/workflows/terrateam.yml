@@ -35,6 +35,8 @@ jobs:
     environment: '${{ github.event.inputs.environment }}'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Run Terrateam Action
         id: terrateam
         uses: terrateamio/action@74e3b391d1d76fee946e1d462973c6f8e229f6c2 # v1 (branch)
