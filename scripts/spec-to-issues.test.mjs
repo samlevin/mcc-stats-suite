@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { buildPlan, printTree } from './spec-to-issues.mjs';
+import { applyEdges, buildPlan, printTree } from './spec-to-issues.mjs';
 
 const catalog = JSON.parse(
   readFileSync(new URL('../.github/labels.json', import.meta.url), 'utf8'),
@@ -320,4 +320,102 @@ test('active phase titles mentioning backlog retain their epic and slices', () =
     assert.deepEqual(plan.deferred, ['P1.1']);
     assert.ok(!plan.nodes.some((node) => node.ref === 'phase-1'));
   }
+});
+
+test('triager edges join leaf blockers, dependencies sections and the printed tree', () => {
+  const plan = parse();
+  assert.deepEqual(applyEdges(plan, 'EDGES | none'), []);
+  assert.deepEqual(plan, parse());
+  assert.deepEqual(
+    applyEdges(
+      plan,
+      'EDGES | P0.3 <- P0.2.2: both edit the adapter; P0.3 <- P0.1: uses the port types',
+    ),
+    [],
+  );
+  const later = plan.nodes.find((n) => n.ref === 'P0.3');
+  assert.deepEqual(later.blockedBy, ['P0.2.2', 'P0.1']);
+  assert.match(later.body, /### Dependencies\n\nP0\.2\.2, P0\.1$/);
+  assert.match(printTree(plan), /\| phase-0 \| P0\.2\.2, P0\.1 \|/);
+  assert.deepEqual(applyEdges(plan, 'EDGES | P0.3 <- P0.1: repeated edge'), []);
+  assert.deepEqual(later.blockedBy, ['P0.2.2', 'P0.1']);
+});
+
+test('malformed, unknown, non-leaf, self and cyclic triager edges leave the plan unchanged', () => {
+  for (const [line, expected] of [
+    ['P0.3 <- P0.1: no prefix', /expected "EDGES \|/],
+    ['EDGES | P0.3 <- P0.1', /malformed edge/],
+    ['EDGES | P0.3 <- P9.9: missing slice', /P9\.9 is not a leaf/],
+    ['EDGES | P0.3 <- P0.2: container blocker', /P0\.2 is not a leaf/],
+    ['EDGES | P0.3 <- P0.3: same leaf', /cannot block itself/],
+    ['EDGES | P0.1 <- P0.2.1: closes the loop', /dependency cycle/],
+    ['EDGES | P0.3 <- P0.1: fine; P0.1 <- P0.3: reversed', /dependency cycle/],
+  ]) {
+    const plan = parse();
+    const errors = applyEdges(plan, line);
+    assert.ok(
+      errors.some((e) => expected.test(e)),
+      `${line}: ${errors}`,
+    );
+    assert.deepEqual(plan, parse(), line);
+  }
+});
+
+test('an edge onto a body without a trailing Dependencies section changes nothing', () => {
+  const plan = parse();
+  const later = plan.nodes.find((n) => n.ref === 'P0.3');
+  later.body += '\n';
+  const before = structuredClone(plan);
+  assert.deepEqual(
+    applyEdges(
+      plan,
+      'EDGES | P0.2.2 <- P0.2.1: reads the adapter; P0.3 <- P0.1: shares the port',
+    ),
+    ['EDGES: P0.3 body does not end with its Dependencies'],
+  );
+  assert.deepEqual(plan, before);
+});
+
+test('the edges CLI applies a triager line to saved drafts outside the repository', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'spec-to-issues-edges-'));
+  const drafts = join(directory, 'drafts.json');
+  const script = new URL('./spec-to-issues.mjs', import.meta.url).pathname;
+  const run = (...args) =>
+    spawnSync(process.execPath, [script, ...args], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: directory },
+    });
+  const plan = run(
+    'plan',
+    new URL('./fixtures/spec-to-issues/conforming.md', import.meta.url)
+      .pathname,
+    '--output',
+    drafts,
+  );
+  assert.equal(plan.status, 0, plan.stderr);
+  const line = 'EDGES | P0.3 <- P0.1: both edit the contracts index';
+  const preview = run('edges', drafts, line);
+  assert.equal(preview.status, 0, preview.stderr);
+  assert.match(preview.stdout, /\| phase-0 \| P0\.1 \|/);
+  const triaged = join(directory, 'triaged.json');
+  const saved = run('edges', drafts, line, '--output', triaged);
+  assert.equal(saved.status, 0, saved.stderr);
+  const node = JSON.parse(readFileSync(triaged, 'utf8')).nodes.find(
+    (n) => n.ref === 'P0.3',
+  );
+  assert.deepEqual(node.blockedBy, ['P0.1']);
+  assert.match(node.body, /### Dependencies\n\nP0\.1$/);
+  const again = run('edges', drafts, line, '--output', triaged);
+  assert.equal(again.status, 1);
+  assert.match(again.stderr, /EEXIST/);
+  const bad = run(
+    'edges',
+    drafts,
+    'EDGES | P0.3 <- P9.9: unknown',
+    '--output',
+    join(directory, 'bad.json'),
+  );
+  assert.equal(bad.status, 1);
+  assert.match(bad.stderr, /P9\.9 is not a leaf/);
+  assert.throws(() => readFileSync(join(directory, 'bad.json')), /ENOENT/);
 });

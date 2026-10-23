@@ -293,24 +293,7 @@ export function buildPlan(text, { specPath, repository, labels }) {
     }
   }
   if (nodes.length === 1) fail('§20', 'no active phases or slices');
-  const visiting = new Set();
-  const visited = new Set();
-  const visit = (ref, chain = []) => {
-    if (visiting.has(ref)) {
-      fail(ref, `dependency cycle ${[...chain, ref].join(' -> ')}`);
-      return;
-    }
-    if (visited.has(ref)) return;
-    visiting.add(ref);
-    const dependencies = [
-      ...(byRef.get(ref)?.blockedBy || []),
-      ...nodes.filter((n) => n.parent === ref).map((n) => n.ref),
-    ];
-    for (const blocker of dependencies) visit(blocker, [...chain, ref]);
-    visiting.delete(ref);
-    visited.add(ref);
-  };
-  for (const node of nodes) visit(node.ref);
+  errors.push(...cycles(nodes));
   for (const node of nodes) {
     const parentKind = byRef.get(node.parent)?.kind;
     const parent = `### Parent ${parentKind === 'EPIC' ? 'epic' : 'issue'}\n\n${node.parent || 'None'}`;
@@ -332,6 +315,92 @@ export function buildPlan(text, { specPath, repository, labels }) {
     errors,
     nodes,
   };
+}
+
+// A node waits on its blockers, and a container also waits on its children.
+function cycles(nodes) {
+  const found = [];
+  const byRef = new Map();
+  for (const node of nodes) if (!byRef.has(node.ref)) byRef.set(node.ref, node);
+  const visiting = new Set();
+  const visited = new Set();
+  const visit = (ref, chain = []) => {
+    if (visiting.has(ref)) {
+      found.push(`${ref}: dependency cycle ${[...chain, ref].join(' -> ')}`);
+      return;
+    }
+    if (visited.has(ref)) return;
+    visiting.add(ref);
+    const dependencies = [
+      ...(byRef.get(ref)?.blockedBy || []),
+      ...nodes.filter((n) => n.parent === ref).map((n) => n.ref),
+    ];
+    for (const blocker of dependencies) visit(blocker, [...chain, ref]);
+    visiting.delete(ref);
+    visited.add(ref);
+  };
+  for (const node of nodes) visit(node.ref);
+  return found;
+}
+
+// Adds the triager's EDGES line to the drafts: each `<waiting> <- <blocker>`
+// pair of leaves joins the waiting leaf's blocked-by refs and its
+// Dependencies section. Returns the errors; the plan is unchanged when any
+// edge is malformed, names an unknown or non-leaf ref, or closes a cycle, or
+// when a waiting leaf's body does not end with its Dependencies section.
+export function applyEdges(plan, line) {
+  const match = /^EDGES \| (.+)$/.exec(line.trim());
+  if (!match) return [`EDGES: expected "EDGES | <edges>" or "EDGES | none"`];
+  if (match[1].trim() === 'none') return [];
+  const errors = [];
+  const byRef = new Map(plan.nodes.map((node) => [node.ref, node]));
+  const blockedBy = new Map(
+    plan.nodes.map((node) => [node.ref, [...node.blockedBy]]),
+  );
+  for (const item of match[1].split(';').map((part) => part.trim())) {
+    const edge = /^(\S+) <- (\S+): \S.*$/.exec(item);
+    if (!edge) {
+      errors.push(`EDGES: malformed edge "${item}"`);
+      continue;
+    }
+    const [, waiting, blocker] = edge;
+    const unknown = [waiting, blocker].filter(
+      (ref) => byRef.get(ref)?.kind !== 'LEAF',
+    );
+    if (unknown.length) {
+      errors.push(`EDGES: ${unknown.join(', ')} is not a leaf in this plan`);
+      continue;
+    }
+    if (waiting === blocker) {
+      errors.push(`EDGES: ${waiting} cannot block itself`);
+      continue;
+    }
+    blockedBy.set(waiting, unique([...blockedBy.get(waiting), blocker]));
+  }
+  if (errors.length) return errors;
+  const updated = plan.nodes.map((node) => ({
+    ...node,
+    blockedBy: blockedBy.get(node.ref),
+  }));
+  const found = cycles(updated);
+  if (found.length) return found;
+  const dependencies = /### Dependencies\n\n[^\n]*$/;
+  const changed = plan.nodes.filter(
+    (node) => blockedBy.get(node.ref).length !== node.blockedBy.length,
+  );
+  const missing = changed.filter((node) => !dependencies.test(node.body));
+  if (missing.length)
+    return missing.map(
+      (node) => `EDGES: ${node.ref} body does not end with its Dependencies`,
+    );
+  for (const node of changed) {
+    node.blockedBy = blockedBy.get(node.ref);
+    node.body = node.body.replace(
+      dependencies,
+      `### Dependencies\n\n${node.blockedBy.join(', ')}`,
+    );
+  }
+  return [];
 }
 
 export function printTree(plan) {
@@ -358,14 +427,39 @@ export function printTree(plan) {
 }
 
 const cli = defineCli(
-  'Usage: node scripts/spec-to-issues.mjs plan <spec-path> [--output <drafts.json>]',
+  [
+    'Usage: node scripts/spec-to-issues.mjs plan <spec-path> [--output <drafts.json>]',
+    '       node scripts/spec-to-issues.mjs edges <drafts.json> <edges-line> [--output <triaged.json>]',
+  ].join('\n'),
   ['output'],
 );
+// Drafts and triaged plans live outside the repository and are never
+// overwritten.
+function writeOutside(path, plan) {
+  const output = resolve(path);
+  const outputDirectory = realpathSync(resolve(output, '..'));
+  if (!isOutside(root, outputDirectory) || inCheckout(outputDirectory))
+    throw cliError(cli, 'Draft output must be outside the repository');
+  writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', {
+    flag: 'wx',
+    mode: 0o600,
+  });
+}
 export function main(argv) {
   try {
     const { options, positionals } = parseCli(argv, cli);
+    if (positionals[0] === 'edges') {
+      if (positionals.length !== 3)
+        throw cliError(cli, 'Expected edges <drafts.json> <edges-line>');
+      const plan = JSON.parse(readFileSync(resolve(positionals[1]), 'utf8'));
+      const errors = applyEdges(plan, positionals[2]);
+      if (errors.length) throw new Error(errors.join('\n'));
+      if (options.output) writeOutside(options.output, plan);
+      else process.stdout.write(printTree(plan) + '\n');
+      return 0;
+    }
     if (positionals.length !== 2 || positionals[0] !== 'plan')
-      throw cliError(cli, 'Expected plan <spec-path>');
+      throw cliError(cli, 'Expected plan <spec-path> or edges');
     const input = realpathSync(resolve(positionals[1]));
     const specPath = relative(root, input);
     if (isOutside(root, input))
@@ -379,17 +473,8 @@ export function main(argv) {
       labels: catalog.labels.map((l) => l.name),
     });
     if (plan.errors.length) throw new Error(plan.errors.join('\n'));
-    if (options.output) {
-      const output = resolve(options.output);
-      const outputDirectory = realpathSync(resolve(output, '..'));
-      if (!isOutside(root, outputDirectory) || inCheckout(outputDirectory))
-        throw cliError(cli, 'Draft output must be outside the repository');
-      writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', {
-        flag: 'wx',
-        mode: 0o600,
-      });
-    }
-    if (!options.output) process.stdout.write(printTree(plan) + '\n');
+    if (options.output) writeOutside(options.output, plan);
+    else process.stdout.write(printTree(plan) + '\n');
     return 0;
   } catch (error) {
     if (error instanceof CliHelp) {

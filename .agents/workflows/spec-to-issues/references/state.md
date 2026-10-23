@@ -6,7 +6,7 @@ Save state atomically (write a sibling temporary file, flush it, rename it). Use
 
 - Run UUID, repository, canonical spec path, SHA-256 of the whole spec bytes and label catalog, draft plan and triaged plan digests.
 - Ordered drafts including ref, title, body, kind, parent ref, blocked-by refs, Size, Priority and labels, and a stable ref-to-number/id/URL mapping.
-- Full triager report, policy line, per-node verdict/metadata and per-container groups, including ungrouped leaves. Persist the groups even when no record has been written yet.
+- Full triager report, policy line, per-node verdict/metadata, returned blocked-by edges with their reasons, and per-container groups, including ungrouped leaves. Persist the groups even when no record has been written yet.
 - The person's confirmation, time, and exact confirmed plan digest. No confirmation for another digest is valid.
 - Original and final rendered bodies and a journal of each intended operation, request payload digest, started/completed/uncertain state, response identifiers and verification evidence. Include post-create script invocations.
 
