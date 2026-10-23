@@ -66,6 +66,10 @@ export function workspaceArguments(mode, job = 'static') {
     ...jobTasks[job],
     '--concurrency=4',
     '--summarize',
+    // In GitHub Actions Turbo prints its own `::group::` per task by default.
+    // Groups do not nest, so stream prefixed lines and keep the whole Turbo
+    // output inside the one group `runChecks` opens for this command.
+    '--log-order=stream',
     ...(mode === 'affected' ? ['--affected'] : []),
   ];
 }

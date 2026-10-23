@@ -148,6 +148,12 @@ test('full gate contains repository checks and the dependency-aware workspace ga
   assert.ok(workspaceArguments('affected').includes('--affected'));
 });
 
+test('Turbo streams prefixed lines instead of its own log groups', () => {
+  for (const job of ['static', 'bundle'])
+    for (const mode of ['all', 'affected'])
+      assert.ok(workspaceArguments(mode, job).includes('--log-order=stream'));
+});
+
 test('automation script tests run only in the repository scope', () => {
   const build = buildTests();
   assert.ok(build.includes('scripts/ci-checks.test.mjs'));
