@@ -36,6 +36,7 @@ const automationLintTargets = [
   'scripts/agent-policy.mjs',
   'scripts/delivery-queue.mjs',
   ...automationTests,
+  'scripts/workflow-node-version.test.mjs',
 ];
 
 // Every other scripts/*.test.mjs belongs to the full gate. Listing the
@@ -88,14 +89,22 @@ export function checks({ full, repository, mode, job = 'static' }) {
   if (repository) {
     // Generated agent definitions must match their sources under .agents/.
     commands.push(['npm', ['run', 'agents:check']]);
-    // CLI compatibility covers automation and build consumers. The full gate
-    // already runs it, so add it here only for repository-only changes.
+    // CLI compatibility covers automation and build consumers, and the Node
+    // version and checkout credentials tests cover the workflows in this
+    // scope. The full gate already runs all three, so add them here only for
+    // repository-only changes.
     commands.push([
       'node',
       [
         '--test',
         ...automationTests,
-        ...(!full ? ['scripts/cli.test.mjs'] : []),
+        ...(!full
+          ? [
+              'scripts/cli.test.mjs',
+              'scripts/workflow-node-version.test.mjs',
+              'scripts/workflow-checkout-credentials.test.mjs',
+            ]
+          : []),
       ],
     ]);
   }
