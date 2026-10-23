@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 
@@ -11,10 +11,12 @@ const read = (path) => readFileSync(new URL(path, root), 'utf8');
 
 const definitions = [
   ...readdirSync(new URL('.github/workflows/', root))
-    .filter((file) => file.endsWith('.yml'))
+    .filter((file) => /\.ya?ml$/.test(file))
     .map((file) => `.github/workflows/${file}`),
-  ...readdirSync(new URL('.github/actions/', root)).map(
-    (name) => `.github/actions/${name}/action.yml`,
+  ...readdirSync(new URL('.github/actions/', root)).flatMap((name) =>
+    ['action.yml', 'action.yaml']
+      .map((file) => `.github/actions/${name}/${file}`)
+      .filter((path) => existsSync(new URL(path, root))),
   ),
 ]
   .sort()
