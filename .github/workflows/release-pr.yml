@@ -15,6 +15,7 @@ jobs:
   update-release-pr:
     name: Update release PR and publish releases
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       applications: ${{ steps.selection.outputs.applications }}
     steps:
@@ -66,6 +67,7 @@ jobs:
     needs: update-release-pr
     if: github.ref == 'refs/heads/main' && needs.update-release-pr.outputs.applications != '[]'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       actions: write
     steps:
