@@ -318,6 +318,9 @@ test('runExtraction enforces the 10,000,000-byte Textract limit', async () => {
  * Textract blocks for a PLAYERS/SCORE table with two player rows. Each cell
  * carries the confidence `confidence` returns for its row and column.
  */
+const CELL_CONFIDENCE = 72;
+
+/** A two-row scoreboard; `confidence` sets each `WORD` block's confidence. */
 function scoreboardBlocks(
   confidence?: (row: number, column: number) => number,
 ): Block[] {
@@ -343,10 +346,17 @@ function scoreboardBlocks(
         BlockType: 'CELL',
         RowIndex: row,
         ColumnIndex: column,
-        Confidence: confidence?.(row, column),
+        // A structural confidence under every flag and alarm threshold, as
+        // on real Halo 3 captures, which validation must not read.
+        Confidence: CELL_CONFIDENCE,
         Relationships: [{ Type: 'CHILD', Ids: [`word-${row}-${column}`] }],
       },
-      { Id: `word-${row}-${column}`, BlockType: 'WORD', Text: text },
+      {
+        Id: `word-${row}-${column}`,
+        BlockType: 'WORD',
+        Text: text,
+        Confidence: confidence?.(row, column),
+      },
     ]),
   ];
 }
@@ -596,11 +606,11 @@ function timedDependencies(
   };
 }
 
-test('runExtraction reports the Textract call, cell confidence and matches in one OK event', async () => {
+test('runExtraction reports the Textract call, word confidence and matches in one OK event', async () => {
   const writes: Array<{ key: string; value: any }> = [];
   const publishedRowCounts: number[] = [];
-  // Header cells read at 99, PlayerOne's row at 97 and PlayerTwo's row at 90.
-  const confidences = [99, 97, 90];
+  // Header words read at 99, PlayerOne's row at 97 and PlayerTwo's row at 85.
+  const confidences = [99, 97, 85];
   const result = await runExtraction(
     { source, trace },
     {
@@ -623,7 +633,7 @@ test('runExtraction reports the Textract call, cell confidence and matches in on
 
   assert.equal(stageEvents.length, 1);
   const [stageEvent] = stageEvents;
-  const meanConfidence = (99 * 2 + 97 * 2 + 90 * 2) / 6;
+  const meanConfidence = (99 * 2 + 97 * 2 + 85 * 2) / 6;
   const completion = writes.find((write) =>
     write.key.endsWith('/completion.json'),
   )?.value as RecordedDocument;
@@ -673,7 +683,13 @@ test('runExtraction reports the Textract call, cell confidence and matches in on
   const observations = writes.find((write) =>
     write.key.endsWith('/normalized/observations.json'),
   )?.value as {
-    cells: Array<{ validation: { deterministicReviewRequired: boolean } }>;
+    cells: Array<{
+      confidence: number;
+      validation: {
+        deterministicReviewRequired: boolean;
+        flags: Array<{ code: string; actual?: number }>;
+      };
+    }>;
   };
   assert.equal(
     observations.cells.filter(
@@ -681,6 +697,18 @@ test('runExtraction reports the Textract call, cell confidence and matches in on
     ).length,
     stageEvent.metrics.ReviewRequiredCells,
     'the count matches the review flags in the normalized artifact',
+  );
+  assert.deepEqual(
+    observations.cells.map((cell) => cell.confidence),
+    Array(6).fill(CELL_CONFIDENCE),
+    'cells keep the CELL block confidence',
+  );
+  assert.deepEqual(
+    observations.cells.flatMap((cell) => cell.validation.flags),
+    [
+      { code: 'LOW_TEXTRACT_CONFIDENCE', severity: 'WARNING', actual: 85 },
+      { code: 'LOW_TEXTRACT_CONFIDENCE', severity: 'WARNING', actual: 85 },
+    ],
   );
   assert.equal(result.rows.length, 2);
   assert.deepEqual(publishedRowCounts, [2]);
