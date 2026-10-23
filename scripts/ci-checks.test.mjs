@@ -215,6 +215,29 @@ test('shared CLI changes select build and automation checks', () => {
   }
 });
 
+test('workflow timeout checks run once for repository and full scopes', () => {
+  const runs = (paths) =>
+    checks(selectScopes(paths, 'pull_request'))
+      .filter(([command]) => command === 'node')
+      .flatMap(([, args]) => args.slice(1))
+      .filter((path) => path === 'scripts/workflow-timeouts.test.mjs').length;
+  assert.ok(buildTests().includes('scripts/workflow-timeouts.test.mjs'));
+  for (const path of [
+    '.github/workflows/ci-pr-title.yml',
+    '.github/workflows/ci-secret-scan.yml',
+    '.github/workflows/tracker-pr-metadata.yml',
+  ])
+    assert.equal(runs([path]), 1, path);
+  assert.equal(runs(['.github/workflows/ci-checks.yml']), 1);
+  assert.equal(
+    runs([
+      '.github/workflows/tracker-pr-metadata.yml',
+      '.github/workflows/ci-checks.yml',
+    ]),
+    1,
+  );
+});
+
 test('automation consumer changes run CLI compatibility without workspace tasks', () => {
   for (const path of [
     'scripts/branch-name.mjs',

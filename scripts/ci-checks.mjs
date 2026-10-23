@@ -23,6 +23,12 @@ export const automationTests = [
   'scripts/delivery-queue.test.mjs',
 ];
 
+// Full-gate tests that also check files in the repository scope.
+const sharedBuildTests = [
+  'scripts/cli.test.mjs',
+  'scripts/workflow-timeouts.test.mjs',
+];
+
 const automationLintTargets = [
   'scripts/ci-scope.mjs',
   'scripts/cli.cjs',
@@ -88,15 +94,12 @@ export function checks({ full, repository, mode, job = 'static' }) {
   if (repository) {
     // Generated agent definitions must match their sources under .agents/.
     commands.push(['npm', ['run', 'agents:check']]);
-    // CLI compatibility covers automation and build consumers. The full gate
-    // already runs it, so add it here only for repository-only changes.
+    // CLI compatibility covers automation and build consumers, and repository
+    // workflows need job timeouts. The full gate already runs both tests, so
+    // add them here only for repository-only changes.
     commands.push([
       'node',
-      [
-        '--test',
-        ...automationTests,
-        ...(!full ? ['scripts/cli.test.mjs'] : []),
-      ],
+      ['--test', ...automationTests, ...(!full ? sharedBuildTests : [])],
     ]);
   }
   return commands;

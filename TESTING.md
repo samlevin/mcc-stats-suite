@@ -97,4 +97,4 @@ Application delivery regression checks run with `node --test scripts/deployment-
 
 `node --test scripts/workflow-names.test.mjs` checks workflow, job, and step names against the convention in [CONTRIBUTING.md](CONTRIBUTING.md#name-github-actions-workflows), including the three check names the `main` ruleset requires.
 
-`node --test scripts/workflow-timeouts.test.mjs` checks that every workflow job sets `timeout-minutes`. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. Pick a value above the job's longest recent successful run.
+`node --test scripts/workflow-timeouts.test.mjs` checks that every workflow job sets `timeout-minutes`. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. CI runs it in the full gate and for changes in the repository scope, such as the `tracker-*.yml` workflows. Pick a value above the job's longest recent successful run.
