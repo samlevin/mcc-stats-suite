@@ -90,15 +90,20 @@ export function checks({ full, repository, mode, job = 'static' }) {
     // Generated agent definitions must match their sources under .agents/.
     commands.push(['npm', ['run', 'agents:check']]);
     // CLI compatibility covers automation and build consumers, and the Node
-    // version test covers the tracker workflows in this scope. The full gate
-    // already runs both, so add them here only for repository-only changes.
+    // version and checkout credentials tests cover the workflows in this
+    // scope. The full gate already runs all three, so add them here only for
+    // repository-only changes.
     commands.push([
       'node',
       [
         '--test',
         ...automationTests,
         ...(!full
-          ? ['scripts/cli.test.mjs', 'scripts/workflow-node-version.test.mjs']
+          ? [
+              'scripts/cli.test.mjs',
+              'scripts/workflow-node-version.test.mjs',
+              'scripts/workflow-checkout-credentials.test.mjs',
+            ]
           : []),
       ],
     ]);
