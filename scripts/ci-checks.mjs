@@ -113,6 +113,17 @@ export function checks({ full, repository, mode, job = 'static' }) {
   return commands;
 }
 
+// Every Turbo run under `runChecks` inherits these, including the one inside
+// `npm run build:shared`. Streamed output keeps Turbo from opening its own
+// `::group::` per task inside the check's group.
+export function turboEnvironment(base, head) {
+  return {
+    TURBO_SCM_BASE: base,
+    TURBO_SCM_HEAD: head,
+    TURBO_LOG_ORDER: 'stream',
+  };
+}
+
 function commandLine(command, args) {
   return [command, ...args].join(' ');
 }
@@ -183,8 +194,7 @@ async function main() {
   const mode = process.env.CI_MODE;
   if (!['affected', 'all'].includes(mode))
     throw new Error('Expected an explicit workspace mode');
-  process.env.TURBO_SCM_BASE = base;
-  process.env.TURBO_SCM_HEAD = head;
+  Object.assign(process.env, turboEnvironment(base, head));
   const job = process.env.CI_JOB ?? 'static';
   if (!(job in jobTasks)) throw new Error('Expected a known CI job');
   console.log(`Workspace validation (${job}): ${full ? mode : 'none'}`);

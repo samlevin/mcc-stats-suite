@@ -27,6 +27,7 @@ import {
   buildTests,
   checks,
   runChecks,
+  turboEnvironment,
   workspaceArguments,
 } from './ci-checks.mjs';
 
@@ -152,6 +153,12 @@ test('Turbo streams prefixed lines instead of its own log groups', () => {
   for (const job of ['static', 'bundle'])
     for (const mode of ['all', 'affected'])
       assert.ok(workspaceArguments(mode, job).includes('--log-order=stream'));
+  // Covers Turbo runs started through npm scripts, such as build:shared.
+  assert.deepEqual(turboEnvironment('a'.repeat(40), 'b'.repeat(40)), {
+    TURBO_SCM_BASE: 'a'.repeat(40),
+    TURBO_SCM_HEAD: 'b'.repeat(40),
+    TURBO_LOG_ORDER: 'stream',
+  });
 });
 
 test('automation script tests run only in the repository scope', () => {
