@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { buildPlan, printTree } from './spec-to-issues.mjs';
+import { applyEdges, buildPlan, printTree } from './spec-to-issues.mjs';
 
 const catalog = JSON.parse(
   readFileSync(new URL('../.github/labels.json', import.meta.url), 'utf8'),
@@ -319,5 +319,44 @@ test('active phase titles mentioning backlog retain their epic and slices', () =
     assert.ok(plan.nodes.some((node) => node.ref === 'P2.1'));
     assert.deepEqual(plan.deferred, ['P1.1']);
     assert.ok(!plan.nodes.some((node) => node.ref === 'phase-1'));
+  }
+});
+
+test('triager edges join leaf blockers, dependencies sections and the printed tree', () => {
+  const plan = parse();
+  assert.deepEqual(applyEdges(plan, 'EDGES | none'), []);
+  assert.deepEqual(plan, parse());
+  assert.deepEqual(
+    applyEdges(
+      plan,
+      'EDGES | P0.3 <- P0.2.2: both edit the adapter; P0.3 <- P0.1: uses the port types',
+    ),
+    [],
+  );
+  const later = plan.nodes.find((n) => n.ref === 'P0.3');
+  assert.deepEqual(later.blockedBy, ['P0.2.2', 'P0.1']);
+  assert.match(later.body, /### Dependencies\n\nP0\.2\.2, P0\.1$/);
+  assert.match(printTree(plan), /\| phase-0 \| P0\.2\.2, P0\.1 \|/);
+  assert.deepEqual(applyEdges(plan, 'EDGES | P0.3 <- P0.1: repeated edge'), []);
+  assert.deepEqual(later.blockedBy, ['P0.2.2', 'P0.1']);
+});
+
+test('malformed, unknown, non-leaf, self and cyclic triager edges leave the plan unchanged', () => {
+  for (const [line, expected] of [
+    ['P0.3 <- P0.1: no prefix', /expected "EDGES \|/],
+    ['EDGES | P0.3 <- P0.1', /malformed edge/],
+    ['EDGES | P0.3 <- P9.9: missing slice', /P9\.9 is not a leaf/],
+    ['EDGES | P0.3 <- P0.2: container blocker', /P0\.2 is not a leaf/],
+    ['EDGES | P0.3 <- P0.3: same leaf', /cannot block itself/],
+    ['EDGES | P0.1 <- P0.2.1: closes the loop', /dependency cycle/],
+    ['EDGES | P0.3 <- P0.1: fine; P0.1 <- P0.3: reversed', /dependency cycle/],
+  ]) {
+    const plan = parse();
+    const errors = applyEdges(plan, line);
+    assert.ok(
+      errors.some((e) => expected.test(e)),
+      `${line}: ${errors}`,
+    );
+    assert.deepEqual(plan, parse(), line);
   }
 });

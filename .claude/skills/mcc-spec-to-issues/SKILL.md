@@ -29,7 +29,7 @@ Include `Policy: tool=<tool> role=issue-triager model=<model> effort=<effort> (m
 
 Spawn with the Agent tool, `subagent_type: mcc-issue-triager`, passing `model` and `effort` from the resolver explicitly.
 
-Apply the triager's verdict, metadata, and groups and never override them. BLOCKED means stop before filing. On SPLIT_REQUIRED, draft the required split and obtain triage of the affected drafts and siblings as `mcc-create-github-issue` does; show no fileable plan until it passes. Only the triager forms independence groups. Never form, extend, or merge groups yourself. Validate returned labels, sizes, references, parentage, and dependency acyclicity before continuing. Save the complete verdict, settings, metadata, and groups in state for resume.
+Apply the triager's verdict, metadata, `EDGES` line, and groups and never override them. Add every returned edge to the drafts with `applyEdges(plan, edgesLine)` from `scripts/spec-to-issues.mjs`, which adds each blocker to the waiting node's blocked-by refs and Dependencies section and reports unknown refs, self-edges, and cycles; stop on any error it reports. BLOCKED means stop before filing. On SPLIT_REQUIRED, draft the required split and obtain triage of the affected drafts and siblings as `mcc-create-github-issue` does; show no fileable plan until it passes. Only the triager forms independence groups. Never form, extend, or merge groups yourself. Validate returned labels, sizes, references, parentage, and dependency acyclicity before continuing. Save the complete verdict, settings, metadata, edges, and groups in state for resume.
 
 ## Print and confirm
 
@@ -39,7 +39,7 @@ For `file`, save the exact plan and its digest, then ask the person to confirm t
 
 ## File and resume
 
-Follow [references/state.md](references/state.md) and [references/github-operations.md](references/github-operations.md). File parents before children, then native sub-issue links, then native blocked-by dependencies. Rewrite Plan ID and delivery-section references in issue bodies to issue numbers once the mapping exists. Keep design-section links to the spec. Write each independence record only after children, native parent links, and blocked-by edges exist.
+Follow [references/state.md](references/state.md) and [references/github-operations.md](references/github-operations.md). File parents before children, then native sub-issue links, then native blocked-by dependencies, including every edge the triager returned. Rewrite Plan ID and delivery-section references in issue bodies to issue numbers once the mapping exists. Keep design-section links to the spec. Write each independence record only after children, native parent links, and blocked-by edges exist.
 
 Each independence record goes on the phase epic or split-slice container whose direct leaf children it lists, only when it has two or more leaf children and the triager returned groups for it. Use the exact marker format in `.agents/independence-groups.md` with issue numbers. The root container gets no record because its children are epics. Never move groups from one parent to another or infer a record from the spec's parallel lanes.
 

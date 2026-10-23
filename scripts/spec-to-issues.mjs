@@ -293,24 +293,7 @@ export function buildPlan(text, { specPath, repository, labels }) {
     }
   }
   if (nodes.length === 1) fail('§20', 'no active phases or slices');
-  const visiting = new Set();
-  const visited = new Set();
-  const visit = (ref, chain = []) => {
-    if (visiting.has(ref)) {
-      fail(ref, `dependency cycle ${[...chain, ref].join(' -> ')}`);
-      return;
-    }
-    if (visited.has(ref)) return;
-    visiting.add(ref);
-    const dependencies = [
-      ...(byRef.get(ref)?.blockedBy || []),
-      ...nodes.filter((n) => n.parent === ref).map((n) => n.ref),
-    ];
-    for (const blocker of dependencies) visit(blocker, [...chain, ref]);
-    visiting.delete(ref);
-    visited.add(ref);
-  };
-  for (const node of nodes) visit(node.ref);
+  errors.push(...cycles(nodes));
   for (const node of nodes) {
     const parentKind = byRef.get(node.parent)?.kind;
     const parent = `### Parent ${parentKind === 'EPIC' ? 'epic' : 'issue'}\n\n${node.parent || 'None'}`;
@@ -332,6 +315,84 @@ export function buildPlan(text, { specPath, repository, labels }) {
     errors,
     nodes,
   };
+}
+
+// A node waits on its blockers, and a container also waits on its children.
+function cycles(nodes) {
+  const found = [];
+  const byRef = new Map();
+  for (const node of nodes) if (!byRef.has(node.ref)) byRef.set(node.ref, node);
+  const visiting = new Set();
+  const visited = new Set();
+  const visit = (ref, chain = []) => {
+    if (visiting.has(ref)) {
+      found.push(`${ref}: dependency cycle ${[...chain, ref].join(' -> ')}`);
+      return;
+    }
+    if (visited.has(ref)) return;
+    visiting.add(ref);
+    const dependencies = [
+      ...(byRef.get(ref)?.blockedBy || []),
+      ...nodes.filter((n) => n.parent === ref).map((n) => n.ref),
+    ];
+    for (const blocker of dependencies) visit(blocker, [...chain, ref]);
+    visiting.delete(ref);
+    visited.add(ref);
+  };
+  for (const node of nodes) visit(node.ref);
+  return found;
+}
+
+// Adds the triager's EDGES line to the drafts: each `<waiting> <- <blocker>`
+// pair of leaves joins the waiting leaf's blocked-by refs and its
+// Dependencies section. Returns the errors; the plan is unchanged when any
+// edge is malformed, names an unknown or non-leaf ref, or closes a cycle.
+export function applyEdges(plan, line) {
+  const match = /^EDGES \| (.+)$/.exec(line.trim());
+  if (!match) return [`EDGES: expected "EDGES | <edges>" or "EDGES | none"`];
+  if (match[1].trim() === 'none') return [];
+  const errors = [];
+  const byRef = new Map(plan.nodes.map((node) => [node.ref, node]));
+  const blockedBy = new Map(
+    plan.nodes.map((node) => [node.ref, [...node.blockedBy]]),
+  );
+  for (const item of match[1].split(';').map((part) => part.trim())) {
+    const edge = /^(\S+) <- (\S+): \S.*$/.exec(item);
+    if (!edge) {
+      errors.push(`EDGES: malformed edge "${item}"`);
+      continue;
+    }
+    const [, waiting, blocker] = edge;
+    const unknown = [waiting, blocker].filter(
+      (ref) => byRef.get(ref)?.kind !== 'LEAF',
+    );
+    if (unknown.length) {
+      errors.push(`EDGES: ${unknown.join(', ')} is not a leaf in this plan`);
+      continue;
+    }
+    if (waiting === blocker) {
+      errors.push(`EDGES: ${waiting} cannot block itself`);
+      continue;
+    }
+    blockedBy.set(waiting, unique([...blockedBy.get(waiting), blocker]));
+  }
+  if (errors.length) return errors;
+  const updated = plan.nodes.map((node) => ({
+    ...node,
+    blockedBy: blockedBy.get(node.ref),
+  }));
+  const found = cycles(updated);
+  if (found.length) return found;
+  for (const node of plan.nodes) {
+    const refs = blockedBy.get(node.ref);
+    if (refs.length === node.blockedBy.length) continue;
+    node.blockedBy = refs;
+    node.body = node.body.replace(
+      /### Dependencies\n\n[^\n]*$/,
+      `### Dependencies\n\n${refs.join(', ')}`,
+    );
+  }
+  return [];
 }
 
 export function printTree(plan) {

@@ -987,7 +987,28 @@ test('issue filing classifies inline and reserves the triager for independent ju
     ])
       assert.ok(triage.includes(reason), `${path}: ${reason}`);
     assert.match(triage, /Only the triager forms independence groups/);
+    assert.match(triage, /the batch files two or more leaves/);
+    assert.match(triage, /single leaf .* still classifies inline/);
+    assert.match(triage, /`EDGES` line/);
+    const publish = section(files.get(path), 'Publish');
+    assert.match(
+      publish,
+      /native parent links, then blocked-by edges, planned and triager-returned alike/,
+    );
   }
+  const role = readFileSync(
+    new URL('../.agents/roles/issue-triager.md', import.meta.url),
+    'utf8',
+  );
+  for (const rule of [
+    'EDGES | <waiting ref> <- <blocker ref>: <=15-word reason',
+    '`EDGES | none`',
+    'whether or not they share a container',
+    'even when the pair needs no particular order',
+    'never recommend an edge that closes a cycle',
+    'leaves linked by an edge never sit in different groups',
+  ])
+    assert.ok(role.includes(rule), rule);
 });
 
 // Routing facts: the namespaced agents and skills a file names and the
@@ -1661,6 +1682,9 @@ test('spec plans require offline validation, triage, confirmation and journaled 
       'as accepted decisions',
       'never override them',
       'Only the triager forms independence groups',
+      '`EDGES` line',
+      'applyEdges(plan, edgesLine)',
+      'including every edge the triager returned',
       'Never form, extend, or merge groups yourself',
       'only as context',
       'Wait for explicit confirmation',

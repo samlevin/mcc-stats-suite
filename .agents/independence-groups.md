@@ -10,6 +10,8 @@ Only `mcc-issue-triager` forms independence groups, for a new container or epic 
 
 Every leaf in a group must be independent of every leaf in every other group. Leaves in one group may depend on each other.
 
+The triager also recommends a blocked-by edge for every pair of leaves in a batch whose implementation notes overlap or where one uses the other's output, and forms groups after counting those edges. Two leaves linked by a planned or recommended edge therefore never sit in different groups.
+
 ## Record
 
 When the triager returns groups, record them once the children exist by appending this section to the container's body, one line per group, with the leaves' issue numbers:
