@@ -17,6 +17,7 @@ jobs:
   detect-changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
       repository: ${{ steps.scope.outputs.repository }}
@@ -91,12 +92,15 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.infrastructure != 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       AWS_EC2_METADATA_DISABLED: 'true'
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - name: Read pinned OpenTofu version
         id: tofu-version
         run: |
@@ -122,6 +126,7 @@ jobs:
     # Static checks do no Docker work. They stay on the ARM64 runner pool so
     # tests run on the architecture Lambda uses.
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -132,10 +137,11 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.16.0'
+          node-version-file: .tool-versions
           cache: npm
       - name: Install dependencies
         run: npm ci
@@ -164,6 +170,7 @@ jobs:
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -174,6 +181,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Start pulling the CDK bundling image
         # Runs in the background so the pull overlaps Node setup and npm ci.
         # The digest comes from the stack's pin, so CI bundles what deploys do.
@@ -184,7 +192,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.16.0'
+          node-version-file: .tool-versions
           cache: npm
       - name: Install dependencies
         run: npm ci
@@ -213,6 +221,7 @@ jobs:
       [detect-changes, check-infrastructure, check-workspaces, check-bundles]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Fail unless every selected check passed
         env:

@@ -41,6 +41,7 @@ jobs:
   qualify-release:
     name: Qualify rollback release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       release-url: ${{ steps.release.outputs.release-url }}
       sha: ${{ steps.target.outputs.sha }}
@@ -51,6 +52,7 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
       - name: Validate release
         id: release
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9

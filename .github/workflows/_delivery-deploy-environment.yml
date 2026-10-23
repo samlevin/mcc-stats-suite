@@ -52,6 +52,7 @@ jobs:
     name: Verify prod reviewer protection
     if: inputs.environment == 'prod'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       actions: read
     # Step conditions cannot read secrets, so the Slack step tests this copy.
@@ -116,6 +117,7 @@ jobs:
       deployed: ${{ steps.deploy.outcome == 'success' && steps.verify.outcome == 'success' }}
     # match-to-csv's ARM64 Lambda bundling needs a native ARM Docker host.
     runs-on: ${{ inputs.application == 'match-to-csv' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    timeout-minutes: 60
     environment:
       name: ${{ inputs.environment }}
       deployment: false
@@ -168,6 +170,7 @@ jobs:
         with:
           ref: ${{ inputs.sha }}
           fetch-depth: 1
+          persist-credentials: false
       - name: Verify checked-out revision
         env:
           TARGET_SHA: ${{ inputs.sha }}
@@ -184,7 +187,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.16.0'
+          node-version-file: .tool-versions
           cache: npm
       - name: Install dependencies
         run: npm ci

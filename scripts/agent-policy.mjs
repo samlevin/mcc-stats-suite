@@ -694,6 +694,16 @@ export function publishReview(
   } catch (error) {
     throw new ReviewNotPosted(error.message);
   }
+  // A review posts only to an open pull request. A merged or closed one
+  // still gets its report, but nothing is written to it.
+  if (pull?.merged === true || pull?.merged_at)
+    throw new ReviewNotPosted('pull request is merged');
+  if (pull?.state !== 'open')
+    throw new ReviewNotPosted(
+      pull?.state === 'closed'
+        ? 'pull request is closed'
+        : `pull request state is ${pull?.state ?? 'unknown'}, not open`,
+    );
   if (pull?.base?.sha !== base || pull?.head?.sha !== head)
     throw new ReviewNotPosted(
       `pull request #${pr} is now at ${pull?.base?.sha}..${pull?.head?.sha}, not the reviewed ${base}..${head}. Run a fresh review for the new commits.`,

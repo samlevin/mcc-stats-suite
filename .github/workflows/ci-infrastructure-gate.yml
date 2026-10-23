@@ -28,6 +28,7 @@ jobs:
     name: Evaluate infrastructure merge requirements
     if: github.event_name != 'status' || startsWith(github.event.context, 'terrateam ')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Mark merge requirements pending before setup
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
@@ -52,7 +53,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.16.0'
+          node-version-file: .tool-versions
       - name: Install trusted dependencies without scripts
         run: npm ci --ignore-scripts
       - name: Evaluate current pull request heads
