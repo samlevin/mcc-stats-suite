@@ -25,9 +25,9 @@ The implementer includes the initial decision with its one claim comment; a miss
 <!-- mcc-effort {"effort":"medium","rule":"default","evidence":"ticket/spec","reason":"The written plan resolves the design."} -->
 ```
 
-A user override uses `rule:"user override"`, the actual selected `effort`, and its explicit constraint as `evidence` and `reason`.
+A user override uses `rule:"user override"`, the actual selected `effort`, and its explicit constraint as `evidence` and `reason`. Every qualifying high record, initial or later, has the unresolved `question` and the matching policy rule's required `criteria` keys set to true; without them the queue reads it as medium.
 
-For an approved later escalation, the parent posts exactly one new decision comment before redispatch, with the explanation beside the record. It is exempt from the no-repeat-claim rule and never repeats the claim. The single-line record adds `later:true`, the unresolved `question`, and the matching policy rule's required `criteria` keys set to true:
+For an approved later escalation, the parent posts exactly one new decision comment before redispatch, with the explanation beside the record. It is exempt from the no-repeat-claim rule and never repeats the claim, and its record adds `later:true`:
 
 ```html
 <!-- mcc-effort {"effort":"high","rule":"H3-demonstrated-limit","later":true,"question":"How can concurrent writes preserve the specified ordering?","evidence":"Reproducible case race-1 and the medium attempt","reason":"The attempt requires revising the ordering design.","criteria":{"mediumAttempt":true,"reproducibleFailureOrFinding":true,"designRevisionRequired":true,"unresolvedReasoning":true}} -->
