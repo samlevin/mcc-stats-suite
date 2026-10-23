@@ -39,7 +39,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.16.0'
+          node-version-file: .tool-versions
       - name: Add the issue to MCC delivery
         env:
           MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
@@ -70,7 +70,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: '22.16.0'
+          node-version-file: .tool-versions
       - name: Add missing open issues to MCC delivery
         env:
           MCC_PROJECT_TOKEN: ${{ secrets.MCC_PROJECT_TOKEN }}
