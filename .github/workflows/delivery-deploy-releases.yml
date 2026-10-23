@@ -22,6 +22,7 @@ jobs:
   qualify-releases:
     name: Qualify application releases
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       releases: ${{ steps.qualify.outputs.releases }}
     steps:

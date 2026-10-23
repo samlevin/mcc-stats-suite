@@ -17,6 +17,7 @@ jobs:
   detect-changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       full: ${{ steps.scope.outputs.full }}
       repository: ${{ steps.scope.outputs.repository }}
@@ -91,6 +92,7 @@ jobs:
     needs: detect-changes
     if: needs.detect-changes.outputs.infrastructure != 'false'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     env:
       AWS_EC2_METADATA_DISABLED: 'true'
       TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.tofu-plugin-cache
@@ -124,6 +126,7 @@ jobs:
     # Static checks do no Docker work. They stay on the ARM64 runner pool so
     # tests run on the architecture Lambda uses.
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -167,6 +170,7 @@ jobs:
     # CDK bundles the ARM64 match-to-csv Lambda in Docker; use a native runner
     # so Bun and the native dependencies do not execute under QEMU.
     runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -217,6 +221,7 @@ jobs:
       [detect-changes, check-infrastructure, check-workspaces, check-bundles]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Fail unless every selected check passed
         env:
