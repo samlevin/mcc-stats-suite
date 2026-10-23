@@ -1,6 +1,6 @@
 ---
 name: mcc-review-code
-description: "Independent code review of one MCC pull request or pushed branch at exact base/head SHAs, run by the read-only mcc-code-reviewer at the repository policy or an explicit override. The target is always a PR (#N, a bare number, or a PR URL) or a branch, never an issue; the PR's linked issue only supplies acceptance criteria. Use for \"review #N\" (PR #N), \"review <PR URL>\", or \"review branch <name>\" in samlevin/mcc-stats-suite. Reports findings to you and posts them to the PR as one review: a change request only for a REQUEST CHANGES verdict from a GitHub account other than the PR author, otherwise a comment. Never edits or approves."
+description: "Independent code review of one MCC pull request or pushed branch at exact base/head SHAs, run by the read-only mcc-code-reviewer at the repository policy or an explicit override. The target is always a PR (#N, a bare number, or a PR URL) or a branch, never an issue; the PR's linked issues only supply acceptance criteria. Use for \"review #N\" (PR #N), \"review <PR URL>\", or \"review branch <name>\" in samlevin/mcc-stats-suite. Reports findings to you and posts them to the PR as one review: a change request only for a REQUEST CHANGES verdict from a GitHub account other than the PR author, otherwise a comment. Never edits or approves."
 ---
 <!-- Generated from .agents/workflows/review-code.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 
