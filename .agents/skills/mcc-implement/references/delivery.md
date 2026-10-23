@@ -32,7 +32,7 @@ Reuse current metadata and verified prerequisites from issue intake or the queue
 
 Write code plus meaningful tests for changed behavior, and update the nearest docs for contract or operator changes, keeping docs and comments to the current state as the `AGENTS.md` hard rules require.
 
-While editing, run focused tests for changed behavior. Before the first push, run every required scope-appropriate check from `AGENTS.md` and fix failures. After fixes, rerun affected checks and broaden validation when changed scope, dependencies, configuration, or new evidence warrants it. Meaningful behavioral tests and required checks remain mandatory: never skip them or weaken assertions, and report pre-existing failures as such. If the same command or blocker fails twice without new evidence, stop and return BLOCKED. Keep a terse record of commands, results, and tested revision for the review packet and PR.
+While editing, run focused tests for changed behavior. Before the first push, run every required scope-appropriate check from `AGENTS.md` and fix failures. After fixes, rerun affected checks and broaden validation when changed scope, dependencies, configuration, or new evidence warrants it. Meaningful behavioral tests and required checks remain mandatory: never skip them or weaken assertions, and report pre-existing failures as such. If the same command or blocker fails twice without new evidence, stop and return BLOCKED. Inspect edits before each push as `.agents/evidence.md` describes. Keep a terse record of commands, results, and tested revision for the review packet and PR.
 
 ## Escalation
 
