@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.4.1](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.4.0...match-to-csv-v3.4.1) (2026-10-23)
+
+
+### Bug Fixes
+
+* **match-to-csv:** base OCR confidence checks on Textract word confidence ([#410](https://github.com/samlevin/mcc-stats-suite/issues/410)) ([4f8874f](https://github.com/samlevin/mcc-stats-suite/commit/4f8874f6228380dc8dc239e9e7e4308a04607d87))
+* **match-to-csv:** strip clan tags that follow misread emblem text ([#404](https://github.com/samlevin/mcc-stats-suite/issues/404)) ([67fd87f](https://github.com/samlevin/mcc-stats-suite/commit/67fd87f4589a75203ce84b8ce988f88b63adc706)), closes [#403](https://github.com/samlevin/mcc-stats-suite/issues/403)
+
 ## [3.4.0](https://github.com/samlevin/mcc-stats-suite/compare/match-to-csv-v3.3.0...match-to-csv-v3.4.0) (2026-10-22)
 
 

@@ -1091,6 +1091,8 @@ function mockGitHub({
   head = HEAD,
   user,
   review,
+  state = 'open',
+  merged = false,
 } = {}) {
   const calls = [];
   const posts = [];
@@ -1101,6 +1103,9 @@ function mockGitHub({
     if (path === `repos/${policy.binding.repository}/pulls/7`)
       return JSON.stringify({
         number: 7,
+        state,
+        merged,
+        merged_at: merged ? '2026-10-01T00:00:00Z' : null,
         user: author === null ? null : { login: author },
         base: { sha: base },
         head: { sha: head },
@@ -1315,6 +1320,28 @@ test('a failed submission is reported, never claimed as posted', () => {
   assert.equal(notFound.github.posts.length, 0);
 });
 
+test('a merged or closed pull request gets no review and says why', () => {
+  for (const [options, reason] of [
+    [{ state: 'closed', merged: true }, 'pull request is merged'],
+    [{ state: 'closed' }, 'pull request is closed'],
+  ])
+    for (const verdict of REVIEW_VERDICTS) {
+      const github = mockGitHub(options);
+      assert.throws(
+        () => publish(verdict, github),
+        (error) =>
+          error.name === 'ReviewNotPosted' &&
+          error.message === `Review not posted: ${reason}`,
+        `${verdict} ${reason}`,
+      );
+      assert.equal(github.posts.length, 0, `${verdict} ${reason}`);
+      assert.ok(
+        github.calls.every((args) => !args[1].endsWith('/reviews')),
+        `${verdict} ${reason}`,
+      );
+    }
+});
+
 test('moved or mismatched SHAs post nothing and ask for a fresh review', () => {
   for (const github of [
     mockGitHub({ head: 'c'.repeat(40) }),
@@ -1444,6 +1471,27 @@ test('review publication runs only from a manual PR review', () => {
     assert.ok(
       lineWith(content, 'fresh review'),
       `${path} must ask for a fresh review when the SHAs moved`,
+    );
+    assert.ok(
+      lineWith(
+        content,
+        'ls-remote --exit-code --heads',
+        'pull/N/head main',
+        'merge-base',
+        'base_fallback=deleted base branch',
+      ),
+      `${path} must review against the merge base with main when the base branch was deleted`,
+    );
+    assert.ok(
+      lineWith(content, '`base_fallback` when Gather used it'),
+      `${path} must put the base fallback in the packet`,
+    );
+    assert.ok(
+      lineWith(
+        content,
+        'Base: merge base of the head and origin/main, because base branch',
+      ),
+      `${path} must print the base fallback in the report`,
     );
     assert.doesNotMatch(content, /nothing in this flow writes to GitHub/, path);
   }
