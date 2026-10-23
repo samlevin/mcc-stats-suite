@@ -488,12 +488,14 @@ function tableHeaderScore(
  * - Drop words with no letter, digit, or clan-tag bracket. Gamertags hold
  *   only letters, digits, and spaces, so such a word is an icon Textract read
  *   as text, like the chat bubble MCC draws over the player column as "...".
- * - Remove clan tags like "[UNSC] "
+ * - Remove everything up to and including the last "]". Gamertags never
+ *   hold a bracket, so that text is a clan tag like "[UNSC]" plus any icon
+ *   Textract read as letters before it, like an emblem read as "ky".
  * - Replace multiple spaces with a single space
  */
 function tidyPlayerName(raw: string): string {
   const t = raw.trim().split(/\s+/).filter(isNameWord).join(' ');
-  return t.replace(/^\[[^\]]+]\s*/, '');
+  return t.replace(/^.*]\s*/, '');
 }
 
 /**

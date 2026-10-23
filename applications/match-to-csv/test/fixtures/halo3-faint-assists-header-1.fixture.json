@@ -3,11 +3,6 @@
   "misreads": [
     {
       "field": "player",
-      "expected": "Player15 D",
-      "read": "ky [CLAN2] Player15 D"
-    },
-    {
-      "field": "player",
       "expected": "Player19",
       "read": "Player: 19"
     }
@@ -2702,14 +2697,7 @@
       "assists": "12",
       "deaths": "24",
       "win": 1,
-      "loss": 0,
-      "reviewFlags": [
-        {
-          "field": "player",
-          "code": "LOW_WORD_CONFIDENCE",
-          "wordConfidence": 36.74037551879883
-        }
-      ]
+      "loss": 0
     },
     {
       "team": "Blue",

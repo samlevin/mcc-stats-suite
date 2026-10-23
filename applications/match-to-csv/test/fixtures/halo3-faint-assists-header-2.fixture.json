@@ -1,12 +1,5 @@
 {
   "name": "halo3 faint assists header 2",
-  "misreads": [
-    {
-      "field": "player",
-      "expected": "Player15 D",
-      "read": "ky [CLAN2] Player15 D"
-    }
-  ],
   "blocks": [
     {
       "BlockType": "WORD",
@@ -2648,14 +2641,7 @@
       "assists": "13",
       "deaths": "11",
       "win": 1,
-      "loss": 0,
-      "reviewFlags": [
-        {
-          "field": "player",
-          "code": "LOW_WORD_CONFIDENCE",
-          "wordConfidence": 37.00135803222656
-        }
-      ]
+      "loss": 0
     },
     {
       "team": "Red",

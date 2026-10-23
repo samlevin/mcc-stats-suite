@@ -625,6 +625,20 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
       ['...', 10],
       ['Spartan117', 99],
     ],
+    // An emblem misread as letters before the clan tag is not part of the
+    // name either.
+    [
+      ['ky', 37],
+      ['[Tag]', 99],
+      ['Noble', 99],
+      ['Six', 99],
+    ],
+    // Icon text before the clan tag.
+    [
+      ['...', 10],
+      ['[UNSC]', 99],
+      ['Name123', 99],
+    ],
     // A lowercase l read as an uppercase I, at very low confidence.
     [['PIayer05', 39]],
     // A high-confidence name with a space before its digits is left alone.
@@ -723,6 +737,8 @@ test('processScoreboardImage flags possibly misread gamertags and keeps them as 
     rows.map((row) => [row.player, row.reviewFlags]),
     [
       ['Spartan117', undefined],
+      ['Noble Six', undefined],
+      ['Name123', undefined],
       ['PIayer05', [low(39)]],
       ['Agent 47', undefined],
       ['Player 06', [split(60)]],
