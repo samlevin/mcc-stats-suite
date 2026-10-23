@@ -42,6 +42,11 @@ pnpm-debug.log*
 .claude/worktrees/
 .codex/worktrees/
 
+# Local agent files: personal instructions, scheduler locks, and Playwright MCP output
+CLAUDE.local.md
+.claude/scheduled_tasks.lock
+.playwright-mcp/
+
 # OS/editor noise
 .DS_Store
 Thumbs.db
