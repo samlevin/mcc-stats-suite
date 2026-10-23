@@ -346,7 +346,8 @@ function cycles(nodes) {
 // Adds the triager's EDGES line to the drafts: each `<waiting> <- <blocker>`
 // pair of leaves joins the waiting leaf's blocked-by refs and its
 // Dependencies section. Returns the errors; the plan is unchanged when any
-// edge is malformed, names an unknown or non-leaf ref, or closes a cycle.
+// edge is malformed, names an unknown or non-leaf ref, or closes a cycle, or
+// when a waiting leaf's body does not end with its Dependencies section.
 export function applyEdges(plan, line) {
   const match = /^EDGES \| (.+)$/.exec(line.trim());
   if (!match) return [`EDGES: expected "EDGES | <edges>" or "EDGES | none"`];
@@ -383,13 +384,20 @@ export function applyEdges(plan, line) {
   }));
   const found = cycles(updated);
   if (found.length) return found;
-  for (const node of plan.nodes) {
-    const refs = blockedBy.get(node.ref);
-    if (refs.length === node.blockedBy.length) continue;
-    node.blockedBy = refs;
+  const dependencies = /### Dependencies\n\n[^\n]*$/;
+  const changed = plan.nodes.filter(
+    (node) => blockedBy.get(node.ref).length !== node.blockedBy.length,
+  );
+  const missing = changed.filter((node) => !dependencies.test(node.body));
+  if (missing.length)
+    return missing.map(
+      (node) => `EDGES: ${node.ref} body does not end with its Dependencies`,
+    );
+  for (const node of changed) {
+    node.blockedBy = blockedBy.get(node.ref);
     node.body = node.body.replace(
-      /### Dependencies\n\n[^\n]*$/,
-      `### Dependencies\n\n${refs.join(', ')}`,
+      dependencies,
+      `### Dependencies\n\n${node.blockedBy.join(', ')}`,
     );
   }
   return [];
@@ -419,14 +427,39 @@ export function printTree(plan) {
 }
 
 const cli = defineCli(
-  'Usage: node scripts/spec-to-issues.mjs plan <spec-path> [--output <drafts.json>]',
+  [
+    'Usage: node scripts/spec-to-issues.mjs plan <spec-path> [--output <drafts.json>]',
+    '       node scripts/spec-to-issues.mjs edges <drafts.json> <edges-line> [--output <triaged.json>]',
+  ].join('\n'),
   ['output'],
 );
+// Drafts and triaged plans live outside the repository and are never
+// overwritten.
+function writeOutside(path, plan) {
+  const output = resolve(path);
+  const outputDirectory = realpathSync(resolve(output, '..'));
+  if (!isOutside(root, outputDirectory) || inCheckout(outputDirectory))
+    throw cliError(cli, 'Draft output must be outside the repository');
+  writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', {
+    flag: 'wx',
+    mode: 0o600,
+  });
+}
 export function main(argv) {
   try {
     const { options, positionals } = parseCli(argv, cli);
+    if (positionals[0] === 'edges') {
+      if (positionals.length !== 3)
+        throw cliError(cli, 'Expected edges <drafts.json> <edges-line>');
+      const plan = JSON.parse(readFileSync(resolve(positionals[1]), 'utf8'));
+      const errors = applyEdges(plan, positionals[2]);
+      if (errors.length) throw new Error(errors.join('\n'));
+      if (options.output) writeOutside(options.output, plan);
+      else process.stdout.write(printTree(plan) + '\n');
+      return 0;
+    }
     if (positionals.length !== 2 || positionals[0] !== 'plan')
-      throw cliError(cli, 'Expected plan <spec-path>');
+      throw cliError(cli, 'Expected plan <spec-path> or edges');
     const input = realpathSync(resolve(positionals[1]));
     const specPath = relative(root, input);
     if (isOutside(root, input))
@@ -440,17 +473,8 @@ export function main(argv) {
       labels: catalog.labels.map((l) => l.name),
     });
     if (plan.errors.length) throw new Error(plan.errors.join('\n'));
-    if (options.output) {
-      const output = resolve(options.output);
-      const outputDirectory = realpathSync(resolve(output, '..'));
-      if (!isOutside(root, outputDirectory) || inCheckout(outputDirectory))
-        throw cliError(cli, 'Draft output must be outside the repository');
-      writeFileSync(output, JSON.stringify(plan, null, 2) + '\n', {
-        flag: 'wx',
-        mode: 0o600,
-      });
-    }
-    if (!options.output) process.stdout.write(printTree(plan) + '\n');
+    if (options.output) writeOutside(options.output, plan);
+    else process.stdout.write(printTree(plan) + '\n');
     return 0;
   } catch (error) {
     if (error instanceof CliHelp) {

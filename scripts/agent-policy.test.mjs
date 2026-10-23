@@ -1683,6 +1683,7 @@ test('spec plans require offline validation, triage, confirmation and journaled 
       'never override them',
       'Only the triager forms independence groups',
       '`EDGES` line',
+      'scripts/spec-to-issues.mjs edges <drafts.json>',
       'applyEdges(plan, edgesLine)',
       'including every edge the triager returned',
       'Never form, extend, or merge groups yourself',
