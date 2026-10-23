@@ -1070,6 +1070,8 @@ function mockGitHub({
   head = HEAD,
   user,
   review,
+  state = 'open',
+  merged = false,
 } = {}) {
   const calls = [];
   const posts = [];
@@ -1080,6 +1082,9 @@ function mockGitHub({
     if (path === `repos/${policy.binding.repository}/pulls/7`)
       return JSON.stringify({
         number: 7,
+        state,
+        merged,
+        merged_at: merged ? '2026-10-01T00:00:00Z' : null,
         user: author === null ? null : { login: author },
         base: { sha: base },
         head: { sha: head },
@@ -1292,6 +1297,28 @@ test('a failed submission is reported, never claimed as posted', () => {
     /^ReviewNotPosted: Review not posted: gh api \S+\/pulls\/7 failed: HTTP 404: Not Found/,
   );
   assert.equal(notFound.github.posts.length, 0);
+});
+
+test('a merged or closed pull request gets no review and says why', () => {
+  for (const [options, reason] of [
+    [{ state: 'closed', merged: true }, 'pull request is merged'],
+    [{ state: 'closed' }, 'pull request is closed'],
+  ])
+    for (const verdict of REVIEW_VERDICTS) {
+      const github = mockGitHub(options);
+      assert.throws(
+        () => publish(verdict, github),
+        (error) =>
+          error.name === 'ReviewNotPosted' &&
+          error.message === `Review not posted: ${reason}`,
+        `${verdict} ${reason}`,
+      );
+      assert.equal(github.posts.length, 0, `${verdict} ${reason}`);
+      assert.ok(
+        github.calls.every((args) => !args[1].endsWith('/reviews')),
+        `${verdict} ${reason}`,
+      );
+    }
 });
 
 test('moved or mismatched SHAs post nothing and ask for a fresh review', () => {
