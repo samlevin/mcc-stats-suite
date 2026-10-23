@@ -314,13 +314,13 @@ test('runExtraction enforces the 10,000,000-byte Textract limit', async () => {
   );
 });
 
-/**
- * Textract blocks for a PLAYERS/SCORE table with two player rows. Each cell
- * carries the confidence `confidence` returns for its row and column.
- */
+/** The `CELL` block confidence of every cell `scoreboardBlocks` returns. */
 const CELL_CONFIDENCE = 72;
 
-/** A two-row scoreboard; `confidence` sets each `WORD` block's confidence. */
+/**
+ * Textract blocks for a PLAYERS/SCORE table with two player rows. Each `WORD`
+ * carries the confidence `confidence` returns for its row and column.
+ */
 function scoreboardBlocks(
   confidence?: (row: number, column: number) => number,
 ): Block[] {
