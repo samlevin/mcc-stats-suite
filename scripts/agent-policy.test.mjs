@@ -1451,6 +1451,27 @@ test('review publication runs only from a manual PR review', () => {
       lineWith(content, 'fresh review'),
       `${path} must ask for a fresh review when the SHAs moved`,
     );
+    assert.ok(
+      lineWith(
+        content,
+        'ls-remote --exit-code --heads',
+        'pull/N/head main',
+        'merge-base',
+        'base_fallback=deleted base branch',
+      ),
+      `${path} must review against the merge base with main when the base branch was deleted`,
+    );
+    assert.ok(
+      lineWith(content, '`base_fallback` when Gather used it'),
+      `${path} must put the base fallback in the packet`,
+    );
+    assert.ok(
+      lineWith(
+        content,
+        'Base: merge base of the head and origin/main, because base branch',
+      ),
+      `${path} must print the base fallback in the report`,
+    );
     assert.doesNotMatch(content, /nothing in this flow writes to GitHub/, path);
   }
   for (const path of [
