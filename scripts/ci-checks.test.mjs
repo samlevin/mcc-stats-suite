@@ -238,6 +238,33 @@ test('workflow timeout checks run once for repository and full scopes', () => {
   );
 });
 
+test('repository-only workflow changes run the checkout credentials test', () => {
+  for (const event of ['pull_request', 'push']) {
+    const scopes = selectScopes(
+      ['.github/workflows/ci-secret-scan.yml'],
+      event,
+    );
+    assert.equal(scopes.full, false, event);
+    assert.equal(scopes.repository, true, event);
+    const tests = checks(scopes)
+      .filter(([command]) => command === 'node')
+      .flatMap(([, args]) => args.slice(1));
+    assert.ok(
+      tests.includes('scripts/workflow-checkout-credentials.test.mjs'),
+      event,
+    );
+  }
+  const full = checks({ full: true, repository: true, mode: 'all' })
+    .filter(([command]) => command === 'node')
+    .flatMap(([, args]) => args.slice(1));
+  assert.equal(
+    full.filter(
+      (path) => path === 'scripts/workflow-checkout-credentials.test.mjs',
+    ).length,
+    1,
+  );
+});
+
 test('automation consumer changes run CLI compatibility without workspace tasks', () => {
   for (const path of [
     'scripts/branch-name.mjs',
@@ -260,6 +287,24 @@ test('automation consumer changes run CLI compatibility without workspace tasks'
     assert.ok(lint.includes('scripts/cli.cjs'), path);
     assert.ok(lint.includes('scripts/cli.test.mjs'), path);
     assert.ok(!JSON.stringify(commands).includes('turbo'), path);
+  }
+});
+
+test('every scope that selects a setup-node workflow runs the Node version test', () => {
+  for (const path of [
+    '.github/workflows/tracker-pr-metadata.yml',
+    '.github/workflows/ci-checks.yml',
+    '.github/workflows/_delivery-deploy-environment.yml',
+  ]) {
+    const tests = checks(selectScopes([path], 'pull_request'))
+      .filter(([command]) => command === 'node')
+      .flatMap(([, args]) => args.slice(1));
+    assert.equal(
+      tests.filter((test) => test === 'scripts/workflow-node-version.test.mjs')
+        .length,
+      1,
+      path,
+    );
   }
 });
 
