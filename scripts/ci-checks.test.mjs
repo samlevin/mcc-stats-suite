@@ -240,6 +240,24 @@ test('automation consumer changes run CLI compatibility without workspace tasks'
   }
 });
 
+test('every scope that selects a setup-node workflow runs the Node version test', () => {
+  for (const path of [
+    '.github/workflows/tracker-pr-metadata.yml',
+    '.github/workflows/ci-checks.yml',
+    '.github/workflows/_delivery-deploy-environment.yml',
+  ]) {
+    const tests = checks(selectScopes([path], 'pull_request'))
+      .filter(([command]) => command === 'node')
+      .flatMap(([, args]) => args.slice(1));
+    assert.equal(
+      tests.filter((test) => test === 'scripts/workflow-node-version.test.mjs')
+        .length,
+      1,
+      path,
+    );
+  }
+});
+
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {
   const started = [];
   const pending = [];
