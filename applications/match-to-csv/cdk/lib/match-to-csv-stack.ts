@@ -1045,7 +1045,7 @@ export class MatchToCsvStack extends Stack {
         cloudwatch.Stats.AVERAGE,
         Duration.hours(6),
       ),
-      'The mean OCR cell confidence was under 90 percent over 6 hours, so most screenshots need review.',
+      'The mean of the lowest OCR word confidence per cell was under 90 percent over 6 hours, so most screenshots need review.',
       90,
       cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
     );

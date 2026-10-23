@@ -53,9 +53,15 @@ const versions = {
   textractNormalizerVersion: 'textract-normalizer-v2',
   tableParserVersion: 'scoreboard-parser-v6',
   semanticMapperVersion: 'scoreboard-semantic-v2',
-  validationRulesVersion: 'scoreboard-validation-v2',
+  validationRulesVersion: 'scoreboard-validation-v3',
   rosterMatcherVersion: ROSTER_MATCHER_VERSION,
 };
+
+/**
+ * A cell whose lowest `WORD` confidence is below this gets
+ * `LOW_TEXTRACT_CONFIDENCE`. Spec 1.1 §7.3 records the fixture evidence.
+ */
+const LOW_TEXTRACT_CONFIDENCE_BELOW = 90;
 
 interface ImageMetadata {
   format?: string;
@@ -161,7 +167,10 @@ interface ExtractionMeasurements {
   heightPx?: number;
   /** Time spent in the `AnalyzeDocument` call, set only when the call returned. */
   textractMs?: number;
-  /** Mean Textract confidence of the normalized cells, absent when there are none. */
+  /**
+   * Mean of each normalized cell's lowest `WORD` confidence, over the cells
+   * that have one, absent when none does.
+   */
   meanConfidence?: number;
   /** Normalized cells whose validation has `deterministicReviewRequired`. */
   reviewRequiredCells?: number;
@@ -371,7 +380,10 @@ async function extract(
     measurements.rowCount = rows.length;
     measurements.playerMatchCounts = playerMatchCounts;
     const normalized = normalize(rawBlocks, source, runId);
-    Object.assign(measurements, cellMeasurements(normalized.cells));
+    Object.assign(
+      measurements,
+      cellMeasurements(normalized.cells, normalized.cellWordConfidences),
+    );
     const normalizedArtifact = await dependencies.writeJson(
       source.bucket,
       `${runPrefix}/normalized/observations.json`,
@@ -480,19 +492,26 @@ function countMatches(resolutions: readonly PlayerResolution[]): {
   };
 }
 
-/** Mean confidence and review count of a run's normalized cells. */
-function cellMeasurements(
+/**
+ * Review count of a run's normalized cells, and the mean of their lowest
+ * `WORD` confidences. `wordConfidences` comes from `normalize`; a cell without
+ * one does not enter the mean.
+ */
+export function cellMeasurements(
   cells: ReadonlyArray<{
-    confidence: number;
     validation: { deterministicReviewRequired: boolean };
   }>,
+  wordConfidences: ReadonlyArray<number | undefined>,
 ): Pick<ExtractionMeasurements, 'meanConfidence' | 'reviewRequiredCells'> {
   const reviewRequiredCells = cells.filter(
     (cell) => cell.validation.deterministicReviewRequired,
   ).length;
-  if (cells.length === 0) return { reviewRequiredCells };
-  const total = cells.reduce((sum, cell) => sum + cell.confidence, 0);
-  return { meanConfidence: total / cells.length, reviewRequiredCells };
+  const known = wordConfidences.filter(
+    (confidence): confidence is number => confidence !== undefined,
+  );
+  if (known.length === 0) return { reviewRequiredCells };
+  const total = known.reduce((sum, confidence) => sum + confidence, 0);
+  return { meanConfidence: total / known.length, reviewRequiredCells };
 }
 
 function validateTextractImage(
@@ -582,12 +601,24 @@ export function normalize(
   }
 
   const cellText = new Map<string, string>();
+  // The lowest `WORD` confidence per cell. A `CELL` block's own confidence
+  // describes table structure, not text recognition (spec 1.1 §8.2.1).
+  const cellWordConfidence = new Map<string, number>();
   for (const [tokenId, cell] of childToCell) {
     const token = blocksById.get(tokenId);
     if (token?.Text) {
       cellText.set(
         cell.Id ?? '',
         `${cellText.get(cell.Id ?? '') ?? ''} ${token.Text}`.trim(),
+      );
+    }
+    if (token?.BlockType === 'WORD' && typeof token.Confidence === 'number') {
+      const lowest = cellWordConfidence.get(cell.Id ?? '');
+      cellWordConfidence.set(
+        cell.Id ?? '',
+        lowest === undefined
+          ? token.Confidence
+          : Math.min(lowest, token.Confidence),
       );
     }
   }
@@ -660,84 +691,91 @@ export function normalize(
     };
   });
 
-  const cells = rawBlocks
-    .filter((block) => block.BlockType === 'CELL')
-    .map((block) => {
-      const observedText = cellText.get(block.Id ?? '') ?? block.Text ?? '';
-      const tableId = cellToTable.get(block.Id ?? '') ?? 'unknown';
-      const tableIndex = tableIndexes.get(tableId) ?? -1;
-      const field =
-        semanticColumnsByTable.get(tableIndex)?.get(block.ColumnIndex ?? 0) ??
-        'UNKNOWN';
-      const rowRole = block.RowIndex === 1 ? 'HEADER' : 'DATA';
-      const expectsInteger =
-        rowRole === 'DATA' &&
-        ['SCORE', 'KILLS', 'ASSISTS', 'DEATHS'].includes(field);
-      const numeric = /^\d+$/.test(observedText.trim());
-      const empty = observedText.trim().length === 0;
-      const lowConfidence = (block.Confidence ?? 0) < 95;
-      const invalidInteger = expectsInteger && !empty && !numeric;
-      const validation = {
-        rulesVersion: versions.validationRulesVersion,
-        valid: !empty && !invalidInteger,
-        deterministicReviewRequired: empty || lowConfidence || invalidInteger,
-        flags: [
-          ...(empty
-            ? [{ code: 'EMPTY_REQUIRED_CELL', severity: 'WARNING' }]
-            : []),
-          ...(lowConfidence
-            ? [
-                {
-                  code: 'LOW_TEXTRACT_CONFIDENCE',
-                  severity: 'WARNING',
-                  actual: block.Confidence ?? 0,
-                },
-              ]
-            : []),
-          ...(invalidInteger
-            ? [{ code: 'INVALID_INTEGER', severity: 'WARNING' }]
-            : []),
-        ],
-      };
-      return {
-        cellObservationId: `${runId}:cell:${block.Id}`,
-        runId,
-        screenshotId: source.screenshotId,
-        tableObservationId: `${runId}:table:${tableId}`,
-        providerBlockId: block.Id,
-        tableLocation: {
-          tableIndex,
-          rowIndex: block.RowIndex,
-          columnIndex: block.ColumnIndex,
-          rowSpan: block.RowSpan ?? 1,
-          columnSpan: block.ColumnSpan ?? 1,
-        },
-        semanticLocation: { field, rowRole },
-        observedText,
-        confidence: block.Confidence ?? 0,
-        parsed: {
-          parserVersion: versions.tableParserVersion,
-          expectedType: expectsInteger ? 'INTEGER' : 'STRING',
-          parseSucceeded: !empty && (!expectsInteger || numeric),
-          stringValue: observedText,
-          integerValue: numeric ? Number(observedText) : undefined,
-          transformations: [],
-        },
-        geometry: geometry(block, source.screenshotId),
-        tokenObservationIds: (block.Relationships ?? []).flatMap(
-          (relationship) =>
-            relationship.Type === 'CHILD'
-              ? (relationship.Ids ?? []).map((id) => `${runId}:token:${id}`)
-              : [],
-        ),
-        providerMetadata: {
-          entityTypes: block.EntityTypes,
-          selectionStatus: block.SelectionStatus,
-        },
-        validation,
-        createdAt: now(),
-      };
-    });
+  const cellBlocks = rawBlocks.filter((block) => block.BlockType === 'CELL');
+  const cellWordConfidences = cellBlocks.map((block) =>
+    cellWordConfidence.get(block.Id ?? ''),
+  );
+  const cells = cellBlocks.map((block, index) => {
+    const observedText = cellText.get(block.Id ?? '') ?? block.Text ?? '';
+    const tableId = cellToTable.get(block.Id ?? '') ?? 'unknown';
+    const tableIndex = tableIndexes.get(tableId) ?? -1;
+    const field =
+      semanticColumnsByTable.get(tableIndex)?.get(block.ColumnIndex ?? 0) ??
+      'UNKNOWN';
+    const rowRole = block.RowIndex === 1 ? 'HEADER' : 'DATA';
+    const expectsInteger =
+      rowRole === 'DATA' &&
+      ['SCORE', 'KILLS', 'ASSISTS', 'DEATHS'].includes(field);
+    const numeric = /^\d+$/.test(observedText.trim());
+    const empty = observedText.trim().length === 0;
+    // A cell without a `WORD` confidence gets no confidence flag; when it
+    // has no text, `EMPTY_REQUIRED_CELL` already marks it for review.
+    const wordConfidence = cellWordConfidences[index];
+    const lowConfidence =
+      wordConfidence !== undefined &&
+      wordConfidence < LOW_TEXTRACT_CONFIDENCE_BELOW;
+    const invalidInteger = expectsInteger && !empty && !numeric;
+    const validation = {
+      rulesVersion: versions.validationRulesVersion,
+      valid: !empty && !invalidInteger,
+      deterministicReviewRequired: empty || lowConfidence || invalidInteger,
+      flags: [
+        ...(empty
+          ? [{ code: 'EMPTY_REQUIRED_CELL', severity: 'WARNING' }]
+          : []),
+        ...(lowConfidence
+          ? [
+              {
+                code: 'LOW_TEXTRACT_CONFIDENCE',
+                severity: 'WARNING',
+                actual: wordConfidence,
+              },
+            ]
+          : []),
+        ...(invalidInteger
+          ? [{ code: 'INVALID_INTEGER', severity: 'WARNING' }]
+          : []),
+      ],
+    };
+    return {
+      cellObservationId: `${runId}:cell:${block.Id}`,
+      runId,
+      screenshotId: source.screenshotId,
+      tableObservationId: `${runId}:table:${tableId}`,
+      providerBlockId: block.Id,
+      tableLocation: {
+        tableIndex,
+        rowIndex: block.RowIndex,
+        columnIndex: block.ColumnIndex,
+        rowSpan: block.RowSpan ?? 1,
+        columnSpan: block.ColumnSpan ?? 1,
+      },
+      semanticLocation: { field, rowRole },
+      observedText,
+      confidence: block.Confidence ?? 0,
+      parsed: {
+        parserVersion: versions.tableParserVersion,
+        expectedType: expectsInteger ? 'INTEGER' : 'STRING',
+        parseSucceeded: !empty && (!expectsInteger || numeric),
+        stringValue: observedText,
+        integerValue: numeric ? Number(observedText) : undefined,
+        transformations: [],
+      },
+      geometry: geometry(block, source.screenshotId),
+      tokenObservationIds: (block.Relationships ?? []).flatMap(
+        (relationship) =>
+          relationship.Type === 'CHILD'
+            ? (relationship.Ids ?? []).map((id) => `${runId}:token:${id}`)
+            : [],
+      ),
+      providerMetadata: {
+        entityTypes: block.EntityTypes,
+        selectionStatus: block.SelectionStatus,
+      },
+      validation,
+      createdAt: now(),
+    };
+  });
 
   const tokens = rawBlocks
     .filter((block) =>
@@ -757,7 +795,7 @@ export function normalize(
       providerMetadata: { textType: block.TextType },
       createdAt: now(),
     }));
-  return { blocks, tables, cells, tokens };
+  return { blocks, tables, cells, tokens, cellWordConfidences };
 }
 
 function semanticField(headerText: string): string | undefined {
