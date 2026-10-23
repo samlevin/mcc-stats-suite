@@ -8,6 +8,8 @@ import { isMap, isSeq, parseDocument } from 'yaml';
 // step in the same job carries a comment directly above it:
 //   # persist-credentials: kept for "<later step name>"
 const KEEP = /persist-credentials: kept for "([^"]+)"/;
+const MISSING =
+  'persists credentials: add `persist-credentials: false`, or put `# persist-credentials: kept for "<later step name>"` directly above it';
 
 const isCheckout = (step) =>
   typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@');
@@ -31,7 +33,7 @@ const persistedCheckouts = (source) => {
       if (index === 0) comments.push(steps.commentBefore);
       const kept = KEEP.exec(comments.filter(Boolean).join('\n'))?.[1];
       if (!kept) {
-        problems.push(`${label} persists credentials without a comment`);
+        problems.push(`${label} ${MISSING}`);
       } else if (
         !steps.items
           .slice(index + 1)
@@ -64,16 +66,17 @@ const checkout =
 const push = '      - name: Push tags\n        run: git push --tags\n';
 
 test('a checkout without persist-credentials false and without a comment fails', () => {
-  assert.deepEqual(persistedCheckouts(job(checkout + push)), [
-    'build step 1 (Check out repository) persists credentials without a comment',
-  ]);
+  const [problem, ...rest] = persistedCheckouts(job(checkout + push));
+  assert.deepEqual(rest, []);
+  assert.equal(problem, `build step 1 (Check out repository) ${MISSING}`);
+  // The message states both accepted fixes.
+  assert.ok(problem.includes('`persist-credentials: false`'));
+  assert.ok(problem.includes('# persist-credentials: kept for "'));
   assert.deepEqual(
     persistedCheckouts(
       job(`${checkout}        with:\n          persist-credentials: true\n`),
     ),
-    [
-      'build step 1 (Check out repository) persists credentials without a comment',
-    ],
+    [`build step 1 (Check out repository) ${MISSING}`],
   );
 });
 
