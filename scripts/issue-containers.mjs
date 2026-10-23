@@ -4,10 +4,13 @@ import {
   configuration,
   discover,
   failureMessage,
-  ghGraphql,
+  MissingIssueError,
+  missingIssue,
   paginate,
   REPOSITORY,
   runTracker,
+  trackerGraphql,
+  warning,
 } from './issue-triage.mjs';
 
 const MARKER = 'automation: container-closed';
@@ -67,7 +70,10 @@ async function issueHierarchy(api, number) {
     { number },
   );
   const root = data.repository?.issue;
-  if (!root) throw new Error('Requested issue is unavailable');
+  if (!root) {
+    if (data.repository) throw new MissingIssueError(number);
+    throw new Error('Requested issue is unavailable');
+  }
   const byId = new Map([[root.id, root]]);
   const edges = new Map();
   const selected = new Set();
@@ -157,6 +163,7 @@ async function marker(api, sweep) {
 }
 
 // A fresh read of one container: state, completion, marker, and project items.
+// Null when the issue was deleted.
 async function snapshot(api, id) {
   const data = await api(
     `query($id: ID!) { node(id: $id) { ... on Issue { ${ISSUE}
@@ -165,7 +172,7 @@ async function snapshot(api, id) {
     { id },
   );
   const issue = data.node;
-  if (!issue?.id) throw new Error('Container became inaccessible');
+  if (!issue?.id) return null;
   const labels = issue.labels.pageInfo.hasNextPage
     ? await connection(api, id, 'labels', LABELS)
     : issue.labels.nodes.filter(Boolean);
@@ -188,6 +195,7 @@ export async function reconcileContainers({
   dryRun = true,
   issueNumber,
   log = console.log,
+  warn = warning,
 }) {
   if (
     issueNumber !== undefined &&
@@ -237,6 +245,14 @@ export async function reconcileContainers({
       },
     );
   }
+  // A container deleted or transferred out of the repository during the run
+  // is skipped with a warning.
+  async function read(id) {
+    const issue = await snapshot(api, id);
+    if (issue?.repository.nameWithOwner === REPOSITORY) return issue;
+    warn(missingIssue(byId.get(id).number));
+    return null;
+  }
   const changed = new Set();
   let updated = 0;
   for (const id of ordered) {
@@ -250,8 +266,9 @@ export async function reconcileContainers({
             marked: label.marked.has(id),
             items: label.marked.get(id),
           }
-        : await snapshot(api, id);
+        : await read(id);
     if (
+      !current ||
       current.repository.nameWithOwner !== REPOSITORY ||
       !current.subIssuesSummary.total
     )
@@ -273,7 +290,8 @@ export async function reconcileContainers({
       }`,
           { id, label: label.id },
         );
-      const fresh = await snapshot(api, id);
+      const fresh = await read(id);
+      if (!fresh) continue;
       const stillComplete =
         fresh.subIssuesSummary.total > 0 &&
         fresh.subIssuesSummary.total === fresh.subIssuesSummary.completed;
@@ -296,7 +314,8 @@ export async function reconcileContainers({
       if (close) continue;
     } else if (current.marked && !dryRun) {
       // Repair status if a prior state mutation succeeded but its project update failed.
-      if (!current.items) current = await snapshot(api, id);
+      if (!current.items) current = await read(id);
+      if (!current) continue;
       if (current.marked)
         await setStatus(
           current,
@@ -310,9 +329,9 @@ export async function reconcileContainers({
     // Runs for sibling issues reconcile the same container concurrently. A
     // container that is closed or complete again may belong to another run
     // that marked it and is about to close it, so it keeps the marker.
-    const after = await snapshot(api, id);
+    const after = await read(id);
     if (
-      after.state === 'OPEN' &&
+      after?.state === 'OPEN' &&
       after.marked &&
       after.subIssuesSummary.total !== after.subIssuesSummary.completed
     )
@@ -337,7 +356,7 @@ if (
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
     process.exitCode = await runTracker({
       sweep: config.issueNumber === undefined,
-      task: () => reconcileContainers({ api: ghGraphql, ...config }),
+      task: () => reconcileContainers({ api: trackerGraphql, ...config }),
     });
   } catch (error) {
     if (error instanceof CliHelp) console.log(error.message);

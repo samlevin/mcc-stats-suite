@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { reconcileContainers } from './issue-containers.mjs';
-import { REPOSITORY } from './issue-triage.mjs';
+import { MissingIssueError, REPOSITORY } from './issue-triage.mjs';
 import { evaluate, workflow } from './workflow-test-helpers.mjs';
 
 const MARKER = 'automation: container-closed';
@@ -487,8 +487,82 @@ test('a hierarchy cycle and a missing marker label fail', async () => {
   }
   await assert.rejects(
     reconcileContainers({ api: github([]).api, issueNumber: 9, ...quiet }),
-    /Requested issue is unavailable/,
+    (error) =>
+      error instanceof MissingIssueError &&
+      error.message === 'Issue #9 no longer exists in the repository; skipping',
   );
+});
+
+// Wraps a mocked repository so issues in `gone` read as deleted, as GitHub's
+// tracker client returns them: a null node.
+function withDeleted(model, gone) {
+  return async (query, variables) =>
+    gone.has(variables.id) && /node\(id: \$id\)/.test(query)
+      ? { node: null }
+      : model.api(query, variables);
+}
+
+test('a container deleted or transferred during a run is skipped with a warning', async () => {
+  // A single-issue run for #3 reads containers #2 and #1 fresh; #2 is gone
+  // by then, and #1 still closes once #2's subtree is done.
+  for (const remove of [
+    (model, gone) => gone.add('I_2'),
+    (model) => (model.issues.get('I_2').repo = 'other/repo'),
+  ]) {
+    const model = github([
+      { number: 1 },
+      { number: 2, parent: 1, state: 'CLOSED' },
+      { number: 3, parent: 2, state: 'CLOSED' },
+      { number: 4, parent: 1, state: 'CLOSED' },
+    ]);
+    const gone = new Set();
+    const warnings = [];
+    const api = async (query, variables) => {
+      if (query.includes('projectV2(number: 1)') || query.includes('label('))
+        remove(model, gone);
+      return withDeleted(model, gone)(query, variables);
+    };
+    await reconcileContainers({
+      api,
+      dryRun: false,
+      issueNumber: 3,
+      warn: (line) => warnings.push(line),
+      ...quiet,
+    });
+    assert.deepEqual(warnings, [
+      'Issue #2 no longer exists in the repository; skipping',
+    ]);
+    assert.equal(model.issues.get('I_1').state, 'CLOSED');
+  }
+});
+
+test('a sweep skips a container deleted after the listing and finishes the rest', async () => {
+  // Closing #2 makes #1 stale, so the sweep reads #1 fresh and finds it gone.
+  const model = github([
+    { number: 1 },
+    { number: 2, parent: 1 },
+    { number: 3, parent: 2, state: 'CLOSED' },
+    { number: 5 },
+    { number: 6, parent: 5, state: 'CLOSED' },
+  ]);
+  const gone = new Set();
+  const warnings = [];
+  const api = async (query, variables) => {
+    if (query.includes('closeIssue') && variables.id === 'I_2') gone.add('I_1');
+    return withDeleted(model, gone)(query, variables);
+  };
+  await reconcileContainers({
+    api,
+    dryRun: false,
+    warn: (line) => warnings.push(line),
+    ...quiet,
+  });
+  assert.deepEqual(warnings, [
+    'Issue #1 no longer exists in the repository; skipping',
+  ]);
+  assert.equal(model.issues.get('I_2').state, 'CLOSED');
+  assert.equal(model.issues.get('I_5').state, 'CLOSED');
+  assert.equal(model.issues.get('I_1').state, 'OPEN');
 });
 
 test('invalid programmatic issue filters fail before any API access', async () => {
