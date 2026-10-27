@@ -27,6 +27,7 @@ import {
 import { createRequire } from 'node:module';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { failureMessage, ghRest } from './github-api.mjs';
 
 export const TOOLS = ['claude', 'codex'];
 // Matches the repository Prettier style so generated YAML passes format:check.
@@ -539,7 +540,6 @@ export function check(base = root) {
 // one review to the pull request it reviewed, or posts nothing and says why.
 export const REVIEW_VERDICTS = ['APPROVE', 'REQUEST CHANGES', 'BLOCKED'];
 const FULL_SHA = /^[0-9a-f]{40}$/;
-const MAX_GITHUB_DETAIL = 300;
 
 export class ReviewNotPosted extends Error {
   constructor(message) {
@@ -616,52 +616,14 @@ export function reviewBody(policy, { report, base, head, note }) {
   return `${parts.join('\n\n')}\n`;
 }
 
-function githubDetail(cause) {
-  if (cause?.code === 'ENOENT') return 'gh is not installed or not on PATH';
-  let body;
-  try {
-    body = JSON.parse(String(cause?.stdout ?? ''));
-  } catch {
-    body = null;
-  }
-  const errors = Array.isArray(body?.errors)
-    ? body.errors
-        .map((error) => (typeof error === 'string' ? error : error?.message))
-        .filter((message) => typeof message === 'string' && message)
-    : [];
-  const status = /\(HTTP (\d{3})\)/.exec(String(cause?.stderr ?? ''))?.[1];
-  const detail = [
-    status && `HTTP ${status}`,
-    typeof body?.message === 'string' && body.message,
-    ...errors.slice(0, 3),
-  ]
-    .filter(Boolean)
-    .join(': ')
-    .replace(/\s+/g, ' ')
-    .slice(0, MAX_GITHUB_DETAIL);
-  return (
-    detail ||
-    `gh exited${cause?.status == null ? '' : ` with status ${cause.status}`} without a GitHub error message`
-  );
-}
-
-// When a request fails, `gh api` writes GitHub's JSON error body to stdout
-// and an `(HTTP nnn)` summary to stderr. Only those two are reported.
 function ghJson(path, run, { method, input } = {}) {
-  const args = ['api', path, ...(method ? ['--method', method] : [])];
+  const args = [path, ...(method ? ['--method', method] : [])];
   if (input !== undefined) args.push('--input', '-');
   let output;
   try {
-    output = run('gh', args, {
-      encoding: 'utf8',
-      ...(input === undefined
-        ? { stdio: ['ignore', 'pipe', 'pipe'] }
-        : { input, stdio: ['pipe', 'pipe', 'pipe'] }),
-    });
+    output = ghRest(args, { run, input });
   } catch (cause) {
-    throw new Error(`gh api ${path} failed: ${githubDetail(cause)}`, {
-      cause,
-    });
+    throw new Error(failureMessage(cause), { cause });
   }
   try {
     return JSON.parse(output);

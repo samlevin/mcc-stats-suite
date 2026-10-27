@@ -1,11 +1,6 @@
 import { pathToFileURL } from 'node:url';
-import {
-  failureMessage,
-  ghGraphql,
-  paginate,
-  REPOSITORY,
-  runTracker,
-} from './issue-triage.mjs';
+import { failureMessage, ghGraphql } from './github-api.mjs';
+import { paginate, REPOSITORY, runTracker } from './issue-triage.mjs';
 
 export async function addToProject({
   api,
