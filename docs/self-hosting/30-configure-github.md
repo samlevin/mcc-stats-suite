@@ -12,18 +12,18 @@ GitHub holds only the values nobody can derive: for each environment, the AWS ac
 
 | Scope | Name | Kind | Value | Used by |
 | --- | --- | --- | --- | --- |
-| repository | `DEV_AWS_ACCOUNT_ID`, `PROD_AWS_ACCOUNT_ID` | secrets | each bootstrap's `aws_account_id` | application deploys, Turbo cache in `main` CI |
-| repository | `DEV_AWS_REGION`, `PROD_AWS_REGION` | variables | workload Region of each account | application deploys, Turbo cache in `main` CI |
+| repository | `DEV_AWS_ACCOUNT_ID`, `PROD_AWS_ACCOUNT_ID` | secrets | each bootstrap's `aws_account_id` | application deploys, Turbo cache in CI |
+| repository | `DEV_AWS_REGION`, `PROD_AWS_REGION` | variables | workload Region of each account | application deploys, Turbo cache in CI |
 | repository | `DEV_MCC_EMAIL_DOMAIN`, `PROD_MCC_EMAIL_DOMAIN` | secrets | verified SES domain that receives each environment's email, in lowercase | [Terrateam](70-optional-terrateam.md) only |
 | repository | `DEV_MCC_EMAIL_ALIAS`, `PROD_MCC_EMAIL_ALIAS` | secrets | each environment's submission alias, the part of `<alias>@<domain>` before the @: lowercase letters, digits, `_`, `-`, and single dots, with no `+` | [Terrateam](70-optional-terrateam.md) only |
 | repository | `RELEASE_PLEASE_APP_ID` | variable | your Release Please app ID | `Release: release PR` |
 | repository | `RELEASE_PLEASE_APP_PRIVATE_KEY` | secret | that app's private key | `Release: release PR` |
-| repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in `main` CI and deploys |
+| repository | `MCC_TURBO_CACHE` | variable | `true` to turn on the Turbo cache (optional) | Turbo cache in CI and deploys |
 | repository | `SLACK_DEPLOY_WEBHOOK_URL` | secret | Slack incoming webhook URL (optional; deploys post no Slack messages without it); see [Slack deploy messages](50-deploy-and-release-applications.md#slack-deploy-messages) | deploy and rollback messages |
 
 ### Turbo cache
 
-The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. Set `MCC_TURBO_CACHE` to `true` after the account and Region settings above. `main` CI uses the dev account and Region, and each deploy uses those of the environment it deploys. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
+The Turbo cache is optional. Without `MCC_TURBO_CACHE`, CI and deploys build uncached and need no cache settings. To turn it on in your repository, apply both [foundation roots](40-change-foundation.md) with `github_oidc_subject_repository` set to your repository: `OWNER@OWNER_ID/REPOSITORY@REPOSITORY_ID` with immutable OIDC subjects, otherwise `OWNER/REPOSITORY`. Each root then creates a `mcc-stats-suite-<environment>-github-turbo-cache` role in your account that trusts only your repository. The dev root also creates `mcc-stats-suite-dev-github-turbo-cache-read`, which only your repository's pull requests can assume and which can read the cache but not write it. Set `MCC_TURBO_CACHE` to `true` after the account and Region settings above. `main` CI writes the cache in the dev account and Region, and same-repo pull requests read it there. Fork pull requests run uncached. Each deploy uses those of the environment it deploys. If you set `MCC_TURBO_CACHE` before the roles exist, the cache step fails at role assumption.
 
 Only Terrateam reads the email domain secrets, as the table shows. A local foundation apply reads the domain from the SSM parameter the foundation owns; [Apply and change the foundation](40-change-foundation.md#inputs) lists every foundation input.
 
