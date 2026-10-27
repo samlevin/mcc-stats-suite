@@ -110,4 +110,4 @@ Requested settings: Policy: <as sent to each reviewer, in spawn order>
 
 Inline delivery substitutes its `Advisory policy:` line for its own requested settings. A review-depth fallback retains the main thread's reviewer settings too. An escalation request includes completed checks and open work before ownership ends; no overlapping replacement work is allowed.
 
-When the {{prefix}}stack extension check fails, return `Status: BLOCKED` with `Blocker: gh stack not installed; <gh --version output>`. Keep the claim, branch, and worktree, and leave uncommitted work in place. The dispatcher continues this same agent after the person installs the extension, and you resume from the stack step.
+When the `gh stack` extension check in {{prefix}}stack fails, return `Status: BLOCKED` with `Blocker: gh stack not installed; <gh --version output>`. Keep the claim, branch, and worktree, and leave uncommitted work in place. The dispatcher continues this same agent after the person installs the extension, and you resume from the stack step.
