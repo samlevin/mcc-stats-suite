@@ -40,6 +40,35 @@
     "@mcc/cdk-config#ci:test": {
       "dependsOn": ["build"],
       "outputs": []
+    },
+    "//#test:scripts": {
+      "dependsOn": [
+        "@mcc/contracts#build",
+        "@mcc/cdk-config#build",
+        "@mcc/roster#build",
+        "@mcc/recipients#build"
+      ],
+      "inputs": [
+        "scripts/**",
+        ".github/**",
+        ".terrateam/**",
+        "infrastructure/**",
+        "applications/**",
+        "packages/**",
+        "docs/self-hosting/policies/**",
+        "*.json",
+        "*.mjs",
+        ".*",
+        "!.git",
+        "!**/node_modules/**",
+        "!**/.turbo/**",
+        "!**/dist/**",
+        "!**/cdk.out/**",
+        "!**/coverage/**",
+        "!**/*.tsbuildinfo",
+        "!**/.terraform/**"
+      ],
+      "outputs": []
     }
   },
   "cacheDir": ".turbo/cache",

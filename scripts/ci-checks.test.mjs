@@ -42,6 +42,15 @@ const applicationNames = [
   'player',
 ];
 const require = createRequire(import.meta.url);
+// Script test files each command runs, directly or through `//#test:scripts`.
+const testFiles = (commands) =>
+  commands.flatMap(([command, args]) =>
+    command === 'node'
+      ? args.slice(1)
+      : args.includes('test:scripts')
+        ? buildTests()
+        : [],
+  );
 
 for (const name of [
   ...applicationNames.map((name) => `applications/${name}`),
@@ -141,13 +150,45 @@ test('full gate contains repository checks and the dependency-aware workspace ga
   for (const command of ['format:check', 'eslint', 'release:check']) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
-  assert.deepEqual(
-    commands.find(([command]) => command === 'node'),
-    ['node', ['--test', ...buildTests()]],
-  );
+  // Root script tests run through Turbo's cached `//#test:scripts`, never a bare
+  // `node --test`.
+  assert.ok(!commands.some(([command]) => command === 'node'));
+  assert.deepEqual(testFiles(commands), buildTests());
   assert.ok(!JSON.stringify(commands).includes('tofu'));
-  assert.ok(!workspaceArguments('all').includes('--affected'));
-  assert.ok(workspaceArguments('affected').includes('--affected'));
+  const [base, head] = ['a'.repeat(40), 'b'.repeat(40)];
+  for (const job of ['static', 'bundle'])
+    assert.ok(
+      !workspaceArguments('all', job, base, head).some((argument) =>
+        argument.startsWith('--filter'),
+      ),
+    );
+  // `--affected` would drop the root task whenever only workspaces change.
+  assert.deepEqual(
+    workspaceArguments('affected', 'static', base, head).slice(-2),
+    [`--filter=...[${base}...${head}]`, '--filter=//'],
+  );
+  assert.equal(
+    workspaceArguments('affected', 'bundle', base, head).at(-1),
+    `--filter=...[${base}...${head}]`,
+  );
+  assert.ok(!workspaceArguments('affected').includes('--affected'));
+});
+
+test('a new script test joins the full gate unless it is an automation test', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-build-tests-'));
+  try {
+    for (const name of [
+      'new-build-check.test.mjs',
+      'new-build-check.mjs',
+      'issue-triage.test.mjs',
+    ])
+      writeFileSync(join(directory, name), '');
+    assert.deepEqual(buildTests(directory), [
+      'scripts/new-build-check.test.mjs',
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('Turbo streams prefixed lines instead of its own log groups', () => {
@@ -221,9 +262,7 @@ test('shared CLI changes select build and automation checks', () => {
     assert.equal(scopes.mode, 'all');
     const commands = checks(scopes);
     assert.ok(commands.some(([, args]) => args.includes('agents:check')));
-    const tests = commands
-      .filter(([command]) => command === 'node')
-      .flatMap(([, args]) => args.slice(1));
+    const tests = testFiles(commands);
     for (const path of [...automationTests, 'scripts/cli.test.mjs'])
       assert.equal(tests.filter((test) => test === path).length, 1, path);
   }
@@ -231,10 +270,9 @@ test('shared CLI changes select build and automation checks', () => {
 
 test('workflow timeout checks run once for repository and full scopes', () => {
   const runs = (paths) =>
-    checks(selectScopes(paths, 'pull_request'))
-      .filter(([command]) => command === 'node')
-      .flatMap(([, args]) => args.slice(1))
-      .filter((path) => path === 'scripts/workflow-timeouts.test.mjs').length;
+    testFiles(checks(selectScopes(paths, 'pull_request'))).filter(
+      (path) => path === 'scripts/workflow-timeouts.test.mjs',
+    ).length;
   assert.ok(buildTests().includes('scripts/workflow-timeouts.test.mjs'));
   for (const path of [
     '.github/workflows/ci-pr-title.yml',
@@ -260,17 +298,13 @@ test('repository-only workflow changes run the checkout credentials test', () =>
     );
     assert.equal(scopes.full, false, event);
     assert.equal(scopes.repository, true, event);
-    const tests = checks(scopes)
-      .filter(([command]) => command === 'node')
-      .flatMap(([, args]) => args.slice(1));
+    const tests = testFiles(checks(scopes));
     assert.ok(
       tests.includes('scripts/workflow-checkout-credentials.test.mjs'),
       event,
     );
   }
-  const full = checks({ full: true, repository: true, mode: 'all' })
-    .filter(([command]) => command === 'node')
-    .flatMap(([, args]) => args.slice(1));
+  const full = testFiles(checks({ full: true, repository: true, mode: 'all' }));
   assert.equal(
     full.filter(
       (path) => path === 'scripts/workflow-checkout-credentials.test.mjs',
@@ -287,17 +321,13 @@ test('repository-only workflow changes run the pull_request_target test', () => 
     );
     assert.equal(scopes.full, false, event);
     assert.equal(scopes.repository, true, event);
-    const tests = checks(scopes)
-      .filter(([command]) => command === 'node')
-      .flatMap(([, args]) => args.slice(1));
+    const tests = testFiles(checks(scopes));
     assert.ok(
       tests.includes('scripts/workflow-pull-request-target.test.mjs'),
       event,
     );
   }
-  const full = checks({ full: true, repository: true, mode: 'all' })
-    .filter(([command]) => command === 'node')
-    .flatMap(([, args]) => args.slice(1));
+  const full = testFiles(checks({ full: true, repository: true, mode: 'all' }));
   assert.equal(
     full.filter(
       (path) => path === 'scripts/workflow-pull-request-target.test.mjs',
@@ -337,9 +367,7 @@ test('every scope that selects a setup-node workflow runs the Node version test'
     '.github/workflows/ci-checks.yml',
     '.github/workflows/_delivery-deploy-environment.yml',
   ]) {
-    const tests = checks(selectScopes([path], 'pull_request'))
-      .filter(([command]) => command === 'node')
-      .flatMap(([, args]) => args.slice(1));
+    const tests = testFiles(checks(selectScopes([path], 'pull_request')));
     assert.equal(
       tests.filter((test) => test === 'scripts/workflow-node-version.test.mjs')
         .length,
@@ -499,7 +527,7 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
   const staticTasks = dryRun('static');
   const bundleTasks = dryRun('bundle');
   for (const [tasks, expected] of [
-    [staticTasks, 17],
+    [staticTasks, 18],
     [bundleTasks, 10],
   ]) {
     assert.equal(
@@ -561,6 +589,79 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
     bundleTasks.get('@mcc/match-to-csv#verify:bundle').dependencies,
     ['@mcc/match-to-csv#ci:synth'],
   );
+  // Root script tests load every shared package's dist and nothing else built.
+  assert.deepEqual(staticTasks.get('//#test:scripts').dependencies, [
+    '@mcc/cdk-config#build',
+    '@mcc/contracts#build',
+    '@mcc/recipients#build',
+    '@mcc/roster#build',
+  ]);
+  assert.ok(!bundleTasks.has('//#test:scripts'));
+});
+
+test('root script tests miss the Turbo cache only when a declared input changes', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-script-inputs-'));
+  try {
+    const git = (...args) =>
+      execFileSync('git', args, { cwd: directory, encoding: 'utf8' });
+    git('init', '-q');
+    for (const name of [
+      'package.json',
+      'package-lock.json',
+      'turbo.json',
+      '.gitignore',
+      ...applicationNames.map((name) => `applications/${name}/package.json`),
+      ...['cdk-config', 'contracts', 'recipients', 'roster'].map(
+        (name) => `packages/${name}/package.json`,
+      ),
+    ]) {
+      mkdirSync(join(directory, name, '..'), { recursive: true });
+      writeFileSync(join(directory, name), readFileSync(new URL(name, root)));
+    }
+    // Paths the root tests read, then paths outside the declared inputs.
+    const inputs = [
+      'scripts/example.test.mjs',
+      '.github/workflows/example.yml',
+      '.terrateam/config.yml',
+      'infrastructure/dev/foundation/main.tf',
+      'applications/admin/cdk/bin/admin.ts',
+      'packages/contracts/src/index.ts',
+      'docs/self-hosting/policies/example.json.template',
+      'tsconfig.base.json',
+      '.tool-versions',
+    ];
+    const outside = [
+      'docs/example.md',
+      'specs/example.md',
+      '.agents/example.md',
+      'README.md',
+      // The lockfile and build dependencies cover installs and build output.
+      'node_modules/ignored.js',
+      'packages/contracts/dist/index.js',
+      'packages/contracts/.turbo/turbo-build.log',
+      'applications/admin/cdk.out/manifest.json',
+    ];
+    for (const path of [...inputs, ...outside]) {
+      mkdirSync(join(directory, path, '..'), { recursive: true });
+      writeFileSync(join(directory, path), '');
+    }
+    git('add', '.');
+    const hash = () =>
+      JSON.parse(
+        execFileSync(turbo, ['run', 'test:scripts', '--dry=json'], {
+          cwd: directory,
+          encoding: 'utf8',
+        }),
+      ).tasks.find((task) => task.taskId === '//#test:scripts').hash;
+    const original = hash();
+    for (const path of [...inputs, ...outside]) {
+      writeFileSync(join(directory, path), '// changed\n');
+      assert.equal(hash() !== original, inputs.includes(path), path);
+      writeFileSync(join(directory, path), '');
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test('the bundle job is the only Docker job and runs only synthesis and verification', () => {
@@ -652,6 +753,9 @@ test('actual Turbo selects affected consumers and invalidates caches for shared 
       ...applicationNames.map((name) => `applications/${name}`),
       'packages/contracts',
       'packages/cdk-config',
+      // The root script tests depend on these builds.
+      'packages/roster',
+      'packages/recipients',
     ]) {
       mkdirSync(join(directory, workspace), { recursive: true });
       writeFileSync(
@@ -678,7 +782,15 @@ test('actual Turbo selects affected consumers and invalidates caches for shared 
         `applications/${name}`,
         [`@mcc/${name}`],
       ]),
-      ['packages/contracts', ['@mcc/contracts', '@mcc/match-to-csv']],
+      [
+        'packages/contracts',
+        [
+          '@mcc/contracts',
+          '@mcc/match-to-csv',
+          '@mcc/recipients',
+          '@mcc/roster',
+        ],
+      ],
       [
         'packages/cdk-config',
         ['@mcc/cdk-config', ...applicationNames.map((name) => `@mcc/${name}`)],
@@ -712,6 +824,30 @@ test('actual Turbo selects affected consumers and invalidates caches for shared 
           .map((task) => task.package)
           .sort(),
         expected.sort(),
+      );
+      // The static job's explicit range selects the same workspaces and adds
+      // the root script tests.
+      const staticPlan = JSON.parse(
+        execFileSync(
+          turbo,
+          [
+            ...workspaceArguments('affected', 'static', base, head).slice(1),
+            '--dry=json',
+          ],
+          { cwd: directory, encoding: 'utf8' },
+        ),
+      ).tasks.filter((task) => task.command !== '<NONEXISTENT>');
+      assert.deepEqual(
+        staticPlan
+          .filter((task) => task.task === 'ci:test')
+          .map((task) => task.package)
+          .sort(),
+        // @mcc/contracts holds only types, so it has no tests.
+        expected.filter((name) => name !== '@mcc/contracts').sort(),
+      );
+      assert.ok(
+        staticPlan.some((task) => task.taskId === '//#test:scripts'),
+        workspace,
       );
       const deploymentPlan = JSON.parse(
         execFileSync(turbo, ['run', 'cdk:deploy', '--affected', '--dry=json'], {

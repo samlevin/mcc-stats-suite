@@ -113,6 +113,7 @@ Run these commands from the repository root after `npm ci`. Pass command argumen
 | `npm run build` | Build all workspaces in dependency order | Optional Turbo options after `--`, such as `--filter=@mcc/contracts`; defaults to all workspaces |
 | `npm run build:shared` | Build the four shared packages | None |
 | `npm test` | Run repository script tests and workspace tests | None required |
+| `npm run test:scripts` | Run the repository script tests the CI full gate selects, without the GitHub automation tests. CI runs it through Turbo as the cached `//#test:scripts` task | None |
 | `npm run typecheck` | Type-check workspaces | Optional Turbo options after `--`; defaults to all workspaces |
 | `npm run lint`, `npm run lint:fix` | Check lint rules, or fix code lint after building shared packages | None required; `lint:fix` excludes Markdown |
 | `npm run format`, `npm run format:check` | Write or check Prettier formatting | None required; Markdown is excluded by `.prettierignore` |
