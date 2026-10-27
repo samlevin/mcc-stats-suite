@@ -29,8 +29,7 @@ The explicit `inline` keyword keeps a small leaf or PR rework here through [refe
 
 ## Settings
 
-`.agents/policy.json` (`implementationEffort`) owns the effort rubric: medium by default, the assessment order, blockers, non-triggers, and the stable rules `H1-boundary`, `H2-coupled-design`, and `H3-demonstrated-limit` with their required criteria. Read it before choosing anything above medium; without a qualifying rule, choose medium. Missing inputs are blockers, never reasons to escalate, and automatic escalation stops at high. Do not investigate broadly merely to choose effort.
-
+`.agents/policy.json` (`implementationEffort`) owns the effort rubric: medium by default, the assessment order, blockers, non-triggers, and the stable rules `H1-boundary`, `H2-coupled-design`, and `H3-demonstrated-limit` with their required criteria. Read it before choosing anything above medium; without a qualifying rule, choose medium. Missing inputs are blockers, never reasons to escalate, and automatic escalation stops at high.
 An explicit `effort <level>` or `implementer effort <level>` overrides the rubric for this task. Explicit medium prevents automatic escalation; if that prevents delivery, return the concrete blocker. Reviewer settings remain independent.
 
 Resolve each role separately with `node scripts/agent-policy.mjs resolve`, as `AGENTS.md` describes, adding `--model` or `--effort` only for a role's explicit override or qualifying automatic high decision. If the offline resolver fails, report its message verbatim and stop; never substitute values.
