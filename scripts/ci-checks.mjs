@@ -29,6 +29,7 @@ const sharedBuildTests = [
   'scripts/workflow-timeouts.test.mjs',
   'scripts/workflow-node-version.test.mjs',
   'scripts/workflow-checkout-credentials.test.mjs',
+  'scripts/workflow-pull-request-target.test.mjs',
 ];
 
 const automationLintTargets = [
@@ -102,8 +103,8 @@ export function checks({ full, repository, mode, job = 'static' }) {
     // Generated agent definitions must match their sources under .agents/.
     commands.push(['npm', ['run', 'agents:check']]);
     // CLI compatibility covers automation and build consumers, and the
-    // workflow timeout, Node version, and checkout credentials tests cover the
-    // workflows in this scope. The full gate already runs all of them, so add
+    // workflow timeout, Node version, checkout credentials, and
+    // pull_request_target tests cover the workflows in this scope. The full gate already runs all of them, so add
     // them here only for repository-only changes.
     commands.push([
       'node',

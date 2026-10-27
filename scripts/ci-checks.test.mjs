@@ -278,6 +278,33 @@ test('repository-only workflow changes run the checkout credentials test', () =>
   );
 });
 
+test('repository-only workflow changes run the pull_request_target test', () => {
+  for (const event of ['pull_request', 'push']) {
+    const scopes = selectScopes(
+      ['.github/workflows/tracker-pr-metadata.yml'],
+      event,
+    );
+    assert.equal(scopes.full, false, event);
+    assert.equal(scopes.repository, true, event);
+    const tests = checks(scopes)
+      .filter(([command]) => command === 'node')
+      .flatMap(([, args]) => args.slice(1));
+    assert.ok(
+      tests.includes('scripts/workflow-pull-request-target.test.mjs'),
+      event,
+    );
+  }
+  const full = checks({ full: true, repository: true, mode: 'all' })
+    .filter(([command]) => command === 'node')
+    .flatMap(([, args]) => args.slice(1));
+  assert.equal(
+    full.filter(
+      (path) => path === 'scripts/workflow-pull-request-target.test.mjs',
+    ).length,
+    1,
+  );
+});
+
 test('automation consumer changes run CLI compatibility without workspace tasks', () => {
   for (const path of [
     'scripts/branch-name.mjs',
