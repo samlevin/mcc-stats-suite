@@ -238,12 +238,22 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Switch Docker to the containerd image store
+        # Only with this store can the default builder, which CDK uses, read
+        # and write the GitHub Actions build cache.
+        run: |
+          CONFIG="$(sudo cat /etc/docker/daemon.json 2>/dev/null || echo '{}')"
+          sudo mkdir -p /etc/docker
+          jq '.features["containerd-snapshotter"] = true' <<< "${CONFIG}" | sudo tee /etc/docker/daemon.json > /dev/null
+          sudo systemctl restart docker
       - name: Start pulling the CDK bundling image
+        id: bundling-image
         # Runs in the background so the pull overlaps Node setup and npm ci.
         # The digest comes from the stack's pin, so CI bundles what deploys do.
         run: |
           IMAGE="$(grep -oE 'public\.ecr\.aws/sam/build-nodejs[0-9.]+x@sha256:[0-9a-f]{64}' applications/match-to-csv/cdk/lib/bundling.ts)"
           test -n "${IMAGE}"
+          echo "image=${IMAGE}" >> "${GITHUB_OUTPUT}"
           nohup docker pull --platform linux/arm64 "${IMAGE}" > "${RUNNER_TEMP}/image-pull.log" 2>&1 &
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -252,6 +262,39 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
+      - name: Locate the CDK bundling Dockerfile and esbuild version
+        id: bundling-build
+        working-directory: applications/match-to-csv/cdk
+        env:
+          IMAGE: ${{ steps.bundling-image.outputs.image }}
+        run: |
+          CONTEXT="$(node -p "path.join(path.dirname(require.resolve('aws-cdk-lib/package.json')), 'aws-lambda-nodejs/lib/docker')")"
+          ESBUILD="$(node -p "require('esbuild/package.json').version")"
+          test -f "${CONTEXT}/Dockerfile"
+          {
+            echo "context=${CONTEXT}"
+            echo "esbuild=${ESBUILD}"
+            echo "scope=cdk-bundling-${IMAGE##*sha256:}-esbuild-${ESBUILD}"
+          } >> "${GITHUB_OUTPUT}"
+      - name: Build the CDK bundling image from the Actions cache
+        # Same Dockerfile, base image, build arguments, and platform as the
+        # NodejsFunction build, so CDK's own docker build reuses every layer
+        # and still produces the image deploys use.
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        env:
+          DOCKER_BUILD_SUMMARY: 'false'
+          DOCKER_BUILD_RECORD_UPLOAD: 'false'
+        with:
+          context: ${{ steps.bundling-build.outputs.context }}
+          platforms: linux/arm64
+          build-args: |
+            IMAGE=${{ steps.bundling-image.outputs.image }}
+            ESBUILD_VERSION=${{ steps.bundling-build.outputs.esbuild }}
+          load: true
+          provenance: false
+          tags: mcc-cdk-bundling
+          cache-from: type=gha,scope=${{ steps.bundling-build.outputs.scope }}
+          cache-to: type=gha,scope=${{ steps.bundling-build.outputs.scope }},mode=max,ignore-error=true
       - name: Start trusted dev Turbo cache
         if: vars.MCC_TURBO_CACHE == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
         # A pull request whose cache start fails runs uncached; main still fails loudly.

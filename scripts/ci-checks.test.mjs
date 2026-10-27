@@ -697,13 +697,34 @@ test('the bundle job is the only Docker job and runs only synthesis and verifica
     assert.ok(!text(jobs[name]).includes('docker'), name);
   const steps = jobs['check-bundles'].steps;
   const pull = steps.findIndex((step) => step.run?.includes('docker pull'));
-  assert.ok(
-    pull >= 0 && pull < steps.findIndex((step) => step.run === 'npm ci'),
+  const install = steps.findIndex((step) => step.run === 'npm ci');
+  const synth = steps.findIndex(
+    (step) => step.run === 'node scripts/ci-checks.mjs',
   );
-  assert.equal(
-    steps.find((step) => step.run === 'node scripts/ci-checks.mjs').env.CI_JOB,
-    'bundle',
+  assert.ok(pull >= 0 && pull < install);
+  assert.equal(steps[synth].env.CI_JOB, 'bundle');
+  // The cached prebuild must match CDK's NodejsFunction image build exactly.
+  const store = steps.findIndex((step) =>
+    step.run?.includes('containerd-snapshotter'),
   );
+  assert.ok(store >= 0 && store < pull);
+  const build = steps.findIndex((step) =>
+    step.uses?.startsWith('docker/build-push-action@'),
+  );
+  assert.ok(install < build && build < synth);
+  const prebuild = steps[build].with;
+  assert.match(
+    steps.find((step) => step.id === 'bundling-build').run,
+    /aws-lambda-nodejs\/lib\/docker/,
+  );
+  assert.equal(prebuild.platforms, 'linux/arm64');
+  assert.deepEqual(prebuild['build-args'].trim().split('\n'), [
+    'IMAGE=${{ steps.bundling-image.outputs.image }}',
+    'ESBUILD_VERSION=${{ steps.bundling-build.outputs.esbuild }}',
+  ]);
+  const scope = 'scope=${{ steps.bundling-build.outputs.scope }}';
+  assert.equal(prebuild['cache-from'], `type=gha,${scope}`);
+  assert.ok(prebuild['cache-to'].startsWith(`type=gha,${scope},`));
 });
 
 test('the scripts job runs only the root script tests on its own runner', () => {
