@@ -75,7 +75,15 @@ jobs:
                 const { selectScopes } = await import(pathToFileURL(classifierPath));
                 if (typeof selectScopes !== 'function')
                   throw new Error('Baseline classifier has no supported entry point.');
-                scopes = { ...all, ...selectScopes(paths, event) };
+                const selected = selectScopes(paths, event);
+                if (
+                  !selected ||
+                  ['full', 'repository', 'infrastructure', 'check'].some(
+                    (name) => typeof selected[name] !== 'boolean',
+                  )
+                )
+                  throw new Error('Baseline classifier returned no valid scope.');
+                scopes = { ...all, ...selected };
                 if (!['affected', 'all'].includes(scopes.mode)) scopes.mode = 'all';
                 base = comparison.data.merge_base_commit.sha;
               } catch (error) {
@@ -273,7 +281,8 @@ jobs:
         run: node scripts/ci-checks.mjs
 
   # The main ruleset requires this job's name. Skipped jobs cannot be required,
-  # so this job always runs and fails unless every selected check passed.
+  # so this job always runs, even in a cancelled run, and fails unless change
+  # detection and every selected check succeeded.
   require-scoped-checks:
     name: Require every check selected for the changed files
     needs:
@@ -284,7 +293,7 @@ jobs:
         check-scripts,
         check-bundles,
       ]
-    if: ${{ !cancelled() }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
