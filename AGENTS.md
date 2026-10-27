@@ -11,7 +11,7 @@ Run the required checks for the changed scope before pushing. Tests never call A
 | Changed | Run |
 | --- | --- |
 | Docs only | `npm run format:check`, `npx eslint '**/*.md' --max-warnings 0` |
-| `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/issue-*.test.mjs scripts/branch-name.test.mjs` |
+| `scripts/` only | `npm run format:check`, `npx eslint scripts/ci-scope.mjs scripts/github-api*.mjs scripts/issue-*.mjs scripts/branch-name.mjs --max-warnings 0`, `node --test scripts/github-api.test.mjs scripts/issue-*.test.mjs scripts/branch-name.test.mjs scripts/agent-policy.test.mjs scripts/delivery-queue.test.mjs` |
 | `.agents/`, `.claude/`, `.codex/`, or `scripts/agent-policy*` | `npm run agents:generate` after editing a source, then `npm run agents:check`, `npm run format:check`, `npx eslint scripts/agent-policy.mjs scripts/agent-policy.test.mjs '**/*.md' --max-warnings 0`, `node --test scripts/agent-policy.test.mjs` |
 | A workspace | iterate with `npm test --workspace @mcc/<pkg>`; before push `npm run check` |
 | `infrastructure/` | `npm run tofu:check` (formatting, backend-disabled validation of every root, module tests) |

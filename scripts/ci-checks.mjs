@@ -16,6 +16,7 @@ const jobTasks = {
 // GitHub automation scripts never feed a build or deployment, so their tests
 // run only when the repository scope selects them, not on every full gate.
 export const automationTests = [
+  'scripts/github-api.test.mjs',
   'scripts/issue-triage.test.mjs',
   'scripts/issue-containers.test.mjs',
   'scripts/issue-pr-metadata.test.mjs',
@@ -39,6 +40,7 @@ const automationLintTargets = [
   'scripts/ci-scope.mjs',
   'scripts/cli.cjs',
   'scripts/cli.test.mjs',
+  'scripts/github-api.mjs',
   'scripts/issue-triage.mjs',
   'scripts/issue-containers.mjs',
   'scripts/issue-pr-metadata.mjs',

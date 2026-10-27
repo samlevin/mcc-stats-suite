@@ -1,22 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import {
-  failureMessage,
-  ghGraphql,
-  paginate,
-  REPOSITORY,
-} from './issue-triage.mjs';
+import { failureMessage, ghGraphql } from './github-api.mjs';
+import { paginate, REPOSITORY } from './issue-triage.mjs';
 
 const PAGE = 'pageInfo { hasNextPage endCursor }';
 
 // A referenced number that is not an issue or PR returns NOT_FOUND with null
 // data; that response is expected and every other error still fails.
 export function metadataGraphql(query, variables, run = execFileSync) {
-  return ghGraphql(
-    query,
-    variables,
+  return ghGraphql(query, variables, {
     run,
-    (result) =>
+    allowErrors: (result) =>
       query.includes('issueOrPullRequest(number:') &&
       result.errors.every(
         (error) =>
@@ -24,7 +18,7 @@ export function metadataGraphql(query, variables, run = execFileSync) {
           error.path?.join('.') === 'repository.issueOrPullRequest',
       ) &&
       result.data?.repository?.issueOrPullRequest === null,
-  );
+  });
 }
 
 export function referenceText(body) {

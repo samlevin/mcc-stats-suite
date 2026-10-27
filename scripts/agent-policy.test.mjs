@@ -1114,11 +1114,12 @@ const report = (verdict, pair = `${BASE}..${HEAD}`) =>
     'Requested settings: Policy: tool=claude role=code-reviewer model=opus effort=high (model: policy, effort: policy)',
   ].join('\n');
 
-// A `gh api` failure: GitHub's JSON body on stdout, the HTTP summary on stderr.
+// A `gh api --include` failure: the status line and GitHub's JSON body on
+// stdout, the HTTP summary on stderr.
 function ghFailure(status, body) {
   return Object.assign(new Error('gh failed'), {
     status: 1,
-    stdout: JSON.stringify(body),
+    stdout: `HTTP/2.0 ${status} Status\r\n\r\n${JSON.stringify(body)}`,
     stderr: `gh: ${body.message} (HTTP ${status})\n`,
   });
 }
@@ -1137,8 +1138,9 @@ function mockGitHub({
   const posts = [];
   const run = (command, args, options) => {
     assert.equal(command, 'gh');
+    assert.deepEqual(args.slice(0, 2), ['api', '--include']);
     calls.push(args);
-    const path = args[1];
+    const path = args[2];
     if (path === `repos/${policy.binding.repository}/pulls/7`)
       return JSON.stringify({
         number: 7,
@@ -1154,7 +1156,7 @@ function mockGitHub({
       return JSON.stringify(viewer === null ? {} : { login: viewer });
     }
     if (path === `repos/${policy.binding.repository}/pulls/7/reviews`) {
-      assert.deepEqual(args.slice(2), ['--method', 'POST', '--input', '-']);
+      assert.deepEqual(args.slice(3), ['--method', 'POST', '--input', '-']);
       const payload = JSON.parse(options.input);
       posts.push(payload);
       if (review) throw review;
@@ -1314,7 +1316,7 @@ test('a failed submission is reported, never claimed as posted', () => {
     () => publish('REQUEST CHANGES', rejected),
     (error) =>
       error.name === 'ReviewNotPosted' &&
-      /^Review not posted: gh api \S+\/reviews failed: HTTP 422: Unprocessable Entity: Review Can not request changes on your own pull request\. Check the pull request/.test(
+      /^Review not posted: GitHub REST request failed: HTTP 422: Unprocessable Entity; Review Can not request changes on your own pull request\. Check the pull request/.test(
         error.message,
       ),
   );
@@ -1334,7 +1336,7 @@ test('a failed submission is reported, never claimed as posted', () => {
       run,
     );
   const missing = wrap((args) => {
-    if (args[1].endsWith('/reviews'))
+    if (args[2].endsWith('/reviews'))
       throw Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
   });
   assert.throws(
@@ -1342,19 +1344,19 @@ test('a failed submission is reported, never claimed as posted', () => {
     /^ReviewNotPosted: Review not posted: .*gh is not installed/,
   );
   const silent = wrap((args) =>
-    args[1].endsWith('/reviews') ? '{}' : undefined,
+    args[2].endsWith('/reviews') ? '{}' : undefined,
   );
   assert.throws(
     () => attempt(silent.run),
     /^ReviewNotPosted: Review not posted: GitHub returned no review URL/,
   );
   const notFound = wrap((args) => {
-    if (args[1].endsWith('/pulls/7'))
+    if (args[2].endsWith('/pulls/7'))
       throw ghFailure(404, { message: 'Not Found' });
   });
   assert.throws(
     () => attempt(notFound.run),
-    /^ReviewNotPosted: Review not posted: gh api \S+\/pulls\/7 failed: HTTP 404: Not Found/,
+    /^ReviewNotPosted: Review not posted: GitHub REST request failed: HTTP 404: Not Found\./,
   );
   assert.equal(notFound.github.posts.length, 0);
 });
@@ -1375,7 +1377,7 @@ test('a merged or closed pull request gets no review and says why', () => {
       );
       assert.equal(github.posts.length, 0, `${verdict} ${reason}`);
       assert.ok(
-        github.calls.every((args) => !args[1].endsWith('/reviews')),
+        github.calls.every((args) => !args[2].endsWith('/reviews')),
         `${verdict} ${reason}`,
       );
     }
@@ -1444,10 +1446,11 @@ test('the publish-review command reports every failure as not posted', () => {
     script,
     readFileSync(new URL('./agent-policy.mjs', import.meta.url)),
   );
-  writeFileSync(
-    join(base, 'scripts/cli.cjs'),
-    readFileSync(new URL('./cli.cjs', import.meta.url)),
-  );
+  for (const module of ['cli.cjs', 'github-api.mjs'])
+    writeFileSync(
+      join(base, 'scripts', module),
+      readFileSync(new URL(`./${module}`, import.meta.url)),
+    );
   const reportPath = join(base, 'review.md');
   writeFileSync(reportPath, report('APPROVE'));
   const publishCommand = (...args) =>

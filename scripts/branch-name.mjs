@@ -1,6 +1,7 @@
 import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
 import { pathToFileURL } from 'node:url';
-import { REPOSITORY, failureMessage, ghRest } from './issue-triage.mjs';
+import { failureMessage, ghRest } from './github-api.mjs';
+import { REPOSITORY } from './issue-triage.mjs';
 
 const MAX_SLUG = 40;
 // Titles with no ASCII letters or digits still need a usable slug.
