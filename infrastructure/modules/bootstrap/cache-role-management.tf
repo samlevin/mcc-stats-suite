@@ -1,6 +1,8 @@
-# Foundation owns the cache workload role; bootstrap delegates only its lifecycle.
+# Foundation owns the cache workload roles; bootstrap delegates only their
+# lifecycle. Dev adds the read-only role that pull requests use.
 locals {
-  github_cache_role_arn = "arn:${local.partition}:iam::${local.account_id}:role/${var.project_name}-${var.environment}-github-turbo-cache"
+  github_cache_role_arn  = "arn:${local.partition}:iam::${local.account_id}:role/${var.project_name}-${var.environment}-github-turbo-cache"
+  github_cache_role_arns = var.environment == "dev" ? [local.github_cache_role_arn, "${local.github_cache_role_arn}-read"] : [local.github_cache_role_arn]
 }
 
 data "aws_iam_policy_document" "terrateam_cache_role_management" {
@@ -8,7 +10,7 @@ data "aws_iam_policy_document" "terrateam_cache_role_management" {
     sid       = "CreateBoundedCacheRole"
     effect    = "Allow"
     actions   = ["iam:CreateRole"]
-    resources = [local.github_cache_role_arn]
+    resources = local.github_cache_role_arns
     condition {
       test     = "StringEquals"
       variable = "iam:PermissionsBoundary"
@@ -25,7 +27,7 @@ data "aws_iam_policy_document" "terrateam_cache_role_management" {
       "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags",
       "iam:ListInstanceProfilesForRole",
     ]
-    resources = [local.github_cache_role_arn]
+    resources = local.github_cache_role_arns
   }
 }
 

@@ -30,11 +30,11 @@ run "dev_scoped_cache_role_management" {
   }
   assert {
     condition = length(data.aws_iam_policy_document.terrateam_cache_role_management.statement) == 2 && alltrue([for statement in data.aws_iam_policy_document.terrateam_cache_role_management.statement :
-      statement.effect == "Allow" && statement.resources == toset(["arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache"]) &&
+      statement.effect == "Allow" && statement.resources == toset(["arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache", "arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache-read"]) &&
       (statement.sid == "CreateBoundedCacheRole" ? statement.actions == toset(["iam:CreateRole"]) && one(statement.condition).variable == "iam:PermissionsBoundary" && toset(one(statement.condition).values) == toset(["arn:aws:iam::000000000000:policy/mcc-stats-suite-workload-boundary"]) :
       statement.sid == "ManageOnlyCacheRole" && length(statement.condition) == 0 && statement.actions == toset(["iam:GetRole", "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateRoleDescription", "iam:UpdateAssumeRolePolicy", "iam:ListRolePolicies", "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:ListAttachedRolePolicies", "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags", "iam:ListInstanceProfilesForRole"]))
     ])
-    error_message = "Terrateam may manage only this environment's cache role, must supply the boundary at creation, and cannot remove boundaries or attach other policies."
+    error_message = "Terrateam may manage only this environment's cache roles, must supply the boundary at creation, and cannot remove boundaries or attach other policies."
   }
   assert {
     condition = alltrue([
@@ -62,7 +62,7 @@ run "prod_scoped_cache_role_management" {
       (statement.sid == "CreateBoundedCacheRole" ? statement.actions == toset(["iam:CreateRole"]) && one(statement.condition).variable == "iam:PermissionsBoundary" && toset(one(statement.condition).values) == toset(["arn:aws:iam::000000000000:policy/mcc-stats-suite-workload-boundary"]) :
       statement.sid == "ManageOnlyCacheRole" && length(statement.condition) == 0 && statement.actions == toset(["iam:GetRole", "iam:DeleteRole", "iam:UpdateRole", "iam:UpdateRoleDescription", "iam:UpdateAssumeRolePolicy", "iam:ListRolePolicies", "iam:GetRolePolicy", "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:ListAttachedRolePolicies", "iam:TagRole", "iam:UntagRole", "iam:ListRoleTags", "iam:ListInstanceProfilesForRole"]))
     ])
-    error_message = "Terrateam may manage only this environment's cache role, must supply the boundary at creation, and cannot remove boundaries or attach other policies."
+    error_message = "Terrateam may manage only this environment's cache roles, must supply the boundary at creation, and cannot remove boundaries or attach other policies."
   }
   assert {
     condition = alltrue([
