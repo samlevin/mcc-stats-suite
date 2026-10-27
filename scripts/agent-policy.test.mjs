@@ -172,6 +172,30 @@ test('worktree ignores preserve tracked agent definitions and configuration', ()
   assert.deepEqual(result.stdout.trim().split('\n'), probes);
 });
 
+test('local agent files are ignored while tracked agent files stay tracked', () => {
+  const local = [
+    'CLAUDE.local.md',
+    '.claude/scheduled_tasks.lock',
+    '.playwright-mcp/ignore-probe',
+  ];
+  const tracked = [
+    'CLAUDE.md',
+    'AGENTS.md',
+    '.agents/policy.json',
+    '.codex/config.toml',
+    ...[...render().keys()].filter((path) =>
+      /^\.(claude|codex|agents)\//.test(path),
+    ),
+  ];
+  const result = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], {
+    cwd: new URL('..', import.meta.url),
+    input: [...local, ...tracked].join('\n') + '\n',
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), local);
+});
+
 test('generated output carries no unresolved placeholder and follows the binding', () => {
   for (const [path, content] of render()) {
     // The maintainer skill documents the placeholders literally.
