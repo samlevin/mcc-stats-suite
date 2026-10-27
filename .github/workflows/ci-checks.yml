@@ -152,6 +152,8 @@ jobs:
         # main writes the cache. Same-repo pull requests only read it; fork pull
         # requests get no OIDC token, so they skip this step and run uncached.
         if: vars.MCC_TURBO_CACHE == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && needs.detect-changes.outputs.full == 'true'
+        # A pull request whose cache start fails runs uncached; main still fails loudly.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
@@ -197,6 +199,8 @@ jobs:
         run: npm ci
       - name: Start trusted dev Turbo cache
         if: vars.MCC_TURBO_CACHE == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        # A pull request whose cache start fails runs uncached; main still fails loudly.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev
@@ -250,6 +254,8 @@ jobs:
         run: npm ci
       - name: Start trusted dev Turbo cache
         if: vars.MCC_TURBO_CACHE == 'true' && ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository))
+        # A pull request whose cache start fails runs uncached; main still fails loudly.
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         uses: ./.github/actions/turbo-s3-cache
         with:
           environment: dev

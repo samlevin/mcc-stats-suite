@@ -1037,7 +1037,15 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
       job.uses?.includes('deploy'),
     ),
   );
-  assert.ok(!workflow.includes('continue-on-error'));
+  // Only a cache start may continue on error; no check may.
+  for (const [name, job] of Object.entries(parsedWorkflow.jobs)) {
+    assert.equal(job['continue-on-error'], undefined, name);
+    for (const step of job.steps ?? []) {
+      if (step['continue-on-error'] !== undefined) {
+        assert.equal(step.uses, './.github/actions/turbo-s3-cache', name);
+      }
+    }
+  }
   assert.ok(!workflow.includes('pull_request_target'));
   const config = JSON.parse(
     readFileSync(new URL('../turbo.json', import.meta.url)),
@@ -1256,6 +1264,21 @@ test('pull request CI reads the dev Turbo cache and never writes it', () => {
       ),
     });
     assert.equal(starts(event.forkPullRequest), false, job);
+    // MCC_TURBO_CACHE gates pull request runs too.
+    assert.equal(
+      evaluate(step.if, {
+        vars: {},
+        github: event.pullRequest,
+        needs: { 'detect-changes': { outputs: { full: 'true' } } },
+      }),
+      false,
+      job,
+    );
+    // Only a pull request continues uncached when the cache cannot start.
+    const continues = (github) =>
+      evaluate(expression(step['continue-on-error']), { github });
+    assert.equal(continues(event.pullRequest), true, job);
+    assert.equal(continues(event.main), false, job);
     for (const [name, github] of Object.entries({
       main: event.main,
       pullRequest: event.pullRequest,
