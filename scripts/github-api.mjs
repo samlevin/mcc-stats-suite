@@ -222,7 +222,7 @@ export function ghRestPages(path, { run = execFileSync } = {}) {
   const pages = [];
   const seen = new Set();
   for (let next = path; next;) {
-    if (seen.has(next)) throw new Error(`GET ${path}: the next page repeats`);
+    if (seen.has(next)) throw new Error(`the next page of ${path} repeats`);
     seen.add(next);
     const response = ghRequest('REST', [next], { run });
     if (response.failed) throw githubError('REST', response);

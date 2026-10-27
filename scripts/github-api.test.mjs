@@ -259,7 +259,7 @@ test('not-found and other failures keep GitHub details without stderr or raw bod
       message: 'GitHub REST request failed: HTTP 404: Not Found.',
     },
   );
-  // Only metadataGraphql tolerates NOT_FOUND.
+  // ghGraphql without allowErrors does not tolerate NOT_FOUND.
   assert.throws(
     () =>
       ghGraphql(
@@ -488,7 +488,7 @@ test('REST pages follow the Link header until the last page', () => {
       ghRestPages('x', {
         run: () => httpResponse(200, next('x'), []),
       }),
-    /the next page repeats/,
+    /^Error: the next page of x repeats$/,
   );
   assert.throws(
     () =>
