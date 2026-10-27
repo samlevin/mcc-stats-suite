@@ -183,7 +183,9 @@ test('local agent files are ignored while tracked agent files stay tracked', () 
     'AGENTS.md',
     '.agents/policy.json',
     '.codex/config.toml',
-    ...[...render().keys()].filter((path) => /^\.(claude|codex)\//.test(path)),
+    ...[...render().keys()].filter((path) =>
+      /^\.(claude|codex|agents)\//.test(path),
+    ),
   ];
   const result = spawnSync('git', ['check-ignore', '--no-index', '--stdin'], {
     cwd: new URL('..', import.meta.url),
