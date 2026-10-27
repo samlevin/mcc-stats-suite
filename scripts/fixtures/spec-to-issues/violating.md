@@ -48,3 +48,13 @@ None.
 - **Provides:** Another contract
 - **Acceptance:**
   - Types compile.
+
+#### P0.3 Cross-spec blocker (XS)
+
+- **Blocked by:** spec 2.3 P0.3
+- **Cross-spec prerequisites:** P0.1 in spec 2.3
+- **Spec:** §3
+- **Files:** src/fourth.ts and its tests
+- **Provides:** Fourth contract,
+- **Acceptance:**
+  - Types compile.

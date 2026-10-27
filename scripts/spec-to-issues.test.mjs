@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { ownershipNotes } from './delivery-queue.mjs';
 import { applyEdges, buildPlan, printTree } from './spec-to-issues.mjs';
 
 const catalog = JSON.parse(
@@ -35,6 +36,7 @@ test('a conforming plan preserves hierarchy, acceptance, defaults and spec links
       ['P0.2.1', 'LEAF', 'P0.2'],
       ['P0.2.2', 'LEAF', 'P0.2'],
       ['P0.3', 'LEAF', 'phase-0'],
+      ['P0.4', 'LEAF', 'phase-0'],
     ],
   );
   const port = plan.nodes.find((n) => n.ref === 'P0.1');
@@ -74,16 +76,219 @@ test('a conforming plan preserves hierarchy, acceptance, defaults and spec links
 test('pre-flight returns all named violations in one pass', () => {
   const { errors } = parse(fixture('violating'));
   for (const expected of [
-    'phase-0: missing Exit criteria',
-    'P0.1: invalid size L',
-    'P0.1: duplicate Plan ID',
-    'P0.2: duplicate title Duplicate contract',
-    'P0.2: missing Provides',
-    'P0.1: unknown label missing label',
-    'P0.1: unknown blocked-by slice P9.9',
+    'phase-0: [phase-fields] missing Exit criteria',
+    'P0.1: [slice-heading] invalid size L',
+    'P0.1: [unique-ids] duplicate Plan ID',
+    'P0.2: [unique-titles] duplicate title Duplicate contract',
+    'P0.2: [slice-fields] missing Provides',
+    'P0.1: [labels] unknown label missing label',
+    'P0.1: [blocked-by] unknown blocked-by slice P9.9',
+    'P0.3: [cross-spec-prerequisites] Blocked by names a slice in another spec; move it to Cross-spec prerequisites',
+    'P0.3: [cross-spec-prerequisites] Cross-spec prerequisites must be none or spec <number> <Plan ID> entries',
+    'P0.3: [files] Files must be backticked paths on one line, or `none`',
+    'P0.3: [provides] Provides must be comma-separated contract names on one line',
   ])
     assert.ok(errors.includes(expected), `${expected}\n${errors.join('\n')}`);
-  assert.ok(errors.some((e) => /dependency cycle/.test(e)));
+  assert.ok(
+    errors.some((e) => /\[acyclic-blockers\] dependency cycle/.test(e)),
+  );
+});
+
+// Rule names come from the template's §20 rule table, so a rule cannot be
+// added there without a failing case here.
+const ruleTable = [
+  ...readFileSync(
+    new URL('../specs/TEMPLATE.md', import.meta.url),
+    'utf8',
+  ).matchAll(/^> \| `([a-z-]+)` \|/gm),
+].map((match) => match[1]);
+
+const violations = {
+  'spec-title': [
+    ['# Fixture: Technical Specification\n', '\n'],
+    'spec: [spec-title] missing document title',
+  ],
+  'plan-sections': [
+    ['### 20.2 Seam contracts', '### Seam contracts'],
+    '§20.2: [plan-sections] missing required section',
+  ],
+  'phase-heading': [
+    ['### Phase 0: Contracts', '### Phase zero'],
+    'Phase zero: [phase-heading] expected Phase <number>: <title>',
+  ],
+  'phase-fields': [
+    ['**Exit criteria:** All port and adapter tests pass.', ''],
+    'phase-0: [phase-fields] missing Exit criteria',
+  ],
+  'slice-heading': [
+    [
+      '#### P0.3 Describe storage API (XS)',
+      '#### P0.3 Describe storage API (L)',
+    ],
+    'P0.3: [slice-heading] invalid size L',
+  ],
+  'slice-fields': [
+    [
+      '- **Spec:** §3\n- **Files:** `docs/storage.md`',
+      '- **Files:** `docs/storage.md`',
+    ],
+    'P0.3: [slice-fields] missing Spec',
+  ],
+  'split-slice': [
+    [
+      '##### P0.2.2 Build write adapter (S)',
+      '##### P0.5 Build write adapter (S)',
+    ],
+    'P0.5: [split-slice] child Plan ID must extend its split container ID',
+  ],
+  'blocked-by': [
+    [
+      '- **Blocked by:** P0.1\n- **Spec:** §3, §16\n- **Files:** `src/adapters/`',
+      '- **Blocked by:** P0.1 and P0.3\n- **Spec:** §3, §16\n- **Files:** `src/adapters/`',
+    ],
+    'P0.2: [blocked-by] Blocked by must be none or Plan IDs',
+  ],
+  'cross-spec-prerequisites': [
+    [
+      '- **Cross-spec prerequisites:** spec 2.3 P5.2',
+      '- **Cross-spec prerequisites:** #12',
+    ],
+    'P0.3: [cross-spec-prerequisites] Cross-spec prerequisites must be none or spec <number> <Plan ID> entries',
+  ],
+  files: [
+    [
+      '- **Files:** `docs/storage.md`, `docs/index.md`',
+      '- **Files:** `docs/storage.md` (API section)',
+    ],
+    'P0.3: [files] Files must be backticked paths on one line, or `none`',
+  ],
+  provides: [
+    [
+      '- **Provides:** API documentation, Storage glossary',
+      '- **Provides:** API documentation,,',
+    ],
+    'P0.3: [provides] Provides must be comma-separated contract names on one line',
+  ],
+  'spec-links': [
+    ['- **Spec:** §3, §16', '- **Spec:** §99'],
+    'P0.1: [spec-links] unknown spec section §99',
+  ],
+  'unique-ids': [
+    [
+      '#### P0.3 Describe storage API (XS)',
+      '#### P0.1 Describe storage API (XS)',
+    ],
+    'P0.1: [unique-ids] duplicate Plan ID',
+  ],
+  'unique-titles': [
+    [
+      '#### P0.3 Describe storage API (XS)',
+      '#### P0.3 Define storage port (XS)',
+    ],
+    'P0.3: [unique-titles] duplicate title Define storage port',
+  ],
+  'acyclic-blockers': [
+    [
+      '- **Blocked by:** none\n- **Spec:** §3, §16',
+      '- **Blocked by:** P0.2.1\n- **Spec:** §3, §16',
+    ],
+    /^P0\.\d: \[acyclic-blockers\] dependency cycle/,
+  ],
+  'backlog-blocker': [
+    [
+      '- **Blocked by:** none\n- **Spec:** §3, §16',
+      '- **Blocked by:** P1.1\n- **Spec:** §3, §16',
+    ],
+    'P0.1: [backlog-blocker] blocked by deferred slice P1.1; resolve before filing',
+  ],
+  priority: [
+    ['- **Priority:** P1', '- **Priority:** P9'],
+    'P0.1: [priority] invalid priority P9',
+  ],
+  labels: [
+    ['package: contracts\n', 'package: missing\n'],
+    'P0.1: [labels] unknown label package: missing',
+  ],
+};
+
+test('every rule in the template table has a passing and a failing case', () => {
+  assert.ok(ruleTable.length > 10, ruleTable.join(', '));
+  assert.deepEqual(Object.keys(violations).sort(), [...ruleTable].sort());
+  assert.deepEqual(parse().errors, []);
+  for (const [rule, [[before, after], expected]] of Object.entries(
+    violations,
+  )) {
+    assert.ok(conforming.includes(before), `${rule}: fixture lacks ${before}`);
+    const { errors } = parse(conforming.replace(before, after));
+    assert.ok(
+      errors.some((e) =>
+        typeof expected === 'string' ? e === expected : expected.test(e),
+      ),
+      `${rule}: ${errors.join('\n')}`,
+    );
+  }
+});
+
+test('every pre-flight error carries a rule name from the template table', () => {
+  const errors = [
+    ...parse(fixture('violating')).errors,
+    ...parse('# No plan').errors,
+    ...Object.values(violations).flatMap(
+      ([[before, after]]) => parse(conforming.replace(before, after)).errors,
+    ),
+  ];
+  for (const error of errors) {
+    const rule = /^[^\n]+?: \[([a-z-]+)\] \S/.exec(error)?.[1];
+    assert.ok(ruleTable.includes(rule), error);
+  }
+});
+
+test('a cross-spec prerequisite is carried to the issue and is never a local blocker', () => {
+  const plan = parse();
+  const docs = plan.nodes.find((n) => n.ref === 'P0.3');
+  assert.deepEqual(docs.blockedBy, []);
+  assert.match(
+    docs.body,
+    /Provides: API documentation, Storage glossary\n\nCross-spec prerequisites: spec 2\.3 P5\.2\n\n### Validation/,
+  );
+  assert.doesNotMatch(
+    plan.nodes.find((n) => n.ref === 'P0.4').body,
+    /Cross-spec prerequisites/,
+  );
+  const misplaced = parse(
+    conforming
+      .replace(
+        '#### P0.3 Describe storage API (XS)',
+        '#### P5.2 Describe storage API (XS)',
+      )
+      .replace(
+        '- **Blocked by:** none\n- **Cross-spec prerequisites:** spec 2.3 P5.2',
+        '- **Blocked by:** spec 2.3 P5.2',
+      ),
+  );
+  assert.deepEqual(misplaced.errors, [
+    'P5.2: [cross-spec-prerequisites] Blocked by names a slice in another spec; move it to Cross-spec prerequisites',
+  ]);
+});
+
+test('the delivery queue reads slice Files and Provides as complete ownership', () => {
+  const plan = parse();
+  assert.deepEqual(
+    ownershipNotes(plan.nodes.find((n) => n.ref === 'P0.3').body),
+    {
+      files: ['docs/storage.md', 'docs/index.md'],
+      contracts: ['API documentation', 'Storage glossary'],
+      complete: true,
+    },
+  );
+  assert.deepEqual(
+    ownershipNotes(plan.nodes.find((n) => n.ref === 'P0.4').body),
+    {
+      files: ['none'],
+      contracts: [],
+      complete: true,
+    },
+  );
 });
 
 test('required fields, malformed headers, priorities, sections and deferred blockers reject filing', () => {
@@ -91,43 +296,47 @@ test('required fields, malformed headers, priorities, sections and deferred bloc
     [
       '**Goal:** A storage port and independently testable adapters exist.',
       '**Goal:**',
-      'phase-0: missing Goal',
+      'phase-0: [phase-fields] missing Goal',
     ],
     [
       '- **Files:** `packages/contracts/src/index.ts`',
       '',
-      'P0.1: missing Files',
+      'P0.1: [slice-fields] missing Files',
     ],
     [
       '- **Acceptance:**\n  - Port types compile.\n  - Existing APIs remain available.',
       '- **Acceptance:**',
-      'P0.1: missing Acceptance',
+      'P0.1: [slice-fields] missing Acceptance',
     ],
     [
       '#### P0.1 Define storage port (XS)',
       '#### Define storage port',
-      'expected Plan ID',
+      '[slice-heading] expected Plan ID',
     ],
-    ['- **Priority:** P1', '- **Priority:** P9', 'P0.1: invalid priority P9'],
+    [
+      '- **Priority:** P1',
+      '- **Priority:** P9',
+      'P0.1: [priority] invalid priority P9',
+    ],
     [
       '- **Spec:** §3, §16',
       '- **Spec:** §99',
-      'P0.1: unknown spec section §99',
+      'P0.1: [spec-links] unknown spec section §99',
     ],
     [
       '- **Blocked by:** none',
       '- **Blocked by:** P1.1',
-      'P0.1: blocked by deferred slice P1.1',
+      'P0.1: [backlog-blocker] blocked by deferred slice P1.1',
     ],
     [
       '- **Blocked by:** none',
-      '- **Blocked by:** spec 2.3 P0.1',
-      'P0.1: Blocked by must be none or Plan IDs',
+      '- **Blocked by:** P0.2 or later',
+      'P0.1: [blocked-by] Blocked by must be none or Plan IDs',
     ],
     [
       '- **Split into:** P0.2.1, P0.2.2',
       '- **Split into:** P0.2.1',
-      'P0.2: Split into must list exactly its nested children',
+      'P0.2: [split-slice] Split into must list exactly its nested children',
     ],
   ]) {
     const { errors } = parse(conforming.replace(before, after));
@@ -136,7 +345,9 @@ test('required fields, malformed headers, priorities, sections and deferred bloc
       `${expected}: ${errors.join('\n')}`,
     );
   }
-  assert.deepEqual(parse('# No plan').errors, ['§20: missing delivery plan']);
+  assert.deepEqual(parse('# No plan').errors, [
+    '§20: [plan-sections] missing delivery plan',
+  ]);
 });
 
 test('split children inherit blockers and container completion cannot depend on its child', () => {
@@ -176,7 +387,7 @@ test('offline CLI writes no GitHub data and rejects invalid input before draft o
   const preview = run('conforming');
   assert.equal(preview.status, 0, preview.stderr);
   assert.match(preview.stdout, /Fixture delivery plan/);
-  assert.equal(JSON.parse(readFileSync(output, 'utf8')).nodes.length, 7);
+  assert.equal(JSON.parse(readFileSync(output, 'utf8')).nodes.length, 8);
   const bad = run('violating', '--output', join(directory, 'bad.json'));
   assert.equal(bad.status, 1);
   assert.equal(bad.stdout, '');
@@ -281,7 +492,9 @@ test('noncanonical lowercase blockers reject known, unknown and cyclic reference
       ),
     );
     assert.ok(
-      plan.errors.includes('P0.2: Blocked by must be none or Plan IDs'),
+      plan.errors.includes(
+        'P0.2: [blocked-by] Blocked by must be none or Plan IDs',
+      ),
       blocker,
     );
   }

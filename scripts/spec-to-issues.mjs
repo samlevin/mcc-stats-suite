@@ -18,6 +18,11 @@ const inCheckout = (directory) => {
 };
 const isBacklogPhase = (title) => title === 'Backlog (not filed with v1)';
 const idPattern = /\bP\d+\.\d+(?:\.\d+)*\b/g;
+const localIDs = /^P\d+\.\d+(?:\.\d+)*(?:,\s*P\d+\.\d+(?:\.\d+)*)*$/;
+const crossSpecID = /^spec \d+(?:\.\d+)* P\d+\.\d+(?:\.\d+)*$/;
+// `none` stays backticked so the delivery queue reads it as complete
+// ownership.
+const filesForm = /^`[^`\n]+`(?:, *`[^`\n]+`)*$/;
 const unique = (items) => [...new Set(items)];
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 const anchor = (heading) =>
@@ -65,12 +70,17 @@ function defaultLabels(files, known) {
 
 export function buildPlan(text, { specPath, repository, labels }) {
   const errors = [];
-  const fail = (ref, message) => errors.push(`${ref}: ${message}`);
+  const fail = (ref, rule, message) =>
+    errors.push(`${ref}: [${rule}] ${message}`);
   const known = new Set(labels);
   const all = headings(text);
   const lines = text.split(/\r?\n/);
   const start = all.findIndex((h) => /^20\. Delivery plan/.test(h.title));
-  if (start < 0) return { errors: ['§20: missing delivery plan'], nodes: [] };
+  if (start < 0)
+    return {
+      errors: ['§20: [plan-sections] missing delivery plan'],
+      nodes: [],
+    };
   const end = all.findIndex(
     (h, i) =>
       i > start && h.level <= 2 && !/^(?:P\d+\.\d|Phase\b)/.test(h.title),
@@ -86,16 +96,16 @@ export function buildPlan(text, { specPath, repository, labels }) {
   const doneHeading = planHeadings.find((h) => /^20\.3 /.test(h.title));
   const done = doneHeading ? contents(doneHeading) : '';
   if (!done || !/^\s*- /m.test(done))
-    fail('§20.3', 'missing definition of done bullets');
+    fail('§20.3', 'plan-sections', 'missing definition of done bullets');
   for (const section of ['20.1', '20.2'])
     if (!planHeadings.some((h) => h.title.startsWith(`${section} `)))
-      fail(`§${section}`, 'missing required section');
+      fail(`§${section}`, 'plan-sections', 'missing required section');
   const contextHeading = planHeadings.find((h) => /^20\.4 /.test(h.title));
   const context = contextHeading ? contents(contextHeading) : '';
   const name = all
     .find((h) => h.level === 1)
     ?.title.replace(/: Technical Specification$/i, '');
-  if (!name) fail('spec', 'missing document title');
+  if (!name) fail('spec', 'spec-title', 'missing document title');
   const nodes = [
     {
       ref: 'root',
@@ -130,16 +140,17 @@ export function buildPlan(text, { specPath, repository, labels }) {
       : fallback;
   const checkLabels = (node) => {
     for (const label of node.labels)
-      if (!known.has(label)) fail(node.ref, `unknown label ${label}`);
+      if (!known.has(label)) fail(node.ref, 'labels', `unknown label ${label}`);
   };
   for (const h of planHeadings) {
     if (/^Phase\b/.test(h.title) && h.level !== 3) {
-      fail(h.title, 'phase heading must use three hashes');
+      fail(h.title, 'phase-heading', 'phase heading must use three hashes');
       continue;
     }
     if (/^P\d+\.\d/.test(h.title) && ![4, 5].includes(h.level)) {
       fail(
         h.title,
+        'slice-heading',
         'slice heading must use four hashes, or five for a split child',
       );
       continue;
@@ -168,15 +179,15 @@ export function buildPlan(text, { specPath, repository, labels }) {
       slice = undefined;
       if (!phase.deferred) {
         for (const field of ['Goal', 'Exit criteria'])
-          if (!data[field]) fail(ref, `missing ${field}`);
+          if (!data[field]) fail(ref, 'phase-fields', `missing ${field}`);
         if (nodes.some((node) => node.ref === ref))
-          fail(ref, 'duplicate phase');
+          fail(ref, 'unique-ids', 'duplicate phase');
         nodes.push(phase);
       }
       continue;
     }
     if (h.level === 3 && /^Phase\b/.test(h.title)) {
-      fail(h.title, 'expected Phase <number>: <title>');
+      fail(h.title, 'phase-heading', 'expected Phase <number>: <title>');
       phase = undefined;
       continue;
     }
@@ -188,12 +199,13 @@ export function buildPlan(text, { specPath, repository, labels }) {
     if (h.level < 4) continue;
     const match = /^(P\d+\.\d+(?:\.\d+)*) (.+) \(([^)]+)\)$/.exec(h.title);
     if (!match) {
-      fail(h.title, 'expected Plan ID, title and (XS|S|M)');
+      fail(h.title, 'slice-heading', 'expected Plan ID, title and (XS|S|M)');
       if (h.level === 4) slice = undefined;
       continue;
     }
     const [, ref, title, size] = match;
     const data = fields(contents(h));
+    const blockedBy = data['Blocked by'];
     const node = {
       ref,
       kind: data['Split into'] ? 'CONTAINER' : 'LEAF',
@@ -202,16 +214,23 @@ export function buildPlan(text, { specPath, repository, labels }) {
       priority: data.Priority || 'P2',
       labels: labelField(data.Labels, defaultLabels(data.Files || '', known)),
       parent: h.level === 4 ? phase?.ref : slice?.ref,
-      blockedBy: unique(data['Blocked by']?.match(idPattern) || []),
+      // Only a well-formed list counts, so another spec's ID never becomes
+      // a local blocker.
+      blockedBy: localIDs.test(blockedBy || '')
+        ? unique(blockedBy.match(idPattern))
+        : [],
       fields: data,
       section: h.title,
     };
-    if (!phase) fail(ref, 'slice has no phase');
+    if (!phase) fail(ref, 'slice-heading', 'slice has no phase');
     if (h.level === 5 && slice?.kind !== 'CONTAINER')
-      fail(ref, 'nested slice needs a split container');
-    if (h.level > 5) fail(ref, 'only one split level is supported');
+      fail(ref, 'split-slice', 'nested slice needs a split container');
     if (h.level === 5 && !ref.startsWith(`${slice?.ref}.`))
-      fail(ref, 'child Plan ID must extend its split container ID');
+      fail(
+        ref,
+        'split-slice',
+        'child Plan ID must extend its split container ID',
+      );
     if (h.level === 4) slice = node;
     for (const field of [
       'Blocked by',
@@ -220,28 +239,61 @@ export function buildPlan(text, { specPath, repository, labels }) {
       'Provides',
       'Acceptance',
     ])
-      if (!data[field]) fail(ref, `missing ${field}`);
+      if (!data[field]) fail(ref, 'slice-fields', `missing ${field}`);
     if (!/^\s*- /m.test(data.Acceptance || ''))
-      fail(ref, 'Acceptance needs bullets');
-    if (
-      data['Blocked by'] &&
-      !/^none$/i.test(data['Blocked by']) &&
-      !/^(?:P\d+\.\d+(?:\.\d+)*(?:,\s*P\d+\.\d+(?:\.\d+)*)*)$/.test(
-        data['Blocked by'],
-      )
+      fail(ref, 'slice-fields', 'Acceptance needs bullets');
+    if (blockedBy && /\bspec \d/i.test(blockedBy))
+      fail(
+        ref,
+        'cross-spec-prerequisites',
+        'Blocked by names a slice in another spec; move it to Cross-spec prerequisites',
+      );
+    else if (
+      blockedBy &&
+      !/^none$/i.test(blockedBy) &&
+      !localIDs.test(blockedBy)
     )
-      fail(ref, 'Blocked by must be none or Plan IDs');
-    if (!['XS', 'S', 'M'].includes(size)) fail(ref, `invalid size ${size}`);
-    if (seenIDs.has(ref)) fail(ref, 'duplicate Plan ID');
+      fail(ref, 'blocked-by', 'Blocked by must be none or Plan IDs');
+    const external = data['Cross-spec prerequisites'];
+    if (
+      external !== undefined &&
+      !/^none$/i.test(external) &&
+      !external.split(',').every((entry) => crossSpecID.test(entry.trim()))
+    )
+      fail(
+        ref,
+        'cross-spec-prerequisites',
+        'Cross-spec prerequisites must be none or spec <number> <Plan ID> entries',
+      );
+    if (data.Files && !filesForm.test(data.Files))
+      fail(
+        ref,
+        'files',
+        'Files must be backticked paths on one line, or `none`',
+      );
+    if (
+      data.Provides &&
+      (data.Provides.includes('\n') ||
+        data.Provides.split(',').some((name) => !name.trim()))
+    )
+      fail(
+        ref,
+        'provides',
+        'Provides must be comma-separated contract names on one line',
+      );
+    if (!['XS', 'S', 'M'].includes(size))
+      fail(ref, 'slice-heading', `invalid size ${size}`);
+    if (seenIDs.has(ref)) fail(ref, 'unique-ids', 'duplicate Plan ID');
     seenIDs.add(ref);
     if (seenTitles.has(title.toLowerCase()))
-      fail(ref, `duplicate title ${title}`);
+      fail(ref, 'unique-titles', `duplicate title ${title}`);
     seenTitles.add(title.toLowerCase());
     const sections = unique(data.Spec?.match(/§\d+(?:\.\d+)*/g) || []);
-    if (!sections.length) fail(ref, 'Spec needs section references');
+    if (!sections.length)
+      fail(ref, 'spec-links', 'Spec needs section references');
     node.specLinks = sections.map((section) => {
       const heading = sectionMap.get(section.slice(1));
-      if (!heading) fail(ref, `unknown spec section ${section}`);
+      if (!heading) fail(ref, 'spec-links', `unknown spec section ${section}`);
       return `[${section}](https://github.com/${repository}/blob/main/${specPath}#${anchor(heading || '')})`;
     });
     nodes.push(node);
@@ -262,18 +314,19 @@ export function buildPlan(text, { specPath, repository, labels }) {
       ]);
     checkLabels(node);
     if (!/^P[0-3]$/.test(node.priority))
-      fail(node.ref, `invalid priority ${node.priority}`);
+      fail(node.ref, 'priority', `invalid priority ${node.priority}`);
     if (node.kind === 'EPIC') {
       if (seenTitles.has(node.title.toLowerCase()))
-        fail(node.ref, `duplicate title ${node.title}`);
+        fail(node.ref, 'unique-titles', `duplicate title ${node.title}`);
       seenTitles.add(node.title.toLowerCase());
       if (!nodes.some((n) => n.parent === node.ref))
-        fail(node.ref, 'phase has no slices');
+        fail(node.ref, 'phase-fields', 'phase has no slices');
     }
     for (const blocker of node.blockedBy) {
       if (!byRef.has(blocker))
         fail(
           node.ref,
+          deferred.has(blocker) ? 'backlog-blocker' : 'blocked-by',
           deferred.has(blocker)
             ? `blocked by deferred slice ${blocker}; resolve before filing`
             : `unknown blocked-by slice ${blocker}`,
@@ -289,19 +342,29 @@ export function buildPlan(text, { specPath, repository, labels }) {
         declared.length !== children.length ||
         declared.some((id) => !children.includes(id))
       )
-        fail(node.ref, 'Split into must list exactly its nested children');
+        fail(
+          node.ref,
+          'split-slice',
+          'Split into must list exactly its nested children',
+        );
     }
   }
-  if (nodes.length === 1) fail('§20', 'no active phases or slices');
+  if (nodes.length === 1)
+    fail('§20', 'plan-sections', 'no active phases or slices');
   errors.push(...cycles(nodes));
   for (const node of nodes) {
+    const external = node.fields?.['Cross-spec prerequisites'];
+    const externalNote =
+      external && !/^none$/i.test(external)
+        ? `\n\nCross-spec prerequisites: ${external}`
+        : '';
     const parentKind = byRef.get(node.parent)?.kind;
     const parent = `### Parent ${parentKind === 'EPIC' ? 'epic' : 'issue'}\n\n${node.parent || 'None'}`;
     const specLink = `https://github.com/${repository}/blob/main/${specPath}`;
     node.body =
       node.kind === 'LEAF'
-        ? `${parent}\n\n### Outcome\n\nPlan ID: ${node.ref}\n\n${node.title}\n\n### Acceptance criteria\n\n${node.fields.Acceptance}\n\nDefinition of done (§20.3):\n\n${done}\n\n### Implementation notes\n\nSpec: ${node.specLinks.join(', ')}\n\nFiles: ${node.fields.Files}\n\nProvides: ${node.fields.Provides}\n\n### Validation\n\nSatisfy the acceptance criteria and §20.3 using the checks in the linked spec and AGENTS.md.\n\n### Dependencies\n\n${node.blockedBy.join(', ') || 'None'}`
-        : `${parent}\n\n### What\n\n${node.kind === 'EPIC' ? node.goal : node.title}\n\n${node.fields ? `Plan ID: ${node.ref}\n\n` : ''}### Why\n\nDeliver [${name}](${specLink}) within this plan's boundaries.\n\n### How\n\n${node.kind === 'EPIC' ? `Exit criteria: ${node.exit}` : node.fields ? `Provides: ${node.fields.Provides}\n\nFiles: ${node.fields.Files}\n\nSpec: ${node.specLinks.join(', ')}\n\nScope inherited by children:\n\n${node.fields.Acceptance}\n\n${done}` : 'Complete the phase epics through their native sub-issues.'}\n\nChildren: ${nodes
+        ? `${parent}\n\n### Outcome\n\nPlan ID: ${node.ref}\n\n${node.title}\n\n### Acceptance criteria\n\n${node.fields.Acceptance}\n\nDefinition of done (§20.3):\n\n${done}\n\n### Implementation notes\n\nSpec: ${node.specLinks.join(', ')}\n\nFiles: ${node.fields.Files}\n\nProvides: ${node.fields.Provides}${externalNote}\n\n### Validation\n\nSatisfy the acceptance criteria and §20.3 using the checks in the linked spec and AGENTS.md.\n\n### Dependencies\n\n${node.blockedBy.join(', ') || 'None'}`
+        : `${parent}\n\n### What\n\n${node.kind === 'EPIC' ? node.goal : node.title}\n\n${node.fields ? `Plan ID: ${node.ref}\n\n` : ''}### Why\n\nDeliver [${name}](${specLink}) within this plan's boundaries.\n\n### How\n\n${node.kind === 'EPIC' ? `Exit criteria: ${node.exit}` : node.fields ? `Provides: ${node.fields.Provides}${externalNote}\n\nFiles: ${node.fields.Files}\n\nSpec: ${node.specLinks.join(', ')}\n\nScope inherited by children:\n\n${node.fields.Acceptance}\n\n${done}` : 'Complete the phase epics through their native sub-issues.'}\n\nChildren: ${nodes
             .filter((n) => n.parent === node.ref)
             .map((n) => n.ref)
             .join(', ')}\n\nBlocked by: ${node.blockedBy.join(', ') || 'None'}`;
@@ -326,7 +389,9 @@ function cycles(nodes) {
   const visited = new Set();
   const visit = (ref, chain = []) => {
     if (visiting.has(ref)) {
-      found.push(`${ref}: dependency cycle ${[...chain, ref].join(' -> ')}`);
+      found.push(
+        `${ref}: [acyclic-blockers] dependency cycle ${[...chain, ref].join(' -> ')}`,
+      );
       return;
     }
     if (visited.has(ref)) return;

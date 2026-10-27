@@ -327,12 +327,37 @@ This section is the backlog source for building the component. It is written to 
 - Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. Use `/mcc-create-github-issue` for ad hoc issues outside a spec plan.
 - **Size** is XS, S or M. Split a slice by independently testable behavior when it outgrows one reviewable PR; the original Plan ID becomes the container.
 - A **split slice** keeps its original heading and all required slice fields, adds `- **Split into:** P0.2.1, P0.2.2`, and puts each child under a five-hash heading such as `##### P0.2.1 <Child title> (S)`. Each child has all slice fields, a stable ID extending its parent, and independently testable Acceptance bullets. One split level is supported.
-- **Priority** is optional (`- **Priority:** P0|P1|P2|P3`), default P2. **Labels** is optional (`- **Labels:** enhancement, severity: none, package: contracts`), with names from `.github/labels.json`. Without it, leaves use enhancement, severity: none, and package/area labels inferred from Files (area: repository when no package is named). Phase epics default to epic, severity: none, area: repository; the root defaults to severity: none, area: repository. Only the triager forms independence groups.
-- **Blocked by** lists Plan IDs. Create native blocked-by links after every issue in the batch exists.
+- **Priority** is optional (`- **Priority:** P0|P1|P2|P3`), default P2. **Labels** is optional (`- **Labels:** enhancement, severity: none, package: contracts`), with names from `.github/labels.json`. Without it, leaves use enhancement, severity: none, and package/area labels inferred from Files (area: repository when no package is named). Phase epics default to epic, severity: none, area: repository; the root defaults to severity: none, area: repository.
+- **Blocked by** lists local Plan IDs. Create native blocked-by links after every issue in the batch exists.
+- **Cross-spec prerequisites** is optional and records slices in other specs, such as `spec 2.3 P5.2`. Filing copies it into the issue's implementation notes and creates no link, because the other spec's Plan IDs are not issues in this plan.
 - **Acceptance** bullets become the issue's acceptance criteria verbatim. Every slice also inherits §20.3.
 - **Spec** lists the sections the implementer must read. Link them; this document stays the source of truth.
-- An active slice cannot depend on an excluded Backlog slice. Resolve that scope in the spec before filing. Blocked-by entries name slices in this plan only; references to another spec need a resolved local delivery plan before filing.
+- **Files** and **Provides** become the issue's implementation notes, which the delivery queue reads as the slice's file and contract ownership.
 - Plan IDs are stable. Deferred slices keep their IDs and move to the backlog phase; new slices take the next free number in their phase.
+- **Parallel delivery** comes from triage, never from this plan. Only `mcc-issue-triager` forms independence groups, under `.agents/independence-groups.md`, and §20.4 parallel lanes are context for it, never groups. The delivery queue pairs two leaves only when both are size M, both sit directly under one container whose independence record is valid and puts them in different groups, and their Files and Provides do not overlap. A shared path prefix or contract name keeps two slices sequential, and delivery stays sequential unless a person asks for parallel delivery.
+
+> Guide: `node scripts/spec-to-issues.mjs plan <spec-path>` checks these rules before filing and rejects the whole plan on any violation. It reports each one as `<owner>: [<rule>] <message>`, where the owner is the phase, slice, or section that breaks the rule. Keep this table in the template; a spec does not copy it.
+>
+> | Rule | Requirement |
+> | --- | --- |
+> | `spec-title` | The document starts with `# <Component name>: Technical Specification`. |
+> | `plan-sections` | §20 has `### 20.1`, `### 20.2` and `### 20.3` headings, §20.3 has bullets, and at least one active phase has a slice. |
+> | `phase-heading` | A phase heading uses three hashes and reads `Phase <n>: <Title>`. |
+> | `phase-fields` | An active phase has `**Goal:**`, `**Exit criteria:**` and at least one slice. |
+> | `slice-heading` | A slice heading sits inside a phase, uses four hashes (five for a split child), and reads `P<n>.<m> <Title> (XS\|S\|M)`. |
+> | `slice-fields` | A slice has Blocked by, Spec, Files, Provides and Acceptance, and Acceptance has bullets. |
+> | `split-slice` | A split slice lists exactly its five-hash children in Split into, and each child ID extends the split slice's ID. |
+> | `blocked-by` | Blocked by is exactly `none` or comma-separated Plan IDs, each naming an active slice in this plan. |
+> | `cross-spec-prerequisites` | Cross-spec prerequisites is `none` or comma-separated `spec <number> <Plan ID>` entries. Another spec's slice never goes in Blocked by. |
+> | `files` | Files is one line of comma-separated backticked paths, or `` `none` `` for a slice that changes no source files. Two `none` slices count as overlapping. |
+> | `provides` | Provides is one line of comma-separated shared contract names, or `none`. |
+> | `spec-links` | Spec lists `§` references, and each names a section or numbered item in this document. |
+> | `unique-ids` | Plan IDs and phase numbers are unique. |
+> | `unique-titles` | Phase and slice titles are unique, ignoring case. |
+> | `acyclic-blockers` | Blockers form no cycle, counting a split slice as waiting on its children. |
+> | `backlog-blocker` | No active slice is blocked by a Backlog slice. Resolve that scope in the spec before filing. |
+> | `priority` | Priority is P0, P1, P2 or P3. |
+> | `labels` | Every label is in `.github/labels.json`. |
 
 ### 20.2 Seam contracts
 
@@ -359,9 +384,10 @@ A change to a contract updates every consumer in the same PR.
 #### P0.1 <Slice title> (<XS|S|M>)
 
 - **Blocked by:** <none | P<n>.<m>, ...>
+- **Cross-spec prerequisites:** <optional: spec <n.m> P<x>.<y>, ...>
 - **Spec:** <§x, §y>
-- **Files:** <paths the slice creates or changes>
-- **Provides:** <the functions, types or resources later slices consume>
+- **Files:** <backticked paths the slice creates or changes, or `none`>
+- **Provides:** <the functions, types or resources later slices consume, or none>
 - **Acceptance:**
   - <Observable, testable criterion.>
   - <Failure or edge case criterion.>

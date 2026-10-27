@@ -1760,9 +1760,9 @@ test('spec plans require offline validation, triage, confirmation and journaled 
     for (const rule of [
       'Before any GitHub write',
       'scripts/spec-to-issues.mjs plan',
-      'duplicate Plan IDs or titles',
-      'dependency cycles',
-      'unknown labels',
+      'rule table in `specs/TEMPLATE.md` §20.1',
+      '`<owner>: [<rule>] <message>`',
+      'Any violation rejects the whole plan',
       'After pre-flight and before printing the tree',
       'for the whole plan',
       '--role issue-triager',

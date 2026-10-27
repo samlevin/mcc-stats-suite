@@ -73,11 +73,22 @@ File active phases; exclude Backlog.
 #### P0.3 Describe storage API (XS)
 
 - **Blocked by:** none
+- **Cross-spec prerequisites:** spec 2.3 P5.2
 - **Spec:** §3
-- **Files:** `docs/storage.md`
-- **Provides:** API documentation
+- **Files:** `docs/storage.md`, `docs/index.md`
+- **Provides:** API documentation, Storage glossary
 - **Acceptance:**
   - Documentation matches the storage port.
+
+#### P0.4 Measure storage limits (XS)
+
+- **Blocked by:** none
+- **Cross-spec prerequisites:** none
+- **Spec:** §16
+- **Files:** `none`
+- **Provides:** none
+- **Acceptance:**
+  - The measured limits are recorded on the issue.
 
 ### Phase 1: Backlog (not filed with v1)
 
