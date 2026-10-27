@@ -21,7 +21,7 @@ const isPullRequestTarget = (definition) =>
 
 // Expressions that name the pull request's head or merge commit, branch, or ref.
 const PR_HEAD =
-  /github\.event\.pull_request\.(?:head\.|merge_commit_sha)|github\.head_ref|refs\/pull\/|pull\/[^/\n]*\/(?:head|merge)\b/;
+  /github\.event\.pull_request\.(?:head\.|merge_commit_sha)|github\.head_ref|GITHUB_HEAD_REF|refs\/pull\/|pull\/[^/\n]*\/(?:head|merge)\b/;
 // Expressions that name the base repository.
 const BASE_REPOSITORY = new Set([
   'github.repository',
@@ -51,6 +51,11 @@ const untrustedCode = (definition) => {
   if (!isPullRequestTarget(definition)) return [];
   const problems = [];
   for (const [id, job] of Object.entries(definition.jobs ?? {})) {
+    // A called workflow runs with this event's token and secrets, but its
+    // own trigger is `workflow_call`, so its steps are not checked here.
+    if (typeof job?.uses === 'string') {
+      problems.push(`${id} calls a reusable workflow: ${job.uses}`);
+    }
     (job?.steps ?? []).forEach((step, index) => {
       const label = `${id} step ${index + 1} (${step.name ?? step.uses ?? 'run'})`;
       const env = envText(definition.env, job.env, step.env);
@@ -200,6 +205,7 @@ test('a run step that fetches the pull request head fails', () => {
     run('git -c protocol.version=2 fetch origin pull/1/head'),
     run('git -C "$DIR" fetch origin ${{ github.event.pull_request.head.sha }}'),
     run('|\n          git \\\n            fetch origin pull/1/head'),
+    run('git fetch origin "$GITHUB_HEAD_REF"'),
     run(
       'git fetch origin "$HEAD_SHA"',
       '        env:\n          HEAD_SHA: ${{ github.event.pull_request.head.sha }}\n',
@@ -231,6 +237,17 @@ test('a run step that checks out the pull request with gh fails', () => {
       script,
     );
   }
+});
+
+test('a job that calls a reusable workflow fails', () => {
+  assert.deepEqual(
+    untrustedCode(
+      parse(
+        'on: pull_request_target\njobs:\n  call:\n    uses: ./.github/workflows/build.yml\n',
+      ),
+    ),
+    ['call calls a reusable workflow: ./.github/workflows/build.yml'],
+  );
 });
 
 test('the same steps pass outside pull_request_target', () => {
