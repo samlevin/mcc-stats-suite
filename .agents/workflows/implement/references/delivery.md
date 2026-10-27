@@ -48,7 +48,7 @@ When a medium attempt exposes a qualifying unresolved correctness problem, stop 
 
 ## Stack
 
-Split into stacked layers only when each layer is reviewable on its own; line count alone does not require a stack. Roughly 400 changed production lines against the immediate parent (tests, docs, generated files, and lockfiles excluded{{#infrastructure}}; infrastructure counts{{/infrastructure}}) is the point to consider one. Early layers reference the issue; only the final layer closes it. {{#infrastructure}}Infrastructure that CI applies only from pull requests targeting `main` is never a stacked layer unless no layer needs the apply before it is retargeted to `main`; say so in the PR body. {{/infrastructure}}Run every stack operation yourself with the {{prefix}}stack skill, in the worktree you created: building or adopting layers, stacking on a prerequisite, linking PRs, cascading rebases, and syncing after a merge. Resolve semantic conflicts yourself.
+Split into stacked layers only when each layer is reviewable on its own; line count alone does not require a stack. Roughly 400 changed production lines against the immediate parent (tests, docs, generated files, and lockfiles excluded{{#infrastructure}}; infrastructure counts{{/infrastructure}}) is the point to consider one. Early layers reference the issue; only the final layer closes it. {{#infrastructure}}Infrastructure that CI applies only from pull requests targeting `main` is never a stacked layer unless no layer needs the apply before it is retargeted to `main`; say so in the PR body. {{/infrastructure}}Run every stack operation yourself with the {{prefix}}stack skill, in the worktree you created: building or adopting layers, stacking on a prerequisite, linking PRs, cascading rebases, and syncing after a merge. Resolve semantic conflicts yourself. The skill first checks that the `gh stack` extension is installed; when it is missing, an isolated implementer returns `BLOCKED: gh stack not installed` as [Result](#result) describes, and inline delivery asks the person to install it.
 
 <!-- claude-only -->
 Load it with the Skill tool (`{{prefix}}stack`).
@@ -84,7 +84,7 @@ For a PR URL, read the PR's state, head and base, review comments, and the issue
 
 ## Never
 
-Never: merge, enable auto-merge, set an issue's status to In review or Done, deploy, apply infrastructure, change repository or workstation settings, invoke {{prefix}}security-reviewer, or wait for, poll, or rerun remote CI. Report CI status as-is and hand off. If you stop early, release the claim with a comment.
+Never: merge, enable auto-merge, set an issue's status to In review or Done, deploy, apply infrastructure, change repository or workstation settings, invoke {{prefix}}security-reviewer, or wait for, poll, or rerun remote CI. Report CI status as-is and hand off. If you stop early, release the claim with a comment, except for `BLOCKED: gh stack not installed`, which keeps the claim.
 
 ## Result
 
@@ -103,9 +103,11 @@ Effort: <level>; rule=<default|user override|stable rule ID>; evidence=<referenc
 Check: <command> | <PASS|FAIL|not run>  (one line per check)
 Review: <APPROVE|REQUEST CHANGES|BLOCKED|skipped|historical>; base=<SHA>; head=<SHA>
 Project: <state as read>
-Blocker: <none or concrete blocker; escalation also names open work>
+Blocker: <none or concrete blocker; escalation also names open work; `gh stack not installed` also gives the `gh --version` output>
 Requested settings: Policy: <as dispatched, including decision provenance>
 Requested settings: Policy: <as sent to each reviewer, in spawn order>
 ```
 
 Inline delivery substitutes its `Advisory policy:` line for its own requested settings. A review-depth fallback retains the main thread's reviewer settings too. An escalation request includes completed checks and open work before ownership ends; no overlapping replacement work is allowed.
+
+When the `gh stack` extension check in {{prefix}}stack fails, return `Status: BLOCKED` with `Blocker: gh stack not installed; <gh --version output>`. Keep the claim, branch, and worktree, and leave uncommitted work in place. The dispatcher continues this same agent after the person installs the extension, and you resume from the stack step.
