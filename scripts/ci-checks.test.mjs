@@ -842,7 +842,8 @@ test('actual Turbo selects affected consumers and invalidates caches for shared 
           .filter((task) => task.task === 'ci:test')
           .map((task) => task.package)
           .sort(),
-        expected.sort(),
+        // @mcc/contracts holds only types, so it has no tests.
+        expected.filter((name) => name !== '@mcc/contracts').sort(),
       );
       assert.ok(
         staticPlan.some((task) => task.taskId === '//#test:scripts'),
