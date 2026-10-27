@@ -132,6 +132,8 @@ jobs:
       id-token: write
     env:
       MCC_BUILD_ENVIRONMENT: dev
+      # `build` already type-checks every CDK source, so synthesis only transpiles.
+      TS_NODE_TRANSPILE_ONLY: 'true'
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -176,6 +178,8 @@ jobs:
       id-token: write
     env:
       MCC_BUILD_ENVIRONMENT: dev
+      # `build` already type-checks every CDK source, so synthesis only transpiles.
+      TS_NODE_TRANSPILE_ONLY: 'true'
     steps:
       - name: Check out repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
