@@ -263,6 +263,44 @@ export function ghGraphql(
   return result.data;
 }
 
+// GitHub answers a lookup of an issue that was deleted or transferred out of
+// the repository with a null `issue`, `node`, or `content` field and a
+// NOT_FOUND error at that field's path. Any other error, including a missing
+// repository or project, still fails.
+const ISSUE_FIELDS = new Set(['issue', 'node', 'content']);
+function missingIssueOnly(result) {
+  return result.errors.every((error) => {
+    const path = error?.path;
+    if (
+      error?.type !== 'NOT_FOUND' ||
+      !Array.isArray(path) ||
+      !ISSUE_FIELDS.has(path.at(-1))
+    )
+      return false;
+    return path.reduce((value, key) => value?.[key], result.data) === null;
+  });
+}
+
+// The GraphQL client of the tracker scripts: a missing issue reads as null.
+export function trackerGraphql(query, variables, run = execFileSync) {
+  return ghGraphql(query, variables, run, missingIssueOnly);
+}
+
+export function missingIssue(number) {
+  return `Issue #${number} no longer exists in the repository; skipping`;
+}
+
+// A single-issue run whose issue was deleted or transferred out of the
+// repository after the run was queued warns and succeeds.
+export class MissingIssueError extends Error {
+  constructor(number) {
+    super(missingIssue(number));
+    this.name = 'MissingIssueError';
+  }
+}
+
+export const warning = (message) => console.log(`::warning::${message}`);
+
 // Returns the response body text; errors carry `httpStatus` when GitHub sent one.
 export function ghRest(args, run = execFileSync) {
   const response = ghRequest('REST', args, { run });
@@ -330,7 +368,8 @@ export async function listItems(api, projectId) {
       } } }`,
       { id: projectId, cursor, filter: SWEEP_FILTER },
     );
-    return data.node?.items;
+    if (!data.node) throw new Error('MCC delivery project is unavailable');
+    return data.node.items;
   });
 }
 
@@ -348,6 +387,8 @@ export async function issueItems(api, number) {
       }`,
       { owner, name, number, cursor },
     );
+    if (data.repository && data.repository.issue === null)
+      throw new MissingIssueError(number);
     return data.repository?.issue?.projectItems ?? EMPTY;
   });
 }
@@ -420,6 +461,7 @@ export async function reconcile({
   dryRun = true,
   issueNumber,
   log = console.log,
+  warn = warning,
 }) {
   if (
     issueNumber !== undefined &&
@@ -435,6 +477,10 @@ export async function reconcile({
   let candidates = 0;
   let updated = 0;
   for (const listed of items) {
+    if (listed.type === 'ISSUE' && !listed.content) {
+      warn(`Project item ${listed.id} has no readable issue; skipping`);
+      continue;
+    }
     if (
       listed.type !== 'ISSUE' ||
       listed.content?.repository?.nameWithOwner !== REPOSITORY ||
@@ -450,8 +496,15 @@ export async function reconcile({
       continue;
     // Re-read the item's project fields and issue metadata at the write boundary.
     const fresh = await readItem(api, listed.id, context);
+    if (!fresh) {
+      warn(`Issue #${listed.content.number} left the project; skipping`);
+      continue;
+    }
+    if (fresh.content?.repository?.nameWithOwner !== REPOSITORY) {
+      warn(missingIssue(listed.content.number));
+      continue;
+    }
     if (
-      !fresh ||
       !eligible(fresh) ||
       (issueNumber !== undefined && fresh.content.number !== issueNumber)
     )
@@ -508,6 +561,8 @@ export async function reconcileEpicLabels({
     } }`,
       { number: issueNumber },
     );
+    if (data.repository && data.repository.issue === null)
+      throw new MissingIssueError(issueNumber);
     epics = data.repository?.issue ? [data.repository.issue] : [];
   }
   for (const epic of epics) {
@@ -556,13 +611,14 @@ export function graphqlBudget(run = execFileSync) {
 // Runs one tracker task between two readings of the GraphQL budget and
 // returns the exit code. A sweep skips below SWEEP_FLOOR. A single-issue run
 // that hits the rate limit warns and succeeds, because the next scheduled
-// sweep repeats its work; every other failure fails the run.
+// sweep repeats its work. A run whose issue no longer exists in the
+// repository warns and succeeds. Every other failure fails the run.
 export async function runTracker({
   sweep,
   task,
   budget = graphqlBudget,
   log = console.log,
-  warn = (message) => console.log(`::warning::${message}`),
+  warn = warning,
   error = console.error,
 }) {
   const read = () => {
@@ -588,7 +644,12 @@ export async function runTracker({
   try {
     await task();
   } catch (cause) {
-    if (!sweep && cause instanceof GitHubError && cause.kind === 'rate-limit')
+    if (cause instanceof MissingIssueError) warn(cause.message);
+    else if (
+      !sweep &&
+      cause instanceof GitHubError &&
+      cause.kind === 'rate-limit'
+    )
       warn(
         `${failureMessage(cause)} The next scheduled sweep reconciles this issue.`,
       );
@@ -655,8 +716,8 @@ if (
     process.exitCode = await runTracker({
       sweep: config.issueNumber === undefined,
       task: async () => {
-        await reconcileEpicLabels({ api: ghGraphql, ...config });
-        await reconcile({ api: ghGraphql, ...config });
+        await reconcileEpicLabels({ api: trackerGraphql, ...config });
+        await reconcile({ api: trackerGraphql, ...config });
       },
     });
   } catch (error) {

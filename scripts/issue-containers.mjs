@@ -4,10 +4,13 @@ import {
   configuration,
   discover,
   failureMessage,
-  ghGraphql,
+  MissingIssueError,
+  missingIssue,
   paginate,
   REPOSITORY,
   runTracker,
+  trackerGraphql,
+  warning,
 } from './issue-triage.mjs';
 
 const MARKER = 'automation: container-closed';
@@ -67,7 +70,10 @@ async function issueHierarchy(api, number) {
     { number },
   );
   const root = data.repository?.issue;
-  if (!root) throw new Error('Requested issue is unavailable');
+  if (!root) {
+    if (data.repository) throw new MissingIssueError(number);
+    throw new Error('Requested issue is unavailable');
+  }
   const byId = new Map([[root.id, root]]);
   const edges = new Map();
   const selected = new Set();
@@ -157,6 +163,7 @@ async function marker(api, sweep) {
 }
 
 // A fresh read of one container: state, completion, marker, and project items.
+// Null when the issue was deleted.
 async function snapshot(api, id) {
   const data = await api(
     `query($id: ID!) { node(id: $id) { ... on Issue { ${ISSUE}
@@ -165,7 +172,7 @@ async function snapshot(api, id) {
     { id },
   );
   const issue = data.node;
-  if (!issue?.id) throw new Error('Container became inaccessible');
+  if (!issue?.id) return null;
   const labels = issue.labels.pageInfo.hasNextPage
     ? await connection(api, id, 'labels', LABELS)
     : issue.labels.nodes.filter(Boolean);
@@ -188,6 +195,7 @@ export async function reconcileContainers({
   dryRun = true,
   issueNumber,
   log = console.log,
+  warn = warning,
 }) {
   if (
     issueNumber !== undefined &&
@@ -214,13 +222,19 @@ export async function reconcileContainers({
   selected.forEach(visit);
   const label = await marker(api, sweep);
   let context;
-  async function setStatus(record, status, { onlyIfChanged = false } = {}) {
+  // The project item a status write would change, or undefined when none would.
+  async function statusItem(record, status, onlyIfChanged) {
     context ??= await discover(api);
     const item = record.items.find(
       (item) => item.project?.id === context.projectId,
     );
     if (!item || (onlyIfChanged && item.fieldValueByName?.name === status))
-      return;
+      return undefined;
+    return item;
+  }
+  async function setStatus(record, status, { onlyIfChanged = false } = {}) {
+    const item = await statusItem(record, status, onlyIfChanged);
+    if (!item) return;
     const field = context.fields.Status;
     const option = field.options.find((option) => option.name === status);
     if (!option) throw new Error(`Missing project status ${status}`);
@@ -237,21 +251,32 @@ export async function reconcileContainers({
       },
     );
   }
+  // A container deleted or transferred out of the repository during the run
+  // is skipped with a warning.
+  async function read(id) {
+    const issue = await snapshot(api, id);
+    if (issue?.repository.nameWithOwner === REPOSITORY) return issue;
+    warn(missingIssue(byId.get(id).number));
+    return null;
+  }
   const changed = new Set();
   let updated = 0;
   for (const id of ordered) {
     // A sweep decides from its listing until a child's state changes in this
     // run; a single-issue run reads each container in its hierarchy.
     const stale = (edges.get(id) ?? []).some((child) => changed.has(child));
-    let current =
-      sweep && !stale
-        ? {
-            ...byId.get(id),
-            marked: label.marked.has(id),
-            items: label.marked.get(id),
-          }
-        : await snapshot(api, id);
+    // A decision from the listing is confirmed by a fresh read before its
+    // first write, so a container deleted since the listing is skipped.
+    const listed = sweep && !stale;
+    let current = listed
+      ? {
+          ...byId.get(id),
+          marked: label.marked.has(id),
+          items: label.marked.get(id),
+        }
+      : await read(id);
     if (
+      !current ||
       current.repository.nameWithOwner !== REPOSITORY ||
       !current.subIssuesSummary.total
     )
@@ -266,14 +291,17 @@ export async function reconcileContainers({
       );
       if (dryRun) continue;
       // Mark before closing so a partial run can recover without losing automation ownership.
-      if (close && !current.marked)
+      if (close && !current.marked) {
+        if (listed && !(await read(id))) continue;
         await api(
           `mutation($id: ID!, $label: ID!) {
         addLabelsToLabelable(input: { labelableId: $id, labelIds: [$label] }) { clientMutationId }
       }`,
           { id, label: label.id },
         );
-      const fresh = await snapshot(api, id);
+      }
+      const fresh = await read(id);
+      if (!fresh) continue;
       const stillComplete =
         fresh.subIssuesSummary.total > 0 &&
         fresh.subIssuesSummary.total === fresh.subIssuesSummary.completed;
@@ -296,7 +324,17 @@ export async function reconcileContainers({
       if (close) continue;
     } else if (current.marked && !dryRun) {
       // Repair status if a prior state mutation succeeded but its project update failed.
-      if (!current.items) current = await snapshot(api, id);
+      if (
+        !current.items ||
+        (listed &&
+          (await statusItem(
+            current,
+            current.state === 'CLOSED' ? 'Done' : 'Ready',
+            true,
+          )))
+      )
+        current = await read(id);
+      if (!current) continue;
       if (current.marked)
         await setStatus(
           current,
@@ -310,9 +348,9 @@ export async function reconcileContainers({
     // Runs for sibling issues reconcile the same container concurrently. A
     // container that is closed or complete again may belong to another run
     // that marked it and is about to close it, so it keeps the marker.
-    const after = await snapshot(api, id);
+    const after = await read(id);
     if (
-      after.state === 'OPEN' &&
+      after?.state === 'OPEN' &&
       after.marked &&
       after.subIssuesSummary.total !== after.subIssuesSummary.completed
     )
@@ -337,7 +375,7 @@ if (
       process.env.GH_TOKEN = process.env.MCC_PROJECT_TOKEN;
     process.exitCode = await runTracker({
       sweep: config.issueNumber === undefined,
-      task: () => reconcileContainers({ api: ghGraphql, ...config }),
+      task: () => reconcileContainers({ api: trackerGraphql, ...config }),
     });
   } catch (error) {
     if (error instanceof CliHelp) console.log(error.message);
