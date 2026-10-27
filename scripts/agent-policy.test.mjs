@@ -817,7 +817,22 @@ test('a container runs as a dependency queue in the owning thread', () => {
   // Concurrent leaves really run at the same time in each tool.
   assert.match(
     section(files.get(QUEUE[0]), 'Parallel exception'),
-    /sending their Agent calls together in one message/,
+    /`run_in_background: true`/,
+  );
+  // Claude records each background result as it arrives and lets a finished
+  // group start its next leaf while other groups still run.
+  for (const fragment of [
+    'Record each result as its notification arrives',
+    'the next ready leaf in that group may start while leaves in other groups still run',
+    'Before any early return, wait for every running implementer and record each result',
+  ])
+    assert.ok(
+      section(files.get(QUEUE[0]), 'Parallel exception').includes(fragment),
+      fragment,
+    );
+  assert.doesNotMatch(
+    section(files.get(QUEUE[0]), 'Parallel exception'),
+    /blocks until it returns/,
   );
   assert.match(
     section(files.get(QUEUE[1]), 'Parallel exception'),
