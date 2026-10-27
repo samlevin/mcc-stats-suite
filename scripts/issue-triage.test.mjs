@@ -22,6 +22,7 @@ import {
   GitHubError,
   ghRest,
   graphqlBudget,
+  MissingIssueError,
   paginate,
   readItem,
   reconcile,
@@ -30,6 +31,7 @@ import {
   REPOSITORY,
   runTracker,
   SWEEP_FLOOR,
+  trackerGraphql,
 } from './issue-triage.mjs';
 
 // `gh api --include` output: a status line, CRLF headers, a blank line, the body.
@@ -483,7 +485,7 @@ function fakeGh(t) {
     ].join('\n'),
   );
   chmodSync(join(directory, 'gh'), 0o755);
-  return (script, args, env = {}) =>
+  const run = (script, args, env = {}) =>
     spawnSync(
       process.execPath,
       [fileURLToPath(new URL(script, import.meta.url)), ...args],
@@ -499,6 +501,7 @@ function fakeGh(t) {
         },
       },
     );
+  return Object.assign(run, { directory });
 }
 
 const budgetLines = (stdout) =>
@@ -826,6 +829,8 @@ test('pagination keeps every page, skips deleted nodes, and rejects broken curso
 // A mocked MCC delivery project. Listing and single-issue reads return each
 // item with the first page of its field values and labels nested; issue #1's
 // item overflows both, so its remaining pages come from follow-up reads.
+const EMPTY = { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } };
+
 function mockApi({
   race,
   multipleSeverity = false,
@@ -876,7 +881,10 @@ function mockApi({
       number: second || state.renumbered ? 2 : 1,
       state: state.closed ? 'CLOSED' : 'OPEN',
       repository: {
-        nameWithOwner: state.foreign ? 'other/repo' : REPOSITORY,
+        nameWithOwner:
+          state.foreign || state.transferred?.includes(id)
+            ? 'other/repo'
+            : REPOSITORY,
       },
       labels: second
         ? connection([{ name: 'severity: none' }])
@@ -947,7 +955,13 @@ function mockApi({
       state.queries.push(`issue-items-${variables.number}`);
       assert.match(query, /includeArchived: false/);
       const id = { 1: 'item', 2: 'item-2' }[variables.number];
-      if (!id || !listed().includes(id)) return { repository: { issue: null } };
+      // Issue 404 was deleted; any other unknown issue is outside the project.
+      if (!id || !listed().includes(id))
+        return {
+          repository: {
+            issue: variables.number === 404 ? null : { projectItems: EMPTY },
+          },
+        };
       // The same issue in another project is never read or written.
       const own = node(id);
       const elsewhere = { ...own, id: 'elsewhere', project: { id: 'x' } };
@@ -974,6 +988,7 @@ function mockApi({
     if (query.includes('... on ProjectV2Item {')) {
       state.queries.push(`read-${variables.id}`);
       state.readItems.push(variables.id);
+      if (state.deleted?.includes(variables.id)) return { node: null };
       const fields = {
         Status: variables.id === 'item-2' ? state.otherStatus : state.status,
         Priority: 'P2',
@@ -1541,4 +1556,227 @@ test('the sweep filter excludes exactly the statuses eligible() never moves', ()
     assert.equal(qualifies(Status), false, Status);
   for (const Status of [undefined, 'Inbox'])
     assert.equal(qualifies(Status), true, String(Status));
+});
+
+// GitHub's answer for an issue that was deleted or transferred out of the
+// repository: a null field and a NOT_FOUND error at its path.
+function notFound(data, path, extra = []) {
+  return ghFails(
+    httpResponse(
+      200,
+      {},
+      {
+        data,
+        errors: [
+          {
+            type: 'NOT_FOUND',
+            path,
+            message: 'Could not resolve to an Issue with the number of 5.',
+          },
+          ...extra,
+        ],
+      },
+    ),
+  );
+}
+
+test('the tracker client reads a missing issue as null and fails on every other error', () => {
+  const query = 'query { repository { issue(number: 5) { id } } }';
+  for (const [data, path] of [
+    [{ repository: { issue: null } }, ['repository', 'issue']],
+    [{ node: null }, ['node']],
+    [{ node: { content: null } }, ['node', 'content']],
+  ])
+    assert.deepEqual(trackerGraphql(query, {}, notFound(data, path)), data);
+  for (const [data, path, extra, kind] of [
+    [{ repository: null }, ['repository'], [], 'not-found'],
+    [{ user: { projectV2: null } }, ['user', 'projectV2'], [], 'not-found'],
+    [
+      { repository: { issue: { id: 'I' } } },
+      ['repository', 'issue'],
+      [],
+      'not-found',
+    ],
+    [{ repository: { issue: null } }, undefined, [], 'not-found'],
+    [
+      { repository: { issue: null } },
+      ['repository', 'issue'],
+      [{ type: 'FORBIDDEN', message: 'Resource not accessible' }],
+      'access',
+    ],
+  ])
+    assert.throws(
+      () => trackerGraphql(query, {}, notFound(data, path, extra)),
+      {
+        name: 'GitHubError',
+        kind,
+      },
+    );
+  assert.throws(
+    () =>
+      trackerGraphql(
+        query,
+        {},
+        ghFails(
+          httpResponse(200, exhausted, {
+            data: { repository: { issue: null } },
+            errors: [{ type: 'RATE_LIMITED', message: 'API rate limit' }],
+          }),
+        ),
+      ),
+    { kind: 'rate-limit' },
+  );
+});
+
+test('a single-issue run for a missing issue stops with MissingIssueError', async () => {
+  const { api, state } = mockApi();
+  await assert.rejects(
+    reconcile({ api, issueNumber: 404, dryRun: false, log: () => {} }),
+    (error) =>
+      error instanceof MissingIssueError &&
+      error.message ===
+        'Issue #404 no longer exists in the repository; skipping',
+  );
+  assert.deepEqual(state.mutations, []);
+  const epics = epicApi();
+  await assert.rejects(
+    reconcileEpicLabels({
+      api: async () => ({ repository: { issue: null } }),
+      dryRun: false,
+      issueNumber: 404,
+      log: () => {},
+    }),
+    MissingIssueError,
+  );
+  assert.deepEqual(epics.writes, []);
+});
+
+test('a sweep skips deleted and transferred issues with a warning and moves the rest', async () => {
+  for (const [change, warning] of [
+    [
+      (state) => (state.deleted = ['item']),
+      'Issue #1 left the project; skipping',
+    ],
+    [
+      (state) => (state.transferred = ['item']),
+      'Issue #1 no longer exists in the repository; skipping',
+    ],
+  ]) {
+    const { api, state } = mockApi({ additionalIssue: true });
+    // The listing still shows issue #1; it changes before the re-read.
+    const warnings = [];
+    const wrapped = async (query, variables) => {
+      if (query.includes('... on ProjectV2Item {') && variables.id === 'item')
+        change(state);
+      return api(query, variables);
+    };
+    assert.deepEqual(
+      await reconcile({
+        api: wrapped,
+        dryRun: false,
+        log: () => {},
+        warn: (line) => warnings.push(line),
+      }),
+      { candidates: 1, updated: 1 },
+    );
+    assert.deepEqual(warnings, [warning]);
+    assert.deepEqual(
+      state.mutations.map((mutation) => mutation.item),
+      ['item-2'],
+    );
+  }
+  const warnings = [];
+  const { api, state } = mockApi();
+  await reconcile({
+    api: async (query, variables) => {
+      const data = await api(query, variables);
+      if (query.includes('items(first: 100') && variables.cursor)
+        data.node.items.nodes.unshift({
+          id: 'gone',
+          type: 'ISSUE',
+          content: null,
+        });
+      return data;
+    },
+    dryRun: false,
+    log: () => {},
+    warn: (line) => warnings.push(line),
+  });
+  assert.deepEqual(warnings, [
+    'Project item gone has no readable issue; skipping',
+  ]);
+  assert.deepEqual(state.mutations.length, 1);
+});
+
+test('the tracker warns and succeeds when its issue no longer exists', async () => {
+  for (const sweep of [false, true]) {
+    const result = await tracker(
+      [budget(4000), budget(4000)],
+      async () => {
+        throw new MissingIssueError(5);
+      },
+      sweep,
+    );
+    assert.equal(result.status, 0);
+    assert.deepEqual(result.errors, []);
+    assert.deepEqual(result.warnings, [
+      'Issue #5 no longer exists in the repository; skipping',
+    ]);
+  }
+});
+
+test('tracker entry points skip a missing issue and still fail on other not-found errors', (t) => {
+  const run = fakeGh(t);
+  for (const script of ['issue-triage.mjs', 'issue-containers.mjs']) {
+    writeFileSync(
+      join(run.directory, 'graphql.txt'),
+      httpResponse(
+        200,
+        {},
+        {
+          data: { repository: { issue: null } },
+          errors: [
+            {
+              type: 'NOT_FOUND',
+              path: ['repository', 'issue'],
+              message: 'Could not resolve to an Issue with the number of 5.',
+            },
+          ],
+        },
+      ),
+    );
+    const missing = run(script, ['--apply', '--issue', '5']);
+    assert.equal(missing.status, 0, `${script}: ${missing.stderr}`);
+    assert.equal(missing.stderr, '', script);
+    assert.ok(
+      missing.stdout.includes(
+        '::warning::Issue #5 no longer exists in the repository; skipping\n',
+      ),
+      `${script}: ${missing.stdout}`,
+    );
+    writeFileSync(
+      join(run.directory, 'graphql.txt'),
+      httpResponse(
+        200,
+        {},
+        {
+          data: { repository: null },
+          errors: [
+            {
+              type: 'NOT_FOUND',
+              path: ['repository'],
+              message: 'Could not resolve to a Repository.',
+            },
+          ],
+        },
+      ),
+    );
+    const failed = run(script, ['--apply', '--issue', '5']);
+    assert.equal(failed.status, 1, script);
+    assert.equal(
+      failed.stderr,
+      'GitHub GraphQL request failed: NOT_FOUND: Could not resolve to a Repository.\n',
+      script,
+    );
+  }
 });

@@ -13,9 +13,16 @@ You run this skill yourself, in the worktree you created for the delivery, and y
 
 Authority: the delivery request covers building your own branches, pushing them, and linking their existing PRs into a native stack. It never covers merges, auto-merge, creating PRs (the delivery procedure opens them through REST), editing PR descriptions, or deleting branches or stacks.
 
+## Check the extension
+
+Every operation here needs the `gh stack` extension (`github/gh-stack`), because each one starts with `gh stack view` and build, adopt, and link run `gh stack` commands. Before you build, adopt, link, cascade, or sync, run `gh stack --help >/dev/null`. A zero exit means the extension is installed; run the check once per delivery. A non-zero exit means it is missing, and you change nothing:
+
+- In the main thread, stop and ask the person to run `! gh extension install github/gh-stack`. Installing an extension changes their workstation, so never run the install yourself. When they confirm, run the check again and continue only when it passes.
+- An isolated {{prefix}}implementer returns `BLOCKED: gh stack not installed` with the output of `gh --version`. It keeps its claim, branch, and worktree, so the dispatcher can continue the same implementer after the install.
+
 ## Inspect before every mutation
 
-1. Use current verified prerequisite facts, refreshing remote refs with `git fetch origin` when they may have moved. This updates only remote-tracking refs, never a local branch. Reuse unchanged inspection results within the operation; ownership, remote heads, and ancestry must still be current before mutation.
+1. Pass the [extension check](#check-the-extension). Use current verified prerequisite facts, refreshing remote refs with `git fetch origin` when they may have moved. This updates only remote-tracking refs, never a local branch. Reuse unchanged inspection results within the operation; ownership, remote heads, and ancestry must still be current before mutation.
 2. `git worktree list --porcelain`: note which worktree has each branch checked out.
 3. For each branch in the stack: its local head (`git rev-parse <branch>`), its remote head (`git ls-remote origin <branch>`), its intended parent (trunk `origin/main`, the previous layer, or a prerequisite's pushed head), and whether that parent is an ancestor (`git merge-base --is-ancestor <parent> <branch>`).
 4. `gh stack view --json` for the tracked stack. Its state lives in the shared git directory, so it can list other worktrees' stacks; act only on yours.
