@@ -4,7 +4,7 @@ Each account has a local OpenTofu bootstrap root, `infrastructure/<environment>/
 
 - an encrypted, versioned, deletion-protected S3 state bucket that requires TLS and retains noncurrent versions for 90 days; neither CI role operates the bootstrap state;
 - the GitHub Actions OIDC provider, unless the account already has one;
-- optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md), with an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role and, in dev, a second grant to manage the `CDKToolkitLocal` stack;
+- optionally, `mcc-stats-suite-<environment>-terrateam`, a role for [Terrateam](70-optional-terrateam.md), with an inline grant to manage only the `mcc-stats-suite-<environment>-github-turbo-cache` role (plus `mcc-stats-suite-dev-github-turbo-cache-read` in dev) and, in dev, a second grant to manage the `CDKToolkitLocal` stack;
 - `mcc-stats-suite-<environment>-github-cdk-deploy`, with `PowerUserAccess`, trusted only by the reusable deployment workflow on `main` in the matching GitHub Environment (see [Trusted deployment workflows](#trusted-deployment-workflows));
 - `mcc-stats-suite-workload-boundary`, the permissions boundary for application roles.
 
@@ -106,7 +106,7 @@ Repeat from `infrastructure/prod/bootstrap`. Each plan should change only the as
 
 ## CI roles for the foundation
 
-The bootstrap creates no generic CI role for the foundation. To apply it from CI/CD, give that system its own role in each account. It needs to manage the foundation's resources, including the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role with the `mcc-stats-suite-workload-boundary` permissions boundary, and to read and write the state bucket. Treat that role, and the workflow it trusts, as production access.
+The bootstrap creates no generic CI role for the foundation. To apply it from CI/CD, give that system its own role in each account. It needs to manage the foundation's resources, including the `mcc-stats-suite-<environment>-github-turbo-cache` IAM role (plus `mcc-stats-suite-dev-github-turbo-cache-read` in dev) with the `mcc-stats-suite-workload-boundary` permissions boundary, and to read and write the state bucket. Treat that role, and the workflow it trusts, as production access.
 
 `create_terrateam_role = true` creates a role that only Terrateam can assume. See [Apply the foundation with Terrateam](70-optional-terrateam.md#bootstrap-the-terrateam-role).
 

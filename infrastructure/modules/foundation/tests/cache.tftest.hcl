@@ -310,6 +310,37 @@ run "dev_github_cache_role" {
     ])
     error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
   }
+  assert {
+    condition     = aws_iam_role.github_cache_read[0].name == "mcc-stats-suite-dev-github-turbo-cache-read" && aws_iam_role.github_cache_read[0].permissions_boundary == "arn:aws:iam::000000000000:policy/mcc-stats-suite-workload-boundary" && aws_iam_role.github_cache_read[0].max_session_duration == 3600
+    error_message = "The dev read-only cache role must use the existing bootstrap workload boundary and a short-lived session."
+  }
+  assert {
+    condition = length(data.aws_iam_policy_document.cache_read_assume_role.statement) == 1 && alltrue([for statement in data.aws_iam_policy_document.cache_read_assume_role.statement :
+      statement.actions == toset(["sts:AssumeRoleWithWebIdentity"]) && length(statement.condition) == 3 && alltrue([for condition in statement.condition :
+        condition.test == "StringEquals" && (
+          condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:samlevin@1/mcc-stats-suite@2:pull_request"]) :
+          condition.variable == "token.actions.githubusercontent.com:aud" ? toset(condition.values) == toset(["sts.amazonaws.com"]) :
+          condition.variable == "token.actions.githubusercontent.com:repository" && toset(condition.values) == toset(["samlevin/mcc-stats-suite"])
+        )
+      ])
+    ])
+    error_message = "Only this repository's pull request subject may assume the read-only cache role."
+  }
+  assert {
+    condition     = alltrue([for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : statement.sid == "DenyInsecureTransport" ? true : anytrue([for condition in statement.condition : condition.variable == "aws:PrincipalArn" && toset(condition.values) == toset([output.github_turbo_cache_role_arn, "arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache-read"])])])
+    error_message = "Exactly the write and read-only cache roles must escape the bucket data/listing deny statements."
+  }
+  # Pull request code must never write the trusted cache: no PutObject, no
+  # multipart, no deletion, and no data key generation.
+  assert {
+    condition = length(data.aws_iam_policy_document.github_cache_read.statement) == 4 && alltrue([for statement in data.aws_iam_policy_document.github_cache_read.statement :
+      statement.sid == "ReadCacheObjects" ? statement.actions == toset(["s3:GetObject"]) && statement.resources == toset(["arn:aws:s3:::mcc-stats-suite-dev-000000000000-turbo-cache/turbogha/dev/*"]) :
+      statement.sid == "ListCacheHashCandidates" ? statement.actions == toset(["s3:ListBucket"]) && one(statement.condition).test == "StringLike" && one(statement.condition).variable == "s3:prefix" && toset(one(statement.condition).values) == toset(["turbogha/dev/*"]) :
+      statement.sid == "ReadCacheContracts" ? statement.actions == toset(["ssm:GetParameter"]) && statement.resources == toset([for name in ["bucket-name", "data-key-arn"] : "arn:aws:ssm:us-east-1:000000000000:parameter/mcc-ci/dev/turbo-cache/${name}"]) :
+      statement.sid == "DecryptCacheObjectsThroughS3" && statement.actions == toset(["kms:Decrypt"]) && length(statement.condition) == 2
+    ])
+    error_message = "The read-only cache role may only list, read, and decrypt the dev cache prefix and read its contracts; it must never write."
+  }
 }
 
 run "prod_github_cache_role" {
@@ -356,6 +387,10 @@ run "prod_github_cache_role" {
     ])
     error_message = "The action needs prefix-scoped listing/read/write and multipart abort, without deletion or bucket-wide access."
   }
+  assert {
+    condition     = length(aws_iam_role.github_cache_read) == 0 && length(aws_iam_role_policy.github_cache_read) == 0 && alltrue([for statement in data.aws_iam_policy_document.turbo_cache_bucket.statement : alltrue([for condition in statement.condition : condition.variable != "aws:PrincipalArn" || toset(condition.values) == toset([output.github_turbo_cache_role_arn])])])
+    error_message = "Prod CI validates no pull requests, so prod has no read-only cache role or bucket exception for one."
+  }
 }
 
 # The role trusts the repository the foundation is deployed for: a fork's role
@@ -380,6 +415,13 @@ run "fork_subject_trusts_only_the_fork" {
       condition.variable == "token.actions.githubusercontent.com:repository" ? toset(condition.values) == toset(["forker/mcc-stats-suite"]) : true
     ])])
     error_message = "A fork's cache role trusts only the fork, never upstream."
+  }
+  assert {
+    condition = length(aws_iam_role.github_cache_read) == 1 && alltrue([for statement in data.aws_iam_policy_document.cache_read_assume_role.statement : alltrue([for condition in statement.condition :
+      condition.variable == "token.actions.githubusercontent.com:sub" ? toset(condition.values) == toset(["repo:forker@3/mcc-stats-suite@4:pull_request"]) :
+      condition.variable == "token.actions.githubusercontent.com:repository" ? toset(condition.values) == toset(["forker/mcc-stats-suite"]) : true
+    ])])
+    error_message = "A fork's read-only cache role trusts only the fork's pull requests, never upstream."
   }
 }
 
@@ -418,7 +460,7 @@ run "missing_subject_gets_no_github_cache_role" {
     }
   }
   assert {
-    condition     = length(aws_iam_role.github_cache) == 0 && length(aws_iam_role_policy.github_cache) == 0 && output.github_turbo_cache_role_arn == null
+    condition     = length(aws_iam_role.github_cache) == 0 && length(aws_iam_role_policy.github_cache) == 0 && length(aws_iam_role.github_cache_read) == 0 && length(aws_iam_role_policy.github_cache_read) == 0 && output.github_turbo_cache_role_arn == null
     error_message = "A foundation without a subject repository has no repository to trust and creates no cache role."
   }
   assert {

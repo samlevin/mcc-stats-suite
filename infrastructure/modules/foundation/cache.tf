@@ -45,7 +45,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "turbo_cache" {
 }
 
 # cache_service_role_arns is an additional same-account workload allowlist; the
-# managed CI cache role is included automatically. These exceptions remove a
+# managed CI cache roles are included automatically. These exceptions remove a
 # denial without granting access. Other principals, including broadly privileged
 # CDK deployment roles, cannot read data or list object names. Lifecycle expiry
 # still works; force_destroy cannot bypass the denial to empty a populated bucket.

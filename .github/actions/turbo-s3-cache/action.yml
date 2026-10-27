@@ -10,6 +10,10 @@ inputs:
   region:
     description: AWS region.
     required: true
+  read-only:
+    description: '`true` reads the cache through the read-only role and never uploads; pull requests use it.'
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -18,14 +22,16 @@ runs:
       env:
         CACHE_ENVIRONMENT: ${{ inputs.environment }}
         CACHE_ACCOUNT: ${{ inputs.account-id }}
+        CACHE_READ_ONLY: ${{ inputs.read-only }}
       run: |
         [[ "$CACHE_ENVIRONMENT" == dev || "$CACHE_ENVIRONMENT" == prod ]]
         [[ "$CACHE_ACCOUNT" =~ ^[0-9]{12}$ ]]
+        [[ "$CACHE_READ_ONLY" == true || "$CACHE_READ_ONLY" == false ]]
     - name: Assume dedicated cache role
       id: credentials
       uses: aws-actions/configure-aws-credentials@61815dcd50bd041e203e49132bacad1fd04d2708 # v5
       with:
-        role-to-assume: arn:aws:iam::${{ inputs.account-id }}:role/mcc-stats-suite-${{ inputs.environment }}-github-turbo-cache
+        role-to-assume: arn:aws:iam::${{ inputs.account-id }}:role/mcc-stats-suite-${{ inputs.environment }}-github-turbo-cache${{ inputs.read-only == 'true' && '-read' || '' }}
         aws-region: ${{ inputs.region }}
         allowed-account-ids: ${{ inputs.account-id }}
         role-duration-seconds: 3600
@@ -56,6 +62,11 @@ runs:
         s3-access-key-id: ${{ steps.credentials.outputs.aws-access-key-id }}
         s3-secret-access-key: ${{ steps.credentials.outputs.aws-secret-access-key }}
         s3-session-token: ${{ steps.credentials.outputs.aws-session-token }}
+    - name: Read the remote cache without uploading
+      # The read-only role cannot write anyway; this keeps Turbo from trying.
+      if: inputs.read-only == 'true'
+      shell: bash
+      run: echo "TURBO_CACHE=local:rw,remote:r" >> "$GITHUB_ENV"
     - name: Remove cache credentials from build environment
       shell: bash
       run: |

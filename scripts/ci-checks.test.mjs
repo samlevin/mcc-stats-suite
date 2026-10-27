@@ -1007,10 +1007,6 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
     /cancel-in-progress: \$\{\{ github\.event_name == 'pull_request' \}\}/,
   );
   assert.match(workflow, /format\('push-\{0\}', github\.run_id\)/);
-  assert.match(
-    workflow,
-    /Start trusted dev Turbo cache\n(?:[ ]+#.*\n)?[ ]+if: vars\.MCC_TURBO_CACHE == 'true' && github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/,
-  );
   // Only the infrastructure job restores a generic cache, keyed to its own
   // provider binaries; every other job uses isolated caches.
   for (const [name, job] of Object.entries(parsedWorkflow.jobs)) {
@@ -1041,7 +1037,15 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
       job.uses?.includes('deploy'),
     ),
   );
-  assert.ok(!workflow.includes('continue-on-error'));
+  // Only a cache start may continue on error; no check may.
+  for (const [name, job] of Object.entries(parsedWorkflow.jobs)) {
+    assert.equal(job['continue-on-error'], undefined, name);
+    for (const step of job.steps ?? []) {
+      if (step['continue-on-error'] !== undefined) {
+        assert.equal(step.uses, './.github/actions/turbo-s3-cache', name);
+      }
+    }
+  }
   assert.ok(!workflow.includes('pull_request_target'));
   const config = JSON.parse(
     readFileSync(new URL('../turbo.json', import.meta.url)),
@@ -1174,6 +1178,133 @@ test('Turbo cache steps run only in repositories that opt in', () => {
     );
     for (const vars of [{}, { MCC_TURBO_CACHE: 'false' }]) {
       assert.equal(evaluate(step.if, context(vars)), false, id);
+    }
+  }
+});
+
+test('pull request CI reads the dev Turbo cache and never writes it', () => {
+  const expression = (value) =>
+    /^\$\{\{\s*(.*?)\s*\}\}$/.exec(String(value).trim())?.[1];
+  const action = parse(
+    readFileSync(
+      new URL('../.github/actions/turbo-s3-cache/action.yml', import.meta.url),
+      'utf8',
+    ),
+  );
+  assert.equal(action.inputs['read-only'].default, 'false');
+  // The cache step for each event, as GitHub would run it.
+  const run = (inputs) => {
+    const values = { inputs };
+    const interpolate = (text) =>
+      String(text).replace(/\$\{\{\s*(.*?)\s*\}\}/g, (_, value) =>
+        String(evaluate(value, values)),
+      );
+    const steps = action.runs.steps.filter(
+      (step) => step.if === undefined || evaluate(step.if, values),
+    );
+    return {
+      role: interpolate(
+        steps.find((step) => step.id === 'credentials').with['role-to-assume'],
+      ),
+      environment: steps
+        .filter((step) => /\bGITHUB_ENV\b/.test(step.run ?? ''))
+        .map((step) => step.run)
+        .join('\n'),
+    };
+  };
+  const event = {
+    main: {
+      event_name: 'push',
+      ref: 'refs/heads/main',
+      repository: 'samlevin/mcc-stats-suite',
+    },
+    pullRequest: {
+      event_name: 'pull_request',
+      ref: 'refs/pull/1/merge',
+      repository: 'samlevin/mcc-stats-suite',
+      event: {
+        pull_request: {
+          head: { repo: { full_name: 'samlevin/mcc-stats-suite' } },
+        },
+      },
+    },
+    forkPullRequest: {
+      event_name: 'pull_request',
+      ref: 'refs/pull/2/merge',
+      repository: 'samlevin/mcc-stats-suite',
+      event: {
+        pull_request: {
+          head: { repo: { full_name: 'forker/mcc-stats-suite' } },
+        },
+      },
+    },
+  };
+  const jobs = Object.entries(loadWorkflow('ci-checks').jobs).flatMap(
+    ([job, { steps = [] }]) =>
+      steps
+        .filter((step) => step.uses === './.github/actions/turbo-s3-cache')
+        .map((step) => ({ job, step })),
+  );
+  assert.deepEqual(
+    jobs.map(({ job }) => job),
+    ['check-workspaces', 'check-scripts', 'check-bundles'],
+  );
+  for (const { job, step } of jobs) {
+    const starts = (github) =>
+      evaluate(step.if, {
+        vars: { MCC_TURBO_CACHE: 'true' },
+        github,
+        needs: { 'detect-changes': { outputs: { full: 'true' } } },
+      });
+    const inputs = (github) => ({
+      environment: 'dev',
+      'account-id': '000000000000',
+      'read-only': String(
+        evaluate(expression(step.with['read-only']), { github }),
+      ),
+    });
+    assert.equal(starts(event.forkPullRequest), false, job);
+    // MCC_TURBO_CACHE gates pull request runs too.
+    assert.equal(
+      evaluate(step.if, {
+        vars: {},
+        github: event.pullRequest,
+        needs: { 'detect-changes': { outputs: { full: 'true' } } },
+      }),
+      false,
+      job,
+    );
+    // Only a pull request continues uncached when the cache cannot start.
+    const continues = (github) =>
+      evaluate(expression(step['continue-on-error']), { github });
+    assert.equal(continues(event.pullRequest), true, job);
+    assert.equal(continues(event.main), false, job);
+    for (const [name, github] of Object.entries({
+      main: event.main,
+      pullRequest: event.pullRequest,
+    })) {
+      assert.equal(starts(github), true, `${job} ${name}`);
+      const { role, environment } = run(inputs(github));
+      if (name === 'main') {
+        // main keeps the write role and Turbo's default read-write cache.
+        assert.equal(
+          role,
+          'arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache',
+          job,
+        );
+        assert.doesNotMatch(environment, /TURBO_CACHE/, job);
+      } else {
+        assert.equal(
+          role,
+          'arn:aws:iam::000000000000:role/mcc-stats-suite-dev-github-turbo-cache-read',
+          job,
+        );
+        assert.match(
+          environment,
+          /^echo "TURBO_CACHE=local:rw,remote:r" >> "\$GITHUB_ENV"$/m,
+          job,
+        );
+      }
     }
   }
 });

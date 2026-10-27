@@ -79,7 +79,7 @@ The release workflow reads Release Please's per-path release outputs and selects
 
 ## Caches
 
-Npm downloads use the setup-node cache. Pull requests use only their ephemeral local Turbo cache and never assume a cache role. Trusted `main` validation and deployment builds can use a remote Turbo cache in S3. [Turborepo cache storage contract](infrastructure/README.md#turborepo-cache-storage-contract) describes its buckets, the cache role, and its trust policy, and [Turbo cache](docs/self-hosting/30-configure-github.md#turbo-cache) covers activation and account settings. Synthesis and native verification are never cached.
+Npm downloads use the setup-node cache. Trusted `main` validation and deployment builds can use a remote Turbo cache in S3. Same-repo pull requests read the dev cache through a read-only role and never write it; fork pull requests use only their ephemeral local Turbo cache. [Turborepo cache storage contract](infrastructure/README.md#turborepo-cache-storage-contract) describes its buckets, the cache role, and its trust policy, and [Turbo cache](docs/self-hosting/30-configure-github.md#turbo-cache) covers activation and account settings. Synthesis and native verification are never cached.
 
 ## Cancellation and benchmarks
 
