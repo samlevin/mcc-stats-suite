@@ -49,5 +49,10 @@
     "scripts/cli.cjs"
   ],
   "globalEnv": ["MCC_BUILD_ENVIRONMENT"],
-  "globalPassThroughEnv": ["TURBO_API", "TURBO_TOKEN", "TURBO_TEAM"]
+  "globalPassThroughEnv": [
+    "TURBO_API",
+    "TURBO_TOKEN",
+    "TURBO_TEAM",
+    "TS_NODE_TRANSPILE_ONLY"
+  ]
 }

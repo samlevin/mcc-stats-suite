@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import {
   readFileSync,
   cpSync,
+  existsSync,
   statSync,
   mkdtempSync,
   mkdirSync,
@@ -587,6 +588,37 @@ test('the bundle job is the only Docker job and runs only synthesis and verifica
     steps.find((step) => step.run === 'node scripts/ci-checks.mjs').env.CI_JOB,
     'bundle',
   );
+});
+
+test('CI synthesis transpiles only, and build type-checks every synthesized CDK app', () => {
+  const jobs = loadWorkflow('ci-checks').jobs;
+  for (const name of ['check-workspaces', 'check-bundles'])
+    assert.equal(jobs[name].env.TS_NODE_TRANSPILE_ONLY, 'true', name);
+  const turbo = JSON.parse(
+    readFileSync(new URL('../turbo.json', import.meta.url)),
+  );
+  // Strict env mode drops variables Turbo does not pass through.
+  assert.ok(turbo.globalPassThroughEnv.includes('TS_NODE_TRANSPILE_ONLY'));
+  // Local synth, diff, and deploy keep ts-node type checking.
+  const base = JSON.parse(
+    readFileSync(new URL('../tsconfig.base.json', import.meta.url)),
+  );
+  assert.equal(base['ts-node'], undefined);
+  const applications = new URL('../applications/', import.meta.url);
+  const apps = readdirSync(applications).filter((app) =>
+    existsSync(new URL(`${app}/cdk.json`, applications)),
+  );
+  assert.ok(apps.length > 0);
+  for (const app of apps) {
+    const read = (name) =>
+      JSON.parse(readFileSync(new URL(`${app}/${name}`, applications)));
+    assert.equal(read('package.json').scripts.build, 'tsc -p tsconfig.json');
+    const { include } = read('tsconfig.json');
+    assert.ok(include.includes('cdk/**/*.ts'), app);
+    const tests = readdirSync(new URL(`${app}/test/`, applications));
+    if (tests.some((name) => name.endsWith('.ts')))
+      assert.ok(include.includes('test/**/*.ts'), app);
+  }
 });
 
 test('actual Turbo selects affected consumers and invalidates caches for shared CLI changes', () => {
