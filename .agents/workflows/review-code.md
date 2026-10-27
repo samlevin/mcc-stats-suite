@@ -4,7 +4,7 @@ description: "Independent code review of one {{label}} pull request or pushed br
 argument-hint: "<#N or PR number | PR URL | branch> [model <name>] [effort <level>]"
 codex:
   display_name: "{{label}}: Review code"
-  short_description: "Independent review of an {{label}} pull request or branch, posted to the PR"
+  short_description: "Independent review of one {{label}} pull request or branch, posted to the PR"
   default_prompt: "Use ${{prefix}}review-code to review this {{label}} pull request or branch."
 ---
 # {{label}} review code

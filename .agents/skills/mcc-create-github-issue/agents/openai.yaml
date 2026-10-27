@@ -2,6 +2,6 @@
 interface:
   display_name: 'MCC: Create GitHub issue'
   short_description: File typed MCC issues with independent triage
-  default_prompt: Use $mcc-create-github-issue to file this as an MCC issue.
+  default_prompt: Use $mcc-create-github-issue to file this as one MCC issue.
 policy:
   allow_implicit_invocation: true

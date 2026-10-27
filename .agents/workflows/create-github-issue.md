@@ -6,7 +6,7 @@ capability: issue-creation
 codex:
   display_name: "{{label}}: Create GitHub issue"
   short_description: "File typed {{label}} issues with independent triage"
-  default_prompt: "Use ${{prefix}}create-github-issue to file this as an {{label}} issue."
+  default_prompt: "Use ${{prefix}}create-github-issue to file this as one {{label}} issue."
 ---
 # {{label}} create GitHub issues
 

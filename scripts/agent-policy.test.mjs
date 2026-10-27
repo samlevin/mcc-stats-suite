@@ -952,10 +952,14 @@ test('independent review stays a separate fresh-context gate on mandatory paths'
       '`.agents/`',
       '`AGENTS.md`',
       '`scripts/agent-policy*`',
-      '`infrastructure/`',
-      '`.terrateam/`',
       '`.github/workflows/`',
-      'CDK account or environment checks',
+      ...(policy.binding.features.infrastructure
+        ? [
+            '`infrastructure/`',
+            '`.terrateam/`',
+            'CDK account or environment checks',
+          ]
+        : []),
     ])
       assert.ok(
         lineWith(review, 'always required', scope),

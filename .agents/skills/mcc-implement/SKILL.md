@@ -1,6 +1,6 @@
 ---
 name: mcc-implement
-description: "Deliver an MCC GitHub issue or rework an MCC PR through an isolated mcc-implementer by default. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. The main thread runs the queue script, dispatches one leaf at a time, and records fixed results. An explicit inline keyword keeps a small leaf or rework in the main thread."
+description: "Deliver one MCC GitHub issue or rework one MCC PR through an isolated mcc-implementer by default. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in samlevin/mcc-stats-suite. The main thread runs the queue script, dispatches one leaf at a time, and records fixed results. An explicit inline keyword keeps a small leaf or rework in the main thread."
 ---
 <!-- Generated from .agents/workflows/implement.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
 

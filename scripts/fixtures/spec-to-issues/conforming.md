@@ -36,7 +36,7 @@ File active phases; exclude Backlog.
 - **Spec:** §3, §16
 - **Files:** `packages/contracts/src/index.ts`
 - **Provides:** Storage port
-- **Labels:** enhancement, severity: none, package: contracts
+- **Labels:** enhancement, severity: none, area: repository
 - **Priority:** P1
 - **Acceptance:**
   - Port types compile.

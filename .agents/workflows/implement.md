@@ -1,6 +1,6 @@
 ---
 name: implement
-description: "Deliver an {{label}} GitHub issue or rework an {{label}} PR through an isolated {{prefix}}implementer by default. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in {{repository}}. The main thread runs the queue script, dispatches one leaf at a time, and records fixed results. An explicit inline keyword keeps a small leaf or rework in the main thread."
+description: "Deliver one {{label}} GitHub issue or rework one {{label}} PR through an isolated {{prefix}}implementer by default. Use for \"implement #N\", \"implement <issue URL>\", \"rework <PR URL>\", or \"deliver this epic\" in {{repository}}. The main thread runs the queue script, dispatches one leaf at a time, and records fixed results. An explicit inline keyword keeps a small leaf or rework in the main thread."
 argument-hint: "<#N | issue URL | PR URL> [inline] [parallel] [model <name>] [effort <level>] [reviewer ...]"
 codex:
   display_name: "{{label}}: Implement"

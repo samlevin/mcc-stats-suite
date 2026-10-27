@@ -43,7 +43,7 @@ test('a conforming plan preserves hierarchy, acceptance, defaults and spec links
   assert.deepEqual(port.labels, [
     'enhancement',
     'severity: none',
-    'package: contracts',
+    'area: repository',
   ]);
   assert.ok(
     port.body.includes(
