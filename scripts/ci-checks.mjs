@@ -5,7 +5,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // `build` already type-checks every source and test file, so CI skips the
 // separate `typecheck` task that local `npm run check` keeps.
 const jobTasks = {
-  static: ['build', 'ci:test'],
+  // `test:scripts` runs the root build tests as the cached `//#test:scripts`.
+  static: ['build', 'ci:test', 'test:scripts'],
   // Only this job needs Docker: it synthesizes and verifies the ARM64 bundles.
   bundle: ['ci:synth', 'verify:bundle'],
 };
@@ -60,7 +61,7 @@ export function buildTests(
     .sort();
 }
 
-export function workspaceArguments(mode, job = 'static') {
+export function workspaceArguments(mode, job = 'static', base, head) {
   return [
     'turbo',
     'run',
@@ -71,20 +72,29 @@ export function workspaceArguments(mode, job = 'static') {
     // Groups do not nest, so stream prefixed lines and keep the whole Turbo
     // output inside the one group `runChecks` opens for this command.
     '--log-order=stream',
-    ...(mode === 'affected' ? ['--affected'] : []),
+    // `--affected` intersects with any `--filter`, so it cannot add the root
+    // package that `//#test:scripts` needs on every full gate. The same range
+    // as an explicit filter selects the same workspaces.
+    ...(mode === 'affected'
+      ? [
+          `--filter=...[${base}...${head}]`,
+          ...(job === 'static' ? ['--filter=//'] : []),
+        ]
+      : []),
   ];
 }
 
-export function checks({ full, repository, mode, job = 'static' }) {
+export function checks({ full, repository, mode, job = 'static', base, head }) {
   if (job === 'bundle')
-    return full ? [['npx', workspaceArguments(mode, 'bundle')]] : [];
+    return full
+      ? [['npx', workspaceArguments(mode, 'bundle', base, head)]]
+      : [];
   const commands = [['npm', ['run', 'format:check']]];
   if (full)
     commands.push(
       ['npx', ['eslint', '.', '--max-warnings', '0']],
       ['npm', ['run', 'release:check']],
-      ['node', ['--test', ...buildTests()]],
-      ['npx', workspaceArguments(mode)],
+      ['npx', workspaceArguments(mode, 'static', base, head)],
     );
   // The full gate's `eslint .` lints every file. Otherwise lint Markdown, which
   // Prettier ignores, plus the automation scripts in the repository scope.
@@ -206,7 +216,7 @@ async function main() {
     // Lint reads shared declarations. Build them once before concurrent readers.
     await runChecks([['npm', ['run', 'build:shared']]]);
   }
-  await runChecks(checks({ full, repository, mode, job }));
+  await runChecks(checks({ full, repository, mode, job, base, head }));
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,
@@ -215,10 +225,16 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
-  try {
-    await main();
-  } catch (error) {
-    // End the log with the failure summary instead of a stack trace.
-    console.error(error.message);
-    process.exitCode = 1;
-  }
+  // `npm run test:scripts`, which Turbo caches as `//#test:scripts`.
+  if (process.argv[2] === 'build-tests')
+    spawn(process.execPath, ['--test', ...buildTests()], {
+      stdio: 'inherit',
+    }).on('close', (code) => (process.exitCode = code ?? 1));
+  else
+    try {
+      await main();
+    } catch (error) {
+      // End the log with the failure summary instead of a stack trace.
+      console.error(error.message);
+      process.exitCode = 1;
+    }
