@@ -5,8 +5,10 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // `build` already type-checks every source and test file, so CI skips the
 // separate `typecheck` task that local `npm run check` keeps.
 const jobTasks = {
-  // `test:scripts` runs the root build tests as the cached `//#test:scripts`.
-  static: ['build', 'ci:test', 'test:scripts'],
+  static: ['build', 'ci:test'],
+  // The root build tests run as the cached `//#test:scripts` on their own
+  // runner, so they do not compete with the workspace tests for CPUs.
+  scripts: ['test:scripts'],
   // Only this job needs Docker: it synthesizes and verifies the ARM64 bundles.
   bundle: ['ci:synth', 'verify:bundle'],
 };
@@ -72,23 +74,19 @@ export function workspaceArguments(mode, job = 'static', base, head) {
     // Groups do not nest, so stream prefixed lines and keep the whole Turbo
     // output inside the one group `runChecks` opens for this command.
     '--log-order=stream',
-    // `--affected` intersects with any `--filter`, so it cannot add the root
-    // package that `//#test:scripts` needs on every full gate. The same range
-    // as an explicit filter selects the same workspaces.
-    ...(mode === 'affected'
-      ? [
-          `--filter=...[${base}...${head}]`,
-          ...(job === 'static' ? ['--filter=//'] : []),
-        ]
-      : []),
+    // The root package owns `//#test:scripts`, which runs on every full gate.
+    // For workspaces, the explicit range selects the same ones as `--affected`.
+    ...(job === 'scripts'
+      ? ['--filter=//']
+      : mode === 'affected'
+        ? [`--filter=...[${base}...${head}]`]
+        : []),
   ];
 }
 
 export function checks({ full, repository, mode, job = 'static', base, head }) {
-  if (job === 'bundle')
-    return full
-      ? [['npx', workspaceArguments(mode, 'bundle', base, head)]]
-      : [];
+  if (job !== 'static')
+    return full ? [['npx', workspaceArguments(mode, job, base, head)]] : [];
   const commands = [['npm', ['run', 'format:check']]];
   if (full)
     commands.push(

@@ -459,7 +459,7 @@ test('workflows read only the repository account, Region, and release names', ()
       assert.ok(!text.includes(retired), `${name} names ${retired}`);
     }
   }
-  for (const job of ['check-workspaces', 'check-bundles']) {
+  for (const job of ['check-workspaces', 'check-scripts', 'check-bundles']) {
     const cache = ci.jobs[job].steps.find((step) =>
       step.uses?.endsWith('/actions/turbo-s3-cache'),
     );

@@ -165,6 +165,50 @@ jobs:
           CI_JOB: static
         run: node scripts/ci-checks.mjs
 
+  check-scripts:
+    name: Test repository build scripts
+    needs: detect-changes
+    if: needs.detect-changes.outputs.check != 'false' && needs.detect-changes.outputs.full == 'true'
+    # A separate runner keeps the root script tests from competing with the
+    # workspace tests for CPUs.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      MCC_BUILD_ENVIRONMENT: dev
+      # The local bootstrap tests synthesize every app through ts-node.
+      TS_NODE_TRANSPILE_ONLY: 'true'
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: .tool-versions
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Start trusted dev Turbo cache
+        if: vars.MCC_TURBO_CACHE == 'true' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: ./.github/actions/turbo-s3-cache
+        with:
+          environment: dev
+          account-id: ${{ secrets.DEV_AWS_ACCOUNT_ID }}
+          region: ${{ vars.DEV_AWS_REGION || 'us-east-1' }}
+      - name: Run repository build script tests
+        env:
+          CI_BASE: ${{ needs.detect-changes.outputs.base }}
+          CI_HEAD: ${{ needs.detect-changes.outputs.head }}
+          CI_FULL: ${{ needs.detect-changes.outputs.full }}
+          CI_REPOSITORY: ${{ needs.detect-changes.outputs.repository }}
+          CI_MODE: ${{ needs.detect-changes.outputs.mode }}
+          CI_JOB: scripts
+        run: node scripts/ci-checks.mjs
+
   check-bundles:
     name: Synthesize CDK stacks and verify Lambda bundles
     needs: detect-changes
@@ -222,7 +266,13 @@ jobs:
   require-scoped-checks:
     name: Require every check selected for the changed files
     needs:
-      [detect-changes, check-infrastructure, check-workspaces, check-bundles]
+      [
+        detect-changes,
+        check-infrastructure,
+        check-workspaces,
+        check-scripts,
+        check-bundles,
+      ]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -235,6 +285,7 @@ jobs:
           INFRASTRUCTURE_RESULT: ${{ needs.check-infrastructure.result }}
           SCOPE_FULL: ${{ needs.detect-changes.outputs.full }}
           APPLICATIONS_RESULT: ${{ needs.check-workspaces.result }}
+          SCRIPTS_RESULT: ${{ needs.check-scripts.result }}
           BUNDLES_RESULT: ${{ needs.check-bundles.result }}
         run: |
           test "$SCOPE_RESULT" = success
@@ -244,6 +295,7 @@ jobs:
           if [[ "$SCOPE_APPLICATIONS" != false ]]; then
             test "$APPLICATIONS_RESULT" = success
             if [[ "$SCOPE_FULL" = true ]]; then
+              test "$SCRIPTS_RESULT" = success
               test "$BUNDLES_RESULT" = success
             fi
           fi

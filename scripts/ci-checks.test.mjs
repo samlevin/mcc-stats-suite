@@ -42,15 +42,18 @@ const applicationNames = [
   'player',
 ];
 const require = createRequire(import.meta.url);
-// Script test files each command runs, directly or through `//#test:scripts`.
-const testFiles = (commands) =>
-  commands.flatMap(([command, args]) =>
-    command === 'node'
-      ? args.slice(1)
-      : args.includes('test:scripts')
-        ? buildTests()
-        : [],
-  );
+// Script test files a scope runs across the static and scripts jobs, directly
+// or through `//#test:scripts`.
+const testFiles = (scopes) =>
+  ['static', 'scripts']
+    .flatMap((job) => checks({ ...scopes, job }))
+    .flatMap(([command, args]) =>
+      command === 'node'
+        ? args.slice(1)
+        : args.includes('test:scripts')
+          ? buildTests()
+          : [],
+    );
 
 for (const name of [
   ...applicationNames.map((name) => `applications/${name}`),
@@ -150,27 +153,35 @@ test('full gate contains repository checks and the dependency-aware workspace ga
   for (const command of ['format:check', 'eslint', 'release:check']) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
-  // Root script tests run through Turbo's cached `//#test:scripts`, never a bare
-  // `node --test`.
+  // Root script tests run only in the scripts job, through Turbo's cached
+  // `//#test:scripts`, never a bare `node --test`.
   assert.ok(!commands.some(([command]) => command === 'node'));
-  assert.deepEqual(testFiles(commands), buildTests());
+  assert.ok(!JSON.stringify(commands).includes('test:scripts'));
+  assert.deepEqual(checks({ full: true, mode: 'all', job: 'scripts' }), [
+    ['npx', workspaceArguments('all', 'scripts')],
+  ]);
+  assert.deepEqual(testFiles({ full: true, mode: 'all' }), buildTests());
   assert.ok(!JSON.stringify(commands).includes('tofu'));
   const [base, head] = ['a'.repeat(40), 'b'.repeat(40)];
-  for (const job of ['static', 'bundle'])
+  for (const job of ['static', 'bundle']) {
     assert.ok(
       !workspaceArguments('all', job, base, head).some((argument) =>
         argument.startsWith('--filter'),
       ),
     );
-  // `--affected` would drop the root task whenever only workspaces change.
-  assert.deepEqual(
-    workspaceArguments('affected', 'static', base, head).slice(-2),
-    [`--filter=...[${base}...${head}]`, '--filter=//'],
-  );
-  assert.equal(
-    workspaceArguments('affected', 'bundle', base, head).at(-1),
-    `--filter=...[${base}...${head}]`,
-  );
+    assert.equal(
+      workspaceArguments('affected', job, base, head).at(-1),
+      `--filter=...[${base}...${head}]`,
+    );
+  }
+  // The root task runs on every full gate, even when only workspaces change.
+  for (const mode of ['all', 'affected'])
+    assert.deepEqual(
+      workspaceArguments(mode, 'scripts', base, head).filter((argument) =>
+        argument.startsWith('--filter'),
+      ),
+      ['--filter=//'],
+    );
   assert.ok(!workspaceArguments('affected').includes('--affected'));
 });
 
@@ -192,7 +203,7 @@ test('a new script test joins the full gate unless it is an automation test', ()
 });
 
 test('Turbo streams prefixed lines instead of its own log groups', () => {
-  for (const job of ['static', 'bundle'])
+  for (const job of ['static', 'scripts', 'bundle'])
     for (const mode of ['all', 'affected'])
       assert.ok(workspaceArguments(mode, job).includes('--log-order=stream'));
   // Covers Turbo runs started through npm scripts, such as build:shared.
@@ -262,7 +273,7 @@ test('shared CLI changes select build and automation checks', () => {
     assert.equal(scopes.mode, 'all');
     const commands = checks(scopes);
     assert.ok(commands.some(([, args]) => args.includes('agents:check')));
-    const tests = testFiles(commands);
+    const tests = testFiles(scopes);
     for (const path of [...automationTests, 'scripts/cli.test.mjs'])
       assert.equal(tests.filter((test) => test === path).length, 1, path);
   }
@@ -270,7 +281,7 @@ test('shared CLI changes select build and automation checks', () => {
 
 test('workflow timeout checks run once for repository and full scopes', () => {
   const runs = (paths) =>
-    testFiles(checks(selectScopes(paths, 'pull_request'))).filter(
+    testFiles(selectScopes(paths, 'pull_request')).filter(
       (path) => path === 'scripts/workflow-timeouts.test.mjs',
     ).length;
   assert.ok(buildTests().includes('scripts/workflow-timeouts.test.mjs'));
@@ -298,13 +309,13 @@ test('repository-only workflow changes run the checkout credentials test', () =>
     );
     assert.equal(scopes.full, false, event);
     assert.equal(scopes.repository, true, event);
-    const tests = testFiles(checks(scopes));
+    const tests = testFiles(scopes);
     assert.ok(
       tests.includes('scripts/workflow-checkout-credentials.test.mjs'),
       event,
     );
   }
-  const full = testFiles(checks({ full: true, repository: true, mode: 'all' }));
+  const full = testFiles({ full: true, repository: true, mode: 'all' });
   assert.equal(
     full.filter(
       (path) => path === 'scripts/workflow-checkout-credentials.test.mjs',
@@ -321,13 +332,13 @@ test('repository-only workflow changes run the pull_request_target test', () => 
     );
     assert.equal(scopes.full, false, event);
     assert.equal(scopes.repository, true, event);
-    const tests = testFiles(checks(scopes));
+    const tests = testFiles(scopes);
     assert.ok(
       tests.includes('scripts/workflow-pull-request-target.test.mjs'),
       event,
     );
   }
-  const full = testFiles(checks({ full: true, repository: true, mode: 'all' }));
+  const full = testFiles({ full: true, repository: true, mode: 'all' });
   assert.equal(
     full.filter(
       (path) => path === 'scripts/workflow-pull-request-target.test.mjs',
@@ -367,7 +378,7 @@ test('every scope that selects a setup-node workflow runs the Node version test'
     '.github/workflows/ci-checks.yml',
     '.github/workflows/_delivery-deploy-environment.yml',
   ]) {
-    const tests = testFiles(checks(selectScopes([path], 'pull_request')));
+    const tests = testFiles(selectScopes([path], 'pull_request'));
     assert.equal(
       tests.filter((test) => test === 'scripts/workflow-node-version.test.mjs')
         .length,
@@ -525,9 +536,11 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
       ).tasks.map((task) => [task.taskId, task]),
     );
   const staticTasks = dryRun('static');
+  const scriptsTasks = dryRun('scripts');
   const bundleTasks = dryRun('bundle');
   for (const [tasks, expected] of [
-    [staticTasks, 18],
+    [staticTasks, 17],
+    [scriptsTasks, 5],
     [bundleTasks, 10],
   ]) {
     assert.equal(
@@ -590,12 +603,13 @@ test('Turbo dependency graph orders shared/own builds, synthesis, and native ver
     ['@mcc/match-to-csv#ci:synth'],
   );
   // Root script tests load every shared package's dist and nothing else built.
-  assert.deepEqual(staticTasks.get('//#test:scripts').dependencies, [
+  assert.deepEqual(scriptsTasks.get('//#test:scripts').dependencies, [
     '@mcc/cdk-config#build',
     '@mcc/contracts#build',
     '@mcc/recipients#build',
     '@mcc/roster#build',
   ]);
+  assert.ok(!staticTasks.has('//#test:scripts'));
   assert.ok(!bundleTasks.has('//#test:scripts'));
 });
 
@@ -679,7 +693,8 @@ test('the bundle job is the only Docker job and runs only synthesis and verifica
   );
   const jobs = loadWorkflow('ci-checks').jobs;
   const text = (job) => JSON.stringify(job.steps);
-  assert.ok(!text(jobs['check-workspaces']).includes('docker'));
+  for (const name of ['check-workspaces', 'check-scripts'])
+    assert.ok(!text(jobs[name]).includes('docker'), name);
   const steps = jobs['check-bundles'].steps;
   const pull = steps.findIndex((step) => step.run?.includes('docker pull'));
   assert.ok(
@@ -691,9 +706,24 @@ test('the bundle job is the only Docker job and runs only synthesis and verifica
   );
 });
 
+test('the scripts job runs only the root script tests on its own runner', () => {
+  assert.deepEqual(
+    checks({ full: false, repository: true, job: 'scripts' }),
+    [],
+  );
+  const jobs = loadWorkflow('ci-checks').jobs;
+  const job = (name) =>
+    jobs[name].steps.find((step) => step.run === 'node scripts/ci-checks.mjs')
+      .env.CI_JOB;
+  assert.equal(job('check-workspaces'), 'static');
+  assert.equal(job('check-scripts'), 'scripts');
+  assert.equal(jobs['check-scripts']['runs-on'], 'ubuntu-24.04-arm');
+});
+
 test('CI synthesis transpiles only, and build type-checks every synthesized CDK app', () => {
   const jobs = loadWorkflow('ci-checks').jobs;
-  for (const name of ['check-workspaces', 'check-bundles'])
+  // The scripts job's local bootstrap tests synthesize through ts-node too.
+  for (const name of ['check-workspaces', 'check-scripts', 'check-bundles'])
     assert.equal(jobs[name].env.TS_NODE_TRANSPILE_ONLY, 'true', name);
   const turbo = JSON.parse(
     readFileSync(new URL('../turbo.json', import.meta.url)),
@@ -825,20 +855,21 @@ test('actual Turbo selects affected consumers and invalidates caches for shared 
           .sort(),
         expected.sort(),
       );
-      // The static job's explicit range selects the same workspaces and adds
-      // the root script tests.
-      const staticPlan = JSON.parse(
-        execFileSync(
-          turbo,
-          [
-            ...workspaceArguments('affected', 'static', base, head).slice(1),
-            '--dry=json',
-          ],
-          { cwd: directory, encoding: 'utf8' },
-        ),
-      ).tasks.filter((task) => task.command !== '<NONEXISTENT>');
+      // The static job's explicit range selects the same workspaces, and the
+      // scripts job still runs the root script tests.
+      const affectedPlan = (job) =>
+        JSON.parse(
+          execFileSync(
+            turbo,
+            [
+              ...workspaceArguments('affected', job, base, head).slice(1),
+              '--dry=json',
+            ],
+            { cwd: directory, encoding: 'utf8' },
+          ),
+        ).tasks.filter((task) => task.command !== '<NONEXISTENT>');
       assert.deepEqual(
-        staticPlan
+        affectedPlan('static')
           .filter((task) => task.task === 'ci:test')
           .map((task) => task.package)
           .sort(),
@@ -846,7 +877,9 @@ test('actual Turbo selects affected consumers and invalidates caches for shared 
         expected.filter((name) => name !== '@mcc/contracts').sort(),
       );
       assert.ok(
-        staticPlan.some((task) => task.taskId === '//#test:scripts'),
+        affectedPlan('scripts').some(
+          (task) => task.taskId === '//#test:scripts',
+        ),
         workspace,
       );
       const deploymentPlan = JSON.parse(
@@ -996,6 +1029,7 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
     'detect-changes',
     'check-infrastructure',
     'check-workspaces',
+    'check-scripts',
     'check-bundles',
   ]);
   assert.equal(gate.if, '${{ !cancelled() }}');
@@ -1120,6 +1154,7 @@ test('Turbo cache steps run only in repositories that opt in', () => {
       '_delivery-deploy-environment.yml deploy: Check out cache action from the qualified workflow revision',
       '_delivery-deploy-environment.yml deploy: Start environment Turbo cache',
       'ci-checks.yml check-workspaces: Start trusted dev Turbo cache',
+      'ci-checks.yml check-scripts: Start trusted dev Turbo cache',
       'ci-checks.yml check-bundles: Start trusted dev Turbo cache',
     ],
   );
@@ -1263,10 +1298,12 @@ test('classifier selects independent infrastructure and application gates', () =
       evaluate(ciWorkflow.jobs['check-workspaces'].if, { needs }),
       expected.check,
     );
-    assert.equal(
-      evaluate(ciWorkflow.jobs['check-bundles'].if, { needs }),
-      expected.check && expected.full,
-    );
+    for (const job of ['check-scripts', 'check-bundles'])
+      assert.equal(
+        evaluate(ciWorkflow.jobs[job].if, { needs }),
+        expected.check && expected.full,
+        job,
+      );
     assert.equal(
       evaluate(ciWorkflow.jobs['check-infrastructure'].if, { needs }),
       expected.infrastructure,
@@ -1349,24 +1386,28 @@ test('check aggregator requires exactly the selected gates', () => {
         for (const infrastructureResult of ['success', 'failure', 'skipped'])
           for (const applicationsResult of ['success', 'failure', 'skipped'])
             for (const full of ['true', 'false'])
-              for (const bundlesResult of ['success', 'failure', 'skipped'])
-                assert.equal(
-                  passes({
-                    SCOPE_RESULT: scope,
-                    SCOPE_INFRASTRUCTURE: infrastructure,
-                    SCOPE_APPLICATIONS: applications,
-                    SCOPE_FULL: full,
-                    INFRASTRUCTURE_RESULT: infrastructureResult,
-                    APPLICATIONS_RESULT: applicationsResult,
-                    BUNDLES_RESULT: bundlesResult,
-                  }),
-                  scope === 'success' &&
-                    (infrastructure === 'false' ||
-                      infrastructureResult === 'success') &&
-                    (applications === 'false' ||
-                      (applicationsResult === 'success' &&
-                        (full === 'false' || bundlesResult === 'success'))),
-                );
+              for (const scriptsResult of ['success', 'failure', 'skipped'])
+                for (const bundlesResult of ['success', 'failure', 'skipped'])
+                  assert.equal(
+                    passes({
+                      SCOPE_RESULT: scope,
+                      SCOPE_INFRASTRUCTURE: infrastructure,
+                      SCOPE_APPLICATIONS: applications,
+                      SCOPE_FULL: full,
+                      INFRASTRUCTURE_RESULT: infrastructureResult,
+                      APPLICATIONS_RESULT: applicationsResult,
+                      SCRIPTS_RESULT: scriptsResult,
+                      BUNDLES_RESULT: bundlesResult,
+                    }),
+                    scope === 'success' &&
+                      (infrastructure === 'false' ||
+                        infrastructureResult === 'success') &&
+                      (applications === 'false' ||
+                        (applicationsResult === 'success' &&
+                          (full === 'false' ||
+                            (scriptsResult === 'success' &&
+                              bundlesResult === 'success')))),
+                  );
 });
 
 test('workflow executes gate selection for push, PR, retired baseline, and API failure', async () => {
