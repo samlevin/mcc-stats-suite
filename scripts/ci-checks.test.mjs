@@ -371,7 +371,7 @@ const fakeCommands = [
   ['test', ['--test', 'a.test.mjs']],
 ];
 
-test('each check prints its buffered output in one group named after its command, in completion order', async () => {
+test('each check prints a start line outside any group, then its buffered output in one group named after its command, in completion order', async () => {
   const { log, error } = await runFakeChecks(
     fakeCommands,
     {
@@ -385,6 +385,9 @@ test('each check prints its buffered output in one group named after its command
   assert.equal(
     log,
     [
+      'Started format run format:check',
+      'Started lint . --max-warnings 0',
+      'Started test --test a.test.mjs',
       '::group::test --test a.test.mjs',
       '::endgroup::',
       '::group::format run format:check',
@@ -448,7 +451,7 @@ test('the default runner buffers stdout and stderr and reports a failed exit cod
     (error) => error.message.endsWith('(exit code 3)'),
   );
   const output = log.join('');
-  assert.match(output, /^::group::.+ -e /);
+  assert.match(output, /^Started .+ -e .+\n::group::.+ -e /);
   assert.match(output, /out\n/);
   assert.match(output, /err\n/);
   assert.match(output, /::endgroup::\n$/);

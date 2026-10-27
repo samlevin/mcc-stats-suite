@@ -129,9 +129,11 @@ function commandLine(command, args) {
 }
 
 // Checks run in parallel, so each one's output is buffered and printed in its
-// own log group when that check ends. Every check settles before the gate
-// fails, so a failure cannot leave a successful deployment gate, and the error
-// names each failed command with its exit code.
+// own log group when that check ends. A `Started` line outside any group marks
+// each check's start, so a timed-out or cancelled run still shows which checks
+// were running. Every check settles before the gate fails, so a failure cannot
+// leave a successful deployment gate, and the error names each failed command
+// with its exit code.
 export async function runChecks(
   commands,
   run = runCommand,
@@ -140,6 +142,7 @@ export async function runChecks(
   const results = await Promise.all(
     commands.map(async ([command, args]) => {
       const line = commandLine(command, args);
+      write(`Started ${line}\n`);
       const { code, output } = await run(command, args);
       write(`::group::${line}\n`);
       if (output) write(output.endsWith('\n') ? output : `${output}\n`);
