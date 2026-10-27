@@ -231,10 +231,12 @@ test('a sweep closes finished containers bottom-up in one run and marks them', a
     assert.equal(mock.issues.get(`I_${number}`).state, 'CLOSED');
     assert.equal(mock.issues.get(`I_${number}`).marked, true);
   }
-  // The parent decides from a fresh read once its child closed this run.
+  // #2 is read before its first write and again after marking; the parent
+  // decides from a fresh read once its child closed this run.
   assert.deepEqual(mock.kinds(), [
     'list',
     'marker',
+    'snapshot',
     'snapshot',
     'discover',
     'snapshot',
@@ -563,6 +565,40 @@ test('a sweep skips a container deleted after the listing and finishes the rest'
   assert.equal(model.issues.get('I_2').state, 'CLOSED');
   assert.equal(model.issues.get('I_5').state, 'CLOSED');
   assert.equal(model.issues.get('I_1').state, 'OPEN');
+});
+
+test('a sweep re-reads a container decided from its listing before the first write', async () => {
+  // #1 would be marked and closed, and #3 is closed and marked with a stale
+  // Ready status; both are deleted after the listing. #5 still closes.
+  const model = github([
+    { number: 1 },
+    { number: 2, parent: 1, state: 'CLOSED' },
+    { number: 3, state: 'CLOSED', marked: true, status: 'Ready' },
+    { number: 4, parent: 3, state: 'CLOSED' },
+    { number: 5 },
+    { number: 6, parent: 5, state: 'CLOSED' },
+  ]);
+  const gone = new Set();
+  const warnings = [];
+  const api = async (query, variables) => {
+    if (query.includes('label(')) gone.add('I_1').add('I_3');
+    return withDeleted(model, gone)(query, variables);
+  };
+  await reconcileContainers({
+    api,
+    dryRun: false,
+    warn: (line) => warnings.push(line),
+    ...quiet,
+  });
+  assert.deepEqual(warnings.toSorted(), [
+    'Issue #1 no longer exists in the repository; skipping',
+    'Issue #3 no longer exists in the repository; skipping',
+  ]);
+  assert.deepEqual(model.mutations(), [
+    'addLabelsToLabelable I_5',
+    'closeIssue I_5',
+    'updateProjectV2ItemFieldValue item-5 Done',
+  ]);
 });
 
 test('invalid programmatic issue filters fail before any API access', async () => {

@@ -222,13 +222,19 @@ export async function reconcileContainers({
   selected.forEach(visit);
   const label = await marker(api, sweep);
   let context;
-  async function setStatus(record, status, { onlyIfChanged = false } = {}) {
+  // The project item a status write would change, or undefined when none would.
+  async function statusItem(record, status, onlyIfChanged) {
     context ??= await discover(api);
     const item = record.items.find(
       (item) => item.project?.id === context.projectId,
     );
     if (!item || (onlyIfChanged && item.fieldValueByName?.name === status))
-      return;
+      return undefined;
+    return item;
+  }
+  async function setStatus(record, status, { onlyIfChanged = false } = {}) {
+    const item = await statusItem(record, status, onlyIfChanged);
+    if (!item) return;
     const field = context.fields.Status;
     const option = field.options.find((option) => option.name === status);
     if (!option) throw new Error(`Missing project status ${status}`);
@@ -259,14 +265,16 @@ export async function reconcileContainers({
     // A sweep decides from its listing until a child's state changes in this
     // run; a single-issue run reads each container in its hierarchy.
     const stale = (edges.get(id) ?? []).some((child) => changed.has(child));
-    let current =
-      sweep && !stale
-        ? {
-            ...byId.get(id),
-            marked: label.marked.has(id),
-            items: label.marked.get(id),
-          }
-        : await read(id);
+    // A decision from the listing is confirmed by a fresh read before its
+    // first write, so a container deleted since the listing is skipped.
+    const listed = sweep && !stale;
+    let current = listed
+      ? {
+          ...byId.get(id),
+          marked: label.marked.has(id),
+          items: label.marked.get(id),
+        }
+      : await read(id);
     if (
       !current ||
       current.repository.nameWithOwner !== REPOSITORY ||
@@ -283,13 +291,15 @@ export async function reconcileContainers({
       );
       if (dryRun) continue;
       // Mark before closing so a partial run can recover without losing automation ownership.
-      if (close && !current.marked)
+      if (close && !current.marked) {
+        if (listed && !(await read(id))) continue;
         await api(
           `mutation($id: ID!, $label: ID!) {
         addLabelsToLabelable(input: { labelableId: $id, labelIds: [$label] }) { clientMutationId }
       }`,
           { id, label: label.id },
         );
+      }
       const fresh = await read(id);
       if (!fresh) continue;
       const stillComplete =
@@ -314,7 +324,16 @@ export async function reconcileContainers({
       if (close) continue;
     } else if (current.marked && !dryRun) {
       // Repair status if a prior state mutation succeeded but its project update failed.
-      if (!current.items) current = await read(id);
+      if (
+        !current.items ||
+        (listed &&
+          (await statusItem(
+            current,
+            current.state === 'CLOSED' ? 'Done' : 'Ready',
+            true,
+          )))
+      )
+        current = await read(id);
       if (!current) continue;
       if (current.marked)
         await setStatus(
