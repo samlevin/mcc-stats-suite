@@ -24,7 +24,7 @@ Every application workspace participates in the root checks and can be targeted 
 
 `npm test` is AWS-free. CDK synth verifies infrastructure structure. After a release PR merges, delivery verifies each released application's dev stack, as [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes. Run the full email integration test before promoting a material ingestion or processing change.
 
-## Issue automation and workflow lint
+## Issue automation and workflow tests
 
 The tracker, delivery queue, branch name, spec filing, and agent generation commands come from the `@agenticool/*` devDependencies, which carry their own tests. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
 
@@ -38,7 +38,7 @@ CI selects checks from the committed changed files, using the baseline classifie
 
 Pull requests and pushes to `main` select gates by these rules:
 
-- Markdown-only changes run formatting and Markdown lint. Recognized repository-only changes also run repository lint, the agent file check, the workflow lint, and the shared CLI test. Neither runs workspace tests or builds, CDK synthesis, bundle validation, or OpenTofu checks. The [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists the same checks to run locally.
+- Markdown-only changes run formatting and Markdown lint. Recognized repository-only changes also run repository lint, the agent file check, the workflow tests, and the shared CLI test. Neither runs workspace tests or builds, CDK synthesis, bundle validation, or OpenTofu checks. The [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists the same checks to run locally.
 - Application and package code runs the full application gate.
 - Dependencies, build configuration, CI selection, `.terrateam/config.yml`, and unknown paths run the full application gate and the infrastructure gate.
 - OpenTofu source and configuration files (`*.tf`, `*.tfvars`, and `*.hcl`) under `infrastructure/` select only the infrastructure gate. Infrastructure-only changes skip the application checks, including `check-workspaces`.
