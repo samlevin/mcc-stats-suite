@@ -47,7 +47,7 @@ Pull requests and pushes to `main` select gates by these rules:
 - Dependencies, build configuration, CI selection, `.terrateam/config.yml`, and unknown paths run the full application gate and the infrastructure gate.
 - OpenTofu source and configuration files (`*.tf`, `*.tfvars`, and `*.hcl`) under `infrastructure/` select only the infrastructure gate. Infrastructure-only changes skip the application checks, including `check-workspaces`.
 
-The required `require-scoped-checks` job, shown as `Require every check selected for the changed files`, runs on `ubuntu-latest`. It waits for each selected gate and fails when one fails.
+The required `require-scoped-checks` job, shown as `Require every check selected for the changed files`, runs on `ubuntu-latest`. It runs even when the workflow is cancelled, and fails unless change detection and every selected gate succeeded, so a failed, cancelled, or skipped job fails it.
 
 ### Application gate
 
