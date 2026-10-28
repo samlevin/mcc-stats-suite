@@ -15,7 +15,7 @@ Lines starting with `> Guide:` explain what a section must contain. Delete them 
 - **Mark optional sections.** Delete an optional section that does not apply, rather than leaving it empty.
 - **Record every limitation.** Each accepted limitation in §18 either explains why it is acceptable or names the backlog slice that fixes it.
 - **When code already exists, the code wins.** When retrofitting a spec to an implementation, describe what the repository does, record each decision in §1, and list known defects in §18 instead of specifying them as requirements.
-- **Follow the prose rules** in `.agents/workflows/plain-language.md`. Use ASCII apart from `§`, no em dashes, code symbols in backticks, one paragraph per line.
+- **Follow the prose rules** in `.agents/skills/mcc-plain-language/SKILL.md`. Use ASCII apart from `§`, no em dashes, code symbols in backticks, one paragraph per line.
 - **Never include** credentials, account IDs, domains, email addresses, real user data, state or plans. This repository is public.
 
 ---

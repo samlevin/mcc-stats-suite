@@ -10,22 +10,6 @@ const repositoryFiles = new Set([
   '.github/CODEOWNERS',
   'CODEOWNERS',
   'LICENSE',
-  'scripts/delivery-queue.mjs',
-  'scripts/delivery-queue.test.mjs',
-  'scripts/branch-name.mjs',
-  'scripts/branch-name.test.mjs',
-  'scripts/github-api.mjs',
-  'scripts/github-api.test.mjs',
-  'scripts/issue-triage.mjs',
-  'scripts/issue-triage.test.mjs',
-  'scripts/issue-containers.mjs',
-  'scripts/issue-containers.test.mjs',
-  'scripts/issue-pr-metadata.mjs',
-  'scripts/issue-pr-metadata.test.mjs',
-  'scripts/issue-pr-status.mjs',
-  'scripts/issue-pr-status.test.mjs',
-  'scripts/issue-project-membership.mjs',
-  'scripts/issue-project-membership.test.mjs',
 ]);
 
 // Known workspaces. Shared with scripts/ci-checks.mjs so selection and Turbo
@@ -36,14 +20,18 @@ export function isApplicationPath(path) {
   );
 }
 
-// Agent workflow sources and their generated output. Checked before the
-// Markdown rule because a role or workflow source is Markdown, and editing
-// one must run the generated-definition check, not only the format check.
+// Agent workflow sources and the files agenticool-agents generates or syncs.
+// Checked before the Markdown rule because many of them are Markdown, and
+// editing one must run the generated-file check, not only the format check.
 export function isAgentWorkflowPath(path) {
   return (
-    /^\.agents\/(policy\.json|roles\/|workflows\/|skills\/)/.test(path) ||
+    /^\.agents\/(policy\.json|local\/|skills\/|[^/]+\.md$)/.test(path) ||
     /^\.(claude|codex)\/(agents|skills)\//.test(path) ||
-    /^scripts\/agent-policy(\.test)?\.mjs$/.test(path)
+    [
+      'AGENTS.md',
+      'ISSUE_TRIAGE.md',
+      '.github/pull_request_template.md',
+    ].includes(path)
   );
 }
 

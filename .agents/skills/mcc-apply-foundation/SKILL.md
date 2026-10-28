@@ -2,7 +2,7 @@
 name: mcc-apply-foundation
 description: "Person-invoked local stand-in for Terrateam on one MCC pull request: the agent plans and applies its OpenTofu foundation roots, dev then prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, and merge, then squash-merges like Terrateam automerge. Only when a person asks, for example 'apply foundation for PR #N'; never part of delivery."
 ---
-<!-- Generated from .agents/workflows/apply-foundation.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
+<!-- Generated from .agents/local/workflows/apply-foundation.md by agenticool-agents. Edit the source and run `npx agenticool-agents generate`. -->
 
 # MCC apply foundation
 

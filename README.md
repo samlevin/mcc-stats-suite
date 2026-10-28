@@ -113,13 +113,14 @@ Run these commands from the repository root after `npm ci`. Pass command argumen
 | `npm run build` | Build all workspaces in dependency order | Optional Turbo options after `--`, such as `--filter=@mcc/contracts`; defaults to all workspaces |
 | `npm run build:shared` | Build the four shared packages | None |
 | `npm test` | Run repository script tests and workspace tests | None required |
-| `npm run test:scripts` | Run the repository script tests the CI full gate selects, without the GitHub automation tests. CI runs it through Turbo as the cached `//#test:scripts` task | None |
+| `npm run test:scripts` | Run the repository script tests the CI full gate selects. CI runs it through Turbo as the cached `//#test:scripts` task | None |
 | `npm run typecheck` | Type-check workspaces | Optional Turbo options after `--`; defaults to all workspaces |
 | `npm run lint`, `npm run lint:fix` | Check lint rules, or fix code lint after building shared packages | None required; `lint:fix` excludes Markdown |
 | `npm run format`, `npm run format:check` | Write or check Prettier formatting | None required; Markdown is excluded by `.prettierignore` |
 | `npm run release:check` | Validate package, lockfile, and release metadata consistency | None |
 | `npm run release:metadata` | Print an application's release metadata as JSON | Required `--application <name>`, e.g. `--application match-to-csv` |
-| `npm run agents:generate`, `npm run agents:check` | Generate or verify Claude and Codex agent files | None |
+| `npm run agents:generate`, `npm run agents:sync`, `npm run agents:check` | Generate the Claude and Codex agent files, sync the shared tracker files and `AGENTS.md` sections, or verify both, with `@agenticool/agents` | None |
+| `npm run workflows:lint` | Lint every GitHub Actions workflow with `@agenticool/workflow-lint` | None |
 | `npm run cdk:local-template` | Rewrite the committed local CDK bootstrap template offline | None |
 | `npm run cdk:synth` | Run workspace CDK synthesis through Turbo | Required CDK environment context, e.g. `npm run cdk:synth -- -- -c environment=dev`; optional Turbo filters before the forwarding `--`. Prefer `app:synth` below for one stack |
 | `npm run app:synth`, `npm run app:diff`, `npm run app:deploy`, `npm run app:destroy` | Synthesize, compare, deploy, or remove one application's stack through account guards | Required application name; optional `--environment dev\|prod` (profile-derived, then `dev`), `--ephemeral <name>`, `--profile <profile>` (defaults to `AWS_PROFILE`), and CDK options. Local diff/deploy requires `--environment dev --ephemeral <name>`; destroy requires an ephemeral name. Stable deploys run only in GitHub Actions on `main` |

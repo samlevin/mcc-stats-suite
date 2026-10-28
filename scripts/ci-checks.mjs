@@ -13,55 +13,24 @@ const jobTasks = {
   bundle: ['ci:synth', 'verify:bundle'],
 };
 
-// GitHub automation scripts never feed a build or deployment, so their tests
-// run only when the repository scope selects them, not on every full gate.
-export const automationTests = [
-  'scripts/github-api.test.mjs',
-  'scripts/issue-triage.test.mjs',
-  'scripts/issue-containers.test.mjs',
-  'scripts/issue-pr-metadata.test.mjs',
-  'scripts/issue-pr-status.test.mjs',
-  'scripts/issue-project-membership.test.mjs',
-  'scripts/branch-name.test.mjs',
-  'scripts/agent-policy.test.mjs',
-  'scripts/delivery-queue.test.mjs',
-];
-
-// Full-gate tests that also check files in the repository scope.
-const sharedBuildTests = [
-  'scripts/cli.test.mjs',
-  'scripts/workflow-timeouts.test.mjs',
-  'scripts/workflow-node-version.test.mjs',
-  'scripts/workflow-checkout-credentials.test.mjs',
-  'scripts/workflow-pull-request-target.test.mjs',
-];
+// The shared CLI also feeds builds, so the full gate tests it as a build test
+// and the repository scope adds it for repository-only changes.
+const sharedBuildTests = ['scripts/cli.test.mjs'];
 
 const automationLintTargets = [
   'scripts/ci-scope.mjs',
   'scripts/cli.cjs',
   'scripts/cli.test.mjs',
-  'scripts/github-api.mjs',
-  'scripts/issue-triage.mjs',
-  'scripts/issue-containers.mjs',
-  'scripts/issue-pr-metadata.mjs',
-  'scripts/issue-pr-status.mjs',
-  'scripts/issue-project-membership.mjs',
-  'scripts/branch-name.mjs',
-  'scripts/agent-policy.mjs',
-  'scripts/delivery-queue.mjs',
-  ...automationTests,
-  'scripts/workflow-node-version.test.mjs',
 ];
 
-// Every other scripts/*.test.mjs belongs to the full gate. Listing the
-// directory keeps new build and deployment tests in it without editing here.
+// Every scripts/*.test.mjs belongs to the full gate. Listing the directory
+// keeps new build and deployment tests in it without editing here.
 export function buildTests(
   directory = fileURLToPath(new URL('.', import.meta.url)),
 ) {
   return readdirSync(directory)
     .filter((name) => name.endsWith('.test.mjs'))
     .map((name) => `scripts/${name}`)
-    .filter((path) => !automationTests.includes(path))
     .sort();
 }
 
@@ -109,18 +78,15 @@ export function checks({ full, repository, mode, job = 'static', base, head }) {
         '0',
       ],
     ]);
-  if (repository) {
-    // Generated agent definitions must match their sources under .agents/.
-    commands.push(['npm', ['run', 'agents:check']]);
-    // CLI compatibility covers automation and build consumers, and the
-    // workflow timeout, Node version, checkout credentials, and
-    // pull_request_target tests cover the workflows in this scope. The full gate already runs all of them, so add
-    // them here only for repository-only changes.
-    commands.push([
-      'node',
-      ['--test', ...automationTests, ...(!full ? sharedBuildTests : [])],
-    ]);
-  }
+  if (full || repository)
+    // Generated and synced agent files must match the installed
+    // @agenticool/agents, and every workflow must pass the shared lint.
+    commands.push(
+      ['npm', ['run', 'agents:check']],
+      ['npm', ['run', 'workflows:lint']],
+    );
+  if (repository && !full)
+    commands.push(['node', ['--test', ...sharedBuildTests]]);
   return commands;
 }
 

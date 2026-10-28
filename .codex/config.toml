@@ -1,3 +1,4 @@
+# agenticool-agents sync: begin browser-mcp
 [mcp_servers.playwright]
 command = "npx"
 args = ["-y", "@playwright/mcp@latest", "--headless"]
@@ -5,3 +6,4 @@ args = ["-y", "@playwright/mcp@latest", "--headless"]
 [mcp_servers.playwriter]
 command = "npx"
 args = ["-y", "playwriter@latest"]
+# agenticool-agents sync: end browser-mcp

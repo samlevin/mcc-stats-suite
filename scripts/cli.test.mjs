@@ -12,8 +12,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { CliHelp, defineCli, parseCli } from './cli.cjs';
-import { run as branch } from './branch-name.mjs';
-import { configuration } from './issue-triage.mjs';
 // Operator CLI modules load the compiled shared packages when imported.
 if (
   ['roster', 'recipients'].some(
@@ -159,40 +157,6 @@ test('roster and recipients share aliases, operands, conflicts, and effect-free 
   }
 });
 
-test('branch and tracker aliases preserve machine results and dry-run defaults', () => {
-  const api = () => '{"title":"Example"}';
-  assert.equal(
-    branch(['-a=sam', '-l=2', '--', '285'], { api }),
-    'sam/285-example-part-2',
-  );
-  assert.throws(
-    () =>
-      branch(['--actor=sam', '-a=agent', '285'], {
-        api: () => assert.fail('GitHub called'),
-      }),
-    /more than once/,
-  );
-  assert.deepEqual(configuration({}, ['-i=42', '-n']), {
-    issueNumber: 42,
-    dryRun: true,
-  });
-  assert.deepEqual(configuration({ DRY_RUN: 'false' }, ['-n']), {
-    dryRun: true,
-  });
-  assert.deepEqual(configuration({}, ['--apply', '-i', '42']), {
-    issueNumber: 42,
-    dryRun: false,
-  });
-  assert.throws(
-    () => configuration({}, ['--apply', '-n']),
-    /Use --dry-run or --apply/,
-  );
-  assert.throws(
-    () => configuration({}, ['-i=42', '--issue=43']),
-    /more than once/,
-  );
-});
-
 const node = (script, args, env = {}) =>
   spawnSync(process.execPath, [script, ...args], {
     encoding: 'utf8',
@@ -205,17 +169,10 @@ test('all root CLI entries help and reject malformed input without subprocesses'
     ['roster', [], ['--unknown'], 2],
     ['recipients', [], ['--unknown'], 2],
     ['sender-allowlist', [], ['--unknown'], 2],
-    ['branch-name', [], ['285', '-a=sam', '--actor=other'], 1],
     ['release-metadata', [], ['--unknown'], 1],
-    ['issue-triage', [], ['--apply', '-n'], 1],
-    ['issue-containers', [], ['--apply', '-n'], 1],
-    ['agent-policy', ['generate'], ['--unknown'], 1],
   ]) {
     for (const help of ['--help', '-h']) {
-      const result = node(`scripts/${script}.mjs`, [...prefix, help], {
-        GITHUB_ACTIONS: 'true',
-        DRY_RUN: 'invalid',
-      });
+      const result = node(`scripts/${script}.mjs`, [...prefix, help]);
       assert.equal(result.status, 0, `${script}: ${result.stderr}`);
       assert.match(result.stdout, /Usage:/);
       assert.equal(result.stderr, '');
@@ -227,35 +184,13 @@ test('all root CLI entries help and reject malformed input without subprocesses'
   }
 });
 
-test('release and agent commands preserve JSON output with aliases and equals', () => {
+test('release metadata preserves JSON output with aliases and equals', () => {
   const release = node('scripts/release-metadata.mjs', ['-a=match-to-csv']);
   assert.equal(release.status, 0, release.stderr);
   assert.equal(
     JSON.parse(release.stdout).application.name,
     '@mcc/match-to-csv',
   );
-  const policy = node('scripts/agent-policy.mjs', [
-    'resolve',
-    '-t=codex',
-    '--role=implementer',
-    '-m=gpt-6.1-sol',
-    '--effort=high',
-  ]);
-  assert.equal(policy.status, 0, policy.stderr);
-  assert.equal(JSON.parse(policy.stdout).spawn.agent_type, 'mcc-implementer');
-  for (const args of [
-    ['resolve', '--tool=codex', '-t=claude'],
-    [
-      'resolve',
-      '-t=codex',
-      '--role=implementer',
-      '--capability=implementation',
-    ],
-  ]) {
-    const result = node('scripts/agent-policy.mjs', args);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /Usage:/);
-  }
 });
 
 test('CDK passthrough remains byte-for-byte in order and guards run before effects', (t) => {

@@ -4,7 +4,7 @@ description: "Person-invoked local stand-in for Terrateam on one MCC pull reques
 argument-hint: <PR number>
 disable-model-invocation: true
 ---
-<!-- Generated from .agents/workflows/apply-foundation.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
+<!-- Generated from .agents/local/workflows/apply-foundation.md by agenticool-agents. Edit the source and run `npx agenticool-agents generate`. -->
 
 # MCC apply foundation
 

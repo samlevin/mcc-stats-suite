@@ -64,7 +64,7 @@ The OIDC subject step assumes immutable OIDC subjects. A repository with mutable
 
 ## Configure the infrastructure merge requirement
 
-The `main` ruleset requires `Require applicable Terrateam applies` from GitHub Actions alongside `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits`. Do not require `terrateam apply` globally: Terrateam intentionally sends no status for the excluded Release Please branch. Keep the pull-request requirement, up-to-date requirement, force-push/deletion protection, and existing bypass policy.
+The `main` ruleset requires `Require applicable Terrateam applies` from GitHub Actions alongside `Require every check selected for the changed files`, `Scan secrets / Scan commits for secrets`, and `Check PR title / Check PR title follows Conventional Commits`. Do not require `terrateam apply` globally: Terrateam intentionally sends no status for the excluded Release Please branch. Keep the pull-request requirement, up-to-date requirement, force-push/deletion protection, and existing bypass policy.
 
 `CI: infrastructure merge gate` publishes the required commit status on each open pull request head targeting `main`. It runs on pull-request changes, Terrateam status events, and manual dispatch. It reads trusted default-branch code and dependencies, never executes pull-request code, and marks the status pending before setup. A dependency installation or API failure leaves the gate pending or failed. It makes no plan, apply, or comment and never writes a `terrateam apply` result.
 

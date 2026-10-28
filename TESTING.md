@@ -24,17 +24,13 @@ Every application workspace participates in the root checks and can be targeted 
 
 `npm test` is AWS-free. CDK synth verifies infrastructure structure. After a release PR merges, delivery verifies each released application's dev stack, as [Merge to production](docs/self-hosting/50-deploy-and-release-applications.md#merge-to-production) describes. Run the full email integration test before promoting a material ingestion or processing change.
 
-## Issue automation tests
+## Issue automation and workflow lint
 
-The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs. Project membership tests cover adding new issues, rejecting pull requests before API calls, items already in the project, sweeps that add only missing open issues, dry-run sweeps, a sweep that continues past one failing issue, and the workflow's triggers, schedule offset, dry-run default, and trusted checkout. The GitHub API tests cover how every script reads GitHub's responses and reports its errors, rate limits, and missing `gh`:
+The tracker, delivery queue, branch name, spec filing, agent generation, and workflow lint commands come from the `@agenticool/*` devDependencies, which carry their own tests. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
 
-```console
-node --test scripts/github-api.test.mjs scripts/issue-*.test.mjs
-```
+Preview a tracker command with `npx agenticool-tracker <command>`; every command is a dry run unless you pass `--apply`. A live read-only check uses `npx agenticool-tracker triage --issue <number> --dry-run` with authenticated local `gh`.
 
-These tests use metadata mocks and never call GitHub. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
-
-Preview the tracker workflows with `PR_NUMBER=<number> node scripts/issue-pr-status.mjs`, `PR_NUMBER=<number> node scripts/issue-pr-metadata.mjs`, `CONTENT_TYPE=issue CONTENT_NUMBER=<number> node scripts/issue-project-membership.mjs`, or `SWEEP=true node scripts/issue-project-membership.mjs`; all of them default to a dry run. A live read-only check uses `node scripts/issue-triage.mjs --issue <number> --dry-run` with authenticated local `gh`.
+`npm run agents:check` fails when a generated agent file or a synced file (`AGENTS.md` sections, `ISSUE_TRIAGE.md`, labels, issue forms, the PR template, the tracker workflows, the `.gitignore` block, and the MCP configuration) differs from what the installed `@agenticool/agents` writes. `npm run workflows:lint` checks every workflow's names, timeouts, checkout credentials, Node version source, `pull_request_target` safety, and the required check names in `workflowLint` in `.agents/policy.json`. CI runs both in the full gate and for changes in the repository scope.
 
 ## How CI selects checks
 
@@ -42,7 +38,7 @@ CI selects checks from the committed changed files, using the baseline classifie
 
 Pull requests and pushes to `main` select gates by these rules:
 
-- Markdown-only changes run formatting and Markdown lint. Recognized repository-only changes also run repository lint and issue-automation tests. Neither runs workspace tests or builds, CDK synthesis, bundle validation, or OpenTofu checks. The [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists the same checks to run locally.
+- Markdown-only changes run formatting and Markdown lint. Recognized repository-only changes also run repository lint, the agent file check, the workflow lint, and the shared CLI test. Neither runs workspace tests or builds, CDK synthesis, bundle validation, or OpenTofu checks. The [Getting started table](docs/getting-started.md#choose-the-checks-for-your-change) lists the same checks to run locally.
 - Application and package code runs the full application gate.
 - Dependencies, build configuration, CI selection, `.terrateam/config.yml`, and unknown paths run the full application gate and the infrastructure gate.
 - OpenTofu source and configuration files (`*.tf`, `*.tfvars`, and `*.hcl`) under `infrastructure/` select only the infrastructure gate. Infrastructure-only changes skip the application checks, including `check-workspaces`.
@@ -55,7 +51,7 @@ The ARM64 `check-workspaces` job installs dependencies once, prepares shared dec
 
 `ci:test` depends on `^build` only, because application tests run the sources. `@mcc/cdk-config#ci:test` also waits for its own build because its tests load `dist`.
 
-The parallel ARM64 `check-scripts` job runs only for full-scope changes, on its own runner so the root script tests do not compete with the workspace tests for CPUs. It runs the root Turbo task `//#test:scripts`, which runs every `scripts/*.test.mjs` file except the GitHub automation tests; those run in `check-workspaces`, only for repository-scope changes. The task waits for the four shared package builds, whose `dist` the tests load. Its `inputs` in `turbo.json` cover `scripts/`, `.github/`, `.terrateam/`, `infrastructure/`, every workspace, the local CDK deployer policy templates under `docs/self-hosting/policies/`, and the root configuration files, so Turbo replays it from cache only when none of those changed. Add a path to those inputs when a root test starts reading a file outside them.
+The parallel ARM64 `check-scripts` job runs only for full-scope changes, on its own runner so the root script tests do not compete with the workspace tests for CPUs. It runs the root Turbo task `//#test:scripts`, which runs every `scripts/*.test.mjs` file. The task waits for the four shared package builds, whose `dist` the tests load. Its `inputs` in `turbo.json` cover `scripts/`, `.github/`, `.terrateam/`, `infrastructure/`, every workspace, the local CDK deployer policy templates under `docs/self-hosting/policies/`, and the root configuration files, so Turbo replays it from cache only when none of those changed. Add a path to those inputs when a root test starts reading a file outside them.
 
 The parallel ARM64 `check-bundles` job runs only for full-scope changes. It starts pulling the digest-pinned bundling image before `npm ci`, then runs `ci:synth` and `verify:bundle`. `ci:synth` always synthesizes dev ephemeral stacks; `verify:bundle` waits for the `match-to-csv` synthesis and checks the Linux ARM64 Sharp assets. The bundling image pin lives in `applications/match-to-csv/cdk/lib/bundling.ts`, which explains how to update it.
 
@@ -97,6 +93,4 @@ node --test scripts/ci-checks.test.mjs
 
 Application delivery regression checks run with `node --test scripts/deployment-workflows.test.mjs`. They use workflow definitions and mocked GitHub responses to verify release selection, exact release commits, required production approval protection, and account checks without AWS calls. The same suite checks per-application dev-success gating, shared deployment queues, stale-version skips and the rollback exception with prior prod qualification. It also runs the Slack deploy message steps with a mocked webhook to check each message's text, that every caller passes `SLACK_DEPLOY_WEBHOOK_URL` explicitly, that each Slack step runs only when the secret is set, and that a failed post only warns.
 
-`node --test scripts/workflow-names.test.mjs` checks workflow, job, and step names against the convention in [CONTRIBUTING.md](CONTRIBUTING.md#name-github-actions-workflows), including the three check names the `main` ruleset requires.
-
-`node --test scripts/workflow-timeouts.test.mjs` checks that every workflow job sets `timeout-minutes`. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. CI runs it in the full gate and for changes in the repository scope, such as the `tracker-*.yml` workflows. Pick a value above the job's longest recent successful run.
+`npm run workflows:lint` covers the naming rules in [GitHub Actions workflow names](AGENTS.md#github-actions-workflow-names), including the check names the `main` ruleset requires, and requires `timeout-minutes` on every job that runs steps. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. Pick a value above the job's longest recent successful run.

@@ -2,7 +2,7 @@
 name: mcc-apply-bootstrap
 description: "Person-invoked local apply of the MCC OpenTofu bootstrap roots and CDK bootstraps at the current origin/main: the agent plans and applies infrastructure/dev/bootstrap, then infrastructure/prod/bootstrap, then creates or upgrades CDKToolkit in dev and prod, with the person's own AWS credentials, stopping for explicit approval before every plan, apply, and bootstrap. No pull request and no merge. Only when a person asks, for example 'apply bootstrap' or 'bootstrap CDK'; never part of delivery."
 ---
-<!-- Generated from .agents/workflows/apply-bootstrap.md by scripts/agent-policy.mjs. Edit the source and run `npm run agents:generate`. -->
+<!-- Generated from .agents/local/workflows/apply-bootstrap.md by agenticool-agents. Edit the source and run `npx agenticool-agents generate`. -->
 
 # MCC apply bootstrap
 

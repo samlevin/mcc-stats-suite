@@ -38,14 +38,15 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Agent-owned linked worktrees (Claude Code and the MCC Codex workflows)
+# Agent worktrees and local agent files
+# agenticool-agents sync: begin agent-local
 .claude/worktrees/
 .codex/worktrees/
-
-# Local agent files: personal instructions, scheduler locks, and Playwright MCP output
 CLAUDE.local.md
+.claude/settings.local.json
 .claude/scheduled_tasks.lock
 .playwright-mcp/
+# agenticool-agents sync: end agent-local
 
 # OS/editor noise
 .DS_Store

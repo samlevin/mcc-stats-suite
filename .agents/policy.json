@@ -1,22 +1,26 @@
 {
-  "$schema": "./policy.schema.json",
-  "description": "Repository binding, model, and effort policy for the agent workflows. scripts/agent-policy.mjs reads this file; both the Claude Code and Codex definitions are generated from it, and every placeholder in .agents/roles and .agents/workflows resolves here.",
+  "$schema": "../node_modules/@agenticool/policy/src/policy.schema.json",
+  "description": "Repository binding, model and effort policy, labels, and workflow lint config for the agent workflows. agenticool-agents generates the Claude Code and Codex definitions and syncs the tracker files from it, and agenticool-workflow-lint reads workflowLint.",
   "binding": {
     "namespace": "mcc",
     "label": "MCC",
     "repository": "samlevin/mcc-stats-suite",
     "project": {
       "owner": "samlevin",
+      "ownerType": "user",
       "number": 1,
       "name": "MCC delivery"
     },
+    "tokenEnv": "MCC_PROJECT_TOKEN",
     "docs": {
       "triage": "ISSUE_TRIAGE.md",
       "workflow": "WORKFLOW.md",
-      "guides": ["WORKFLOW.md", "CONTRIBUTING.md", "TESTING.md"]
+      "guides": ["WORKFLOW.md", "TESTING.md"]
     },
     "features": {
-      "infrastructure": true
+      "infrastructure": true,
+      "releasePlease": true,
+      "browserMcp": true
     }
   },
   "capabilities": {
@@ -168,5 +172,100 @@
         ]
       }
     }
+  },
+  "labels": {
+    "extra": [
+      {
+        "name": "area: infrastructure",
+        "color": "d4c5f9",
+        "description": "OpenTofu foundation and persistent shared resources"
+      },
+      {
+        "name": "autorelease: pending",
+        "color": "ededed",
+        "description": "Managed by Release Please; never apply by hand"
+      },
+      {
+        "name": "package: admin",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/admin NPM package"
+      },
+      {
+        "name": "package: cdk-config",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/cdk-config NPM package"
+      },
+      {
+        "name": "package: contracts",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/contracts NPM package"
+      },
+      {
+        "name": "package: data-pipeline",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/data-pipeline NPM package"
+      },
+      {
+        "name": "package: match-to-csv",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/match-to-csv NPM package"
+      },
+      {
+        "name": "package: ocr-quality",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/ocr-quality NPM package"
+      },
+      {
+        "name": "package: player",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/player NPM package"
+      },
+      {
+        "name": "package: recipients",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/recipients NPM package"
+      },
+      {
+        "name": "package: roster",
+        "color": "5319e7",
+        "description": "Directly affects the @mcc/roster NPM package"
+      },
+      {
+        "name": "risk: deployment",
+        "color": "e99695",
+        "description": "May affect deployment, rollback, or persistent infrastructure"
+      }
+    ]
+  },
+  "workflowLint": {
+    "areas": {
+      "ci": "CI",
+      "release": "Release",
+      "delivery": "Delivery",
+      "tracker": "Tracker"
+    },
+    "exclude": ["terrateam.yml"],
+    "pullRequestTarget": [
+      "ci-infrastructure-gate.yml",
+      "tracker-pr-issue-status.yml",
+      "tracker-pr-metadata.yml"
+    ],
+    "requiredChecks": [
+      {
+        "file": "ci-checks.yml",
+        "job": "require-scoped-checks",
+        "name": "Require every check selected for the changed files"
+      },
+      {
+        "file": "ci-pr-title.yml",
+        "job": "check-pr-title",
+        "name": "Check PR title"
+      },
+      {
+        "file": "ci-secret-scan.yml",
+        "job": "scan-secrets",
+        "name": "Scan secrets"
+      }
+    ]
   }
 }

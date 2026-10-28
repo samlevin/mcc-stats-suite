@@ -585,8 +585,17 @@ test('each deployment caller passes only the account secrets it deploys to and t
       },
     );
   }
+  // The tracker callers that @agenticool/tracker syncs inherit secrets because
+  // the reusable tracker workflows read the Projects token by the name in
+  // `token_env`. No other job may.
   for (const { name, text } of workflowFiles()) {
-    assert.doesNotMatch(text, /secrets:\s*inherit/, name);
+    for (const [id, job] of Object.entries(parse(text).jobs))
+      if (job.secrets === 'inherit')
+        assert.match(
+          job.uses,
+          /^agenticool\/agenticool\/\.github\/workflows\/_tracker-[a-z-]+\.yml@/,
+          `${name} ${id}`,
+        );
   }
 });
 
