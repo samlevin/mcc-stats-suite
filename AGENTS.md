@@ -38,6 +38,8 @@ Tests never call AWS. Run the required checks for the changed scope before pushi
 
 Repository files such as `package.json`, `turbo.json`, and release-please config are ordinary code changes.
 
+Add a `package:` label for each directly affected workspace; infrastructure work uses `area: infrastructure`.
+
 <!-- agenticool-agents sync: begin code -->
 
 ## Code and comments
@@ -62,7 +64,7 @@ Version-controlled agents and skills under `.claude/agents/` and `.claude/skills
 | Review a pushed branch or PR | `/mcc-review-code` | `$mcc-review-code` | `mcc-code-reviewer` (read-only, reports to you; the skill posts the report to a target PR) |
 | Security review, only when a person asks | `/mcc-review-security` | `$mcc-review-security` | `mcc-security-reviewer` (read-only) |
 | Write a PR body, issue body, comment, or doc | `/mcc-plain-language` | `$mcc-plain-language` | none |
-| Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits sources, regenerates both tools, verifies |
+| Change, add, or regenerate these agents and skills | `/mcc-agents` | `$mcc-agents` | none; edits the policy or local sources, regenerates both tools, verifies |
 
 - Delivery and handoffs: [the implement workflow](.agents/skills/mcc-implement/SKILL.md) owns dispatch, its [dependency queue](.agents/skills/mcc-implement/references/queue.md) owns containers and the parallel exception, and [leaf delivery](.agents/skills/mcc-implement/references/delivery.md) owns the pre-PR reviewer spawn. Only `mcc-issue-triager` forms independence groups, under `.agents/independence-groups.md`. No automatic flow spawns `mcc-security-reviewer`.
 - Model and effort: `.agents/policy.json` names the model and effort for each role, per tool, and owns the implementation effort rubric. Every dispatcher runs `npx agenticool-agents resolve --tool <claude|codex> --role <role>` and passes the result explicitly when it spawns; it never inherits a session or contributor default. An explicit `model <name>` or `effort <level>` in the request overrides only that setting, for that task and the handoffs it names (`reviewer effort max`), and changes nothing on disk; unsupported values fail. Each agent labels the dispatched `Policy:` line `Requested settings:`, including overrides, and omits model self-identification and runtime-verification commentary. `CLAUDE_CODE_EFFORT_LEVEL` and Codex agent file fields can silently override requested settings.

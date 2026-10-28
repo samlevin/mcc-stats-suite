@@ -585,17 +585,8 @@ test('each deployment caller passes only the account secrets it deploys to and t
       },
     );
   }
-  // The tracker callers that @agenticool/tracker syncs inherit secrets because
-  // the reusable tracker workflows read the Projects token by the name in
-  // `token_env`. No other job may.
   for (const { name, text } of workflowFiles()) {
-    for (const [id, job] of Object.entries(parse(text).jobs))
-      if (job.secrets === 'inherit')
-        assert.match(
-          job.uses,
-          /^agenticool\/agenticool\/\.github\/workflows\/_tracker-[a-z-]+\.yml@/,
-          `${name} ${id}`,
-        );
+    assert.doesNotMatch(text, /secrets:\s*inherit/, name);
   }
 });
 
@@ -2042,5 +2033,23 @@ test('Slack messages escape control characters, and a failed post only warns', a
         assert.ok(!line.includes(webhook), line);
       }
     }
+  }
+});
+
+test('workflow, job, and step names write the environments as dev and prod', () => {
+  // Terrateam owns its workflow file and keeps the vendor's names.
+  for (const { name: file, text } of workflowFiles()) {
+    if (file === 'terrateam.yml') continue;
+    const definition = parse(text);
+    const names = [
+      definition.name,
+      definition['run-name'] ?? '',
+      ...Object.values(definition.jobs).flatMap((job) => [
+        job.name,
+        ...(job.steps ?? []).map((step) => step.name),
+      ]),
+    ];
+    for (const name of names)
+      assert.doesNotMatch(name, /production/i, `${file}: ${name}`);
   }
 });

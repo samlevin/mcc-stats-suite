@@ -33,4 +33,5 @@ jobs:
       token_env: 'MCC_PROJECT_TOKEN'
       pull_request: ${{ fromJSON(github.event.pull_request.number || inputs.pull_request) }}
       dry_run: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
-    secrets: inherit
+    secrets:
+      project_token: ${{ secrets.MCC_PROJECT_TOKEN }}

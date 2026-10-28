@@ -21,6 +21,9 @@
       "infrastructure": true,
       "releasePlease": true,
       "browserMcp": true
+    },
+    "infrastructure": {
+      "accountChecks": ["scripts/cdk-app.mjs", "packages/cdk-config"]
     }
   },
   "capabilities": {
