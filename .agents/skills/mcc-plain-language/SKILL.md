@@ -79,7 +79,7 @@ Use the most ordinary word that is still accurate. These come up most often:
 
 ## PR bodies and commit messages
 
-A PR body or commit message states the change, the reason for it, the decisions a reviewer should check, the open findings, and the validation results. It leaves out the delivery history: how the evidence was gathered, the order the work was done in, and who raised what during review. Write the fact that the history points to. "Textract reads both totals correctly" replaces "In both dev runs, Textract read the right numbers". "`parseRow` accepts a negative score" replaces "The reviewer raised three low findings that I left for follow-up", with one line for each open finding. A before-and-after statement of behavior, such as "Before, one 502 failed the whole run", is a fact about the defect and stays.
+A PR body or commit message states the change, the reason for it, the decisions a reviewer should check, the open findings, and the validation results. It leaves out the delivery history: how the evidence was gathered, the order the work was done in, and who raised what during review. Write the fact that the history points to. "The parser reads both totals correctly" replaces "In both dev runs, the parser read the right numbers". "`parseRow` accepts a negative score" replaces "The reviewer raised three low findings that I left for follow-up", with one line for each open finding. A before-and-after statement of behavior, such as "Before, one 502 failed the whole run", is a fact about the defect and stays.
 
 ## Docs and code comments
 
