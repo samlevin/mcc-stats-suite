@@ -1028,7 +1028,7 @@ test('workflow isolates cache namespaces and keeps validation independent of rel
     'check-scripts',
     'check-bundles',
   ]);
-  assert.equal(gate.if, '${{ !cancelled() }}');
+  assert.equal(gate.if, '${{ always() }}');
   // Job names are the required status-check contexts in the main ruleset.
   assert.equal(gate.name, 'Require every check selected for the changed files');
   assert.equal(parsedWorkflow.jobs['select-applications'], undefined);
@@ -1539,6 +1539,34 @@ test('check aggregator requires exactly the selected gates', () => {
                             (scriptsResult === 'success' &&
                               bundlesResult === 'success')))),
                   );
+  // A cancelled run reaches the gate with cancelled or skipped results.
+  const selected = {
+    SCOPE_RESULT: 'success',
+    SCOPE_INFRASTRUCTURE: 'true',
+    SCOPE_APPLICATIONS: 'true',
+    SCOPE_FULL: 'true',
+    INFRASTRUCTURE_RESULT: 'success',
+    APPLICATIONS_RESULT: 'success',
+    SCRIPTS_RESULT: 'success',
+    BUNDLES_RESULT: 'success',
+  };
+  assert.equal(passes(selected), true);
+  for (const name of Object.keys(selected).filter((key) =>
+    key.endsWith('_RESULT'),
+  ))
+    for (const result of ['cancelled', 'skipped'])
+      assert.equal(passes({ ...selected, [name]: result }), false, name);
+  // Failed detection leaves every scope output empty.
+  assert.equal(
+    passes({
+      ...selected,
+      SCOPE_RESULT: 'failure',
+      SCOPE_INFRASTRUCTURE: '',
+      SCOPE_APPLICATIONS: '',
+      SCOPE_FULL: '',
+    }),
+    false,
+  );
 });
 
 test('workflow executes gate selection for push, PR, retired baseline, and API failure', async () => {
@@ -1663,6 +1691,24 @@ test('workflow executes gate selection for push, PR, retired baseline, and API f
     [true, true, true, true],
   );
   assert.match(retired.warnings.join('\n'), /supported entry point/);
+  for (const result of ['null', "{ full: 'false' }", '{ full: false }']) {
+    const invalid = await run({
+      paths: ['infrastructure/dev/foundation/main.tf'],
+      baseline: `export function selectScopes() { return ${result}; }`,
+    });
+    assert.deepEqual(
+      [
+        invalid.outputs.full,
+        invalid.outputs.repository,
+        invalid.outputs.infrastructure,
+        invalid.outputs.check,
+        invalid.outputs.mode,
+      ],
+      [true, true, true, true, 'all'],
+      result,
+    );
+    assert.match(invalid.warnings.join('\n'), /no valid scope/);
+  }
   const constExport = await run({
     paths: ['infrastructure/dev/foundation/main.tf'],
     baseline: String(currentClassifier).replace(
