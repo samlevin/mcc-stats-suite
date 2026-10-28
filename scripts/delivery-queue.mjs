@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { CliHelp, cliError, defineCli, parseCli } from './cli.cjs';
+import { failureMessage, ghRest, ghRestPages } from './github-api.mjs';
 import { implementationEffort, loadPolicy } from './agent-policy.mjs';
 import { closingIssues } from './issue-pr-status.mjs';
 
@@ -10,42 +11,25 @@ const text = (value) =>
 
 // Every invocation refetches GitHub; this REST client keeps no response cache.
 export function restClient(run = execFileSync) {
-  const get = (path, paginate = false) => {
+  const request = (path, read) => {
     try {
-      return JSON.parse(
-        run(
-          'gh',
-          [
-            'api',
-            path,
-            '--method',
-            'GET',
-            ...(paginate ? ['--paginate', '--slurp'] : []),
-          ],
-          {
-            encoding: 'utf8',
-            maxBuffer: 64 * 1024 * 1024,
-            stdio: ['ignore', 'pipe', 'pipe'],
-          },
-        ),
-      );
+      return read();
     } catch (error) {
-      throw new Error(
-        `GET ${path}: ${String(error.stderr || error.message).trim()}`,
-        { cause: error },
-      );
+      throw new Error(`GET ${path}: ${failureMessage(error)}`, {
+        cause: error,
+      });
     }
   };
-  // gh follows Link headers, including the Projects v2 cursor-based endpoint.
+  const get = (path) =>
+    request(path, () => JSON.parse(ghRest([path], { run })));
   const list = (path, key) => {
-    const pages = get(
-      `${path}${path.includes('?') ? '&' : '?'}per_page=100`,
-      true,
+    const pages = request(path, () =>
+      ghRestPages(`${path}${path.includes('?') ? '&' : '?'}per_page=100`, {
+        run,
+      }),
     );
-    if (!Array.isArray(pages))
-      throw new Error(`GET ${path}: expected paginated responses`);
     return pages.flatMap((page) => {
-      const items = key ? page[key] : page;
+      const items = key ? page?.[key] : page;
       if (!Array.isArray(items))
         throw new Error(`GET ${path}: expected a list`);
       return items;
@@ -64,7 +48,12 @@ export function claimRecord(comments) {
       const value = JSON.parse(record[1]);
       if (value.released) {
         if (active?.agent === value.agent) active = null;
-      } else active = { ...value, url: comment.html_url };
+      } else
+        active = {
+          ...value,
+          url: comment.html_url,
+          login: comment.user?.login,
+        };
     } else if (
       /\b(?:claims?|claimed|claiming)\b/i.test(body) &&
       !/\b(?:releases?|released|releasing)\b/i.test(body)
@@ -76,13 +65,12 @@ export function claimRecord(comments) {
           body,
         )?.[1],
         url: comment.html_url,
+        login: comment.user?.login,
       };
     } else if (/\b(?:releases?|released|releasing)\b.*\bclaim\b/i.test(body)) {
       // Legacy releases belong to the GitHub account that wrote the claim.
       if (active && comment.user?.login === active.login) active = null;
     }
-    if (active && (record || /\b(?:claims?|claimed|claiming)\b/i.test(body)))
-      active.login = comment.user?.login;
   }
   return active;
 }

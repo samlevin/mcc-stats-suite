@@ -14,6 +14,8 @@ const repositoryFiles = new Set([
   'scripts/delivery-queue.test.mjs',
   'scripts/branch-name.mjs',
   'scripts/branch-name.test.mjs',
+  'scripts/github-api.mjs',
+  'scripts/github-api.test.mjs',
   'scripts/issue-triage.mjs',
   'scripts/issue-triage.test.mjs',
   'scripts/issue-containers.mjs',

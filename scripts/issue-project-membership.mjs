@@ -1,10 +1,11 @@
 import { pathToFileURL } from 'node:url';
+import { failureMessage } from './github-api.mjs';
 import {
-  failureMessage,
-  ghGraphql,
+  MissingIssueError,
   paginate,
   REPOSITORY,
   runTracker,
+  trackerGraphql,
 } from './issue-triage.mjs';
 
 export async function addToProject({
@@ -26,7 +27,8 @@ export async function addToProject({
     { owner, name, number },
   );
   const content = data.repository?.issue;
-  if (!content?.id) throw new Error(`Issue #${number} not found`);
+  // An issue deleted or transferred before the run reads as null.
+  if (!content?.id) throw new MissingIssueError(number);
   const project = data.user?.projectV2;
   if (!project?.id || project.closed)
     throw new Error('MCC delivery project is unavailable');
@@ -139,9 +141,9 @@ if (
       sweep: sweeping,
       task: () =>
         sweeping
-          ? sweep({ api: ghGraphql, dryRun })
+          ? sweep({ api: trackerGraphql, dryRun })
           : addToProject({
-              api: ghGraphql,
+              api: trackerGraphql,
               kind: process.env.CONTENT_TYPE,
               number: Number(process.env.CONTENT_NUMBER),
               dryRun,

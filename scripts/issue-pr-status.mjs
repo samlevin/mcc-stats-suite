@@ -4,9 +4,9 @@ import {
   metadataGraphql,
   referenceText,
 } from './issue-pr-metadata.mjs';
+import { failureMessage } from './github-api.mjs';
 import {
   discover,
-  failureMessage,
   paginate,
   readItem,
   REPOSITORY,

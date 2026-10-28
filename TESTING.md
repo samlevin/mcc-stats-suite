@@ -26,10 +26,10 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Issue automation tests
 
-The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs. Project membership tests cover adding new issues, rejecting pull requests before API calls, items already in the project, sweeps that add only missing open issues, dry-run sweeps, a sweep that continues past one failing issue, and the workflow's triggers, schedule offset, dry-run default, and trusted checkout:
+The AWS-free issue automation tests cover triage eligibility, pagination, idempotency, and metadata changes before mutation. PR metadata tests cover description links, multiple issues, milestone conflicts, existing metadata, and dry runs. Project membership tests cover adding new issues, rejecting pull requests before API calls, items already in the project, sweeps that add only missing open issues, dry-run sweeps, a sweep that continues past one failing issue, and the workflow's triggers, schedule offset, dry-run default, and trusted checkout. The GitHub API tests cover how every script reads GitHub's responses and reports its errors, rate limits, and missing `gh`:
 
 ```console
-node --test scripts/issue-*.test.mjs
+node --test scripts/github-api.test.mjs scripts/issue-*.test.mjs
 ```
 
 These tests use metadata mocks and never call GitHub. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.

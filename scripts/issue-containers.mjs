@@ -1,9 +1,9 @@
 import { CliHelp } from './cli.cjs';
 import { pathToFileURL } from 'node:url';
+import { failureMessage } from './github-api.mjs';
 import {
   configuration,
   discover,
-  failureMessage,
   MissingIssueError,
   missingIssue,
   paginate,

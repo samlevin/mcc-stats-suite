@@ -13,11 +13,13 @@ const definitions = [
   ...readdirSync(new URL('.github/workflows/', root))
     .filter((file) => /\.ya?ml$/.test(file))
     .map((file) => `.github/workflows/${file}`),
-  ...readdirSync(new URL('.github/actions/', root)).flatMap((name) =>
-    ['action.yml', 'action.yaml']
-      .map((file) => `.github/actions/${name}/${file}`)
-      .filter((path) => existsSync(new URL(path, root))),
-  ),
+  ...(existsSync(new URL('.github/actions/', root))
+    ? readdirSync(new URL('.github/actions/', root)).flatMap((name) =>
+        ['action.yml', 'action.yaml']
+          .map((file) => `.github/actions/${name}/${file}`)
+          .filter((path) => existsSync(new URL(path, root))),
+      )
+    : []),
 ]
   .sort()
   .map((path) => [path, parse(read(path))]);

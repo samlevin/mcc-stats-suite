@@ -300,6 +300,29 @@ test('released, untrusted, and legacy claims follow ownership rules', () => {
   );
   assert.equal(claimRecord([legacy]).branch, 'agent/1-one');
   assert.equal(claimRecord([legacy, comment('Released the claim.')]), null);
+  // A release by another account changes nothing, and does not make that
+  // account the owner of the claim it failed to release.
+  const other = (body) => ({ ...comment(body), user: { login: 'other' } });
+  assert.equal(
+    claimRecord([legacy, other('Released the claim.')]).branch,
+    'agent/1-one',
+  );
+  assert.equal(
+    claimRecord([
+      legacy,
+      other('Released the claim.'),
+      comment('Released the claim.'),
+    ]),
+    null,
+  );
+  assert.equal(
+    claimRecord([
+      legacy,
+      other('Released the claim.'),
+      other('Released the claim.'),
+    ]).branch,
+    'agent/1-one',
+  );
 });
 
 test('the ledger reuses only qualifying effort decisions and never escalates from metadata', () => {
@@ -342,35 +365,44 @@ test('the ledger reuses only qualifying effort decisions and never escalates fro
 });
 
 test('REST client follows Link pagination through gh, uses only GET, and propagates errors', () => {
+  const ok = (body, headers = '') =>
+    `HTTP/2.0 200 OK\r\n${headers}\r\n${JSON.stringify(body)}`;
   const calls = [];
-  const api = restClient((command, args, options) => {
+  const api = restClient((command, args) => {
     calls.push(args);
     assert.equal(command, 'gh');
-    assert.deepEqual(args.slice(2), [
-      '--method',
-      'GET',
-      '--paginate',
-      '--slurp',
-    ]);
-    assert.ok(options.maxBuffer > 1024 * 1024);
-    return JSON.stringify([Array(100).fill({}), [{ last: true }]]);
+    // No method, field, or input flag, so gh sends a GET.
+    assert.deepEqual(args.slice(0, 2), ['api', '--include']);
+    assert.equal(args.length, 3);
+    return args[2].endsWith('per_page=100')
+      ? ok(
+          Array(100).fill({}),
+          'Link: <https://api.github.com/repos/x/y/branches?per_page=100&page=2>; rel="next"\r\n',
+        )
+      : ok([{ last: true }]);
   });
   assert.equal(api.list('repos/x/y/branches').length, 101);
-  assert.equal(calls.length, 1);
-  assert.match(calls[0][1], /per_page=100$/);
+  assert.deepEqual(
+    calls.map((args) => args[2]),
+    [
+      'repos/x/y/branches?per_page=100',
+      'repos/x/y/branches?per_page=100&page=2',
+    ],
+  );
+  assert.deepEqual(api.get('repos/x/y'), [{ last: true }]);
   assert.throws(
     () =>
       restClient(() => {
-        throw new Error('denied');
+        throw Object.assign(new Error('Command failed: gh api'), {
+          status: 1,
+          stdout: `HTTP/2.0 403 Forbidden\r\n\r\n${JSON.stringify({ message: 'denied' })}`,
+        });
       }).get('x'),
-    /GET x: denied/,
+    /^Error: GET x: GitHub REST request failed: HTTP 403: denied\./,
   );
-  assert.throws(() => restClient(() => '[{}]').list('x'), /expected a list/);
+  assert.throws(() => restClient(() => ok({})).list('x'), /expected a list/);
   assert.deepEqual(
-    restClient(() => '[{"check_runs":[1]},{"check_runs":[2]}]').list(
-      'x',
-      'check_runs',
-    ),
+    restClient(() => ok({ check_runs: [1, 2] })).list('x', 'check_runs'),
     [1, 2],
   );
 });
