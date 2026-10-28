@@ -13,14 +13,20 @@ const jobTasks = {
   bundle: ['ci:synth', 'verify:bundle'],
 };
 
-// The shared CLI also feeds builds, so the full gate tests it as a build test
-// and the repository scope adds it for repository-only changes.
-const sharedBuildTests = ['scripts/cli.test.mjs'];
+// Full-gate tests that also check files in the repository scope.
+const sharedBuildTests = [
+  'scripts/cli.test.mjs',
+  'scripts/workflow-timeouts.test.mjs',
+  'scripts/workflow-node-version.test.mjs',
+  'scripts/workflow-checkout-credentials.test.mjs',
+  'scripts/workflow-pull-request-target.test.mjs',
+];
 
 const automationLintTargets = [
   'scripts/ci-scope.mjs',
   'scripts/cli.cjs',
   'scripts/cli.test.mjs',
+  'scripts/workflow-node-version.test.mjs',
 ];
 
 // Every scripts/*.test.mjs belongs to the full gate. Listing the directory
@@ -80,11 +86,11 @@ export function checks({ full, repository, mode, job = 'static', base, head }) {
     ]);
   if (full || repository)
     // Generated and synced agent files must match the installed
-    // @agenticool/agents, and every workflow must pass the shared lint.
-    commands.push(
-      ['npm', ['run', 'agents:check']],
-      ['npm', ['run', 'workflows:lint']],
-    );
+    // @agenticool/agents.
+    commands.push(['npm', ['run', 'agents:check']]);
+  // CLI compatibility covers automation and build consumers, and the workflow
+  // timeout, Node version, checkout credentials, and pull_request_target tests
+  // cover the workflows in this scope. The full gate already runs them.
   if (repository && !full)
     commands.push(['node', ['--test', ...sharedBuildTests]]);
   return commands;

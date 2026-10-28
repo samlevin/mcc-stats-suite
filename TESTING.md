@@ -26,11 +26,11 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Issue automation and workflow lint
 
-The tracker, delivery queue, branch name, spec filing, agent generation, and workflow lint commands come from the `@agenticool/*` devDependencies, which carry their own tests. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
+The tracker, delivery queue, branch name, spec filing, and agent generation commands come from the `@agenticool/*` devDependencies, which carry their own tests. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
 
 Preview a tracker command with `npx agenticool-tracker <command>`; every command is a dry run unless you pass `--apply`. A live read-only check uses `npx agenticool-tracker triage --issue <number> --dry-run` with authenticated local `gh`.
 
-`npm run agents:check` fails when a generated agent file or a synced file (`AGENTS.md` sections, `ISSUE_TRIAGE.md`, labels, issue forms, the PR template, the tracker workflows, the `.gitignore` block, and the MCP configuration) differs from what the installed `@agenticool/agents` writes. `npm run workflows:lint` checks every workflow's names, timeouts, checkout credentials, Node version source, `pull_request_target` safety, and the required check names in `workflowLint` in `.agents/policy.json`. CI runs both in the full gate and for changes in the repository scope.
+`npm run agents:check` fails when a generated agent file or a synced file (`AGENTS.md` sections, `ISSUE_TRIAGE.md`, labels, issue forms, the PR template, the tracker workflows, the `.gitignore` block, and the MCP configuration) differs from what the installed `@agenticool/agents` writes. CI runs it in the full gate and for changes in the repository scope.
 
 ## How CI selects checks
 
@@ -93,4 +93,6 @@ node --test scripts/ci-checks.test.mjs
 
 Application delivery regression checks run with `node --test scripts/deployment-workflows.test.mjs`. They use workflow definitions and mocked GitHub responses to verify release selection, exact release commits, required production approval protection, and account checks without AWS calls. The same suite checks per-application dev-success gating, shared deployment queues, stale-version skips and the rollback exception with prior prod qualification. It also runs the Slack deploy message steps with a mocked webhook to check each message's text, that every caller passes `SLACK_DEPLOY_WEBHOOK_URL` explicitly, that each Slack step runs only when the secret is set, and that a failed post only warns.
 
-`npm run workflows:lint` covers the naming rules in [GitHub Actions workflow names](AGENTS.md#github-actions-workflow-names), including the check names the `main` ruleset requires, and requires `timeout-minutes` on every job that runs steps. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. Pick a value above the job's longest recent successful run.
+`node --test scripts/workflow-names.test.mjs` checks workflow, job, and step names against the convention in [CONTRIBUTING.md](CONTRIBUTING.md#name-github-actions-workflows), including the three check names the `main` ruleset requires.
+
+`node --test scripts/workflow-timeouts.test.mjs` checks that every workflow job sets `timeout-minutes`. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. CI runs it in the full gate and for changes in the repository scope, such as the `tracker-*.yml` workflows. Pick a value above the job's longest recent successful run.

@@ -112,8 +112,8 @@ test('documentation and recognized repository scopes avoid workspace and infrast
   ]);
   const commands = checks({ full: false, repository: true });
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
-  // One ESLint run covers the shared CLI, the scope classifier, and every
-  // Markdown file.
+  // One ESLint run covers the shared CLI, the scope classifier, the workflow
+  // Node version test, and every Markdown file.
   assert.deepEqual(commands, [
     ['npm', ['run', 'format:check']],
     [
@@ -123,14 +123,24 @@ test('documentation and recognized repository scopes avoid workspace and infrast
         'scripts/ci-scope.mjs',
         'scripts/cli.cjs',
         'scripts/cli.test.mjs',
+        'scripts/workflow-node-version.test.mjs',
         '**/*.md',
         '--max-warnings',
         '0',
       ],
     ],
     ['npm', ['run', 'agents:check']],
-    ['npm', ['run', 'workflows:lint']],
-    ['node', ['--test', 'scripts/cli.test.mjs']],
+    [
+      'node',
+      [
+        '--test',
+        'scripts/cli.test.mjs',
+        'scripts/workflow-timeouts.test.mjs',
+        'scripts/workflow-node-version.test.mjs',
+        'scripts/workflow-checkout-credentials.test.mjs',
+        'scripts/workflow-pull-request-target.test.mjs',
+      ],
+    ],
   ]);
 });
 
@@ -169,7 +179,6 @@ test('full gate contains repository checks and the dependency-aware workspace ga
     'eslint',
     'release:check',
     'agents:check',
-    'workflows:lint',
   ]) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
@@ -264,7 +273,7 @@ test('tracker and PR workflows select the repository scope, and build workflows 
   );
   assert.equal(application.repository, false);
   // The full gate's eslint . already covers the shared CLI and Markdown, and
-  // its scripts job already runs the CLI test.
+  // its scripts job already runs the CLI and workflow tests.
   const both = checks({ full: true, repository: true, mode: 'all' });
   assert.deepEqual(
     both.filter(([, args]) => args[0] === 'eslint'),
@@ -289,7 +298,7 @@ test('shared CLI changes select build and repository checks', () => {
   }
 });
 
-test('every scope that selects a workflow runs the agent check and workflow lint once', () => {
+test('every scope that selects a workflow runs the agent check once', () => {
   for (const paths of [
     ['.github/workflows/tracker-pr-metadata.yml'],
     ['.github/workflows/ci-secret-scan.yml'],
@@ -303,16 +312,44 @@ test('every scope that selects a workflow runs the agent check and workflow lint
     const commands = ['static', 'scripts', 'bundle'].flatMap((job) =>
       checks({ ...selectScopes(paths, 'pull_request'), job }),
     );
-    for (const script of ['agents:check', 'workflows:lint'])
-      assert.equal(
-        commands.filter(
-          ([command, args]) => command === 'npm' && args[1] === script,
-        ).length,
-        1,
-        `${paths} ${script}`,
-      );
+    assert.equal(
+      commands.filter(
+        ([command, args]) => command === 'npm' && args[1] === 'agents:check',
+      ).length,
+      1,
+      `${paths}`,
+    );
   }
 });
+
+for (const name of [
+  'workflow-timeouts',
+  'workflow-node-version',
+  'workflow-checkout-credentials',
+  'workflow-pull-request-target',
+])
+  test(`every scope that selects a workflow runs the ${name} test once`, () => {
+    const path = `scripts/${name}.test.mjs`;
+    assert.ok(buildTests().includes(path));
+    for (const paths of [
+      ['.github/workflows/ci-pr-title.yml'],
+      ['.github/workflows/ci-secret-scan.yml'],
+      ['.github/workflows/tracker-pr-metadata.yml'],
+      ['.github/workflows/ci-checks.yml'],
+      ['.github/workflows/_delivery-deploy-environment.yml'],
+      [
+        '.github/workflows/tracker-pr-metadata.yml',
+        '.github/workflows/ci-checks.yml',
+      ],
+    ])
+      for (const event of ['pull_request', 'push'])
+        assert.equal(
+          testFiles(selectScopes(paths, event)).filter((test) => test === path)
+            .length,
+          1,
+          `${paths} ${event}`,
+        );
+  });
 
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {
   const started = [];

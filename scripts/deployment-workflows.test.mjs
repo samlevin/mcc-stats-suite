@@ -2035,21 +2035,3 @@ test('Slack messages escape control characters, and a failed post only warns', a
     }
   }
 });
-
-test('workflow, job, and step names write the environments as dev and prod', () => {
-  // Terrateam owns its workflow file and keeps the vendor's names.
-  for (const { name: file, text } of workflowFiles()) {
-    if (file === 'terrateam.yml') continue;
-    const definition = parse(text);
-    const names = [
-      definition.name,
-      definition['run-name'] ?? '',
-      ...Object.values(definition.jobs).flatMap((job) => [
-        job.name,
-        ...(job.steps ?? []).map((step) => step.name),
-      ]),
-    ];
-    for (const name of names)
-      assert.doesNotMatch(name, /production/i, `${file}: ${name}`);
-  }
-});

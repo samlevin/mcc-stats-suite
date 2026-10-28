@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@agenticool/policy/src/policy.schema.json",
-  "description": "Repository binding, model and effort policy, labels, and workflow lint config for the agent workflows. agenticool-agents generates the Claude Code and Codex definitions and syncs the tracker files from it, and agenticool-workflow-lint reads workflowLint.",
+  "description": "Repository binding, model and effort policy, and labels for the agent workflows. agenticool-agents generates the Claude Code and Codex definitions and syncs the tracker files from it.",
   "binding": {
     "namespace": "mcc",
     "label": "MCC",
@@ -237,37 +237,6 @@
         "name": "risk: deployment",
         "color": "e99695",
         "description": "May affect deployment, rollback, or persistent infrastructure"
-      }
-    ]
-  },
-  "workflowLint": {
-    "areas": {
-      "ci": "CI",
-      "release": "Release",
-      "delivery": "Delivery",
-      "tracker": "Tracker"
-    },
-    "exclude": ["terrateam.yml"],
-    "pullRequestTarget": [
-      "ci-infrastructure-gate.yml",
-      "tracker-pr-issue-status.yml",
-      "tracker-pr-metadata.yml"
-    ],
-    "requiredChecks": [
-      {
-        "file": "ci-checks.yml",
-        "job": "require-scoped-checks",
-        "name": "Require every check selected for the changed files"
-      },
-      {
-        "file": "ci-pr-title.yml",
-        "job": "check-pr-title",
-        "name": "Check PR title"
-      },
-      {
-        "file": "ci-secret-scan.yml",
-        "job": "scan-secrets",
-        "name": "Scan secrets"
       }
     ]
   }

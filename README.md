@@ -120,7 +120,6 @@ Run these commands from the repository root after `npm ci`. Pass command argumen
 | `npm run release:check` | Validate package, lockfile, and release metadata consistency | None |
 | `npm run release:metadata` | Print an application's release metadata as JSON | Required `--application <name>`, e.g. `--application match-to-csv` |
 | `npm run agents:generate`, `npm run agents:sync`, `npm run agents:check` | Generate the Claude and Codex agent files, sync the shared tracker files and `AGENTS.md` sections, or verify both, with `@agenticool/agents` | None |
-| `npm run workflows:lint` | Lint every GitHub Actions workflow with `@agenticool/workflow-lint` | None |
 | `npm run cdk:local-template` | Rewrite the committed local CDK bootstrap template offline | None |
 | `npm run cdk:synth` | Run workspace CDK synthesis through Turbo | Required CDK environment context, e.g. `npm run cdk:synth -- -- -c environment=dev`; optional Turbo filters before the forwarding `--`. Prefer `app:synth` below for one stack |
 | `npm run app:synth`, `npm run app:diff`, `npm run app:deploy`, `npm run app:destroy` | Synthesize, compare, deploy, or remove one application's stack through account guards | Required application name; optional `--environment dev\|prod` (profile-derived, then `dev`), `--ephemeral <name>`, `--profile <profile>` (defaults to `AWS_PROFILE`), and CDK options. Local diff/deploy requires `--environment dev --ephemeral <name>`; destroy requires an ephemeral name. Stable deploys run only in GitHub Actions on `main` |

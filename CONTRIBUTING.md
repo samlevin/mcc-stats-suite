@@ -76,9 +76,9 @@ When you add or remove a root, a module directory, or a local module call, updat
 
 ## Name GitHub Actions workflows
 
-Workflow names show up in the Actions sidebar and in every pull request's check list, so a reader should be able to tell what a run does without opening the YAML. `npm run workflows:lint` (`agenticool-workflow-lint`) enforces the parts of this convention that a linter can check, reading the areas, the vendor files it skips, and the required checks from `workflowLint` in `.agents/policy.json`.
+Workflow names show up in the Actions sidebar and in every pull request's check list, so a reader should be able to tell what a run does without opening the YAML. `scripts/workflow-names.test.mjs` enforces the parts of this convention that a test can check.
 
-1. Name files `<area>-<purpose>.yml` in kebab-case. The areas are `ci`, `release`, `delivery`, and `tracker`; add a new one to `workflowLint.areas` first. Reusable workflows start with `_`, for example `_delivery-deploy-environment.yml`.
+1. Name files `<area>-<purpose>.yml` in kebab-case. The areas are `ci`, `release`, `delivery`, and `tracker`. Reusable workflows start with `_`, for example `_delivery-deploy-environment.yml`.
 2. Write the workflow `name:` as `<Area>: <purpose>` in sentence case, such as `CI: checks`. Reusable workflow names end with ` (reusable)`.
 3. Make job IDs kebab-case and start them with a verb, such as `check-workspaces`.
 4. Give every job a sentence-case `name:` that starts with a verb and names what it acts on. Matrix and reusable jobs put the application and environment in the name, such as `Deploy match-to-csv to prod`. A check then reads `CI: checks / Build and test affected workspaces`.
@@ -91,7 +91,7 @@ Workflow names show up in the Actions sidebar and in every pull request's check 
 Two kinds of rename need more than a code change:
 
 - The CDK entry role trusts `_delivery-deploy-environment.yml` by its path, which GitHub puts in the OIDC `job_workflow_ref` claim, so renaming `delivery-deploy-releases.yml` or `delivery-rollback.yml`, changing their `name:`, or adding another caller needs no bootstrap change. To move or rename `_delivery-deploy-environment.yml`, set `cdk_deploy_workflow_path` to the new path in the same pull request and apply bootstrap from that branch in dev and then prod before it merges. [Trusted deployment workflows](docs/self-hosting/10-bootstrap-accounts.md#trusted-deployment-workflows) has the steps.
-- The `main` ruleset requires three checks by name: `Require every check selected for the changed files`, `Scan secrets / Scan commits for secrets`, and `Check PR title / Check PR title follows Conventional Commits`. The last two run the reusable `@agenticool` workflows, so each check name joins the calling job's name and the called job's name. The Terrateam setup also requires the `Require applicable Terrateam applies` commit status from GitHub Actions, which the infrastructure merge gate publishes independently of its evaluator job name. Renaming a required job or status needs a ruleset change when the pull request merges, or later pull requests wait on a check that no longer runs.
+- The `main` ruleset requires three checks by job name: `Require every check selected for the changed files`, `Scan commits for secrets`, and `Check PR title follows Conventional Commits`. The Terrateam setup also requires the `Require applicable Terrateam applies` commit status from GitHub Actions, which the infrastructure merge gate publishes independently of its evaluator job name. Renaming a required job or status needs a ruleset change when the pull request merges, or later pull requests wait on a check that no longer runs.
 
 ## Keep documentation with the code
 

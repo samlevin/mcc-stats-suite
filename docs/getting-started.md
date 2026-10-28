@@ -60,7 +60,7 @@ Run the narrowest set that covers your change before you push. While you iterate
 | Docs only | `npm run format:check`, `npx eslint '**/*.md' --max-warnings 0` |
 | `scripts/` only | `npm run format:check`, `npx eslint scripts/ --max-warnings 0`, `node --test 'scripts/*.test.mjs'` |
 | `.agents/policy.json`, `.agents/local/`, or generated or synced agent files | `npm run agents:generate` after editing the policy or a local source, then `npm run agents:check`, `npm run format:check`, `npx eslint '**/*.md' --max-warnings 0` |
-| `.github/workflows/` | `npm run workflows:lint`, `npm run format:check` |
+| `.github/workflows/` | `node --test 'scripts/workflow-*.test.mjs' scripts/deployment-workflows.test.mjs`, `npm run format:check` |
 | A workspace | iterate with `npm test --workspace @mcc/<pkg>`; before you push, `npm run check` |
 | `infrastructure/` | `npm run tofu:check`, which needs OpenTofu but no AWS access |
 | CDK or bundling | also `npm run app:synth -- <app> --environment dev` and `npm run verify:bundle --workspace @mcc/match-to-csv`, which need Docker |
