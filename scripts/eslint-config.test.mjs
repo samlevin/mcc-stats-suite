@@ -62,8 +62,8 @@ test('only the prose skill may use bracketed tell markers', async () => {
   const text =
     "# Title\n\nIt saves lives.[6] In today's [fast-paced/digital/modern] world.\n";
   for (const path of [
-    '.agents/skills/plain-language/SKILL.md',
-    '.claude/skills/plain-language/SKILL.md',
+    '.agents/skills/ac-plain-language/SKILL.md',
+    '.claude/skills/ac-plain-language/SKILL.md',
   ])
     assert.deepEqual(await lintMarkdown(text, path), [], path);
   assert.deepEqual(await lintMarkdown(text), [

@@ -92,8 +92,8 @@ export default tseslint.config(
     // such as `[7]` and writes placeholders such as
     // `[fast-paced/digital/modern]`. Both are text, not reference links.
     files: [
-      '.agents/skills/plain-language/SKILL.md',
-      '.claude/skills/plain-language/SKILL.md',
+      '.agents/skills/ac-plain-language/SKILL.md',
+      '.claude/skills/ac-plain-language/SKILL.md',
     ],
     rules: {
       'markdown/no-missing-label-refs': [
