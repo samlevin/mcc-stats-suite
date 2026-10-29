@@ -24,7 +24,6 @@ import {
   workflow as loadWorkflow,
 } from './workflow-test-helpers.mjs';
 import {
-  automationTests,
   buildTests,
   checks,
   runChecks,
@@ -112,45 +111,75 @@ test('documentation and recognized repository scopes avoid workspace and infrast
     ['npx', ['eslint', '**/*.md', '--max-warnings', '0']],
   ]);
   const commands = checks({ full: false, repository: true });
-  assert.equal(commands.length, 4);
   assert.ok(!JSON.stringify(commands).match(/turbo|tofu|synth|bundle/));
-  assert.ok(JSON.stringify(commands).includes('issue-triage.test.mjs'));
-  assert.ok(JSON.stringify(commands).includes('branch-name.test.mjs'));
-  assert.ok(JSON.stringify(commands).includes('agent-policy.test.mjs'));
-  // One ESLint run covers the automation scripts and every Markdown file.
-  const lint = commands.filter(([, args]) => args[0] === 'eslint');
-  assert.equal(lint.length, 1);
-  assert.deepEqual(lint[0][1].slice(-3), ['**/*.md', '--max-warnings', '0']);
-  assert.ok(lint[0][1].includes('scripts/agent-policy.mjs'));
-  assert.deepEqual(commands[2], ['npm', ['run', 'agents:check']]);
+  // One ESLint run covers the shared CLI, the scope classifier, the workflow
+  // Node version test, and every Markdown file.
+  assert.deepEqual(commands, [
+    ['npm', ['run', 'format:check']],
+    [
+      'npx',
+      [
+        'eslint',
+        'scripts/ci-scope.mjs',
+        'scripts/cli.cjs',
+        'scripts/cli.test.mjs',
+        'scripts/workflow-node-version.test.mjs',
+        '**/*.md',
+        '--max-warnings',
+        '0',
+      ],
+    ],
+    ['npm', ['run', 'agents:check']],
+    [
+      'node',
+      [
+        '--test',
+        'scripts/cli.test.mjs',
+        'scripts/workflow-timeouts.test.mjs',
+        'scripts/workflow-node-version.test.mjs',
+        'scripts/workflow-checkout-credentials.test.mjs',
+        'scripts/workflow-pull-request-target.test.mjs',
+      ],
+    ],
+  ]);
 });
 
-test('agent workflow sources and generated definitions select the repository scope', () => {
+test('agent policy, local sources, and generated or synced agent files select the repository scope', () => {
   for (const path of [
     '.agents/policy.json',
-    '.agents/roles/implementer.md',
-    '.agents/workflows/implement.md',
-    '.agents/workflows/create-github-issue/references/github-operations.md',
-    '.agents/skills/mcc-implement/SKILL.md',
-    '.agents/skills/mcc-implement/agents/openai.yaml',
-    '.claude/agents/mcc-implementer.md',
-    '.claude/skills/mcc-implement/SKILL.md',
-    '.codex/agents/mcc-implementer.toml',
-    'scripts/agent-policy.mjs',
-    'scripts/agent-policy.test.mjs',
+    '.agents/local/workflows/apply-foundation.md',
+    '.agents/skills/ac-implement/SKILL.md',
+    '.agents/skills/ac-implement/agents/openai.yaml',
+    '.agents/evidence.md',
+    '.agents/README.md',
+    '.claude/agents/ac-implementer.md',
+    '.claude/skills/ac-implement/SKILL.md',
+    '.codex/agents/ac-implementer.toml',
+    'AGENTS.md',
+    'ISSUE_TRIAGE.md',
+    '.github/pull_request_template.md',
+    '.github/labels.json',
+    '.github/ISSUE_TEMPLATE/task.yml',
   ])
     assert.equal(classify(path), 'repository', path);
-  assert.equal(classify('.agents/README.md'), 'documentation');
-  assert.equal(classify('.agents/issue-creation.md'), 'documentation');
+  assert.equal(classify('docs/getting-started.md'), 'documentation');
   assert.equal(classify('.claude/settings.json'), 'full');
-  const scopes = selectScopes(['.agents/roles/implementer.md'], 'pull_request');
+  const scopes = selectScopes(
+    ['.agents/local/workflows/apply-foundation.md'],
+    'pull_request',
+  );
   assert.equal(scopes.repository, true);
   assert.equal(scopes.full, false);
 });
 
 test('full gate contains repository checks and the dependency-aware workspace gate', () => {
   const commands = checks({ full: true, mode: 'all' });
-  for (const command of ['format:check', 'eslint', 'release:check']) {
+  for (const command of [
+    'format:check',
+    'eslint',
+    'release:check',
+    'agents:check',
+  ]) {
     assert.ok(JSON.stringify(commands).includes(command));
   }
   // Root script tests run only in the scripts job, through Turbo's cached
@@ -185,17 +214,18 @@ test('full gate contains repository checks and the dependency-aware workspace ga
   assert.ok(!workspaceArguments('affected').includes('--affected'));
 });
 
-test('a new script test joins the full gate unless it is an automation test', () => {
+test('every new script test joins the full gate', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mcc-ci-build-tests-'));
   try {
     for (const name of [
       'new-build-check.test.mjs',
       'new-build-check.mjs',
-      'issue-triage.test.mjs',
+      'other-check.test.mjs',
     ])
       writeFileSync(join(directory, name), '');
     assert.deepEqual(buildTests(directory), [
       'scripts/new-build-check.test.mjs',
+      'scripts/other-check.test.mjs',
     ]);
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -214,22 +244,17 @@ test('Turbo streams prefixed lines instead of its own log groups', () => {
   });
 });
 
-test('automation script tests run only in the repository scope', () => {
+test('board and PR workflows select the repository scope, and build workflows the full gate', () => {
   const build = buildTests();
   assert.ok(build.includes('scripts/ci-checks.test.mjs'));
   assert.ok(build.includes('scripts/deployment-workflows.test.mjs'));
-  for (const path of automationTests) {
-    assert.ok(!build.includes(path), path);
-    assert.equal(classify(path), 'repository', path);
-    assert.equal(classify(path.replace('.test.mjs', '.mjs')), 'repository');
-  }
   for (const path of [
     '.github/workflows/ci-pr-title.yml',
     '.github/workflows/ci-secret-scan.yml',
-    '.github/workflows/tracker-issue-states.yml',
-    '.github/workflows/tracker-pr-issue-status.yml',
-    '.github/workflows/tracker-pr-metadata.yml',
-    '.github/workflows/tracker-project-membership.yml',
+    '.github/workflows/board-issue-states.yml',
+    '.github/workflows/board-pr-issue-status.yml',
+    '.github/workflows/board-pr-metadata.yml',
+    '.github/workflows/board-project-membership.yml',
   ])
     assert.equal(classify(path), 'repository', path);
   // Workflows that build, deploy, or release always run the full gate.
@@ -247,25 +272,17 @@ test('automation script tests run only in the repository scope', () => {
     'pull_request',
   );
   assert.equal(application.repository, false);
-  const full = JSON.stringify(checks({ full: true, mode: 'affected' }));
-  for (const path of automationTests) assert.ok(!full.includes(path), path);
+  // The full gate's eslint . already covers the shared CLI and Markdown, and
+  // its scripts job already runs the CLI and workflow tests.
   const both = checks({ full: true, repository: true, mode: 'all' });
-  assert.ok(
-    both.some(
-      ([command, args]) =>
-        command === 'node' &&
-        JSON.stringify(args) === JSON.stringify(['--test', ...automationTests]),
-    ),
-  );
-  // The full gate's eslint . already covers the automation scripts and
-  // Markdown.
   assert.deepEqual(
     both.filter(([, args]) => args[0] === 'eslint'),
     [['npx', ['eslint', '.', '--max-warnings', '0']]],
   );
+  assert.ok(!both.some(([command]) => command === 'node'));
 });
 
-test('shared CLI changes select build and automation checks', () => {
+test('shared CLI changes select build and repository checks', () => {
   for (const event of ['pull_request', 'push']) {
     const scopes = selectScopes(['scripts/cli.cjs'], event);
     assert.equal(scopes.full, true);
@@ -274,119 +291,65 @@ test('shared CLI changes select build and automation checks', () => {
     const commands = checks(scopes);
     assert.ok(commands.some(([, args]) => args.includes('agents:check')));
     const tests = testFiles(scopes);
-    for (const path of [...automationTests, 'scripts/cli.test.mjs'])
-      assert.equal(tests.filter((test) => test === path).length, 1, path);
-  }
-});
-
-test('workflow timeout checks run once for repository and full scopes', () => {
-  const runs = (paths) =>
-    testFiles(selectScopes(paths, 'pull_request')).filter(
-      (path) => path === 'scripts/workflow-timeouts.test.mjs',
-    ).length;
-  assert.ok(buildTests().includes('scripts/workflow-timeouts.test.mjs'));
-  for (const path of [
-    '.github/workflows/ci-pr-title.yml',
-    '.github/workflows/ci-secret-scan.yml',
-    '.github/workflows/tracker-pr-metadata.yml',
-  ])
-    assert.equal(runs([path]), 1, path);
-  assert.equal(runs(['.github/workflows/ci-checks.yml']), 1);
-  assert.equal(
-    runs([
-      '.github/workflows/tracker-pr-metadata.yml',
-      '.github/workflows/ci-checks.yml',
-    ]),
-    1,
-  );
-});
-
-test('repository-only workflow changes run the checkout credentials test', () => {
-  for (const event of ['pull_request', 'push']) {
-    const scopes = selectScopes(
-      ['.github/workflows/ci-secret-scan.yml'],
-      event,
-    );
-    assert.equal(scopes.full, false, event);
-    assert.equal(scopes.repository, true, event);
-    const tests = testFiles(scopes);
-    assert.ok(
-      tests.includes('scripts/workflow-checkout-credentials.test.mjs'),
-      event,
-    );
-  }
-  const full = testFiles({ full: true, repository: true, mode: 'all' });
-  assert.equal(
-    full.filter(
-      (path) => path === 'scripts/workflow-checkout-credentials.test.mjs',
-    ).length,
-    1,
-  );
-});
-
-test('repository-only workflow changes run the pull_request_target test', () => {
-  for (const event of ['pull_request', 'push']) {
-    const scopes = selectScopes(
-      ['.github/workflows/tracker-pr-metadata.yml'],
-      event,
-    );
-    assert.equal(scopes.full, false, event);
-    assert.equal(scopes.repository, true, event);
-    const tests = testFiles(scopes);
-    assert.ok(
-      tests.includes('scripts/workflow-pull-request-target.test.mjs'),
-      event,
-    );
-  }
-  const full = testFiles({ full: true, repository: true, mode: 'all' });
-  assert.equal(
-    full.filter(
-      (path) => path === 'scripts/workflow-pull-request-target.test.mjs',
-    ).length,
-    1,
-  );
-});
-
-test('automation consumer changes run CLI compatibility without workspace tasks', () => {
-  for (const path of [
-    'scripts/branch-name.mjs',
-    'scripts/issue-triage.mjs',
-    'scripts/issue-containers.mjs',
-    'scripts/agent-policy.mjs',
-  ]) {
-    const scopes = selectScopes([path], 'pull_request');
-    assert.equal(scopes.full, false, path);
-    assert.equal(scopes.repository, true, path);
-    const commands = checks(scopes);
-    assert.ok(
-      commands.some(
-        ([command, args]) =>
-          command === 'node' && args.includes('scripts/cli.test.mjs'),
-      ),
-      path,
-    );
-    const lint = commands.find(([, args]) => args[0] === 'eslint')[1];
-    assert.ok(lint.includes('scripts/cli.cjs'), path);
-    assert.ok(lint.includes('scripts/cli.test.mjs'), path);
-    assert.ok(!JSON.stringify(commands).includes('turbo'), path);
-  }
-});
-
-test('every scope that selects a setup-node workflow runs the Node version test', () => {
-  for (const path of [
-    '.github/workflows/tracker-pr-metadata.yml',
-    '.github/workflows/ci-checks.yml',
-    '.github/workflows/_delivery-deploy-environment.yml',
-  ]) {
-    const tests = testFiles(selectScopes([path], 'pull_request'));
     assert.equal(
-      tests.filter((test) => test === 'scripts/workflow-node-version.test.mjs')
-        .length,
+      tests.filter((test) => test === 'scripts/cli.test.mjs').length,
       1,
-      path,
     );
   }
 });
+
+test('every scope that selects a workflow runs the agent check once', () => {
+  for (const paths of [
+    ['.github/workflows/board-pr-metadata.yml'],
+    ['.github/workflows/ci-secret-scan.yml'],
+    ['.github/workflows/ci-checks.yml'],
+    ['.github/workflows/_delivery-deploy-environment.yml'],
+    [
+      '.github/workflows/board-pr-metadata.yml',
+      '.github/workflows/ci-checks.yml',
+    ],
+  ]) {
+    const commands = ['static', 'scripts', 'bundle'].flatMap((job) =>
+      checks({ ...selectScopes(paths, 'pull_request'), job }),
+    );
+    assert.equal(
+      commands.filter(
+        ([command, args]) => command === 'npm' && args[1] === 'agents:check',
+      ).length,
+      1,
+      `${paths}`,
+    );
+  }
+});
+
+for (const name of [
+  'workflow-timeouts',
+  'workflow-node-version',
+  'workflow-checkout-credentials',
+  'workflow-pull-request-target',
+])
+  test(`every scope that selects a workflow runs the ${name} test once`, () => {
+    const path = `scripts/${name}.test.mjs`;
+    assert.ok(buildTests().includes(path));
+    for (const paths of [
+      ['.github/workflows/ci-pr-title.yml'],
+      ['.github/workflows/ci-secret-scan.yml'],
+      ['.github/workflows/board-pr-metadata.yml'],
+      ['.github/workflows/ci-checks.yml'],
+      ['.github/workflows/_delivery-deploy-environment.yml'],
+      [
+        '.github/workflows/board-pr-metadata.yml',
+        '.github/workflows/ci-checks.yml',
+      ],
+    ])
+      for (const event of ['pull_request', 'push'])
+        assert.equal(
+          testFiles(selectScopes(paths, event)).filter((test) => test === path)
+            .length,
+          1,
+          `${paths} ${event}`,
+        );
+  });
 
 test('checks overlap and any failing check rejects the gate after all checks settle', async () => {
   const started = [];

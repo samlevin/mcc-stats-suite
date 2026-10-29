@@ -45,7 +45,7 @@ docs: explain the production promotion path
 chore: update development tooling
 ```
 
-Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, assignees, and milestone are copied from the linked issue automatically; nothing assigns people to issues. The Release Please pull request takes no labels from the issues its changelog links; it gets one `package:` label for each package whose version changes in `.release-please-manifest.json`. The `tracker-project-membership.yml` workflow adds every new issue to the MCC delivery project when it opens, however it was created, and the hourly sweep in `tracker-issue-states.yml` adds any open issue still missing. Pull requests are not added to the project.
+Link the pull request to its task or bug with `Closes #<number>`. Reference the immediate parent issue or epic separately using `Parent issue or epic: #<number>`. A pull request closes executable leaf work; container completion follows its children. Labels, assignees, and milestone are copied from the linked issue automatically; nothing assigns people to issues. The Release Please pull request takes no labels from the issues its changelog links; it gets one `package:` label for each package whose version changes in `.release-please-manifest.json`. The `board-project-membership.yml` workflow adds every new issue to the MCC delivery project when it opens, however it was created, and the hourly sweep in `board-issue-states.yml` adds any open issue still missing. Pull requests are not added to the project.
 
 Use `feat` for a minor version, `fix` for a patch, and a documented breaking change for a major version.
 
@@ -78,7 +78,7 @@ When you add or remove a root, a module directory, or a local module call, updat
 
 Workflow names show up in the Actions sidebar and in every pull request's check list, so a reader should be able to tell what a run does without opening the YAML. `scripts/workflow-names.test.mjs` enforces the parts of this convention that a test can check.
 
-1. Name files `<area>-<purpose>.yml` in kebab-case. The areas are `ci`, `release`, `delivery`, and `tracker`. Reusable workflows start with `_`, for example `_delivery-deploy-environment.yml`.
+1. Name files `<area>-<purpose>.yml` in kebab-case. The areas are `board`, `ci`, `release`, and `delivery`. Reusable workflows start with `_`, for example `_delivery-deploy-environment.yml`.
 2. Write the workflow `name:` as `<Area>: <purpose>` in sentence case, such as `CI: checks`. Reusable workflow names end with ` (reusable)`.
 3. Make job IDs kebab-case and start them with a verb, such as `check-workspaces`.
 4. Give every job a sentence-case `name:` that starts with a verb and names what it acts on. Matrix and reusable jobs put the application and environment in the name, such as `Deploy match-to-csv to prod`. A check then reads `CI: checks / Build and test affected workspaces`.

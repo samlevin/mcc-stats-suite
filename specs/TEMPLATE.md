@@ -15,7 +15,7 @@ Lines starting with `> Guide:` explain what a section must contain. Delete them 
 - **Mark optional sections.** Delete an optional section that does not apply, rather than leaving it empty.
 - **Record every limitation.** Each accepted limitation in §18 either explains why it is acceptable or names the backlog slice that fixes it.
 - **When code already exists, the code wins.** When retrofitting a spec to an implementation, describe what the repository does, record each decision in §1, and list known defects in §18 instead of specifying them as requirements.
-- **Follow the prose rules** in `.agents/workflows/plain-language.md`. Use ASCII apart from `§`, no em dashes, code symbols in backticks, one paragraph per line.
+- **Follow the prose rules** in `.agents/skills/ac-plain-language/SKILL.md`. Use ASCII apart from `§`, no em dashes, code symbols in backticks, one paragraph per line.
 - **Never include** credentials, account IDs, domains, email addresses, real user data, state or plans. This repository is public.
 
 ---
@@ -322,9 +322,9 @@ This section is the backlog source for building the component. It is written to 
 
 ### 20.1 How to file this plan
 
-- File the whole plan with `/mcc-spec-to-issues <spec-path> plan` (Codex: `$mcc-spec-to-issues`). Use `file` to print the triaged tree and confirm before GitHub writes; use the saved external state to resume an interrupted filing. The plan has one root container, with phase epics underneath. Backlog is excluded when filing v1.
+- File the whole plan with `/ac-spec-to-issues <spec-path> plan` (Codex: `$ac-spec-to-issues`). Use `file` to print the triaged tree and confirm before GitHub writes; use the saved external state to resume an interrupted filing. The plan has one root container, with phase epics underneath. Backlog is excluded when filing v1.
 - Each **phase** becomes one epic, titled with the phase title, with its goal and exit criteria as the body. Create epics only when someone explicitly asks for filing.
-- Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. Use `/mcc-create-github-issue` for ad hoc issues outside a spec plan.
+- Each **slice** becomes one leaf issue under its phase epic, titled without its code, with `Plan ID: P<n>.<m>` in the body. Use `/ac-create-github-issue` for ad hoc issues outside a spec plan.
 - **Size** is XS, S or M. Split a slice by independently testable behavior when it outgrows one reviewable PR; the original Plan ID becomes the container.
 - A **split slice** keeps its original heading and all required slice fields, adds `- **Split into:** P0.2.1, P0.2.2`, and puts each child under a five-hash heading such as `##### P0.2.1 <Child title> (S)`. Each child has all slice fields, a stable ID extending its parent, and independently testable Acceptance bullets. One split level is supported.
 - **Priority** is optional (`- **Priority:** P0|P1|P2|P3`), default P2. **Labels** is optional (`- **Labels:** enhancement, severity: none, package: contracts`), with names from `.github/labels.json`. Without it, leaves use enhancement, severity: none, and package/area labels inferred from Files (area: repository when no package is named). Phase epics default to epic, severity: none, area: repository; the root defaults to severity: none, area: repository. Only the triager forms independence groups.
