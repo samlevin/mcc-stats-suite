@@ -1,7 +1,0 @@
-# Generated from @agenticool/agents/sources/workflows/create-github-issue.md by agenticool-agents. Edit the source and run `npx agenticool-agents generate`.
-interface:
-  display_name: 'MCC: Create GitHub issue'
-  short_description: File typed MCC issues, triaged inline or independently
-  default_prompt: Use $mcc-create-github-issue to file this as one MCC issue.
-policy:
-  allow_implicit_invocation: true

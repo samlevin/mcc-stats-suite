@@ -148,13 +148,13 @@ test('agent policy, local sources, and generated or synced agent files select th
   for (const path of [
     '.agents/policy.json',
     '.agents/local/workflows/apply-foundation.md',
-    '.agents/skills/mcc-implement/SKILL.md',
-    '.agents/skills/mcc-implement/agents/openai.yaml',
+    '.agents/skills/implement/SKILL.md',
+    '.agents/skills/implement/agents/openai.yaml',
     '.agents/evidence.md',
     '.agents/README.md',
-    '.claude/agents/mcc-implementer.md',
-    '.claude/skills/mcc-implement/SKILL.md',
-    '.codex/agents/mcc-implementer.toml',
+    '.claude/agents/implementer.md',
+    '.claude/skills/implement/SKILL.md',
+    '.codex/agents/implementer.toml',
     'AGENTS.md',
     'ISSUE_TRIAGE.md',
     '.github/pull_request_template.md',
@@ -244,17 +244,17 @@ test('Turbo streams prefixed lines instead of its own log groups', () => {
   });
 });
 
-test('tracker and PR workflows select the repository scope, and build workflows the full gate', () => {
+test('board and PR workflows select the repository scope, and build workflows the full gate', () => {
   const build = buildTests();
   assert.ok(build.includes('scripts/ci-checks.test.mjs'));
   assert.ok(build.includes('scripts/deployment-workflows.test.mjs'));
   for (const path of [
     '.github/workflows/ci-pr-title.yml',
     '.github/workflows/ci-secret-scan.yml',
-    '.github/workflows/tracker-issue-states.yml',
-    '.github/workflows/tracker-pr-issue-status.yml',
-    '.github/workflows/tracker-pr-metadata.yml',
-    '.github/workflows/tracker-project-membership.yml',
+    '.github/workflows/board-issue-states.yml',
+    '.github/workflows/board-pr-issue-status.yml',
+    '.github/workflows/board-pr-metadata.yml',
+    '.github/workflows/board-project-membership.yml',
   ])
     assert.equal(classify(path), 'repository', path);
   // Workflows that build, deploy, or release always run the full gate.
@@ -300,12 +300,12 @@ test('shared CLI changes select build and repository checks', () => {
 
 test('every scope that selects a workflow runs the agent check once', () => {
   for (const paths of [
-    ['.github/workflows/tracker-pr-metadata.yml'],
+    ['.github/workflows/board-pr-metadata.yml'],
     ['.github/workflows/ci-secret-scan.yml'],
     ['.github/workflows/ci-checks.yml'],
     ['.github/workflows/_delivery-deploy-environment.yml'],
     [
-      '.github/workflows/tracker-pr-metadata.yml',
+      '.github/workflows/board-pr-metadata.yml',
       '.github/workflows/ci-checks.yml',
     ],
   ]) {
@@ -334,11 +334,11 @@ for (const name of [
     for (const paths of [
       ['.github/workflows/ci-pr-title.yml'],
       ['.github/workflows/ci-secret-scan.yml'],
-      ['.github/workflows/tracker-pr-metadata.yml'],
+      ['.github/workflows/board-pr-metadata.yml'],
       ['.github/workflows/ci-checks.yml'],
       ['.github/workflows/_delivery-deploy-environment.yml'],
       [
-        '.github/workflows/tracker-pr-metadata.yml',
+        '.github/workflows/board-pr-metadata.yml',
         '.github/workflows/ci-checks.yml',
       ],
     ])

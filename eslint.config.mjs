@@ -92,9 +92,8 @@ export default tseslint.config(
     // such as `[7]` and writes placeholders such as
     // `[fast-paced/digital/modern]`. Both are text, not reference links.
     files: [
-      '.agents/workflows/write-prose.md',
-      '.agents/skills/mcc-write-prose/SKILL.md',
-      '.claude/skills/mcc-write-prose/SKILL.md',
+      '.agents/skills/plain-language/SKILL.md',
+      '.claude/skills/plain-language/SKILL.md',
     ],
     rules: {
       'markdown/no-missing-label-refs': [

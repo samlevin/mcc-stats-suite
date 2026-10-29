@@ -6,7 +6,7 @@ claude:
 codex:
   display_name: "{{label}}: Apply bootstrap"
   short_description: "Apply the bootstrap roots and CDK bootstraps at origin/main, one approved step at a time"
-  default_prompt: "Use ${{prefix}}apply-bootstrap to apply the bootstrap roots and CDK bootstraps at origin/main"
+  default_prompt: "Use $apply-bootstrap to apply the bootstrap roots and CDK bootstraps at origin/main"
   allow_implicit_invocation: false
 ---
 # {{label}} apply bootstrap

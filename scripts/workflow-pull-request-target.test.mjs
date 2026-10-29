@@ -22,9 +22,9 @@ const isPullRequestTarget = (definition) =>
 // Expressions that name the pull request's head or merge commit, branch, or ref.
 const PR_HEAD =
   /github\.event\.pull_request\.(?:head\.|merge_commit_sha)|github\.head_ref|GITHUB_HEAD_REF|refs\/pull\/|pull\/[^/\n]*\/(?:head|merge)\b/;
-// An agenticool reusable workflow at a full commit SHA or a release tag.
-const AGENTICOOL_REUSABLE =
-  /^agenticool\/agenticool\/\.github\/workflows\/_[a-z0-9-]+\.ya?ml@(?:[0-9a-f]{40}|[a-z0-9-]+-v\d+\.\d+\.\d+)$/;
+// An agenticool board workflow at a full commit SHA or a board release tag.
+const AGENTICOOL_BOARD =
+  /^agenticool\/agenticool\/\.github\/workflows\/_board-[a-z0-9-]+\.ya?ml@(?:[0-9a-f]{40}|board-v\d+\.\d+\.\d+)$/;
 // Expressions that name the base repository.
 const BASE_REPOSITORY = new Set([
   'github.repository',
@@ -56,9 +56,9 @@ const untrustedCode = (definition) => {
   for (const [id, job] of Object.entries(definition.jobs ?? {})) {
     // A called workflow runs with this event's token and secrets, but its
     // own trigger is `workflow_call`, so its steps are not checked here.
-    // agenticool's pinned tracker workflows check out only the caller's
+    // agenticool's pinned board workflows check out only the caller's
     // default branch, so calling them is safe.
-    if (typeof job?.uses === 'string' && !AGENTICOOL_REUSABLE.test(job.uses)) {
+    if (typeof job?.uses === 'string' && !AGENTICOOL_BOARD.test(job.uses)) {
       problems.push(`${id} calls a reusable workflow: ${job.uses}`);
     }
     (job?.steps ?? []).forEach((step, index) => {
@@ -99,8 +99,8 @@ test('pull_request_target workflows never check out or fetch pull request code',
   const targets = names.filter((name) => isPullRequestTarget(workflow(name)));
   for (const name of [
     'ci-infrastructure-gate',
-    'tracker-pr-issue-status',
-    'tracker-pr-metadata',
+    'board-pr-issue-status',
+    'board-pr-metadata',
   ]) {
     assert.ok(targets.includes(name), `${name} runs on pull_request_target`);
   }
@@ -255,27 +255,28 @@ test('a job that calls a reusable workflow fails', () => {
   );
 });
 
-test('a job that calls a pinned agenticool reusable workflow passes', () => {
-  for (const ref of ['tracker-v0.1.0', 'a'.repeat(40)])
+test('a job that calls a pinned agenticool board workflow passes', () => {
+  for (const ref of ['board-v0.1.0', 'a'.repeat(40)])
     assert.deepEqual(
       untrustedCode(
         parse(
-          `on: pull_request_target\njobs:\n  call:\n    uses: agenticool/agenticool/.github/workflows/_tracker-pr-metadata.yml@${ref}\n`,
+          `on: pull_request_target\njobs:\n  call:\n    uses: agenticool/agenticool/.github/workflows/_board-pr-metadata.yml@${ref}\n`,
         ),
       ),
       [],
       ref,
     );
-  assert.deepEqual(
-    untrustedCode(
-      parse(
-        'on: pull_request_target\njobs:\n  call:\n    uses: agenticool/agenticool/.github/workflows/_tracker-pr-metadata.yml@main\n',
+  for (const uses of [
+    'agenticool/agenticool/.github/workflows/_board-pr-metadata.yml@main',
+    'agenticool/agenticool/.github/workflows/_release-packages.yml@board-v0.1.0',
+  ])
+    assert.deepEqual(
+      untrustedCode(
+        parse(`on: pull_request_target\njobs:\n  call:\n    uses: ${uses}\n`),
       ),
-    ),
-    [
-      'call calls a reusable workflow: agenticool/agenticool/.github/workflows/_tracker-pr-metadata.yml@main',
-    ],
-  );
+      [`call calls a reusable workflow: ${uses}`],
+      uses,
+    );
 });
 
 test('the same steps pass outside pull_request_target', () => {

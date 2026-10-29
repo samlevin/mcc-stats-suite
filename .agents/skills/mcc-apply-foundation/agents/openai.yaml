@@ -1,7 +1,0 @@
-# Generated from .agents/local/workflows/apply-foundation.md by agenticool-agents. Edit the source and run `npx agenticool-agents generate`.
-interface:
-  display_name: 'MCC: Apply foundation'
-  short_description: Plan and apply a PR's foundation roots locally, one approved step at a time
-  default_prompt: 'Use $mcc-apply-foundation to apply the foundation for PR #'
-policy:
-  allow_implicit_invocation: false

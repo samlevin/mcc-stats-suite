@@ -105,7 +105,7 @@ Never commit `.envrc`, AWS credentials, account IDs, email addresses, domain nam
 
 ## Scripts reference
 
-Run these commands from the repository root after `npm ci`. Pass command arguments after `--`, for example `npm run app:synth -- match-to-csv --environment dev --ephemeral example`. The [standalone script reference](scripts/README.md#scripts-reference) covers tracker and agent utilities. The [application reference](applications/match-to-csv/README.md#scripts-reference) covers fixture tools. NPM lifecycle hooks run automatically and are omitted here.
+Run these commands from the repository root after `npm ci`. Pass command arguments after `--`, for example `npm run app:synth -- match-to-csv --environment dev --ephemeral example`. The [standalone script reference](scripts/README.md#scripts-reference) covers board and agent utilities. The [application reference](applications/match-to-csv/README.md#scripts-reference) covers fixture tools. NPM lifecycle hooks run automatically and are omitted here.
 
 | Script | Purpose | Arguments |
 | --- | --- | --- |
@@ -119,7 +119,7 @@ Run these commands from the repository root after `npm ci`. Pass command argumen
 | `npm run format`, `npm run format:check` | Write or check Prettier formatting | None required; Markdown is excluded by `.prettierignore` |
 | `npm run release:check` | Validate package, lockfile, and release metadata consistency | None |
 | `npm run release:metadata` | Print an application's release metadata as JSON | Required `--application <name>`, e.g. `--application match-to-csv` |
-| `npm run agents:generate`, `npm run agents:sync`, `npm run agents:check` | Generate the Claude and Codex agent files, sync the shared tracker files and `AGENTS.md` sections, or verify both, with `@agenticool/agents` | None |
+| `npm run agents:generate`, `npm run agents:sync`, `npm run agents:check` | Generate the Claude and Codex agent files, sync the shared board files and `AGENTS.md` sections, or verify both, with `@agenticool/agents` | None |
 | `npm run cdk:local-template` | Rewrite the committed local CDK bootstrap template offline | None |
 | `npm run cdk:synth` | Run workspace CDK synthesis through Turbo | Required CDK environment context, e.g. `npm run cdk:synth -- -- -c environment=dev`; optional Turbo filters before the forwarding `--`. Prefer `app:synth` below for one stack |
 | `npm run app:synth`, `npm run app:diff`, `npm run app:deploy`, `npm run app:destroy` | Synthesize, compare, deploy, or remove one application's stack through account guards | Required application name; optional `--environment dev\|prod` (profile-derived, then `dev`), `--ephemeral <name>`, `--profile <profile>` (defaults to `AWS_PROFILE`), and CDK options. Local diff/deploy requires `--environment dev --ephemeral <name>`; destroy requires an ephemeral name. Stable deploys run only in GitHub Actions on `main` |
@@ -132,7 +132,7 @@ Run these commands from the repository root after `npm ci`. Pass command argumen
 
 Pull requests run CI without deploying and need no AWS access; [How CI selects checks](TESTING.md#how-ci-selects-checks) explains which checks run. [What happens after merge](CONTRIBUTING.md#what-happens-after-merge) covers deployment and releases.
 
-See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the tracker automation that sets Ready. Coding agents follow [AGENTS.md](AGENTS.md). [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification and required metadata. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
+See [WORKFLOW.md](WORKFLOW.md) for issue planning, epics, task states, and the board automation that sets Ready. Coding agents follow [AGENTS.md](AGENTS.md). [ISSUE_TRIAGE.md](ISSUE_TRIAGE.md) defines classification and required metadata. See [CONTRIBUTING.md](CONTRIBUTING.md) for the monorepo workflow, component ownership, conventional pull-request titles, and what happens after a merge. To run your own deployment, follow [Self-hosting](docs/self-hosting/README.md).
 
 ## Glossary
 

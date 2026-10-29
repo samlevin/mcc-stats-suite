@@ -20,7 +20,7 @@ Use `--help` on commands with declared options. The [root reference](../README.m
 | `node scripts/ci-checks.mjs` | Run CI-selected checks | None; requires `CI_BASE`, `CI_HEAD`, `CI_FULL`, `CI_REPOSITORY`, and `CI_MODE` environment inputs. `CI_JOB` defaults to `static`; [the implementation](ci-checks.mjs) lists job choices |
 | `bash scripts/tofu-checks.sh` | Check OpenTofu pins, formatting, validation, and module tests | None; optional `--pinned-version` prints the pinned version and exits |
 
-The tracker, delivery queue, branch name, spec filing, agent generation, and review publishing commands come from the `@agenticool/*` devDependencies: `npx agenticool-tracker`, `npx agenticool-delivery`, `npx agenticool-spec`, and `npx agenticool-agents`. Each package README in `node_modules/@agenticool/` lists its commands, and `--help` prints their options. See the [application script reference](../applications/match-to-csv/README.md#scripts-reference) for fixture capture, reduction, and bundle verification.
+The board, delivery queue, branch name, spec filing, agent generation, and review publishing commands come from the `@agenticool/*` devDependencies: `npx agenticool-board`, `npx agenticool-dispatch`, `npx agenticool-spec`, and `npx agenticool-agents`. Each package README in `node_modules/@agenticool/` lists its commands, and `--help` prints their options. See the [application script reference](../applications/match-to-csv/README.md#scripts-reference) for fixture capture, reduction, and bundle verification.
 
 ### Operator arguments
 

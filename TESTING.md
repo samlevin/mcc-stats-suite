@@ -26,11 +26,11 @@ Every application workspace participates in the root checks and can be targeted 
 
 ## Issue automation and workflow tests
 
-The tracker, delivery queue, branch name, spec filing, and agent generation commands come from the `@agenticool/*` devDependencies, which carry their own tests. [Automation](WORKFLOW.md#automation) describes what the tracker workflows do and which credentials they use.
+The board, delivery queue, branch name, spec filing, and agent generation commands come from the `@agenticool/*` devDependencies, which carry their own tests. [Automation](WORKFLOW.md#automation) describes what the board workflows do and which credentials they use.
 
-Preview a tracker command with `npx agenticool-tracker <command>`; every command is a dry run unless you pass `--apply`. A live read-only check uses `npx agenticool-tracker triage --issue <number> --dry-run` with authenticated local `gh`.
+Preview a board command with `npx agenticool-board <command>`; every command is a dry run unless you pass `--apply`. A live read-only check uses `npx agenticool-board triage --issue <number> --dry-run` with authenticated local `gh`.
 
-`npm run agents:check` fails when a generated agent file or a synced file (`AGENTS.md` sections, `ISSUE_TRIAGE.md`, labels, issue forms, the PR template, the tracker workflows, the `.gitignore` block, and the MCP configuration) differs from what the installed `@agenticool/agents` writes. CI runs it in the full gate and for changes in the repository scope.
+`npm run agents:check` fails when a generated agent file or a synced file (`AGENTS.md` sections, `ISSUE_TRIAGE.md`, labels, issue forms, the PR template, the board workflows, the `.gitignore` block, and the MCP configuration) differs from what the installed `@agenticool/agents` writes. CI runs it in the full gate and for changes in the repository scope.
 
 ## How CI selects checks
 
@@ -95,4 +95,4 @@ Application delivery regression checks run with `node --test scripts/deployment-
 
 `node --test scripts/workflow-names.test.mjs` checks workflow, job, and step names against the convention in [CONTRIBUTING.md](CONTRIBUTING.md#name-github-actions-workflows), including the three check names the `main` ruleset requires.
 
-`node --test scripts/workflow-timeouts.test.mjs` checks that every workflow job sets `timeout-minutes`. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. CI runs it in the full gate and for changes in the repository scope, such as the `tracker-*.yml` workflows. Pick a value above the job's longest recent successful run.
+`node --test scripts/workflow-timeouts.test.mjs` checks that every workflow job sets `timeout-minutes`. A job that only calls a reusable workflow is exempt, because GitHub does not allow the key there; the called workflow's jobs set it instead. CI runs it in the full gate and for changes in the repository scope, such as the `board-*.yml` workflows. Pick a value above the job's longest recent successful run.

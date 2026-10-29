@@ -7,7 +7,7 @@ claude:
 codex:
   display_name: "{{label}}: Apply foundation"
   short_description: "Plan and apply a PR's foundation roots locally, one approved step at a time"
-  default_prompt: "Use ${{prefix}}apply-foundation to apply the foundation for PR #"
+  default_prompt: "Use $apply-foundation to apply the foundation for PR #"
   allow_implicit_invocation: false
 ---
 # {{label}} apply foundation
